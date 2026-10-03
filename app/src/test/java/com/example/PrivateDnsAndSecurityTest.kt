@@ -119,12 +119,35 @@ class PrivateDnsAndSecurityTest {
         assertFalse(root.has("api"))
         assertFalse(root.has("metrics"))
         val dns = root.getJSONObject("dns")
-        assertEquals(1, dns.getJSONArray("servers").length())
-        assertEquals(settings.dnsServer, dns.getJSONArray("servers").getString(0))
+        val servers = dns.getJSONArray("servers")
+        assertEquals(2, servers.length())
+        assertEquals("fakedns", servers.getString(0))
+        assertEquals(settings.dnsServer, servers.getJSONObject(1).getString("address"))
+        assertEquals(XrayConfigBuilder.DNS_TIMEOUT_MS, servers.getJSONObject(1).getInt("timeoutMs"))
         assertTrue(dns.getBoolean("disableFallback"))
         val rules = root.getJSONObject("routing").getJSONArray("rules")
         assertEquals("proxy", rules.getJSONObject(0).getString("outboundTag"))
         assertEquals("53", rules.getJSONObject(1).getString("port"))
+    }
+
+    @Test fun fakeDnsAnswersAppsAndRoutingKeepsRestoredDomains() {
+        val root = JSONObject(XrayConfigBuilder.buildJson(profile(), settings))
+        val pools = root.getJSONArray("fakedns")
+        assertEquals("198.18.0.0/15", pools.getJSONObject(0).getString("ipPool"))
+        assertEquals("fc00::/18", pools.getJSONObject(1).getString("ipPool"))
+        assertEquals("AsIs", root.getJSONObject("routing").getString("domainStrategy"))
+        assertFalse(root.getJSONObject("dns").has("queryStrategy"))
+
+        // LAN domains are exact suffixes, not keywords that would also catch e.g. "planet.com".
+        val rules = root.getJSONObject("routing").getJSONArray("rules")
+        val lanDomains = (0 until rules.length()).map { rules.getJSONObject(it) }
+            .first { it.has("domain") }.getJSONArray("domain")
+        assertEquals(listOf("domain:local", "full:localhost", "domain:lan"),
+            (0 until lanDomains.length()).map { lanDomains.getString(it) })
+
+        val v4Only = JSONObject(XrayConfigBuilder.buildJson(profile(), settings.copy(ipv6Enabled = false)))
+        assertEquals(1, v4Only.getJSONArray("fakedns").length())
+        assertEquals("UseIPv4", v4Only.getJSONObject("dns").getString("queryStrategy"))
     }
 
     @Test fun disabledIpv6IsBlockedInsideNativeTunnel() {
