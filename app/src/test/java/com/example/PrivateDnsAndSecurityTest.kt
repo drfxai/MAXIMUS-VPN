@@ -155,6 +155,19 @@ class PrivateDnsAndSecurityTest {
         assertEquals("fragment", stream.getJSONObject("finalmask").getJSONArray("tcp").getJSONObject(0).getString("type"))
     }
 
+    @Test fun quicIsBlockedSoAppsFallBackToTcp() {
+        val rules = JSONObject(XrayConfigBuilder.buildJson(profile(), settings)).getJSONObject("routing").getJSONArray("rules")
+        val all = (0 until rules.length()).map { rules.getJSONObject(it) }
+        val quic = all.indexOfFirst { it.optString("network") == "udp" && it.optString("port") == "443" }
+        assertTrue(quic >= 0)
+        assertEquals("block", all[quic].getString("outboundTag"))
+        // DNS keeps working: its rule comes first.
+        val dns = all.indexOfFirst { it.optString("port") == "53" }
+        assertTrue(dns in 0 until quic)
+        // And the catch-all proxy rule comes after the QUIC block.
+        assertTrue(all.indexOfLast { it.optString("outboundTag") == "proxy" } > quic)
+    }
+
     @Test fun malformedFinalMaskIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             XrayConfigBuilder.buildJson(profile().copy(security = "tls", finalMask = "{broken"), settings)

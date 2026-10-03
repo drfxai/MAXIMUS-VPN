@@ -77,6 +77,16 @@ object XrayConfigBuilder {
         routingObj.put("domainStrategy", "IPIfNonMatch")
         val rulesArray = JSONArray()
 
+        // Block QUIC (HTTP/3 over UDP 443). Many servers - Cloudflare Worker panels such as BPB in
+        // particular - cannot relay it, and YouTube/Chrome then stall instead of using TCP. Dropping
+        // it makes them fall back to HTTPS over TCP immediately. DNS (UDP 53) is unaffected.
+        rulesArray.put(JSONObject().apply {
+            put("type", "field")
+            put("network", "udp")
+            put("port", "443")
+            put("outboundTag", "block")
+        })
+
 
         when (settings.routingMode) {
             RoutingMode.GLOBAL -> {
