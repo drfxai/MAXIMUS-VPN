@@ -402,9 +402,8 @@ class TcpVlessTunnel(
         if (!profile.security.equals("tls", ignoreCase = true)) {
             throw javax.net.ssl.SSLException("Only standard TLS is supported by the embedded tunnel")
         }
-        if (profile.fingerprint.equals("unsafe", ignoreCase = true)) {
-            throw javax.net.ssl.SSLException("TLS certificate verification cannot be disabled")
-        }
+        // "unsafe" only selects a plain (non-browser-imitating) TLS stack, which is what this
+        // tunnel always uses; certificate verification stays on.
 
         val sniHost = if (profile.sni.isNotBlank()) {
             profile.sni

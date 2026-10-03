@@ -23,6 +23,7 @@ data class VlessProfile(
     val fingerprint: String = "",  // chrome, firefox, safari, randomized, unsafe
     val cipherSuites: String = "", // custom cipher suites colon or comma separated
     val fakeSniPool: String = "",  // multi-domain fake SNI pool
+    val finalMask: String = "",    // raw Xray streamSettings.finalmask JSON (e.g. TLS fragment)
     val desyncEnabled: Boolean = true,
     val desyncProfileName: String = "BALANCED",
     val desyncMethodName: String = "FAKE_SNI",

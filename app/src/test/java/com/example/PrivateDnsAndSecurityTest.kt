@@ -134,9 +134,30 @@ class PrivateDnsAndSecurityTest {
         assertEquals("private-ipv6-block", rules.getJSONObject(2).getString("outboundTag"))
     }
 
-    @Test fun unsafeFingerprintIsRejectedByNativeBuilder() {
+    @Test fun unsafeFingerprintUsesStandardTlsWithoutDisablingVerification() {
+        val mask = """{"tcp":[{"type":"fragment","settings":{"packets":"tlshello","lengths":["0","104","1"],"delays":["0"],"maxSplit":"0"}}]}"""
+        val root = JSONObject(
+            XrayConfigBuilder.buildJson(
+                profile().copy(
+                    fingerprint = "unsafe", security = "tls", transport = "ws", sni = "w.example.com",
+                    cipherSuites = "TLS_AES_256_GCM_SHA384", alpn = "http/1.1", finalMask = mask
+                ),
+                settings
+            )
+        )
+        val outbounds = root.getJSONArray("outbounds")
+        val proxy = (0 until outbounds.length()).map { outbounds.getJSONObject(it) }.first { it.optString("tag") == "proxy" }
+        val stream = proxy.getJSONObject("streamSettings")
+        val tls = stream.getJSONObject("tlsSettings")
+        assertEquals("unsafe", tls.getString("fingerprint"))
+        assertEquals("TLS_AES_256_GCM_SHA384", tls.getString("cipherSuites"))
+        assertFalse(tls.optBoolean("allowInsecure", false))
+        assertEquals("fragment", stream.getJSONObject("finalmask").getJSONArray("tcp").getJSONObject(0).getString("type"))
+    }
+
+    @Test fun malformedFinalMaskIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
-            XrayConfigBuilder.buildJson(profile().copy(fingerprint = "unsafe", security = "tls"), settings)
+            XrayConfigBuilder.buildJson(profile().copy(security = "tls", finalMask = "{broken"), settings)
         }
     }
 

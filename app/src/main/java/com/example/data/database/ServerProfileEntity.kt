@@ -1,5 +1,6 @@
 package com.example.data.database
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -38,6 +39,8 @@ data class ServerProfileEntity(
     val fingerprint: String,
     val cipherSuites: String = "",
     val fakeSniPool: String = "",
+    @ColumnInfo(defaultValue = "")
+    val finalMask: String = "",
     val desyncEnabled: Boolean = true,
     val desyncProfileName: String = "BALANCED",
     val desyncMethodName: String = "FAKE_SNI",
@@ -99,6 +102,7 @@ data class ServerProfileEntity(
         fingerprint = fingerprint,
         cipherSuites = cipherSuites,
         fakeSniPool = fakeSniPool,
+        finalMask = finalMask,
         desyncEnabled = desyncEnabled,
         desyncProfileName = desyncProfileName,
         desyncMethodName = desyncMethodName,
@@ -157,6 +161,7 @@ data class ServerProfileEntity(
             fingerprint = p.fingerprint,
             cipherSuites = p.cipherSuites,
             fakeSniPool = p.fakeSniPool,
+            finalMask = p.finalMask,
             desyncEnabled = p.desyncEnabled,
             desyncProfileName = p.desyncProfileName,
             desyncMethodName = p.desyncMethodName,
