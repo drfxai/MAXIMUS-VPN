@@ -19,7 +19,6 @@ object XrayConfigBuilder {
      * If the profile has a raw JSON config, it sanitizes and preserves it directly.
      */
     fun buildJson(profile: VlessProfile, settings: AppSettings): String {
-        require(!profile.fingerprint.equals("unsafe", ignoreCase = true)) { "TLS certificate verification cannot be disabled" }
         if (profile.profileType == ProfileType.XRAY_JSON && profile.rawConfig.isNotBlank()) {
             return XrayConfigParser.sanitizeForExecution(profile.rawConfig, settings)
         }
@@ -296,12 +295,10 @@ object XrayConfigBuilder {
                 val tlsObj = JSONObject().apply {
                     if (profile.sni.isNotBlank()) put("serverName", profile.sni)
                     if (profile.fingerprint.isNotBlank()) {
-                        if (profile.fingerprint.equals("unsafe", ignoreCase = true)) {
-                            error("TLS certificate verification cannot be disabled")
-                            put("fingerprint", "chrome")
-                        } else {
-                            put("fingerprint", profile.fingerprint)
-                        }
+                        // Xray's "unsafe" fingerprint means "use Go's standard TLS instead of a uTLS
+                        // browser imitation" (needed for custom cipher suites). Certificates are still
+                        // verified because allowInsecure is never set.
+                        put("fingerprint", profile.fingerprint.lowercase())
                     }
                     if (profile.cipherSuites.isNotBlank()) {
                         put("cipherSuites", profile.cipherSuites)
@@ -329,6 +326,14 @@ object XrayConfigBuilder {
                     if (profile.spiderX.isNotBlank()) put("spiderX", profile.spiderX)
                 }
                 put("realitySettings", realityObj)
+            }
+
+            // Final mask (for example TLS ClientHello fragmentation), stored as raw JSON.
+            if (profile.finalMask.isNotBlank()) {
+                val mask = runCatching { JSONObject(profile.finalMask) }.getOrElse {
+                    throw IllegalArgumentException("The profile's finalMask is not valid JSON")
+                }
+                put("finalmask", mask)
             }
 
             // Transport Specific Settings

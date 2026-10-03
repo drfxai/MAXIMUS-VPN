@@ -36,7 +36,8 @@ class RuntimeRegressionTest {
     @Test fun unsupportedProfilesCannotMasqueradeAsWorkingTunnels() {
         assertNull(RuntimeCapabilities.unsupportedReason(node))
         assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(security="reality")))
-        assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(security="tls", fingerprint="unsafe")))
+        assertNull(RuntimeCapabilities.unsupportedReason(node.copy(security="tls", fingerprint="unsafe")))
+        assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(security="tls", finalMask="{broken")))
         assertNull(RuntimeCapabilities.unsupportedReason(node.copy(transport="grpc")))
         assertNull(RuntimeCapabilities.unsupportedReason(node.copy(protocolType=ProtocolType.VMESS)))
         assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(flow="xtls-rprx-vision")))

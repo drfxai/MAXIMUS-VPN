@@ -329,12 +329,12 @@ fun PanelManagerScreen(
                         Toast.makeText(context, "Panel port updated to $newPort", Toast.LENGTH_SHORT).show()
                     },
                     onImportToVpn = {
-                        viewModel.importServerToProfiles(activePanel)
-                        Toast.makeText(context, "3X-UI server imported to VPN profiles!", Toast.LENGTH_SHORT).show()
+                        if (activePanel.type == PanelType.BPB_WORKER) viewModel.importBpbToProfiles(activePanel)
+                        else viewModel.importServerToProfiles(activePanel)
                     },
                     onOneClickReality = {
-                        viewModel.createQuickConfig(activePanel)
-                        Toast.makeText(context, "Quick Config (VLESS TCP) generated", Toast.LENGTH_SHORT).show()
+                        if (activePanel.type == PanelType.BPB_WORKER) viewModel.fixBpbProfiles(activePanel)
+                        else viewModel.createQuickConfig(activePanel)
                     },
                     onDelete = { confirmRemovePanel = activePanel }
                 )
@@ -576,7 +576,14 @@ fun PanelManagerScreen(
                         onInstall = { token, accountId, email, password ->
                             viewModel.deployBpb(token, accountId, email, password)
                         },
-                        onImportToVpn = { panel -> viewModel.importBpbToProfiles(panel) }
+                        onImportToVpn = { panel -> viewModel.importBpbToProfiles(panel) },
+                        onFixBpb = { panel -> viewModel.fixBpbProfiles(panel) }
+                    )
+                    SavedBpbPanelsCard(
+                        panels = state.panels.filter { it.type == PanelType.BPB_WORKER },
+                        busy = state.busy,
+                        onImportToVpn = { panel -> viewModel.importBpbToProfiles(panel) },
+                        onFixBpb = { panel -> viewModel.fixBpbProfiles(panel) }
                     )
                 }
 
@@ -1655,7 +1662,8 @@ private fun BpbWizardCard(
     newlyDeployedPanel: ManagedPanel?,
     onDismissNewPanel: () -> Unit,
     onInstall: (token: String, account: String, email: String, password: String) -> Unit,
-    onImportToVpn: (panel: ManagedPanel) -> Unit
+    onImportToVpn: (panel: ManagedPanel) -> Unit,
+    onFixBpb: (panel: ManagedPanel) -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -2354,6 +2362,8 @@ private fun BpbWizardCard(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Add to Maximus VPN Profiles", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676))
                     }
+
+                    FixBpbButton(onClick = { onFixBpb(newlyDeployedPanel) })
                 }
             } else {
                 // Standby Card matching photo 1
@@ -3630,14 +3640,14 @@ private fun InstalledPanelDetailView(
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Bolt,
+                                    imageVector = if (panel.type == PanelType.BPB_WORKER) Icons.Default.Security else Icons.Default.Bolt,
                                     contentDescription = null,
                                     tint = PanelColors.CyanAccent,
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = "Quick Config",
+                                    text = if (panel.type == PanelType.BPB_WORKER) "FIX BPB" else "Quick Config",
                                     color = PanelColors.CyanAccent,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -4197,3 +4207,81 @@ private fun outlinedColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = Color.White,
     unfocusedTextColor = Color.White
 )
+
+@Composable
+private fun FixBpbButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth().height(40.dp),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, Color(0xFFFFB300)),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFFB300))
+    ) {
+        Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("FIX BPB", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Saved BPB workers, so "Add to VPN" and "FIX BPB" stay available after the install card is closed. */
+@Composable
+private fun SavedBpbPanelsCard(
+    panels: List<ManagedPanel>,
+    busy: Boolean,
+    onImportToVpn: (ManagedPanel) -> Unit,
+    onFixBpb: (ManagedPanel) -> Unit
+) {
+    if (panels.isEmpty()) return
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = "Your BPB panels",
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+            Text(
+                text = "FIX BPB adds TLS fragmentation, a plain-TLS fingerprint, HTTP/1.1 ALPN and a tuned cipher list to the configs of a panel. Use it when BPB configs do not connect.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+            panels.forEach { panel ->
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = panel.host.ifBlank { panel.name },
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { onImportToVpn(panel) },
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f).height(40.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E5C3C))
+                            ) {
+                                Text("Add to VPN", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676))
+                            }
+                            FixBpbButton(onClick = { onFixBpb(panel) }, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -18,8 +18,8 @@ object RuntimeCapabilities {
             "Security ${profile.security} is not supported by the bundled Xray core."
         profile.security.equals("reality", ignoreCase = true) && (profile.publicKey.isBlank() || profile.sni.isBlank()) ->
             "REALITY requires both the server public key and SNI."
-        profile.fingerprint.equals("unsafe", ignoreCase = true) ->
-            "Disabling TLS certificate verification is not supported."
+        profile.finalMask.isNotBlank() && runCatching { org.json.JSONObject(profile.finalMask) }.isFailure ->
+            "The finalMask setting is not valid JSON."
         profile.headerType.lowercase() !in setOf("", "none", "http") -> "TCP header ${profile.headerType} is not supported by the Xray configuration adapter."
         profile.protocolType == ProtocolType.VLESS && profile.encryption.lowercase() !in setOf("", "none") ->
             "This VLESS encryption mode requires a native Xray core."
