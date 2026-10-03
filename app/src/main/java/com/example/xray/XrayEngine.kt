@@ -128,6 +128,13 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
                 .forEach { inbound ->
                     val tunSettings = inbound.optJSONObject("settings") ?: JSONObject().also { inbound.put("settings", it) }
                     tunSettings.put("mtu", mtu)
+                    // Restore domains behind FakeDNS placeholder addresses before routing.
+                    if (config.has("fakedns") && !inbound.has("sniffing")) {
+                        inbound.put("sniffing", JSONObject()
+                            .put("enabled", true)
+                            .put("destOverride", org.json.JSONArray().put("fakedns"))
+                            .put("routeOnly", false))
+                    }
                 }
             config.remove("metrics")
             config.remove("api")

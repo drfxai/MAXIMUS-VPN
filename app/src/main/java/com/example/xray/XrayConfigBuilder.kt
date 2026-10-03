@@ -13,6 +13,7 @@ object XrayConfigBuilder {
     const val DEFAULT_SOCKS_PORT = 10808
     const val DEFAULT_DOKODEMO_PORT = 10809
     const val SO_MARK_VPN = 255
+    const val DNS_TIMEOUT_MS = 10000
 
     /**
      * Builds a complete, valid Xray-core JSON configuration object from a VlessProfile and AppSettings.
@@ -117,9 +118,11 @@ object XrayConfigBuilder {
                     put("type", "field")
                     put("outboundTag", "direct")
                     put("domain", JSONArray().apply {
-                        put("local")
-                        put("localhost")
-                        put("lan")
+                        // Exact suffixes: plain words are keyword matches in Xray ("lan" would
+                        // also match "planet.com") and domains are restored by FakeDNS.
+                        put("domain:local")
+                        put("full:localhost")
+                        put("domain:lan")
                     })
                 })
                 rulesArray.put(JSONObject().apply {
@@ -180,7 +183,30 @@ object XrayConfigBuilder {
         })
 
         applyPrivateDns(root, settings)
+        applyFakeDns(root, settings)
         return root.toString(2)
+    }
+
+    /**
+     * FakeDNS: apps get an instant placeholder address from 198.18.0.0/15 (fc00::/18 for IPv6) and
+     * the TUN inbound restores the real domain (see XrayEngine), so the server resolves names
+     * itself. Browsing then no longer depends on a DNS-over-HTTPS round trip through the proxy,
+     * which often exceeds Xray's lookup timeout on Cloudflare Worker (BPB) paths and left every
+     * website unreachable while IP-based apps kept working. Xray's own lookups skip FakeDNS and
+     * still use the private resolver.
+     */
+    internal fun applyFakeDns(root: JSONObject, settings: AppSettings) {
+        val pools = JSONArray().put(JSONObject().put("ipPool", "198.18.0.0/15").put("poolSize", 65535))
+        if (settings.ipv6Enabled) pools.put(JSONObject().put("ipPool", "fc00::/18").put("poolSize", 65535))
+        root.put("fakedns", pools)
+        val dns = root.getJSONObject("dns")
+        val resolver = dns.getJSONArray("servers").getString(0)
+        dns.put("servers", JSONArray().put("fakedns")
+            .put(JSONObject().put("address", resolver).put("timeoutMs", DNS_TIMEOUT_MS)))
+        if (!settings.ipv6Enabled) dns.put("queryStrategy", "UseIPv4")
+        // Routing must see the restored domain, not resolve it again (that would bring back the
+        // slow lookup, and a placeholder address would match the 198.18.0.0/15 bypass rule).
+        root.getJSONObject("routing").put("domainStrategy", "AsIs")
     }
 
     internal fun applyPrivateDns(root: JSONObject, settings: AppSettings) {
