@@ -55,4 +55,14 @@ class BpbSubscriptionImportTest {
         val result = UniversalImportEngine.importText(payload, "BPB", null)
         assertEquals(3, result.validProfiles.size)
     }
+
+    @Test
+    fun keepsAPlusInTheTrojanPassword() {
+        // BPB writes the password with the URL API, which escapes '@' but leaves '+' as is.
+        val link = "trojan://Ab1%40c&d*e_f-g+h!jk9Z@$host:443?host=$host&type=ws&security=tls" +
+            "&path=%2Ftr%2FQwErTy12345678%3Fed%3D2560&sni=$host&fp=chrome&alpn=http%2F1.1#t"
+        val imported = UniversalImportEngine.importText(link, "BPB", null).validProfiles.single()
+        assertEquals("Ab1@c&d*e_f-g+h!jk9Z", imported.uuid)
+        assertEquals("Ab1@c&d*e_f-g+h!jk9Z", com.example.vpn.engine.ConfigurationAdapter.parseTrojanUri(link)?.uuid)
+    }
 }

@@ -38,6 +38,13 @@ object RealDelayProbe {
     @Volatile
     var socketProtector: ((Int) -> Boolean)? = null
 
+    /**
+     * Turns a server host name into an address before the probe; the app installs one that does not
+     * trust a filtered network's DNS (see EndpointResolver). Identity by default.
+     */
+    @Volatile
+    var endpointResolver: (VlessProfile) -> VlessProfile = { it }
+
     fun measure(profile: VlessProfile, timeoutSec: Int): Outcome = measure(listOf(profile), timeoutSec).first()
 
     fun measure(profiles: List<VlessProfile>, timeoutSec: Int): List<Outcome> =
@@ -46,7 +53,7 @@ object RealDelayProbe {
     private fun measureBatch(profiles: List<VlessProfile>, timeoutSec: Int): List<Outcome> {
         // Only the proxy outbound is used, so the user's DNS and routing settings do not matter.
         val configs = profiles.map { profile ->
-            runCatching { XrayConfigBuilder.buildJson(profile, AppSettings()) }
+            runCatching { XrayConfigBuilder.buildJson(endpointResolver(profile), AppSettings()) }
         }
         val runnable = configs.mapIndexedNotNull { index, config -> config.getOrNull()?.let { index to it } }
         val results = arrayOfNulls<Outcome>(profiles.size)

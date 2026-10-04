@@ -56,6 +56,29 @@ class RayApplication : Application() {
 
         XrayLogManager.i("APP", "Maximus Application starting. Initializing database and subsystems...")
 
+        // Real-delay probes (server ping, FIX BPB) dial the server themselves; resolve its name without
+        // trusting a filtering network's DNS answer. While the VPN runs the probe does not run at all.
+        com.example.xray.RealDelayProbe.endpointResolver = { profile ->
+            val host = profile.address.trim().removePrefix("[").removeSuffix("]")
+            if (profile.profileType == com.example.data.model.ProfileType.XRAY_JSON ||
+                com.example.vpn.tunnel.ProxyDnsTransport.isLiteralAddress(host) ||
+                com.example.vpn.VpnController.connectionState.value.isConnected
+            ) profile
+            else runCatching {
+                val resolved = com.example.vpn.EndpointResolver.resolve(
+                    host,
+                    system = { java.net.InetAddress.getAllByName(it).toList() },
+                    open = { url -> url.openConnection() as java.net.HttpURLConnection }
+                )
+                val usesTls = profile.security.equals("tls", true) || profile.security.equals("reality", true)
+                profile.copy(
+                    address = resolved.address,
+                    sni = if (usesTls && profile.sni.isBlank()) host else profile.sni,
+                    host = profile.host.ifBlank { if (profile.transport.lowercase() in setOf("ws", "httpupgrade", "xhttp", "splithttp", "h2", "http")) host else "" }
+                )
+            }.getOrDefault(profile)
+        }
+
         try {
             database = AppDatabase.getInstance(this)
             serverRepository = ServerRepository(database.serverProfileDao())
