@@ -42,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -59,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -194,42 +196,43 @@ fun ServersScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Ping All Action Row
+            // Nodes header: count and Ping All on one slim line
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "ALL CONFIGURED NODES",
+                    text = "ALL NODES · ${serverList.size}",
                     color = AppTheme.colors.textMuted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp
                 )
 
-                Button(
+                TextButton(
                     onClick = { serverViewModel.testAllServers() },
                     enabled = !isTestingAll && serverList.isNotEmpty(),
-                    colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surfaceElevated),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                    modifier = Modifier.testTag("test_all_servers_button")
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier
+                        .height(32.dp)
+                        .testTag("test_all_servers_button")
                 ) {
                     if (isTestingAll) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
+                            modifier = Modifier.size(12.dp),
                             strokeWidth = 2.dp,
                             color = AppTheme.colors.primary
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Pinging...", color = AppTheme.colors.primary, fontSize = 12.sp)
+                        Text("Pinging…", color = AppTheme.colors.primary, fontSize = 12.sp)
                     } else {
                         Icon(
                             imageVector = Icons.Default.NetworkPing,
                             contentDescription = "Ping All",
                             tint = AppTheme.colors.primary,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Ping All", color = AppTheme.colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -237,50 +240,79 @@ fun ServersScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // Search Bar & Filters
+            // Search Bar & Filters (40dp high instead of the 56dp Material text field)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
+                androidx.compose.foundation.text.BasicTextField(
                     value = searchQuery,
                     onValueChange = { serverViewModel.setSearchQuery(it) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = AppTheme.colors.textPrimary, fontSize = 13.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(AppTheme.colors.primary),
                     modifier = Modifier
                         .weight(1f)
+                        .height(40.dp)
                         .testTag("server_search_input"),
-                    placeholder = { Text("Search nodes, host, protocol...", color = AppTheme.colors.textMuted, fontSize = 13.sp) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = AppTheme.colors.textMuted)
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { serverViewModel.setSearchQuery("") }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = AppTheme.colors.textMuted)
+                    decorationBox = { inner ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(AppTheme.colors.surfaceCard)
+                                .border(1.dp, AppTheme.colors.borderSubtle, RoundedCornerShape(12.dp))
+                                .padding(start = 10.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                tint = AppTheme.colors.textMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(modifier = Modifier.weight(1f)) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        "Search nodes, host, protocol",
+                                        color = AppTheme.colors.textMuted,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                inner()
+                            }
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { serverViewModel.setSearchQuery("") },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Clear,
+                                        contentDescription = "Clear",
+                                        tint = AppTheme.colors.textMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = AppTheme.colors.surfaceCard,
-                        unfocusedContainerColor = AppTheme.colors.surfaceCard,
-                        focusedBorderColor = AppTheme.colors.primary,
-                        unfocusedBorderColor = AppTheme.colors.borderSubtle,
-                        focusedTextColor = AppTheme.colors.textPrimary,
-                        unfocusedTextColor = AppTheme.colors.textPrimary
-                    )
+                    }
                 )
 
                 Spacer(modifier = Modifier.width(8.dp))
 
                 // Favorite Filter Toggle
-                IconButton(
-                    onClick = { serverViewModel.toggleFavoritesFilter() },
+                // Plain Box: IconButton would pad itself to 48dp and outgrow the 40dp search field.
+                Box(
+                    contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(40.dp)
                         .clip(RoundedCornerShape(12.dp))
+                        .clickable { serverViewModel.toggleFavoritesFilter() }
                         .background(
                             if (onlyFavorites) {
                                 if (AppTheme.colors.isDark) Color(0xFF2E2410) else Color(0xFFFEF3C7)
@@ -295,7 +327,8 @@ fun ServersScreen(
                     Icon(
                         imageVector = if (onlyFavorites) Icons.Default.Star else Icons.Outlined.StarBorder,
                         contentDescription = "Filter Favorites",
-                        tint = if (onlyFavorites) AppTheme.colors.statusWarning else AppTheme.colors.textSecondary
+                        tint = if (onlyFavorites) AppTheme.colors.statusWarning else AppTheme.colors.textSecondary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
@@ -303,18 +336,20 @@ fun ServersScreen(
 
                 // Sort Menu
                 Box {
-                    IconButton(
-                        onClick = { showSortMenu = true },
+                    Box(
+                        contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(40.dp)
                             .clip(RoundedCornerShape(12.dp))
+                            .clickable { showSortMenu = true }
                             .background(AppTheme.colors.surfaceCard)
                             .border(1.dp, AppTheme.colors.borderSubtle, RoundedCornerShape(12.dp))
                     ) {
                         Icon(
                             imageVector = Icons.Default.FilterList,
                             contentDescription = "Sort Options",
-                            tint = AppTheme.colors.textSecondary
+                            tint = AppTheme.colors.textSecondary,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
