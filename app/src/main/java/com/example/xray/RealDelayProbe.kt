@@ -58,6 +58,9 @@ object RealDelayProbe {
                 parseResponse(invoker(buildRequest(runnable.map { it.second }, timeoutSec).toString()), runnable.size)
             } catch (e: Exception) {
                 List(runnable.size) { Outcome.NotRun(e.message ?: e.javaClass.simpleName) }
+            } catch (e: LinkageError) {
+                // libXray's classes without its native library (JVM unit tests) fail to link.
+                List(runnable.size) { Outcome.NotRun(e.message ?: e.javaClass.simpleName) }
             }
             runnable.forEachIndexed { i, (index, _) -> results[index] = outcomes[i] }
         }
