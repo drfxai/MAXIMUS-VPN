@@ -82,6 +82,7 @@ fun ServersScreen(
     onNavigateToSubscriptions: () -> Unit,
     onNavigateToBenchmark: () -> Unit,
     onNavigateToPanels: () -> Unit = {},
+    onNavigateToEditServer: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val serverList by serverViewModel.serverList.collectAsStateWithLifecycle()
@@ -470,7 +471,10 @@ fun ServersScreen(
                             },
                             onExportUri = {
                                 serverViewModel.exportUri(it)
-                            }
+                            },
+                            onEdit = if (profile.profileType == com.example.data.model.ProfileType.VLESS) {
+                                { onNavigateToEditServer(profile.id) }
+                            } else null
                         )
                     }
                 }

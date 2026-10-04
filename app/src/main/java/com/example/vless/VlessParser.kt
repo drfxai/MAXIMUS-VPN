@@ -193,6 +193,9 @@ object VlessParser {
             val spiderX = params["spx"] ?: params["spiderX"] ?: ""
             val alpn = params["alpn"] ?: ""
             val headerType = params["headerType"] ?: ""
+            val pinnedCert = params["pcs"] ?: ""
+            val verifyByName = params["vcn"] ?: ""
+            val echConfig = params["ech"] ?: ""
 
             val effectiveSni = if (sni.isNotBlank()) sni else wsHost
             val effectiveHost = if (wsHost.isNotBlank()) wsHost else effectiveSni
@@ -215,7 +218,10 @@ object VlessParser {
                 shortId = shortId,
                 spiderX = spiderX,
                 alpn = alpn,
-                headerType = headerType
+                headerType = headerType,
+                pinnedPeerCertSha256 = pinnedCert,
+                verifyPeerCertByName = verifyByName,
+                echConfigList = echConfig
             )
 
             // Validate
@@ -300,6 +306,15 @@ object VlessParser {
         }
         if (profile.headerType.isNotBlank()) {
             queryParams.add("headerType=${encodeUrl(profile.headerType)}")
+        }
+        if (profile.pinnedPeerCertSha256.isNotBlank()) {
+            queryParams.add("pcs=${encodeUrl(profile.pinnedPeerCertSha256)}")
+        }
+        if (profile.verifyPeerCertByName.isNotBlank()) {
+            queryParams.add("vcn=${encodeUrl(profile.verifyPeerCertByName)}")
+        }
+        if (profile.echConfigList.isNotBlank()) {
+            queryParams.add("ech=${encodeUrl(profile.echConfigList)}")
         }
 
         val queryString = if (queryParams.isNotEmpty()) "?${queryParams.joinToString("&")}" else ""
