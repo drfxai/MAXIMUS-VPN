@@ -89,6 +89,12 @@ object ConfigurationAdapter {
         }
     }
 
+    /**
+     * Percent-decodes a link's user info. A literal '+' is part of the password there (BPB, like the
+     * WHATWG URL API, leaves it unescaped), so it must not become a space as in form decoding.
+     */
+    private fun decodeUserInfo(str: String): String = safeDecodeUrl(str.replace("+", "%2B"))
+
     private fun safeDecodeUrl(str: String?): String {
         if (str.isNullOrBlank()) return ""
         return try {
@@ -248,7 +254,7 @@ object ConfigurationAdapter {
             val comp = extractUriComponents(uriString, "trojan") ?: return null
             val host = comp.host
             val port = if (comp.port in 1..65535) comp.port else 443
-            val password = safeDecodeUrl(comp.userInfo)
+            val password = decodeUserInfo(comp.userInfo)
             if (password.isBlank()) return null
 
             val name = if (comp.fragment.isNotBlank()) {
