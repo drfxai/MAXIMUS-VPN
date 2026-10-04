@@ -186,7 +186,7 @@ fun HomeScreen(
             onExploreArchitecture = { showLandingTourDialog = true }
         )
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Professional Mode Switcher Card (Daily Mode vs GOD Mode)
         Card(
@@ -204,67 +204,75 @@ fun HomeScreen(
                 if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) Color(0xFFE53935).copy(alpha = 0.6f) else AppTheme.colors.borderSubtle
             )
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                val isGodMode = settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE
+                val accent = if (isGodMode) Color(0xFFFF5252) else AppTheme.colors.primary
+                val toggleMode = {
+                    val nextMode = if (isGodMode) {
+                        com.example.data.model.OperationalMode.DAILY
+                    } else {
+                        com.example.data.model.OperationalMode.GOD_MODE
+                    }
+                    settingsViewModel.updateSettings(settings.copy(operationalMode = nextMode))
+                    if (nextMode == com.example.data.model.OperationalMode.GOD_MODE) {
+                        com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
+                        com.example.vpn.godmode.MaximusMeshManager.startMesh()
+                    } else {
+                        com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
+                        com.example.vpn.godmode.MaximusMeshManager.stopMesh()
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) Color(0xFFD32F2F) else AppTheme.colors.primary
-                        ) {
-                            Text(
-                                text = settings.operationalMode.badge,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(accent.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isGodMode) Icons.Default.Shield else Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = settings.operationalMode.displayName,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
+                            fontSize = 13.5.sp,
                             color = AppTheme.colors.textPrimary
                         )
+                        Text(
+                            text = settings.operationalMode.subtitle,
+                            fontSize = 10.5.sp,
+                            color = AppTheme.colors.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-
-                    // Mode Toggle Switch Button
-                    TextButton(
-                        onClick = {
-                            val nextMode = if (settings.operationalMode == com.example.data.model.OperationalMode.DAILY) {
-                                com.example.data.model.OperationalMode.GOD_MODE
-                            } else {
-                                com.example.data.model.OperationalMode.DAILY
-                            }
-                            settingsViewModel.updateSettings(settings.copy(operationalMode = nextMode))
-                            if (nextMode == com.example.data.model.OperationalMode.GOD_MODE) {
-                                com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
-                                com.example.vpn.godmode.MaximusMeshManager.startMesh()
-                            } else {
-                                com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
-                                com.example.vpn.godmode.MaximusMeshManager.stopMesh()
-                            }
-                        }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    // Mode switch
+                    Surface(
+                        onClick = toggleMode,
+                        shape = RoundedCornerShape(10.dp),
+                        color = accent.copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.4f))
                     ) {
                         Text(
-                            text = if (settings.operationalMode == com.example.data.model.OperationalMode.DAILY) "Switch to GOD Mode ➔" else "Switch to Daily Mode ➔",
+                            text = if (isGodMode) "Daily Mode" else "GOD Mode",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) Color(0xFFFF8A80) else AppTheme.colors.primary
+                            color = if (isGodMode) Color(0xFFFF8A80) else AppTheme.colors.primary,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = settings.operationalMode.subtitle,
-                    fontSize = 11.sp,
-                    color = AppTheme.colors.textSecondary
-                )
 
                 // Quick Tools & Cascade Path when GOD MODE is Active
                 if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) {
@@ -508,57 +516,18 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Active Server Card
+        // Active Server Card (exit country and ping are shown inside it while connected)
         ServerSelectorCard(
             profile = activeProfile,
             pingMs = connectionState.pingMs,
+            exitCountryCode = connectionState.exitCountryCode
+                ?.uppercase(Locale.US)
+                ?.takeIf { connectionState.isConnected && it.length == 2 },
             onClick = onNavigateToServers
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        if (connectionState.isConnected) {
-            val liveCountryCode = connectionState.exitCountryCode
-                ?.uppercase(Locale.US)
-                ?.takeIf { it.length == 2 }
-                ?: "--"
-            val livePing = connectionState.pingMs?.let { "${it} ms" } ?: "—"
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = AppTheme.colors.surfaceCard,
-                border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "${countryFlag(liveCountryCode)} $liveCountryCode",
-                        color = AppTheme.colors.textPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(4.dp)
-                            .clip(CircleShape)
-                            .background(AppTheme.colors.textMuted)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = livePing,
-                        color = AppTheme.colors.primary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-        }
         // Real-Time Traffic Dashboard Grid
         TrafficDashboardCard(
             uploadBytes = connectionState.uploadBytes,
@@ -750,76 +719,72 @@ private fun SmartRecommendationCard(
 private fun ServerSelectorCard(
     profile: VlessProfile?,
     pingMs: Long?,
+    exitCountryCode: String?,
     onClick: () -> Unit
 ) {
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(if (AppTheme.colors.isDark) 2.dp else 4.dp, RoundedCornerShape(24.dp))
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
             .testTag("selected_server_card"),
-        colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-        shape = RoundedCornerShape(24.dp)
+        shape = RoundedCornerShape(18.dp),
+        color = AppTheme.colors.surfaceCard,
+        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(AppTheme.colors.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(AppTheme.colors.surfaceElevated)
-                        .border(1.dp, AppTheme.colors.borderMedium, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
+                if (exitCountryCode != null) {
+                    Text(text = countryFlag(exitCountryCode), fontSize = 18.sp)
+                } else {
                     Icon(
                         imageVector = Icons.Default.Public,
                         contentDescription = "Server",
                         tint = AppTheme.colors.primary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = profile?.name ?: "No Server Selected",
-                        color = AppTheme.colors.textPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = profile?.displaySubtitle ?: "Tap to choose a proxy server",
-                        color = AppTheme.colors.textSecondary,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LatencyPill(latencyMs = pingMs)
-                Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "Change Server",
-                    tint = AppTheme.colors.textMuted,
-                    modifier = Modifier.size(20.dp)
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = profile?.name ?: "No Server Selected",
+                    color = AppTheme.colors.textPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = listOfNotNull(
+                        exitCountryCode,
+                        profile?.displaySubtitle ?: "Tap to choose a proxy server"
+                    ).joinToString(" • "),
+                    color = AppTheme.colors.textMuted,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+            Spacer(modifier = Modifier.width(8.dp))
+            LatencyPill(latencyMs = pingMs)
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = "Change Server",
+                tint = AppTheme.colors.textMuted,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
@@ -834,142 +799,119 @@ private fun TrafficDashboardCard(
     isConnected: Boolean,
     activeProfile: VlessProfile?
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(if (AppTheme.colors.isDark) 2.dp else 4.dp, RoundedCornerShape(24.dp)),
-        colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-        shape = RoundedCornerShape(24.dp)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = AppTheme.colors.surfaceCard,
+        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle)
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
-            Text(
-                text = "NETWORK TELEMETRY",
-                color = AppTheme.colors.textMuted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
-            Spacer(modifier = Modifier.height(14.dp))
-
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Download Metric
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(AppTheme.colors.metricDownload)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Default.ArrowDownward,
-                            contentDescription = "Download",
-                            tint = AppTheme.colors.metricDownload,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("DOWNLOAD", color = AppTheme.colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = if (isConnected) TrafficStats.formatSpeed(downloadSpeedBps) else "0.0 B/s",
-                        color = AppTheme.colors.textPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = "Total: ${TrafficStats.formatBytes(downloadBytes)}",
-                        color = AppTheme.colors.textMuted,
-                        fontSize = 11.sp
-                    )
-                }
-
-                // Upload Metric
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(AppTheme.colors.metricUpload)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Default.ArrowUpward,
-                            contentDescription = "Upload",
-                            tint = AppTheme.colors.metricUpload,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("UPLOAD", color = AppTheme.colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = if (isConnected) TrafficStats.formatSpeed(uploadSpeedBps) else "0.0 B/s",
-                        color = AppTheme.colors.textPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = "Total: ${TrafficStats.formatBytes(uploadBytes)}",
-                        color = AppTheme.colors.textMuted,
-                        fontSize = 11.sp
-                    )
-                }
+                TrafficMetric(
+                    icon = Icons.Default.ArrowDownward,
+                    tint = AppTheme.colors.metricDownload,
+                    label = "Download",
+                    speed = if (isConnected) TrafficStats.formatSpeed(downloadSpeedBps) else "0 B/s",
+                    total = TrafficStats.formatBytes(downloadBytes),
+                    modifier = Modifier.weight(1f)
+                )
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(34.dp)
+                        .background(AppTheme.colors.borderSubtle)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                TrafficMetric(
+                    icon = Icons.Default.ArrowUpward,
+                    tint = AppTheme.colors.metricUpload,
+                    label = "Upload",
+                    speed = if (isConnected) TrafficStats.formatSpeed(uploadSpeedBps) else "0 B/s",
+                    total = TrafficStats.formatBytes(uploadBytes),
+                    modifier = Modifier.weight(1f)
+                )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-            Box(
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Protocol and tunnel address
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(1.dp)
-                    .background(AppTheme.colors.borderSubtle)
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Tunnel IP and Protocol details
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AppTheme.colors.surfaceElevated.copy(alpha = 0.6f))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Protocol",
-                        tint = AppTheme.colors.primary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Protocol: ${activeProfile?.protocolType?.displayName ?: "VLESS"}",
-                        color = AppTheme.colors.textSecondary,
-                        fontSize = 11.sp
-                    )
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Dns,
-                        contentDescription = "IP",
-                        tint = AppTheme.colors.metricDownload,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Tunnel: $vpnIp",
-                        color = AppTheme.colors.textSecondary,
-                        fontSize = 11.sp
-                    )
-                }
+                TelemetryDetail(
+                    icon = Icons.Default.Lock,
+                    tint = AppTheme.colors.primary,
+                    text = activeProfile?.protocolType?.displayName ?: "VLESS"
+                )
+                TelemetryDetail(
+                    icon = Icons.Default.Dns,
+                    tint = AppTheme.colors.metricDownload,
+                    text = vpnIp
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun TrafficMetric(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    label: String,
+    speed: String,
+    total: String,
+    modifier: Modifier = Modifier
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(tint.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(imageVector = icon, contentDescription = label, tint = tint, modifier = Modifier.size(16.dp))
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Column {
+            Text(
+                text = speed,
+                color = AppTheme.colors.textPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1
+            )
+            Text(
+                text = "$label • $total",
+                color = AppTheme.colors.textMuted,
+                fontSize = 10.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun TelemetryDetail(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    text: String
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(12.dp))
+        Spacer(modifier = Modifier.width(5.dp))
+        Text(text = text, color = AppTheme.colors.textSecondary, fontSize = 10.5.sp, maxLines = 1)
     }
 }
 

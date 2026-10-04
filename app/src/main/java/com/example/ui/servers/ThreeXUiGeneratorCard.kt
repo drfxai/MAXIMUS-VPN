@@ -137,99 +137,77 @@ fun ThreeXUiGeneratorCard(
             modifier = modifier
                 .fillMaxWidth()
                 .testTag("3xui_generator_card_inactive"),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(
                 containerColor = AppTheme.colors.surfaceCard
             ),
-            border = BorderStroke(1.dp, AppTheme.colors.borderSubtle)
+            border = BorderStroke(1.dp, AppTheme.colors.statusWarning.copy(alpha = 0.35f))
         ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+            // One compact row: status, one-line explanation and the install action.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AppTheme.colors.statusWarning.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(AppTheme.colors.surfaceElevated),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Router,
-                            contentDescription = null,
-                            tint = AppTheme.colors.statusWarning,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "3X-UI PANEL REQUIRED",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = AppTheme.colors.statusWarning,
-                                letterSpacing = 1.1.sp,
-                                fontSize = 11.sp
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(AppTheme.colors.statusWarning)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(2.dp))
-
-                        Text(
-                            text = "Server Not Installed",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = AppTheme.colors.textPrimary,
-                            fontSize = 12.5.sp
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Router,
+                        contentDescription = null,
+                        tint = AppTheme.colors.statusWarning,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
-                Text(
-                    text = "Automatic configuration generation activates only after you enter your server access details and install the 3X-UI panel. Dummy configs cannot be generated without an active server.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AppTheme.colors.textSecondary,
-                    fontSize = 11.5.sp,
-                    lineHeight = 16.sp
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "3X-UI panel not installed",
+                        fontWeight = FontWeight.SemiBold,
+                        color = AppTheme.colors.textPrimary,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Install it to create configs automatically",
+                        color = AppTheme.colors.textMuted,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Button(
                     onClick = onNavigateToPanels,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
+                        .height(34.dp)
                         .testTag("install_3xui_panel_button"),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = AppTheme.colors.primary,
                         contentColor = AppTheme.colors.onPrimary
                     ),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Tune,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Enter Server Details & Install 3X-UI",
-                        fontSize = 12.5.sp,
+                        text = "Install",
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
