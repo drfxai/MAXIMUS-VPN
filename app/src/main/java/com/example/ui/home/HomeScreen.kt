@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.BuildConfig
 import com.example.R
 import com.example.data.model.ConnectionStatus
 import com.example.data.model.TrafficStats
@@ -76,6 +77,7 @@ import com.example.ui.components.ConnectionButton
 import com.example.ui.components.LatencyPill
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.ThemeToggleSwitch
+import com.example.ui.components.CompactCardDefaults
 import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.SettingsViewModel
 import com.example.ui.viewmodel.VpnViewModel
@@ -181,171 +183,109 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Landing & Architecture Hero Banner
-        LandingHeroBanner(
+        // Brand row (tap for the architecture tour)
+        CompactHeroCard(
+            logo = painterResource(id = R.drawable.ic_maximus_logo),
+            versionName = BuildConfig.VERSION_NAME,
             onExploreArchitecture = { showLandingTourDialog = true }
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(CompactCardDefaults.Gap))
 
-        // Professional Mode Switcher Card (Daily Mode vs GOD Mode)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) {
-                    Color(0xFF2E0F16)
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                }
-            ),
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) Color(0xFFE53935).copy(alpha = 0.6f) else AppTheme.colors.borderSubtle
-            )
+        // Mode switcher (Daily Mode vs GOD Mode)
+        val isGodMode = settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE
+        val toggleMode = {
+            val nextMode = if (isGodMode) {
+                com.example.data.model.OperationalMode.DAILY
+            } else {
+                com.example.data.model.OperationalMode.GOD_MODE
+            }
+            settingsViewModel.updateSettings(settings.copy(operationalMode = nextMode))
+            if (nextMode == com.example.data.model.OperationalMode.GOD_MODE) {
+                com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
+                com.example.vpn.godmode.MaximusMeshManager.startMesh()
+            } else {
+                com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
+                com.example.vpn.godmode.MaximusMeshManager.stopMesh()
+            }
+        }
+        CompactModeCard(
+            title = settings.operationalMode.displayName,
+            subtitle = settings.operationalMode.subtitle,
+            isGodMode = isGodMode,
+            onToggleMode = toggleMode
         ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                val isGodMode = settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE
-                val accent = if (isGodMode) Color(0xFFFF5252) else AppTheme.colors.primary
-                val toggleMode = {
-                    val nextMode = if (isGodMode) {
-                        com.example.data.model.OperationalMode.DAILY
-                    } else {
-                        com.example.data.model.OperationalMode.GOD_MODE
-                    }
-                    settingsViewModel.updateSettings(settings.copy(operationalMode = nextMode))
-                    if (nextMode == com.example.data.model.OperationalMode.GOD_MODE) {
-                        com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
-                        com.example.vpn.godmode.MaximusMeshManager.startMesh()
-                    } else {
-                        com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
-                        com.example.vpn.godmode.MaximusMeshManager.stopMesh()
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+            // Quick Tools & Cascade Path when GOD MODE is Active
+            if (isGodMode) {
+                val bridges by com.example.vpn.godmode.PsiphonConduitBridge.bridgesStateFlow.collectAsStateWithLifecycle()
+                val meshPeers by com.example.vpn.godmode.MaximusMeshManager.peersFlow.collectAsStateWithLifecycle()
+                val verifiedBridgesCount = bridges.count { it.isVerified || it.latencyMs != null }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // God Mode Cascade Path & Live Network Mesh Indicator
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF1A0A0F),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE53935).copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(accent.copy(alpha = 0.16f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isGodMode) Icons.Default.Shield else Icons.Default.Bolt,
-                            contentDescription = null,
-                            tint = accent,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = settings.operationalMode.displayName,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.5.sp,
-                            color = AppTheme.colors.textPrimary
-                        )
-                        Text(
-                            text = settings.operationalMode.subtitle,
-                            fontSize = 10.5.sp,
-                            color = AppTheme.colors.textMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    // Mode switch
-                    Surface(
-                        onClick = toggleMode,
-                        shape = RoundedCornerShape(10.dp),
-                        color = accent.copy(alpha = 0.12f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.4f))
-                    ) {
-                        Text(
-                            text = if (isGodMode) "Daily Mode" else "GOD Mode",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isGodMode) Color(0xFFFF8A80) else AppTheme.colors.primary,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-
-                // Quick Tools & Cascade Path when GOD MODE is Active
-                if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) {
-                    val bridges by com.example.vpn.godmode.PsiphonConduitBridge.bridgesStateFlow.collectAsStateWithLifecycle()
-                    val meshPeers by com.example.vpn.godmode.MaximusMeshManager.peersFlow.collectAsStateWithLifecycle()
-                    val verifiedBridgesCount = bridges.count { it.isVerified || it.latencyMs != null }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // God Mode Cascade Path & Live Network Mesh Indicator
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF1A0A0F),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE53935).copy(alpha = 0.3f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "CASCADE FAILOVER LADDER",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFFF8A80),
-                                    letterSpacing = 0.5.sp
-                                )
-                                Text(
-                                    text = "Bridges: $verifiedBridgesCount/${bridges.size} | Mesh: ${meshPeers.size} Peers",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFFFCC80)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
                             Text(
-                                text = "1. VLESS Reality ➔ 2. Hysteria2 ➔ 3. Psiphon/Conduit ➔ 4. P2P Mesh",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFFE0E0E0)
+                                text = "CASCADE FAILOVER LADDER",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFF8A80),
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "Bridges: $verifiedBridgesCount/${bridges.size} | Mesh: ${meshPeers.size} Peers",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFFCC80)
                             )
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "1. VLESS Reality ➔ 2. Hysteria2 ➔ 3. Psiphon/Conduit ➔ 4. P2P Mesh",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFE0E0E0)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = onNavigateToSecretChat,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7B1FA2)),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Secret Chat", fontSize = 11.sp)
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Button(
+                        onClick = onNavigateToGodBrowser,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00796B)),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                     ) {
-                        Button(
-                            onClick = onNavigateToSecretChat,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7B1FA2)),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                        ) {
-                            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Secret Chat", fontSize = 11.sp)
-                        }
-
-                        Button(
-                            onClick = onNavigateToGodBrowser,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00796B)),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                        ) {
-                            Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Hardened Browser", fontSize = 11.sp)
-                        }
+                        Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Hardened Browser", fontSize = 11.sp)
                     }
                 }
             }
@@ -516,27 +456,30 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Active Server Card (exit country and ping are shown inside it while connected)
-        ServerSelectorCard(
-            profile = activeProfile,
+        // Active server and live traffic: two compact rows
+        val exitCountryCode = connectionState.exitCountryCode
+            ?.uppercase(Locale.US)
+            ?.takeIf { connectionState.isConnected && it.length == 2 }
+        CompactServerCard(
+            name = activeProfile?.name ?: "No Server Selected",
+            subtitle = listOfNotNull(
+                exitCountryCode,
+                activeProfile?.displaySubtitle ?: "Tap to choose a proxy server"
+            ).joinToString(" • "),
+            flag = exitCountryCode?.let(::countryFlag),
             pingMs = connectionState.pingMs,
-            exitCountryCode = connectionState.exitCountryCode
-                ?.uppercase(Locale.US)
-                ?.takeIf { connectionState.isConnected && it.length == 2 },
             onClick = onNavigateToServers
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(CompactCardDefaults.Gap))
 
-        // Real-Time Traffic Dashboard Grid
-        TrafficDashboardCard(
-            uploadBytes = connectionState.uploadBytes,
-            downloadBytes = connectionState.downloadBytes,
-            uploadSpeedBps = connectionState.uploadSpeedBps,
-            downloadSpeedBps = connectionState.downloadSpeedBps,
-            vpnIp = connectionState.vpnIp ?: "172.19.0.1",
-            isConnected = connectionState.isConnected,
-            activeProfile = activeProfile
+        CompactTrafficCard(
+            downloadSpeed = if (connectionState.isConnected) TrafficStats.formatSpeed(connectionState.downloadSpeedBps) else "0 B/s",
+            downloadTotal = TrafficStats.formatBytes(connectionState.downloadBytes),
+            uploadSpeed = if (connectionState.isConnected) TrafficStats.formatSpeed(connectionState.uploadSpeedBps) else "0 B/s",
+            uploadTotal = TrafficStats.formatBytes(connectionState.uploadBytes),
+            protocol = activeProfile?.protocolType?.displayName ?: "VLESS",
+            tunnelIp = connectionState.vpnIp ?: "172.19.0.1"
         )
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -712,206 +655,6 @@ private fun SmartRecommendationCard(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ServerSelectorCard(
-    profile: VlessProfile?,
-    pingMs: Long?,
-    exitCountryCode: String?,
-    onClick: () -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick)
-            .testTag("selected_server_card"),
-        shape = RoundedCornerShape(18.dp),
-        color = AppTheme.colors.surfaceCard,
-        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(AppTheme.colors.primary.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                if (exitCountryCode != null) {
-                    Text(text = countryFlag(exitCountryCode), fontSize = 18.sp)
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Public,
-                        contentDescription = "Server",
-                        tint = AppTheme.colors.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = profile?.name ?: "No Server Selected",
-                    color = AppTheme.colors.textPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = listOfNotNull(
-                        exitCountryCode,
-                        profile?.displaySubtitle ?: "Tap to choose a proxy server"
-                    ).joinToString(" • "),
-                    color = AppTheme.colors.textMuted,
-                    fontSize = 11.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            LatencyPill(latencyMs = pingMs)
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = "Change Server",
-                tint = AppTheme.colors.textMuted,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun TrafficDashboardCard(
-    uploadBytes: Long,
-    downloadBytes: Long,
-    uploadSpeedBps: Long,
-    downloadSpeedBps: Long,
-    vpnIp: String,
-    isConnected: Boolean,
-    activeProfile: VlessProfile?
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = AppTheme.colors.surfaceCard,
-        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle)
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TrafficMetric(
-                    icon = Icons.Default.ArrowDownward,
-                    tint = AppTheme.colors.metricDownload,
-                    label = "Download",
-                    speed = if (isConnected) TrafficStats.formatSpeed(downloadSpeedBps) else "0 B/s",
-                    total = TrafficStats.formatBytes(downloadBytes),
-                    modifier = Modifier.weight(1f)
-                )
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(34.dp)
-                        .background(AppTheme.colors.borderSubtle)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                TrafficMetric(
-                    icon = Icons.Default.ArrowUpward,
-                    tint = AppTheme.colors.metricUpload,
-                    label = "Upload",
-                    speed = if (isConnected) TrafficStats.formatSpeed(uploadSpeedBps) else "0 B/s",
-                    total = TrafficStats.formatBytes(uploadBytes),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Protocol and tunnel address
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(AppTheme.colors.surfaceElevated.copy(alpha = 0.6f))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TelemetryDetail(
-                    icon = Icons.Default.Lock,
-                    tint = AppTheme.colors.primary,
-                    text = activeProfile?.protocolType?.displayName ?: "VLESS"
-                )
-                TelemetryDetail(
-                    icon = Icons.Default.Dns,
-                    tint = AppTheme.colors.metricDownload,
-                    text = vpnIp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TrafficMetric(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: Color,
-    label: String,
-    speed: String,
-    total: String,
-    modifier: Modifier = Modifier
-) {
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(30.dp)
-                .clip(CircleShape)
-                .background(tint.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(imageVector = icon, contentDescription = label, tint = tint, modifier = Modifier.size(16.dp))
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        Column {
-            Text(
-                text = speed,
-                color = AppTheme.colors.textPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1
-            )
-            Text(
-                text = "$label • $total",
-                color = AppTheme.colors.textMuted,
-                fontSize = 10.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun TelemetryDetail(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: Color,
-    text: String
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(12.dp))
-        Spacer(modifier = Modifier.width(5.dp))
-        Text(text = text, color = AppTheme.colors.textSecondary, fontSize = 10.5.sp, maxLines = 1)
     }
 }
 

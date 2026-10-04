@@ -14,7 +14,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -28,6 +27,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.ai.AiAgentConfig
 import com.example.ai.GeminiModelCatalog
+import com.example.ui.components.CompactCard
+import com.example.ui.components.CompactCardDefaults
+import com.example.ui.components.CompactIconTile
+import com.example.ui.components.CompactRow
+import com.example.ui.components.CompactSwitch
 import com.example.ui.theme.AppTheme
 
 @Composable
@@ -288,55 +292,22 @@ fun AiAgentSetupDialog(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Auto Voice Switch: one slim row, tapping anywhere on it toggles
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(AppTheme.colors.surfaceElevated.copy(alpha = 0.5f))
-                            .toggleable(
-                                value = config.autoVoiceEnabled,
-                                role = androidx.compose.ui.semantics.Role.Switch,
-                                onValueChange = onToggleAutoVoice
-                            )
-                            .padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    // Auto Voice Switch: a standard compact row; tapping anywhere toggles
+                    CompactCard(
+                        modifier = Modifier.clip(CompactCardDefaults.Shape).toggleable(
+                            value = config.autoVoiceEnabled,
+                            role = androidx.compose.ui.semantics.Role.Switch,
+                            onValueChange = onToggleAutoVoice
+                        ),
+                        containerColor = AppTheme.colors.surfaceElevated.copy(alpha = 0.5f)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = null,
-                            tint = AppTheme.colors.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Spoken Audio Replies",
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = AppTheme.colors.textPrimary
-                            )
-                            Text(
-                                text = "Read AI responses aloud",
-                                fontSize = 10.5.sp,
-                                color = AppTheme.colors.textMuted
-                            )
+                        CompactRow(
+                            title = "Spoken Audio Replies",
+                            subtitle = "Read AI responses aloud",
+                            leading = { CompactIconTile(icon = Icons.Default.VolumeUp, tint = AppTheme.colors.primary) }
+                        ) {
+                            CompactSwitch(checked = config.autoVoiceEnabled)
                         }
-                        // The row handles the click; the thumb used to share the track colour
-                        // and vanish when switched on.
-                        Switch(
-                            checked = config.autoVoiceEnabled,
-                            onCheckedChange = null,
-                            modifier = Modifier.scale(0.8f),
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = AppTheme.colors.primary,
-                                checkedBorderColor = AppTheme.colors.primary,
-                                uncheckedThumbColor = AppTheme.colors.textMuted,
-                                uncheckedTrackColor = AppTheme.colors.surfaceCard,
-                                uncheckedBorderColor = AppTheme.colors.borderSubtle
-                            )
-                        )
                     }
                 }
 

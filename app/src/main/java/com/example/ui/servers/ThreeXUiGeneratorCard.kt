@@ -92,6 +92,10 @@ import com.example.panels.InboundGenerationResult
 import com.example.panels.ManagedPanel
 import com.example.panels.ThreeXUiProtocol
 import com.example.panels.ThreeXUiSecurity
+import com.example.ui.components.CompactActionPill
+import com.example.ui.components.CompactCard
+import com.example.ui.components.CompactIconTile
+import com.example.ui.components.CompactRow
 import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.ServerViewModel
 
@@ -133,84 +137,22 @@ fun ThreeXUiGeneratorCard(
     // If no 3X-UI panel has been installed or configured yet, the generator section is INACTIVE.
     // Dummy configurations cannot be generated without an active server.
     if (!hasInstalledPanel || activePanel == null) {
-        Card(
-            modifier = modifier
-                .fillMaxWidth()
-                .testTag("3xui_generator_card_inactive"),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = AppTheme.colors.surfaceCard
-            ),
-            border = BorderStroke(1.dp, AppTheme.colors.statusWarning.copy(alpha = 0.35f))
+        CompactCard(
+            modifier = modifier.testTag("3xui_generator_card_inactive"),
+            borderColor = AppTheme.colors.statusWarning.copy(alpha = 0.35f)
         ) {
-            // One compact row: status, one-line explanation and the install action.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            CompactRow(
+                title = "3X-UI panel not installed",
+                subtitle = "Install it to create configs automatically",
+                leading = { CompactIconTile(icon = Icons.Default.Router, tint = AppTheme.colors.statusWarning) }
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(AppTheme.colors.statusWarning.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Router,
-                        contentDescription = null,
-                        tint = AppTheme.colors.statusWarning,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "3X-UI panel not installed",
-                        fontWeight = FontWeight.SemiBold,
-                        color = AppTheme.colors.textPrimary,
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "Install it to create configs automatically",
-                        color = AppTheme.colors.textMuted,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Button(
+                CompactActionPill(
+                    text = "Install",
+                    icon = Icons.Default.Tune,
+                    filled = true,
                     onClick = onNavigateToPanels,
-                    modifier = Modifier
-                        .height(34.dp)
-                        .testTag("install_3xui_panel_button"),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AppTheme.colors.primary,
-                        contentColor = AppTheme.colors.onPrimary
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Install",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                    modifier = Modifier.testTag("install_3xui_panel_button")
+                )
             }
         }
         return
