@@ -4,6 +4,7 @@ import com.example.data.model.EngineType
 import com.example.data.model.ProfileType
 import com.example.data.model.ProtocolType
 import com.example.data.model.VlessProfile
+import com.example.vpn.engine.ProtocolLinks
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
@@ -20,12 +21,27 @@ enum class ThreeXUiProtocol(
     val displayName: String,
     val network: String,
     val tag: String,
-    val description: String
+    val description: String,
+    /** Security this protocol always uses; null when the user picks it. */
+    val fixedSecurity: ThreeXUiSecurity? = null
 ) {
     WEBSOCKET("WebSocket", "ws", "WS", "Cloudflare CDN & HTTP/1.1 Upgrade"),
     XHTTP("xHTTP", "xhttp", "xHTTP", "Next-Gen Xray SplitHTTP / HTTP/3"),
-    REALITY("Reality", "tcp", "REALITY", "Anti-censorship TLS camouflage direct to VPS"),
-    RAW("RAW (TCP)", "tcp", "RAW", "Direct TCP stream, maximum throughput")
+    REALITY("Reality", "tcp", "REALITY", "Anti-censorship TLS camouflage direct to VPS", ThreeXUiSecurity.REALITY),
+    RAW("RAW (TCP)", "tcp", "RAW", "Direct TCP stream, maximum throughput"),
+    HTTPUPGRADE("HTTPUpgrade", "httpupgrade", "HU", "Lean HTTP/1.1 Upgrade, CDN friendly and lighter than WebSocket"),
+    HYSTERIA2("Hysteria2", "hysteria", "HY2", "QUIC over UDP, fast on lossy networks", ThreeXUiSecurity.TLS),
+    WIREGUARD("WireGuard", "wireguard", "WG", "Classic UDP VPN tunnel, simple and quick", ThreeXUiSecurity.NONE);
+
+    /** Hysteria2 and WireGuard listen on UDP, so they can share a port number with a TCP inbound. */
+    val isUdp: Boolean get() = this == HYSTERIA2 || this == WIREGUARD
+
+    /** Security choices that make a working inbound with this protocol. */
+    val allowedSecurities: List<ThreeXUiSecurity>
+        get() = fixedSecurity?.let { listOf(it) } ?: when (this) {
+            XHTTP -> ThreeXUiSecurity.values().toList()
+            else -> listOf(ThreeXUiSecurity.NONE, ThreeXUiSecurity.TLS)
+        }
 }
 
 /**
@@ -58,7 +74,14 @@ data class InboundGenerationResult(
     val panelHost: String,
     val statusMessage: String,
     /** True when the inbound port answered a TCP connect from this device. */
-    val reachable: Boolean = true
+    val reachable: Boolean = true,
+    /**
+     * False for UDP inbounds (Hysteria2, WireGuard): a UDP port gives no answer to a connect, so
+     * only a real request through the config (the protocol test) shows that it works.
+     */
+    val portChecked: Boolean = true,
+    /** The panel's id for the inbound, so a test inbound can be removed again. */
+    val inboundId: Int = -1
 )
 
 /**
@@ -131,11 +154,12 @@ class ThreeXUiConfigGenerator(
         }
         val host = panel.host.trim()
         val uuid = customUuid ?: UUID.randomUUID().toString()
-        val effectiveSecurity = if (protocol == ThreeXUiProtocol.REALITY) ThreeXUiSecurity.REALITY else security
+        val effectiveSecurity = protocol.fixedSecurity ?: security
         // Xray refuses to start with a WebSocket + REALITY inbound, which takes every inbound on
         // the server down with it, so that combination must never reach the panel.
-        require(!(protocol == ThreeXUiProtocol.WEBSOCKET && effectiveSecurity == ThreeXUiSecurity.REALITY)) {
-            "Reality works with RAW (TCP) or xHTTP, not WebSocket. Pick TLS or None for WebSocket."
+        require(effectiveSecurity in protocol.allowedSecurities) {
+            "Reality works with RAW (TCP) or xHTTP, not ${protocol.displayName}. " +
+                "Pick ${protocol.allowedSecurities.joinToString(" or ") { it.displayName }} for ${protocol.displayName}."
         }
 
         val api = XuiApiClient(
@@ -147,6 +171,12 @@ class ThreeXUiConfigGenerator(
             pinnedCertSha256 = panel.certSha256
         )
         api.requireAccess()
+
+        when (protocol) {
+            ThreeXUiProtocol.HYSTERIA2 -> return generateHysteria2(api, panel, host, customPort, customUuid, customRemark, customHostOrSni)
+            ThreeXUiProtocol.WIREGUARD -> return generateWireGuard(api, panel, host, customPort, customRemark)
+            else -> Unit
+        }
 
         // Reality material comes from the panel itself; it is never invented locally.
         var realityPrivate = ""
@@ -175,15 +205,13 @@ class ThreeXUiConfigGenerator(
             cert
         } else null
 
-        val used = api.usedPorts() + panelPort(panel)
-        val candidates = if (customPort != null) {
-            require(customPort in 1..65535) { "Invalid port" }
-            require(customPort !in used) { "Port $customPort is already used on this server" }
-            listOf(customPort)
-        } else {
-            candidatePorts(protocol, effectiveSecurity).filter { it !in used }.take(MAX_PORT_ATTEMPTS)
-        }
-        check(candidates.isNotEmpty()) { "No free port available on the server" }
+        val candidates = freePorts(api, panel, protocol, effectiveSecurity, customPort)
+
+        // Xray clients refuse VLESS without TLS to a public address, so an inbound without
+        // transport security gets VLESS Encryption instead. It also keeps the traffic private
+        // from a CDN in front of the server.
+        val vlessEncryption: Pair<String, String>? =
+            if (effectiveSecurity == ThreeXUiSecurity.NONE) api.newVlessEncryption() else null
 
         var lastFailure = ""
         for ((index, port) in candidates.withIndex()) {
@@ -195,6 +223,13 @@ class ThreeXUiConfigGenerator(
             val flow = if (effectiveSecurity == ThreeXUiSecurity.REALITY && protocol.network == "tcp") "xtls-rprx-vision" else ""
             val wsPath = customPath?.takeIf { it.isNotBlank() } ?: "/maximus-ws"
             val xhttpPath = customPath?.takeIf { it.isNotBlank() } ?: "/maximus-xhttp"
+            val httpUpgradePath = customPath?.takeIf { it.isNotBlank() } ?: "/maximus-hu"
+            val transportPath = when (protocol) {
+                ThreeXUiProtocol.XHTTP -> xhttpPath
+                ThreeXUiProtocol.HTTPUPGRADE -> httpUpgradePath
+                ThreeXUiProtocol.WEBSOCKET -> wsPath
+                else -> ""
+            }
             val hostHeader = customHostOrSni?.trim().orEmpty().ifBlank { host }
 
             val settings = JSONObject()
@@ -212,8 +247,9 @@ class ThreeXUiConfigGenerator(
                         .put("comment", "")
                         .put("reset", 0)
                 ))
-                .put("decryption", "none")
-                .put("fallbacks", JSONArray())
+                .put("decryption", vlessEncryption?.first ?: "none")
+                // Xray refuses "fallbacks" next to a decryption key, and that stops every inbound on the server.
+                .apply { if (vlessEncryption == null) put("fallbacks", JSONArray()) }
 
             val stream = JSONObject().put("network", protocol.network).put("security", effectiveSecurity.key)
             when (protocol) {
@@ -226,11 +262,16 @@ class ThreeXUiConfigGenerator(
                     "xhttpSettings",
                     JSONObject().put("path", xhttpPath).put("host", hostHeader).put("mode", "auto")
                 )
+                ThreeXUiProtocol.HTTPUPGRADE -> stream.put(
+                    "httpupgradeSettings",
+                    JSONObject().put("acceptProxyProtocol", false).put("path", httpUpgradePath).put("host", hostHeader)
+                )
                 ThreeXUiProtocol.RAW, ThreeXUiProtocol.REALITY -> stream.put(
                     "tcpSettings",
                     JSONObject().put("acceptProxyProtocol", false)
                         .put("header", JSONObject().put("type", "none"))
                 )
+                ThreeXUiProtocol.HYSTERIA2, ThreeXUiProtocol.WIREGUARD -> error("not a VLESS transport")
             }
             when (effectiveSecurity) {
                 ThreeXUiSecurity.REALITY -> stream.put(
@@ -270,17 +311,13 @@ class ThreeXUiConfigGenerator(
                 ThreeXUiSecurity.NONE -> Unit
             }
 
-            val sniffing = JSONObject()
-                .put("enabled", true)
-                .put("destOverride", JSONArray().put("http").put("tls").put("quic"))
-                .put("metadataOnly", false)
-                .put("routeOnly", false)
+            val sniffing = defaultSniffing()
 
             val created = api.addInbound(remark, port, "vless", settings, stream, sniffing)
 
             // 1) Read it back and make sure the panel stored exactly what we asked for.
             val stored = api.readBack(port)
-            val problem = verifyStored(stored, uuid, protocol, effectiveSecurity)
+            val problem = verifyStored(stored, uuid, protocol, effectiveSecurity, vlessEncryption?.first ?: "none")
             if (problem != null) {
                 api.deleteInbound(created.id)
                 throw IllegalStateException("3X-UI stored a different inbound than requested: $problem")
@@ -289,13 +326,14 @@ class ThreeXUiConfigGenerator(
             // 2) Build the client link; prefer the panel's own export when it is complete.
             val ownUri = buildVlessUri(
                 uuid, host, port, protocol, effectiveSecurity, flow, realitySni,
-                if (protocol == ThreeXUiProtocol.XHTTP) xhttpPath else wsPath,
-                hostHeader, realityPublic, realityShortId, remark
+                transportPath,
+                hostHeader, realityPublic, realityShortId, remark, vlessEncryption?.second ?: "none"
             )
             val panelUri = api.allLinks().firstOrNull { link ->
                 link.startsWith("vless://") && link.contains(uuid, ignoreCase = true) &&
                     link.contains("@$host:$port") &&
-                    (effectiveSecurity != ThreeXUiSecurity.REALITY || link.contains("pbk="))
+                    (effectiveSecurity != ThreeXUiSecurity.REALITY || link.contains("pbk=")) &&
+                    (vlessEncryption == null || link.contains("encryption=mlkem"))
             }
             val clientUri = panelUri ?: ownUri
 
@@ -313,7 +351,7 @@ class ThreeXUiConfigGenerator(
                 address = host,
                 port = port,
                 uuid = uuid,
-                encryption = "none",
+                encryption = vlessEncryption?.second ?: "none",
                 transport = protocol.network,
                 security = effectiveSecurity.key,
                 sni = when (effectiveSecurity) {
@@ -321,12 +359,8 @@ class ThreeXUiConfigGenerator(
                     ThreeXUiSecurity.TLS -> hostHeader
                     ThreeXUiSecurity.NONE -> ""
                 },
-                host = if (protocol == ThreeXUiProtocol.WEBSOCKET || protocol == ThreeXUiProtocol.XHTTP) hostHeader else "",
-                path = when (protocol) {
-                    ThreeXUiProtocol.WEBSOCKET -> wsPath
-                    ThreeXUiProtocol.XHTTP -> xhttpPath
-                    else -> ""
-                },
+                host = if (transportPath.isNotBlank()) hostHeader else "",
+                path = transportPath,
                 flow = flow,
                 fingerprint = if (effectiveSecurity != ThreeXUiSecurity.NONE) "chrome" else "",
                 publicKey = realityPublic,
@@ -357,17 +391,253 @@ class ThreeXUiConfigGenerator(
                 publishedToPanel = true,
                 panelHost = host,
                 statusMessage = message,
-                reachable = reachable
+                reachable = reachable,
+                inboundId = created.id
             )
         }
         error("Could not create a reachable inbound ($lastFailure). Check the server firewall.")
+    }
+
+    /**
+     * Hysteria2 (QUIC over UDP). It needs a TLS certificate: a real one installed in 3X-UI, or the
+     * self-signed panel certificate Maximus created, which the client then pins by its SHA-256.
+     */
+    private fun generateHysteria2(
+        api: XuiApiClient,
+        panel: ManagedPanel,
+        host: String,
+        customPort: Int?,
+        customAuth: String?,
+        customRemark: String?,
+        customSni: String?
+    ): InboundGenerationResult {
+        val cert = requireNotNull(api.panelCertificate()) {
+            "Hysteria2 needs a TLS certificate on the server and this panel has none. " +
+                "Reinstall the panel from Maximus (it creates one) or install a certificate in 3X-UI first."
+        }
+        val selfSigned = cert.first.contains(SELF_SIGNED_CERT_DIR)
+        // Xray clients no longer skip certificate checks, so a self-signed certificate only works pinned.
+        require(!selfSigned || panel.certSha256.isNotBlank()) {
+            "The server uses the self-signed panel certificate but its fingerprint was not recorded. " +
+                "Reinstall the panel from Maximus so the fingerprint can be pinned."
+        }
+        val pin = if (selfSigned) panel.certSha256.lowercase() else ""
+        val sni = customSni?.trim().orEmpty().ifBlank { host }
+        val auth = customAuth?.takeIf { it.isNotBlank() } ?: randomLower(24)
+        val port = freePorts(api, panel, ThreeXUiProtocol.HYSTERIA2, ThreeXUiSecurity.TLS, customPort).first()
+        val remark = customRemark ?: "Maximus-HY2-$port"
+
+        val settings = JSONObject()
+            .put("version", 2)
+            .put("clients", JSONArray().put(newClient().put("auth", auth)))
+        val stream = JSONObject()
+            .put("network", "hysteria")
+            .put("security", "tls")
+            .put("hysteriaSettings", JSONObject().put("version", 2).put("auth", "").put("udpIdleTimeout", 60))
+            .put(
+                "tlsSettings",
+                JSONObject()
+                    .put("serverName", sni)
+                    .put("alpn", JSONArray().put("h3"))
+                    .put("certificates", JSONArray().put(
+                        JSONObject().put("certificateFile", cert.first).put("keyFile", cert.second)
+                    ))
+            )
+        val sniffing = defaultSniffing()
+        val created = api.addInbound(remark, port, "hysteria", settings, stream, sniffing)
+
+        val stored = api.readBack(port, udp = true)
+        val problem = when {
+            stored == null -> "the inbound is not listed by the panel"
+            stored.optString("protocol") != "hysteria" -> "protocol is ${stored.optString("protocol")}"
+            !clientStored(stored, "auth", auth) -> "client auth was not stored"
+            else -> null
+        }
+        if (problem != null) {
+            api.deleteInbound(created.id)
+            throw IllegalStateException("3X-UI stored a different inbound than requested: $problem")
+        }
+
+        val enc: (String) -> String = { java.net.URLEncoder.encode(it, "UTF-8") }
+        val query = mutableListOf("sni=${enc(sni)}", "alpn=h3")
+        if (pin.isNotBlank()) query.add("pinSHA256=${enc(pin)}")
+        val uri = "hysteria2://${enc(auth)}@${authority(host)}:$port/?${query.joinToString("&")}#${enc(remark)}"
+        val profile = ProtocolLinks.parseHysteria2(uri).copy(id = UUID.randomUUID().toString(), name = remark)
+        return udpResult(profile, remark, port, auth, settings, stream, sniffing, "hysteria", uri, ThreeXUiProtocol.HYSTERIA2, ThreeXUiSecurity.TLS, host)
+            .copy(inboundId = created.id)
+    }
+
+    /**
+     * WireGuard. The server and client key pairs both come from the panel's own key generator.
+     * 3X-UI does not give a client created with the inbound a tunnel address, so one is picked
+     * here that no other WireGuard client on the server uses.
+     */
+    private fun generateWireGuard(
+        api: XuiApiClient,
+        panel: ManagedPanel,
+        host: String,
+        customPort: Int?,
+        customRemark: String?
+    ): InboundGenerationResult {
+        val (serverPrivate, serverPublic) = api.newX25519().let { wireGuardKey(it.first) to wireGuardKey(it.second) }
+        val (clientPrivate, clientPublic) = api.newX25519().let { wireGuardKey(it.first) to wireGuardKey(it.second) }
+        val port = freePorts(api, panel, ThreeXUiProtocol.WIREGUARD, ThreeXUiSecurity.NONE, customPort).first()
+        val remark = customRemark ?: "Maximus-WG-$port"
+        val address = freeWireGuardAddress(api.listInbounds())
+
+        val settings = JSONObject()
+            .put("mtu", 1420)
+            .put("secretKey", serverPrivate)
+            .put("peers", JSONArray())
+            .put("clients", JSONArray().put(
+                newClient().put("privateKey", clientPrivate).put("publicKey", clientPublic)
+                    .put("allowedIPs", JSONArray().put(address)).put("keepAlive", 25)
+            ))
+            .put("noKernelTun", false)
+        // WireGuard has no selectable transport: 3X-UI stores its stream settings without a network.
+        val stream = JSONObject().put("security", "none")
+        val sniffing = defaultSniffing()
+        val created = api.addInbound(remark, port, "wireguard", settings, stream, sniffing)
+
+        val stored = api.readBack(port, udp = true)
+        val storedClient = stored?.let { asObject(it.opt("settings")) }?.optJSONArray("clients")?.let { list ->
+            (0 until list.length()).mapNotNull { list.optJSONObject(it) }
+                .firstOrNull { it.optString("publicKey") == clientPublic }
+        }
+        val problem = when {
+            stored == null -> "the inbound is not listed by the panel"
+            stored.optString("protocol") != "wireguard" -> "protocol is ${stored.optString("protocol")}"
+            storedClient == null -> "the client key was not stored"
+            storedClient.optJSONArray("allowedIPs")?.optString(0) != address -> "the client tunnel address was not stored"
+            else -> null
+        }
+        if (problem != null) {
+            api.deleteInbound(created.id)
+            throw IllegalStateException("3X-UI stored a different inbound than requested: $problem")
+        }
+
+        val enc: (String) -> String = { java.net.URLEncoder.encode(it, "UTF-8") }
+        val uri = "wireguard://${enc(clientPrivate)}@${authority(host)}:$port" +
+            "?publickey=${enc(serverPublic)}&address=${enc(address)}&mtu=$WG_MTU&keepalive=25#${enc(remark)}"
+        val profile = ProtocolLinks.parseWireGuard(uri).copy(id = UUID.randomUUID().toString(), name = remark)
+        return udpResult(profile, remark, port, clientPublic, settings, stream, sniffing, "wireguard", uri, ThreeXUiProtocol.WIREGUARD, ThreeXUiSecurity.NONE, host)
+            .copy(inboundId = created.id)
+    }
+
+    /** First 10.0.0.x/32 that no WireGuard client or peer on the server already uses. */
+    private fun freeWireGuardAddress(inbounds: JSONArray): String {
+        val used = mutableSetOf<String>()
+        for (i in 0 until inbounds.length()) {
+            val inbound = inbounds.optJSONObject(i) ?: continue
+            if (inbound.optString("protocol") != "wireguard") continue
+            val settings = asObject(inbound.opt("settings")) ?: continue
+            for (key in listOf("clients", "peers")) {
+                val list = settings.optJSONArray(key) ?: continue
+                for (j in 0 until list.length()) {
+                    val ips = list.optJSONObject(j)?.optJSONArray("allowedIPs") ?: continue
+                    for (k in 0 until ips.length()) used.add(ips.optString(k).substringBefore('/'))
+                }
+            }
+        }
+        val free = (2..254).firstOrNull { "10.0.0.$it" !in used } ?: error("Every WireGuard address on this server is taken")
+        return "10.0.0.$free/32"
+    }
+
+    private fun udpResult(
+        profile: VlessProfile,
+        remark: String,
+        port: Int,
+        id: String,
+        settings: JSONObject,
+        stream: JSONObject,
+        sniffing: JSONObject,
+        protocolName: String,
+        uri: String,
+        protocol: ThreeXUiProtocol,
+        security: ThreeXUiSecurity,
+        host: String
+    ) = InboundGenerationResult(
+        profile = profile,
+        inboundJson = JSONObject()
+            .put("remark", remark).put("port", port).put("protocol", protocolName)
+            .put("settings", settings.toString()).put("streamSettings", stream.toString())
+            .put("sniffing", sniffing.toString()).toString(2),
+        clientUri = uri,
+        protocol = protocol,
+        security = security,
+        port = port,
+        uuid = id,
+        serverRemark = remark,
+        publishedToPanel = true,
+        panelHost = host,
+        statusMessage = "Inbound created and verified in the panel ($host:$port UDP). " +
+            "Make sure UDP $port is open in your VPS/cloud firewall.",
+        reachable = true,
+        portChecked = false
+    )
+
+    /** Ports to try, skipping ones already bound on the same transport (TCP and UDP may share a number). */
+    private fun freePorts(
+        api: XuiApiClient,
+        panel: ManagedPanel,
+        protocol: ThreeXUiProtocol,
+        security: ThreeXUiSecurity,
+        customPort: Int?
+    ): List<Int> {
+        val used = api.usedPorts(udp = protocol.isUdp) + if (protocol.isUdp) emptySet() else setOf(panelPort(panel))
+        val candidates = if (customPort != null) {
+            require(customPort in 1..65535) { "Invalid port" }
+            require(customPort !in used) { "Port $customPort is already used on this server" }
+            listOf(customPort)
+        } else {
+            candidatePorts(protocol, security).filter { it !in used }.distinct().take(MAX_PORT_ATTEMPTS)
+        }
+        check(candidates.isNotEmpty()) { "No free port available on the server" }
+        return candidates
+    }
+
+    private fun newClient(): JSONObject = JSONObject()
+        .put("email", "maximus-${randomLower(6)}")
+        .put("limitIp", 0)
+        .put("totalGB", 0)
+        .put("expiryTime", 0)
+        .put("enable", true)
+        .put("tgId", 0)
+        .put("subId", randomLower(16))
+        .put("comment", "")
+        .put("reset", 0)
+
+    private fun defaultSniffing(): JSONObject = JSONObject()
+        .put("enabled", true)
+        .put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+        .put("metadataOnly", false)
+        .put("routeOnly", false)
+
+    private fun clientStored(stored: JSONObject, key: String, value: String): Boolean {
+        val clients = asObject(stored.opt("settings"))?.optJSONArray("clients") ?: return false
+        return (0 until clients.length()).any { clients.optJSONObject(it)?.optString(key) == value }
+    }
+
+    private fun authority(host: String) = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
+
+    /** Removes an inbound this generator created, e.g. a protocol-test inbound the user did not keep. */
+    fun deleteInbound(panel: ManagedPanel, inboundId: Int) {
+        XuiApiClient(
+            panelUrl = panel.url,
+            apiToken = panel.apiToken,
+            username = panel.username,
+            password = panel.password,
+            httpClient = httpClient,
+            pinnedCertSha256 = panel.certSha256
+        ).deleteInbound(inboundId)
     }
 
     private fun verifyStored(
         stored: JSONObject?,
         uuid: String,
         protocol: ThreeXUiProtocol,
-        security: ThreeXUiSecurity
+        security: ThreeXUiSecurity,
+        decryption: String
     ): String? {
         if (stored == null) return "the inbound is not listed by the panel"
         if (!stored.optBoolean("enable", true)) return "the inbound is disabled"
@@ -377,6 +647,7 @@ class ThreeXUiConfigGenerator(
             clients.optJSONObject(it)?.optString("id").equals(uuid, ignoreCase = true)
         }
         if (!hasClient) return "client id was not stored"
+        if (settings.optString("decryption", "none") != decryption) return "VLESS decryption was not stored"
         val stream = asObject(stored.opt("streamSettings")) ?: return "stream settings are unreadable"
         if (stream.optString("network") != protocol.network) return "network is ${stream.optString("network")}"
         if (stream.optString("security", "none") != security.key) return "security is ${stream.optString("security")}"
@@ -396,8 +667,10 @@ class ThreeXUiConfigGenerator(
         val randoms = List(3) { 20000 + SecureRandom().nextInt(40000) }
         val preferred = when {
             security == ThreeXUiSecurity.REALITY -> listOf(443, 8443)
-            protocol == ThreeXUiProtocol.WEBSOCKET && security == ThreeXUiSecurity.TLS -> listOf(443, 8443, 2053, 2083, 2087, 2096)
-            protocol == ThreeXUiProtocol.WEBSOCKET || protocol == ThreeXUiProtocol.XHTTP ->
+            protocol == ThreeXUiProtocol.HYSTERIA2 -> listOf(443, 8443)
+            protocol == ThreeXUiProtocol.WIREGUARD -> listOf(51820, 2408)
+            protocol in CDN_PROTOCOLS && security == ThreeXUiSecurity.TLS -> listOf(443, 8443, 2053, 2083, 2087, 2096)
+            protocol in CDN_PROTOCOLS ->
                 listOf(8080, 8880, 2052, 2082, 2086, 2095)
             security == ThreeXUiSecurity.TLS -> listOf(443, 8443)
             else -> emptyList()
@@ -417,10 +690,12 @@ class ThreeXUiConfigGenerator(
         hostHeader: String,
         publicKey: String,
         shortId: String,
-        remark: String
+        remark: String,
+        encryption: String
     ): String {
         val enc: (String) -> String = { java.net.URLEncoder.encode(it, "UTF-8") }
         val q = mutableListOf("type=${protocol.network}")
+        if (encryption != "none") q.add("encryption=${enc(encryption)}")
         if (security != ThreeXUiSecurity.NONE) q.add("security=${security.key}")
         if (flow.isNotBlank()) q.add("flow=${enc(flow)}")
         when (security) {
@@ -437,13 +712,12 @@ class ThreeXUiConfigGenerator(
             }
             ThreeXUiSecurity.NONE -> Unit
         }
-        if (protocol == ThreeXUiProtocol.WEBSOCKET || protocol == ThreeXUiProtocol.XHTTP) {
+        if (protocol in CDN_PROTOCOLS) {
             if (path.isNotBlank()) q.add("path=${enc(path)}")
             if (hostHeader.isNotBlank()) q.add("host=${enc(hostHeader)}")
             if (protocol == ThreeXUiProtocol.XHTTP) q.add("mode=auto")
         }
-        val authority = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
-        return "vless://$uuid@$authority:$port?${q.joinToString("&")}#${enc(remark)}"
+        return "vless://$uuid@${authority(host)}:$port?${q.joinToString("&")}#${enc(remark)}"
     }
 
     private fun randomLower(len: Int): String {
@@ -459,10 +733,24 @@ class ThreeXUiConfigGenerator(
     }
 
     companion object {
+        /**
+         * Xray prints X25519 keys as unpadded URL-safe base64; WireGuard configs use standard
+         * padded base64 of the same 32 bytes.
+         */
+        fun wireGuardKey(xrayKey: String): String {
+            val raw = java.util.Base64.getUrlDecoder().decode(xrayKey.trim().trimEnd('=').replace('+', '-').replace('/', '_'))
+            require(raw.size == 32) { "3X-UI returned a ${raw.size}-byte key; WireGuard needs 32 bytes" }
+            return java.util.Base64.getEncoder().encodeToString(raw)
+        }
+
         const val DEFAULT_REALITY_SNI = "www.microsoft.com"
         /** Where PanelProvisioner stores the pinned self-signed panel certificate. */
         private const val SELF_SIGNED_CERT_DIR = "/etc/x-ui/maximus-tls/"
         private const val MAX_PORT_ATTEMPTS = 4
+        /** Transports Cloudflare's CDN can carry, so they get CDN ports and a path/host in the link. */
+        private val CDN_PROTOCOLS = setOf(ThreeXUiProtocol.WEBSOCKET, ThreeXUiProtocol.XHTTP, ThreeXUiProtocol.HTTPUPGRADE)
+        /** Default MTU for the WireGuard inbound; 1280 keeps mobile networks with small MTUs working. */
+        private const val WG_MTU = 1280
 
         /** TCP connect probe used to prove the new inbound is reachable from this device. */
         fun tcpReachable(host: String, port: Int): Boolean {

@@ -135,8 +135,10 @@ class ServerViewModel(
             try {
                 XrayLogManager.i("3X-UI", "Creating $label on ${target.host}...")
                 val result = withContext(Dispatchers.IO) { generate(target) }
-                // Import exactly the link that the panel/runtime serves.
-                val canonicalProfile = when (val parsed = VlessParser.parse(result.clientUri)) {
+                // Import exactly the link that the panel/runtime serves. Hysteria2 and WireGuard
+                // profiles were already parsed from their links by the generator.
+                val canonicalProfile = if (!result.clientUri.startsWith("vless://")) result.profile
+                else when (val parsed = VlessParser.parse(result.clientUri)) {
                     is AppResult.Success -> parsed.data
                     is AppResult.Error -> error(
                         "3X-UI exported a client link Maximus could not parse: ${parsed.userFriendlyMessage}"

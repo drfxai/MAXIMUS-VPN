@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Settings
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.RssFeed
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
@@ -33,6 +35,7 @@ import androidx.compose.runtime.produceState
 import com.example.data.model.VlessProfile
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,6 +57,7 @@ import com.example.ui.importing.ImportScreen
 import com.example.ui.importing.ImportViewModel
 import com.example.ui.panels.PanelManagerScreen
 import com.example.ui.panels.PanelManagerViewModel
+import com.example.ui.protocols.ProtocolsScreen
 import com.example.ui.servers.EditConfigScreen
 import com.example.ui.servers.ServersScreen
 import com.example.ui.settings.SettingsScreen
@@ -77,6 +81,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector,
     data object Benchmark : Screen("benchmark", "Benchmark", Icons.Filled.Speed, Icons.Outlined.Speed)
     data object AiAgent : Screen("ai_agent", "AI Agent", Icons.Default.AutoAwesome, Icons.Default.AutoAwesome)
     data object Panels : Screen("panels", "Panels", Icons.Filled.Cloud, Icons.Outlined.Cloud)
+    data object Protocols : Screen("protocols", "Protocols", Icons.Filled.Hub, Icons.Outlined.Hub)
     data object Settings : Screen("settings", "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
 
     // Additional sub-destinations
@@ -222,6 +227,7 @@ fun MainApp(
                     onNavigateToSubscriptions = { navController.navigate(Screen.Subscriptions.route) },
                     onNavigateToBenchmark = { navController.navigate(Screen.Benchmark.route) },
                     onNavigateToPanels = { navController.navigate(Screen.Panels.route) },
+                    onNavigateToProtocols = { navController.navigate(Screen.Protocols.route) },
                     onNavigateToEditServer = { navController.navigate(Screen.EditServer.route(it)) }
                 )
             }
@@ -274,6 +280,21 @@ fun MainApp(
                     viewModel = diagnosticsViewModel,
                     settingsViewModel = settingsViewModel,
                     onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.Protocols.route) {
+                val context = LocalContext.current
+                ProtocolsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToPanels = { navController.navigate(Screen.Panels.route) },
+                    onConnect = { profile ->
+                        vpnViewModel.selectServer(profile)
+                        vpnViewModel.startOrRequestPermission(context, profile) { onRequestVpnPermission() }
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.Home.route) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    }
                 )
             }
             composable(Screen.Panels.route) {

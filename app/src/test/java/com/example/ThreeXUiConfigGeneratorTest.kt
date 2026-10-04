@@ -33,14 +33,18 @@ private class FakePanel(
     private val bearerWorks: Boolean = true,
     private val withCertificate: Boolean = false,
     private val dropPublicKey: Boolean = false,
-    private val corruptStoredClient: Boolean = false
+    private val corruptStoredClient: Boolean = false,
+    private val certFile: String = "/etc/ssl/panel.crt"
 ) : Interceptor {
     val inbounds = mutableListOf<JSONObject>()
     var nextId = 1
     var loggedIn = false
     var loginCalls = 0
-    val publicKey = "PUBKEY_0123456789abcdefghijklmnopqrstuvwxyzABCDE"
-    val privateKey = "PRIVKEY_0123456789abcdefghijklmnopqrstuvwxyzABCD"
+    // Unpadded URL-safe base64 of 32 bytes, the form Xray prints X25519 keys in.
+    val publicKey = "PUBKEY_0123456789abcdefghijklmnopqrstuvwx-A"
+    val privateKey = "PRIVKEY_0123456789abcdefghijklmnopqrstuvw_A"
+    val vlessDecryption = "mlkem768x25519plus.native.600s.SERVERKEY"
+    val vlessEncryption = "mlkem768x25519plus.native.0rtt.CLIENTKEY"
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -70,7 +74,9 @@ private class FakePanel(
                     return plain(request, 400, """{"success":false,"msg":"json: cannot unmarshal object into Go struct field"}""")
                 }
                 val port = payload.getInt("port")
-                if (inbounds.any { it.getInt("port") == port }) {
+                // Xray binds TCP and UDP separately, so only a clash on the same transport is refused.
+                val udp = payload.getString("protocol") in setOf("hysteria", "wireguard")
+                if (inbounds.any { it.getInt("port") == port && (it.getString("protocol") in setOf("hysteria", "wireguard")) == udp }) {
                     JSONObject().put("success", false).put("msg", "Port already exists: $port")
                 } else {
                     val stored = JSONObject(payload.toString())
@@ -91,18 +97,25 @@ private class FakePanel(
                 inbounds.removeAll { it.getInt("id") == id }
                 JSONObject().put("success", true)
             }
+            path.endsWith("/panel/api/server/getNewVlessEnc") -> JSONObject().put("success", true).put(
+                "obj",
+                JSONObject().put("auths", JSONArray()
+                    .put(JSONObject().put("id", "mlkem768").put("decryption", "mlkem768x25519plus.native.600s.PQDEC").put("encryption", "mlkem768x25519plus.native.0rtt.PQENC"))
+                    .put(JSONObject().put("id", "x25519").put("decryption", vlessDecryption).put("encryption", vlessEncryption)))
+            )
             path.endsWith("/panel/api/server/getNewX25519Cert") -> JSONObject().put("success", true)
                 .put("obj", JSONObject().put("privateKey", privateKey).put("publicKey", publicKey))
             path.endsWith("/panel/setting/all") -> JSONObject().put("success", true).put(
                 "obj",
                 JSONObject().apply {
-                    if (withCertificate) put("webCertFile", "/etc/ssl/panel.crt").put("webKeyFile", "/etc/ssl/panel.key")
+                    if (withCertificate) put("webCertFile", certFile).put("webKeyFile", certFile.replace(".crt", ".key"))
                     else put("webCertFile", "").put("webKeyFile", "")
                 }
             )
             path.endsWith("/panel/api/inbounds/allLinks") -> {
                 val links = JSONArray()
                 for (ib in inbounds) {
+                    if (ib.getString("protocol") != "vless") continue
                     val stream = JSONObject(ib.getString("streamSettings"))
                     val client = JSONObject(ib.getString("settings")).getJSONArray("clients").getJSONObject(0)
                     val q = mutableListOf("type=${stream.getString("network")}")
@@ -251,6 +264,7 @@ class ThreeXUiConfigGeneratorTest {
         assertEquals(8080, result.port)
         assertEquals("ws", result.profile.transport)
         assertEquals("/ws", result.profile.path)
+        assertEquals(fake.vlessEncryption, result.profile.encryption)
         assertEquals("cdn.example.com", result.profile.host)
         assertTrue(result.clientUri.contains("type=ws"))
     }
@@ -335,6 +349,126 @@ class ThreeXUiConfigGeneratorTest {
             assertTrue(server.requestCount >= 3) // token try, login, retry with cookie
         } finally {
             server.shutdown()
+        }
+    }
+
+    @Test
+    fun hysteria2PinsTheSelfSignedPanelCertificateAndSharesPort443WithReality() {
+        val fake = FakePanel(withCertificate = true, certFile = "/etc/x-ui/maximus-tls/panel.crt")
+        val pin = "ab".repeat(32)
+        val panel = httpPanel.copy(certSha256 = pin)
+        val gen = generator(fake) { _, _ -> true }
+        assertEquals(443, gen.generateRecommended(panel).port)
+
+        val result = gen.generateInbound(panel, ThreeXUiProtocol.HYSTERIA2, ThreeXUiSecurity.NONE)
+        // UDP 443 is free even though REALITY holds TCP 443.
+        assertEquals(443, result.port)
+        assertEquals(ThreeXUiSecurity.TLS, result.security)
+        assertFalse(result.portChecked)
+        assertEquals(ProtocolType.HYSTERIA2, result.profile.protocolType)
+        assertEquals(pin, result.profile.pinnedPeerCertSha256)
+        assertEquals("198.51.100.25", result.profile.sni)
+        assertTrue(result.clientUri.startsWith("hysteria2://"))
+        assertTrue(result.clientUri.contains("pinSHA256=$pin"))
+
+        val stored = fake.inbounds.last()
+        assertEquals("hysteria", stored.getString("protocol"))
+        assertEquals(result.profile.uuid, JSONObject(stored.getString("settings")).getJSONArray("clients").getJSONObject(0).getString("auth"))
+        val stream = JSONObject(stored.getString("streamSettings"))
+        assertEquals(2, stream.getJSONObject("hysteriaSettings").getInt("version"))
+        assertEquals(
+            "/etc/x-ui/maximus-tls/panel.crt",
+            stream.getJSONObject("tlsSettings").getJSONArray("certificates").getJSONObject(0).getString("certificateFile")
+        )
+    }
+
+    @Test
+    fun hysteria2IsRefusedWithoutACertificateOrAnUnpinnableOne() {
+        for (fake in listOf(FakePanel(), FakePanel(withCertificate = true, certFile = "/etc/x-ui/maximus-tls/panel.crt"))) {
+            try {
+                generator(fake).generateInbound(httpPanel, ThreeXUiProtocol.HYSTERIA2, ThreeXUiSecurity.TLS)
+                fail("Hysteria2 needs a certificate the client can trust")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message.orEmpty().contains("certificate"))
+            }
+            assertTrue(fake.inbounds.isEmpty())
+        }
+        // A real certificate needs no pin.
+        val result = generator(FakePanel(withCertificate = true)).generateInbound(httpPanel, ThreeXUiProtocol.HYSTERIA2, ThreeXUiSecurity.TLS)
+        assertEquals("", result.profile.pinnedPeerCertSha256)
+    }
+
+    @Test
+    fun wireGuardUsesPanelKeysAndATunnelAddressNoOtherClientHas() {
+        val fake = FakePanel()
+        val gen = generator(fake)
+        val first = gen.generateInbound(httpPanel, ThreeXUiProtocol.WIREGUARD, ThreeXUiSecurity.NONE)
+        val second = gen.generateInbound(httpPanel, ThreeXUiProtocol.WIREGUARD, ThreeXUiSecurity.NONE)
+
+        assertEquals(51820, first.port)
+        assertEquals(2408, second.port)
+        assertEquals(ProtocolType.WIREGUARD, first.profile.protocolType)
+        val wgPublic = ThreeXUiConfigGenerator.wireGuardKey(fake.publicKey)
+        val wgPrivate = ThreeXUiConfigGenerator.wireGuardKey(fake.privateKey)
+        assertEquals(wgPublic, first.profile.publicKey)
+        assertEquals(wgPrivate, first.profile.uuid)
+        assertTrue(first.clientUri.contains("address=10.0.0.2%2F32"))
+        assertTrue(second.clientUri.contains("address=10.0.0.3%2F32"))
+
+        val settings = JSONObject(fake.inbounds[0].getString("settings"))
+        assertEquals(wgPrivate, settings.getString("secretKey"))
+        val client = settings.getJSONArray("clients").getJSONObject(0)
+        assertEquals(wgPublic, client.getString("publicKey"))
+        assertEquals("10.0.0.2/32", client.getJSONArray("allowedIPs").getString(0))
+    }
+
+    @Test
+    fun wireGuardKeysAreConvertedFromXrayToWireGuardBase64() {
+        val raw = ByteArray(32) { (it * 7 + 250).toByte() }
+        val xray = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(raw)
+        assertEquals(java.util.Base64.getEncoder().encodeToString(raw), ThreeXUiConfigGenerator.wireGuardKey(xray))
+        try {
+            ThreeXUiConfigGenerator.wireGuardKey("c2hvcnQ")
+            fail("short keys must be refused")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message.orEmpty().contains("32"))
+        }
+    }
+
+    @Test
+    fun httpUpgradeLinkCarriesPathAndHost() {
+        val fake = FakePanel()
+        val result = generator(fake).generateInbound(
+            httpPanel, ThreeXUiProtocol.HTTPUPGRADE, ThreeXUiSecurity.NONE, customHostOrSni = "cdn.example.com"
+        )
+        assertEquals(8080, result.port)
+        assertEquals("httpupgrade", result.profile.transport)
+        assertEquals("/maximus-hu", result.profile.path)
+        assertEquals("cdn.example.com", result.profile.host)
+        val stream = JSONObject(fake.inbounds[0].getString("streamSettings"))
+        assertEquals("/maximus-hu", stream.getJSONObject("httpupgradeSettings").getString("path"))
+        // Without TLS the inbound carries VLESS Encryption, which Xray needs for a public server.
+        val settings = JSONObject(fake.inbounds[0].getString("settings"))
+        assertEquals(fake.vlessDecryption, settings.getString("decryption"))
+        assertFalse("Xray will not start with fallbacks next to a decryption key", settings.has("fallbacks"))
+        assertEquals(fake.vlessEncryption, result.profile.encryption)
+        assertTrue(result.clientUri.contains("encryption=mlkem768x25519plus.native.0rtt.CLIENTKEY"))
+        val parsed = VlessParser.parse(result.clientUri)
+        assertTrue(parsed is AppResult.Success)
+        assertEquals("httpupgrade", (parsed as AppResult.Success).data.transport)
+    }
+
+    @Test
+    fun realityIsRefusedOnTransportsThatCannotCarryIt() {
+        for (protocol in listOf(ThreeXUiProtocol.WEBSOCKET, ThreeXUiProtocol.HTTPUPGRADE)) {
+            val fake = FakePanel()
+            try {
+                generator(fake).generateInbound(httpPanel, protocol, ThreeXUiSecurity.REALITY)
+                fail("$protocol + REALITY must never reach the panel")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message.orEmpty().contains("Reality"))
+            }
+            assertTrue(fake.inbounds.isEmpty())
         }
     }
 
