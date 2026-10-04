@@ -260,6 +260,12 @@ object UniversalImportEngine {
         }
     }
 
+    /**
+     * Percent-decodes a link's user info. A literal '+' is part of the password there (BPB, like the
+     * WHATWG URL API, leaves it unescaped), so it must not become a space as in form decoding.
+     */
+    private fun decodeUserInfo(str: String): String = safeDecodeUrl(str.replace("+", "%2B"))
+
     private fun safeDecodeUrl(str: String?): String {
         if (str.isNullOrBlank()) return ""
         return try {
@@ -326,7 +332,7 @@ object UniversalImportEngine {
         return try {
             val comp = extractUriComponents(uriString, "trojan")
                 ?: return ParsedItem.Invalid(uriString.take(60), "Malformed Trojan URI structure")
-            val password = safeDecodeUrl(comp.userInfo)
+            val password = decodeUserInfo(comp.userInfo)
             if (password.isBlank() || comp.host.isBlank()) {
                 return ParsedItem.Invalid(uriString.take(60), "Trojan link missing password or host")
             }
