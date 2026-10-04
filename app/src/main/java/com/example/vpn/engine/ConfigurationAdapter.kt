@@ -19,6 +19,7 @@ object ConfigurationAdapter {
         SHADOWSOCKS_LINK,
         TROJAN_LINK,
         HYSTERIA2_LINK,
+        WIREGUARD_LINK,
         XRAY_JSON,
         MIHOMO_YAML,
         SUBSCRIPTION_URL,
@@ -41,6 +42,9 @@ object ConfigurationAdapter {
         }
         if (trimmed.startsWith("hysteria2://", ignoreCase = true) || trimmed.startsWith("hy2://", ignoreCase = true)) {
             return DetectedFormat.HYSTERIA2_LINK
+        }
+        if (trimmed.startsWith("wireguard://", ignoreCase = true) || trimmed.startsWith("wg://", ignoreCase = true)) {
+            return DetectedFormat.WIREGUARD_LINK
         }
         if (trimmed.startsWith("{") && (trimmed.contains("\"outbounds\"") || trimmed.contains("\"inbounds\"") || trimmed.contains("\"log\""))) {
             return DetectedFormat.XRAY_JSON
@@ -69,6 +73,9 @@ object ConfigurationAdapter {
             }
             DetectedFormat.HYSTERIA2_LINK -> {
                 parseHysteria2Uri(trimmed)?.let { listOf(it) } ?: emptyList()
+            }
+            DetectedFormat.WIREGUARD_LINK -> {
+                runCatching { listOf(ProtocolLinks.parseWireGuard(trimmed)) }.getOrDefault(emptyList())
             }
             DetectedFormat.XRAY_JSON -> {
                 XrayConfigParser.parseJson(trimmed)
@@ -280,53 +287,25 @@ object ConfigurationAdapter {
                 host = params["host"] ?: sni,
                 serviceName = params["serviceName"] ?: "",
                 alpn = params["alpn"] ?: "",
+                fingerprint = params["fp"].orEmpty(),
+                publicKey = params["pbk"].orEmpty(),
+                shortId = params["sid"].orEmpty(),
+                spiderX = params["spx"].orEmpty(),
+                headerType = params["headerType"].orEmpty(),
+                pinnedPeerCertSha256 = params["pcs"].orEmpty(),
+                echConfigList = params["ech"].orEmpty(),
                 profileType = ProfileType.VLESS,
                 protocolType = ProtocolType.TROJAN,
                 engineType = EngineType.XRAY,
                 nodeCount = 1
-            )
+            ).let { ProfileExtras.fromQuery(it, params) }
         } catch (_: Exception) {
             null
         }
     }
 
-    fun parseHysteria2Uri(uriString: String): VlessProfile? {
-        return try {
-            val comp = extractUriComponents(uriString, "hysteria2")
-                ?: extractUriComponents(uriString, "hy2")
-                ?: return null
-            val host = comp.host
-            val port = if (comp.port in 1..65535) comp.port else 443
-            val password = comp.userInfo
-            if (password.isBlank()) return null
-
-            val name = if (comp.fragment.isNotBlank()) {
-                safeDecodeUrl(comp.fragment)
-            } else "Hysteria2-$host"
-
-            val params = parseQueryParams(comp.query)
-            val sni = params["sni"] ?: host
-
-            VlessProfile(
-                id = UUID.randomUUID().toString(),
-                name = name,
-                address = host,
-                port = port,
-                uuid = password,
-                encryption = "none",
-                transport = "udp",
-                security = "tls",
-                sni = sni,
-                alpn = params["alpn"] ?: "h3",
-                profileType = ProfileType.VLESS,
-                protocolType = ProtocolType.HYSTERIA2,
-                engineType = EngineType.MIHOMO,
-                nodeCount = 1
-            )
-        } catch (_: Exception) {
-            null
-        }
-    }
+    fun parseHysteria2Uri(uriString: String): VlessProfile? =
+        runCatching { ProtocolLinks.parseHysteria2(uriString) }.getOrNull()?.takeIf { it.uuid.isNotBlank() }
 
     private fun parseQueryParams(query: String?): Map<String, String> {
         if (query.isNullOrBlank()) return emptyMap()
