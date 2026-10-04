@@ -39,7 +39,11 @@ object ServerTester {
         protectSocket: ((Socket) -> Boolean)? = null
     ): List<ServerTestResult> = withContext(Dispatchers.IO) {
         val invalid = profiles.associate { it.id to validationError(it) }
-        val valid = profiles.filter { invalid[it.id] == null }
+        // Xray refuses plain VLESS to a public address; those servers run on the Kotlin tunnel, so
+        // they get the reachability probe.
+        val valid = profiles.filter {
+            invalid[it.id] == null && !com.example.vpn.engine.EngineSelectionPolicy.usesKotlinPacketTunnel(it)
+        }
         val outcomes = if (valid.isEmpty()) emptyList()
         else RealDelayProbe.measure(valid, realDelayTimeoutSec(timeoutMs))
         val real = valid.zip(outcomes).toMap()
@@ -66,7 +70,8 @@ object ServerTester {
         }
     }
 
-    internal fun realDelayTimeoutSec(timeoutMs: Int): Int = ((timeoutMs + 999) / 1000).coerceAtLeast(5)
+    /** A request through a Cloudflare Worker on a filtered network often needs several seconds. */
+    internal fun realDelayTimeoutSec(timeoutMs: Int): Int = ((timeoutMs + 999) / 1000).coerceAtLeast(8)
 
     private fun validationError(profile: VlessProfile): String? = try {
         VlessValidator.validate(profile)

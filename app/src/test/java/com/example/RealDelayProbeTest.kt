@@ -92,12 +92,14 @@ class RealDelayProbeTest {
     @Test
     fun fixBpbKeepsTheFirstMaskThatCarriesTraffic() {
         val choice = BpbFix.choose(bpb) { candidates, _ ->
-            assertEquals(BpbFix.MASKS.size + 1, candidates.size)
+            assertEquals(RealDelayProbe.MAX_BATCH, candidates.size)
             assertEquals(bpb, candidates.last())
             listOf(
                 RealDelayProbe.Outcome.Failed("tls: handshake failure"),
+                RealDelayProbe.Outcome.Failed("EOF"),
                 RealDelayProbe.Outcome.Delay(900),
-                RealDelayProbe.Outcome.Delay(700)
+                RealDelayProbe.Outcome.Delay(700),
+                RealDelayProbe.Outcome.Failed("EOF")
             )
         }
         assertEquals(BpbFix.Choice.Verified(BpbFix.FINAL_MASK_TLSHELLO, 900), choice)
@@ -114,26 +116,26 @@ class RealDelayProbeTest {
     }
 
     @Test
-    fun legacyFixBpbMaskIsRepairedWhenTheConfigIsBuilt() {
-        val legacy = bpb.copy(fingerprint = BpbFix.FINGERPRINT, alpn = BpbFix.ALPN,
-            cipherSuites = BpbFix.CIPHER_SUITES, finalMask = BpbFix.LEGACY_FINAL_MASK)
-        assertTrue(BpbFix.wasApplied(legacy))
-        assertTrue(!BpbFix.isApplied(legacy))
-        val proxy = JSONObject(XrayConfigBuilder.buildJson(legacy, com.example.data.model.AppSettings()))
+    fun fixBpbTriesTheOriginalRecipeFirstAndBuildsItUnchanged() {
+        assertEquals(BpbFix.FINAL_MASK_ORIGINAL, BpbFix.MASKS.first())
+        val fixed = bpb.copy(fingerprint = BpbFix.FINGERPRINT, alpn = BpbFix.ALPN,
+            cipherSuites = BpbFix.CIPHER_SUITES, finalMask = BpbFix.FINAL_MASK_ORIGINAL)
+        assertTrue(BpbFix.wasApplied(fixed))
+        val proxy = JSONObject(XrayConfigBuilder.buildJson(fixed, com.example.data.model.AppSettings()))
             .getJSONArray("outbounds").getJSONObject(0)
         val lengths = proxy.getJSONObject("streamSettings").getJSONObject("finalmask").getJSONArray("tcp")
             .getJSONObject(0).getJSONObject("settings").getJSONArray("lengths")
-        assertEquals(listOf("104", "1"), (0 until lengths.length()).map { lengths.getString(it) })
+        assertEquals(listOf("0", "104", "1"), (0 until lengths.length()).map { lengths.getString(it) })
     }
 
     @Test
-    fun currentFixBpbMaskHasNoEmptyRecord() {
-        BpbFix.MASKS.forEach { mask ->
-            val tcp = JSONObject(mask).getJSONArray("tcp")
-            for (i in 0 until tcp.length()) {
-                val lengths = tcp.getJSONObject(i).getJSONObject("settings").optJSONArray("lengths") ?: continue
-                assertTrue((0 until lengths.length()).none { lengths.getString(it) == "0" })
-            }
-        }
+    fun plainVlessIsNotSentToXraysRealDelayProbe() = runBlocking {
+        // Xray refuses plain VLESS to a public address, so such a server must not be marked dead.
+        var called = false
+        RealDelayProbe.invoker = { called = true; results(JSONObject().put("success", false).put("error", "prohibited")) }
+        val plain = VlessProfile(name = "plain", address = "203.0.113.7", port = 443,
+            uuid = "8b0e2c4a-9f6d-4c1e-a7b3-2d5f8e1c0a9b", transport = "tcp", security = "none")
+        ServerTester.testServers(listOf(plain), timeoutMs = 500)
+        assertTrue(!called)
     }
 }

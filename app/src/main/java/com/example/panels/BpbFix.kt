@@ -6,8 +6,9 @@ import com.example.xray.RealDelayProbe
 /**
  * "FIX BPB": client settings that let BPB Worker configs connect on filtered networks.
  *
- * - finalMask fragments the TLS ClientHello so it cannot be matched in one packet. FIX BPB tests the
- *   fragment settings with a real request through the worker and keeps the first one that works;
+ * - finalMask fragments the TLS ClientHello so it cannot be matched in one packet. Which fragment
+ *   settings get past the network's filter differs between networks, so FIX BPB tests each one with
+ *   a real request through the worker and keeps the first that works;
  * - the "unsafe" fingerprint makes Xray use Go's standard TLS stack (instead of a browser
  *   imitation), which is required for the custom cipher-suite list to take effect. Certificate
  *   verification stays enabled;
@@ -25,10 +26,17 @@ object BpbFix {
             "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256:TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"
 
     /**
-     * Splits the ClientHello into TLS records (104 bytes, then 1-byte records) sent in one write, then
-     * splits that write into TCP segments. It must not start with a zero-length record: TLS forbids
-     * empty handshake records (RFC 8446 section 5.1), and servers abort the handshake on them.
+     * The original FIX BPB recipe: an empty TLS record, a 104-byte record, then 1-byte records, all in
+     * one write, which is then split into TCP segments. The empty record confuses some filters, but
+     * TLS forbids empty handshake records (RFC 8446 section 5.1) and strict servers such as Go's abort
+     * the handshake on them, so it is only kept when a real request through the worker succeeds.
      */
+    const val FINAL_MASK_ORIGINAL =
+        """{"tcp": [{"type": "fragment", "settings": {"packets": "tlshello", "lengths": ["0", "104", "1"], """ +
+            """"delays": ["0"], "maxSplit": "0"}},{"type": "fragment", "settings": {"packets": "1-1", """ +
+            """"lengths": ["114", "1"], "delays": ["1"], "maxSplit": "11"}}]}"""
+
+    /** [FINAL_MASK_ORIGINAL] without the empty record, which every TLS server accepts. */
     const val FINAL_MASK =
         """{"tcp": [{"type": "fragment", "settings": {"packets": "tlshello", "lengths": ["104", "1"], """ +
             """"delays": ["0"], "maxSplit": "0"}},{"type": "fragment", "settings": {"packets": "1-1", """ +
@@ -38,14 +46,12 @@ object BpbFix {
     const val FINAL_MASK_TLSHELLO =
         """{"tcp": [{"type": "fragment", "settings": {"packets": "tlshello", "length": "100-200", "delay": "10-20"}}]}"""
 
-    /** The first FIX BPB mask. Its zero-length first record makes the TLS handshake fail. */
-    const val LEGACY_FINAL_MASK =
-        """{"tcp": [{"type": "fragment", "settings": {"packets": "tlshello", "lengths": ["0", "104", "1"], """ +
-            """"delays": ["0"], "maxSplit": "0"}},{"type": "fragment", "settings": {"packets": "1-1", """ +
-            """"lengths": ["114", "1"], "delays": ["1"], "maxSplit": "11"}}]}"""
+    /** Finer ClientHello fragmentation into 10-20 byte TCP segments, 10-20 ms apart. */
+    const val FINAL_MASK_TLSHELLO_SMALL =
+        """{"tcp": [{"type": "fragment", "settings": {"packets": "tlshello", "length": "10-20", "delay": "10-20"}}]}"""
 
-    /** Masks FIX BPB tries, most preferred first. */
-    val MASKS = listOf(FINAL_MASK, FINAL_MASK_TLSHELLO)
+    /** Masks FIX BPB tries, most preferred first; with the unfixed config they fill one probe batch. */
+    val MASKS = listOf(FINAL_MASK_ORIGINAL, FINAL_MASK, FINAL_MASK_TLSHELLO, FINAL_MASK_TLSHELLO_SMALL)
 
     /** True when [profile] is one of the configs served by the BPB worker at [workerHost]. */
     fun belongsTo(profile: VlessProfile, workerHost: String): Boolean {
@@ -75,9 +81,8 @@ object BpbFix {
         profile.fingerprint == FINGERPRINT && profile.alpn == ALPN && profile.cipherSuites == CIPHER_SUITES &&
             (if (mask != null) profile.finalMask == mask else profile.finalMask in MASKS)
 
-    /** True when FIX BPB was turned on for [profile], including the first, broken mask. */
-    fun wasApplied(profile: VlessProfile): Boolean =
-        isApplied(profile) || (profile.fingerprint == FINGERPRINT && profile.finalMask == LEGACY_FINAL_MASK)
+    /** True when FIX BPB was turned on for [profile]. */
+    fun wasApplied(profile: VlessProfile): Boolean = isApplied(profile)
 
     sealed class Choice {
         /** [mask] carried a real request through the worker. */
@@ -86,7 +91,7 @@ object BpbFix {
         data class NotNeeded(val latencyMs: Long) : Choice()
         /** Nothing carried traffic, with or without the fix: the worker or its proxy IP is the problem. */
         data class NothingWorks(val reason: String) : Choice()
-        /** Could not test (for example while the VPN is connected); [FINAL_MASK] is used untested. */
+        /** Could not test (for example while the VPN is connected); [FINAL_MASK_ORIGINAL] is used untested. */
         data class Untested(val reason: String) : Choice()
     }
 
