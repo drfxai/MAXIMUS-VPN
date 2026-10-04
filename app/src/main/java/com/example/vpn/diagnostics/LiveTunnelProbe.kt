@@ -10,13 +10,49 @@ import java.net.URL
 
 object LiveTunnelProbe {
     data class Sample(val latencyMs: Long, val country: String?)
-    /** Explicit VPN binding prevents a late probe from falling back to the ISP after disconnect. */
-    suspend fun measure(context: Context): Sample = withContext(Dispatchers.IO) {
+
+    /**
+     * Latency of a real HTTPS request through the tunnel. It uses a non-Cloudflare URL: a Cloudflare
+     * Worker (BPB) reaches Cloudflare-hosted sites only through its proxy IP, so a Cloudflare URL can
+     * fail while the rest of the internet works. Explicit VPN binding prevents a late probe from
+     * falling back to the ISP after disconnect.
+     */
+    suspend fun latency(context: Context): Long = withContext(Dispatchers.IO) {
+        val vpn = vpnNetwork(context)
+        val started = System.nanoTime()
+        val connection = vpn.openConnection(URL(com.example.xray.RealDelayProbe.PROBE_URL)) as HttpURLConnection
+        try {
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.instanceFollowRedirects = false
+            connection.useCaches = false
+            check(connection.responseCode in 200..399) { "Probe returned HTTP ${connection.responseCode}" }
+            ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)
+        } finally { connection.disconnect() }
+    }
+
+    /** Latency through the tunnel, plus the exit country when Cloudflare's trace page is reachable. */
+    suspend fun measure(context: Context): Sample {
+        val latency = latency(context)
+        val country = try {
+            country(context)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        return Sample(latency, country)
+    }
+
+    private fun vpnNetwork(context: Context): android.net.Network {
         val manager = requireNotNull(context.getSystemService(ConnectivityManager::class.java))
-        val vpn = manager.allNetworks.firstOrNull {
+        return manager.allNetworks.firstOrNull {
             manager.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
         } ?: error("VPN network unavailable")
-        val started = System.nanoTime()
+    }
+
+    private suspend fun country(context: Context): String? = withContext(Dispatchers.IO) {
+        val vpn = vpnNetwork(context)
         val connection = vpn.openConnection(URL("https://www.cloudflare.com/cdn-cgi/trace")) as HttpURLConnection
         try {
             connection.connectTimeout = 4000
@@ -32,9 +68,8 @@ object LiveTunnelProbe {
                 val count = reader.read(chars)
                 if (count > 0) String(chars, 0, count) else ""
             }
-            val country = trace.lineSequence().firstOrNull { it.startsWith("loc=") }?.substringAfter('=')
+            trace.lineSequence().firstOrNull { it.startsWith("loc=") }?.substringAfter('=')
                 ?.takeIf { it.matches(Regex("[A-Z]{2}")) }
-            Sample(((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1), country)
         } finally { connection.disconnect() }
     }
 }

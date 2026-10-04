@@ -643,38 +643,66 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * FIX BPB: stores the TLS fragment mask, plain-TLS fingerprint, HTTP/1.1 ALPN and cipher-suite
-     * list on every TLS config that belongs to this BPB worker (single profile and subscription).
+     * FIX BPB: stores a TLS fragment mask, the plain-TLS fingerprint, HTTP/1.1 ALPN and the
+     * cipher-suite list on every TLS config that belongs to this BPB worker (single profile and
+     * subscription). Each mask is first tried with a real request through one of the configs, and
+     * the first one that carries traffic is kept.
      */
     fun fixBpbProfiles(panel: ManagedPanel) {
-        runJob("Applying FIX BPB…") {
+        runJob("Testing FIX BPB settings through the worker…") {
             val host = panel.host.ifBlank { android.net.Uri.parse(panel.url).host.orEmpty() }
             val owned = RayApplication.instance.serverRepository.getAllProfilesOnce()
                 .filter { com.example.panels.BpbFix.belongsTo(it, host) }
             check(owned.isNotEmpty()) {
                 "No configs from this BPB panel yet. Tap \"Add to Maximus VPN Profiles\" first, then FIX BPB."
             }
-            val changed = applyBpbFix(host)
-            val connected = VpnController.connectionState.value.isConnected
-            _state.value.copy(
-                status = "FIX BPB applied to $changed config${if (changed == 1) "" else "s"}." +
-                    if (connected) " Reconnect the VPN to use the new settings." else ""
-            )
+            val sample = owned.filter { com.example.panels.BpbFix.canApply(it) }
+                .let { tls -> tls.firstOrNull { it.address.equals(host, ignoreCase = true) } ?: tls.firstOrNull() }
+            check(sample != null) { "This BPB panel has no TLS configs, which are the ones FIX BPB changes." }
+            val choice = withContext(Dispatchers.IO) { com.example.panels.BpbFix.choose(sample) }
+            appendLog("[BPB] FIX BPB test result: ${choice::class.simpleName}")
+            val reconnect = if (VpnController.connectionState.value.isConnected) " Reconnect the VPN to use the new settings." else ""
+            val status = when (choice) {
+                is com.example.panels.BpbFix.Choice.Verified -> {
+                    val changed = applyBpbFix(host, choice.mask)
+                    "FIX BPB tested OK (${choice.latencyMs} ms through the worker) and applied to " +
+                        "$changed config${if (changed == 1) "" else "s"}.$reconnect"
+                }
+                is com.example.panels.BpbFix.Choice.NotNeeded ->
+                    "These BPB configs already work without FIX BPB (${choice.latencyMs} ms through the worker) " +
+                        "and FIX BPB did not, so they were left unchanged."
+                is com.example.panels.BpbFix.Choice.NothingWorks ->
+                    "No request got through this BPB worker, with or without FIX BPB: ${choice.reason}. " +
+                        "Check the worker's UUID and proxy IP in the BPB panel; configs were left unchanged."
+                is com.example.panels.BpbFix.Choice.Untested -> {
+                    val changed = applyBpbFix(host, com.example.panels.BpbFix.FINAL_MASK)
+                    "FIX BPB applied to $changed config${if (changed == 1) "" else "s"} without a test " +
+                        "(${choice.reason}). Disconnect the VPN and tap FIX BPB again to test it.$reconnect"
+                }
+            }
+            _state.value.copy(status = status)
         }
     }
 
     private suspend fun hasBpbFix(host: String): Boolean =
         RayApplication.instance.serverRepository.getAllProfilesOnce()
-            .any { com.example.panels.BpbFix.belongsTo(it, host) && com.example.panels.BpbFix.isApplied(it) }
+            .any { com.example.panels.BpbFix.belongsTo(it, host) && com.example.panels.BpbFix.wasApplied(it) }
+
+    /** The mask this worker's configs use, so new configs get the same tested one. */
+    private suspend fun bpbFixMask(host: String): String =
+        RayApplication.instance.serverRepository.getAllProfilesOnce()
+            .firstOrNull { com.example.panels.BpbFix.belongsTo(it, host) && com.example.panels.BpbFix.isApplied(it) }
+            ?.finalMask ?: com.example.panels.BpbFix.FINAL_MASK
 
     /** Returns how many configs now carry the fix. */
-    private suspend fun applyBpbFix(host: String): Int {
+    private suspend fun applyBpbFix(host: String, mask: String? = null): Int {
         val repo = RayApplication.instance.serverRepository
+        val chosen = mask ?: bpbFixMask(host)
         var count = 0
         repo.getAllProfilesOnce()
             .filter { com.example.panels.BpbFix.belongsTo(it, host) && com.example.panels.BpbFix.canApply(it) }
             .forEach { profile ->
-                if (!com.example.panels.BpbFix.isApplied(profile)) repo.update(com.example.panels.BpbFix.apply(profile))
+                if (!com.example.panels.BpbFix.isApplied(profile, chosen)) repo.update(com.example.panels.BpbFix.apply(profile, chosen))
                 count++
             }
         return count

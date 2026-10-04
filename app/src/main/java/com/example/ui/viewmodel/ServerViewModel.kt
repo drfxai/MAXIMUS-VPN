@@ -419,17 +419,20 @@ class ServerViewModel(
             _isTestingAll.value = true
             try {
                 val currentProfiles = serverList.value
-                for (profile in currentProfiles) {
-                    _serverTestingStates.value = _serverTestingStates.value + (profile.id to ServerTestStatus.Testing)
-                    val result = ServerTester.testServer(profile, timeoutMs = 2500)
-                    _serverTestingStates.value = _serverTestingStates.value + (profile.id to result.status)
+                // Real-delay probes run five configs at a time.
+                for (batch in currentProfiles.chunked(com.example.xray.RealDelayProbe.MAX_BATCH)) {
+                    _serverTestingStates.value = _serverTestingStates.value + batch.map { it.id to ServerTestStatus.Testing }
+                    val results = ServerTester.testServers(batch, timeoutMs = 2500)
+                    for ((profile, result) in batch.zip(results)) {
+                        _serverTestingStates.value = _serverTestingStates.value + (profile.id to result.status)
 
-                    val latency = when (result.status) {
-                        is ServerTestStatus.Available -> result.status.latencyMs
-                        is ServerTestStatus.Slow -> result.status.latencyMs
-                        else -> null
+                        val latency = when (result.status) {
+                            is ServerTestStatus.Available -> result.status.latencyMs
+                            is ServerTestStatus.Slow -> result.status.latencyMs
+                            else -> null
+                        }
+                        repository.updateLatency(profile.id, latency)
                     }
-                    repository.updateLatency(profile.id, latency)
                 }
             } finally {
                 _isTestingAll.value = false
