@@ -108,6 +108,8 @@ class RayVpnService : VpnService() {
         createNotificationChannel()
         registerNetworkCallback()
         observeSettingsFlow()
+        // Real-delay probes must bypass this VPN while it exists.
+        com.example.xray.RealDelayProbe.socketProtector = { fd -> safeProtectFd(fd) }
     }
 
     private fun observeSettingsFlow() {
@@ -566,6 +568,7 @@ class RayVpnService : VpnService() {
             failoverManager = com.example.vpn.smart.FailoverManager(
                 serverRepository = serverRepository,
                 protectSocket = { socket -> safeProtectSocket(socket) },
+                tunnelProbe = { com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) },
                 onTriggerSwitch = { newProfile, reason ->
                     serviceScope.launch {
                         XrayLogManager.w("FAILOVER", "Executing auto-failover to '${newProfile.name}': $reason")
@@ -927,6 +930,7 @@ class RayVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        com.example.xray.RealDelayProbe.socketProtector = null
         protectionRequested = false
         connectJob?.cancel()
         serviceScope.coroutineContext[Job]?.cancel()

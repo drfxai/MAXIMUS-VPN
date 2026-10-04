@@ -38,6 +38,8 @@ import java.net.Socket
 class FailoverManager(
     private val serverRepository: ServerRepository,
     private val protectSocket: ((Socket) -> Boolean)? = null,
+    /** Latency of a real request through the running tunnel; throws when nothing gets through. */
+    private val tunnelProbe: (suspend () -> Long)? = null,
     private val onTriggerSwitch: (VlessProfile, String) -> Unit
 ) {
     enum class CascadeTier(val stageNumber: Int, val title: String, val badge: String) {
@@ -80,10 +82,10 @@ class FailoverManager(
             while (isActive) {
                 delay(12000) // Check health every 12 seconds
 
-                val isHealthy = checkHealth(currentProfile, settings.failoverThresholdMs)
+                val isHealthy = checkActiveTunnel(currentProfile, settings.failoverThresholdMs)
                 if (!isHealthy) {
                     val failures = consecutiveFailures.updateAndGet { (it + 1).coerceAtMost(3) }
-                    XrayLogManager.w("FAILOVER", "Node $safeName is unavailable or exceeds the configured ${settings.failoverThresholdMs}ms latency limit ($failures/3).")
+                    XrayLogManager.w("FAILOVER", "Node $safeName carried no traffic or exceeded the latency limit ($failures/3).")
 
                     // Require 3 consecutive failures to avoid flapping
                     if (failures >= 3) {
@@ -161,6 +163,23 @@ class FailoverManager(
             profile.id.startsWith("bridge-") -> CascadeTier.TIER_3_VOLUNTEER_BRIDGES
             profile.overallScore >= 75.0 -> CascadeTier.TIER_1_PRIMARY_REALITY
             else -> CascadeTier.TIER_2_SECONDARY_NODES
+        }
+    }
+
+    /**
+     * The active node is healthy when a real request gets through the tunnel. A handshake with the
+     * server is not enough: a Cloudflare Worker (BPB) edge answers it even when the worker carries no
+     * traffic. A real request takes several round trips, so the latency limit has a floor.
+     */
+    private suspend fun checkActiveTunnel(profile: VlessProfile, latencyThreshold: Long): Boolean {
+        val probe = tunnelProbe ?: return checkHealth(profile, latencyThreshold)
+        return try {
+            probe() < maxOf(latencyThreshold, REAL_REQUEST_LATENCY_FLOOR_MS)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            XrayLogManager.d("FAILOVER", "Request through the tunnel failed: ${SecretRedactor.redact(e.message.orEmpty())}")
+            false
         }
     }
 
@@ -272,6 +291,8 @@ class FailoverManager(
     }
 
     companion object {
+        internal const val REAL_REQUEST_LATENCY_FLOOR_MS = 3000L
+
         private val lastFailoverAt = java.util.concurrent.atomic.AtomicLong(0L)
 
         private fun acquireFailoverCooldown(intervalMs: Long): Boolean {
