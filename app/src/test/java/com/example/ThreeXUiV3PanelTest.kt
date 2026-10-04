@@ -27,7 +27,8 @@ import org.junit.Test
  *  - client tgId must be a number; a string fails the whole request;
  *  - /login and session-cookie POSTs need the X-CSRF-Token from /csrf-token;
  *  - rejected requests answer with an empty body labelled gzip;
- *  - panel certificate paths live under /panel/api, /panel/setting/all is gone.
+ *  - panel certificate paths live under /panel/api, /panel/setting/all is gone;
+ *  - configs without TLS need VLESS Encryption keys from /panel/api/server/getNewVlessEnc.
  */
 private class V3Panel(
     private val token: String,
@@ -61,6 +62,16 @@ private class V3Panel(
             path.endsWith("/panel/api/inbounds/list") -> ok(JSONArray(inbounds))
             path.endsWith("/panel/api/server/getNewX25519Cert") ->
                 ok(JSONObject().put("privateKey", "PRIV_KEY_v3").put("publicKey", "PUB_KEY_v3"))
+            path.endsWith("/panel/api/server/getNewVlessEnc") -> ok(
+                JSONObject().put(
+                    "auths",
+                    JSONArray().put(
+                        JSONObject().put("id", "x25519")
+                            .put("decryption", "mlkem768x25519plus.native.600s.DEC_v3")
+                            .put("encryption", "mlkem768x25519plus.native.0rtt.ENC_v3")
+                    )
+                )
+            )
             path.endsWith("/panel/api/server/getWebCertFiles") ->
                 ok(JSONObject().put("webCertFile", certFile).put("webKeyFile", if (certFile.isBlank()) "" else "$certFile.key"))
             path.endsWith("/panel/api/inbounds/allLinks") -> ok(JSONArray())
@@ -139,6 +150,7 @@ class ThreeXUiV3PanelTest {
 
         assertEquals(1, fake.logins)
         assertEquals(1, fake.inbounds.size)
+        assertTrue(result.clientUri.contains("encryption=mlkem768x25519plus"))
         assertTrue(VlessParser.parse(result.clientUri) is AppResult.Success)
     }
 
