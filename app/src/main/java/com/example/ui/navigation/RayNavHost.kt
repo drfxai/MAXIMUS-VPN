@@ -29,6 +29,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import com.example.data.model.VlessProfile
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -52,6 +54,7 @@ import com.example.ui.importing.ImportScreen
 import com.example.ui.importing.ImportViewModel
 import com.example.ui.panels.PanelManagerScreen
 import com.example.ui.panels.PanelManagerViewModel
+import com.example.ui.servers.EditConfigScreen
 import com.example.ui.servers.ServersScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.subscription.SubscriptionViewModel
@@ -82,6 +85,9 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector,
     data object Diagnostics : Screen("diagnostics", "Logs", Icons.Filled.Analytics, Icons.Outlined.Analytics)
     data object AddServer : Screen("add_server", "Add Node", Icons.Filled.Dns, Icons.Outlined.Dns)
     data object SecretChat : Screen("secret_chat", "Secret Chat", Icons.Filled.Shield, Icons.Outlined.Shield)
+    data object EditServer : Screen("edit_server/{profileId}", "Edit Configuration", Icons.Filled.Dns, Icons.Outlined.Dns) {
+        fun route(profileId: String) = "edit_server/${android.net.Uri.encode(profileId)}"
+    }
     data object GodBrowser : Screen("god_browser", "GOD Browser", Icons.Filled.Shield, Icons.Outlined.Shield)
 }
 
@@ -215,7 +221,8 @@ fun MainApp(
                     onNavigateToImport = { navController.navigate(Screen.Import.route) },
                     onNavigateToSubscriptions = { navController.navigate(Screen.Subscriptions.route) },
                     onNavigateToBenchmark = { navController.navigate(Screen.Benchmark.route) },
-                    onNavigateToPanels = { navController.navigate(Screen.Panels.route) }
+                    onNavigateToPanels = { navController.navigate(Screen.Panels.route) },
+                    onNavigateToEditServer = { navController.navigate(Screen.EditServer.route(it)) }
                 )
             }
             composable(Screen.Benchmark.route) {
@@ -241,6 +248,26 @@ fun MainApp(
                     serverViewModel = serverViewModel,
                     onNavigateBack = { navController.popBackStack() }
                 )
+            }
+            composable(Screen.EditServer.route) { entry ->
+                val profileId = entry.arguments?.getString("profileId").orEmpty()
+                val profile by produceState<VlessProfile?>(null, profileId) {
+                    value = serverViewModel.getServer(profileId)
+                }
+                profile?.let { current ->
+                    EditConfigScreen(
+                        profile = current,
+                        onBack = { navController.popBackStack() },
+                        onSave = { serverViewModel.updateServer(it) },
+                        onDelete = {
+                            serverViewModel.deleteServer(current.id)
+                            navController.popBackStack()
+                        },
+                        onFetchFingerprint = { address, port, sni ->
+                            serverViewModel.fetchCertificateFingerprint(address, port, sni)
+                        }
+                    )
+                }
             }
             composable(Screen.Diagnostics.route) {
                 DiagnosticsScreen(

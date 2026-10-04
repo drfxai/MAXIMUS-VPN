@@ -132,6 +132,11 @@ class ThreeXUiConfigGenerator(
         val host = panel.host.trim()
         val uuid = customUuid ?: UUID.randomUUID().toString()
         val effectiveSecurity = if (protocol == ThreeXUiProtocol.REALITY) ThreeXUiSecurity.REALITY else security
+        // Xray refuses to start with a WebSocket + REALITY inbound, which takes every inbound on
+        // the server down with it, so that combination must never reach the panel.
+        require(!(protocol == ThreeXUiProtocol.WEBSOCKET && effectiveSecurity == ThreeXUiSecurity.REALITY)) {
+            "Reality works with RAW (TCP) or xHTTP, not WebSocket. Pick TLS or None for WebSocket."
+        }
 
         val api = XuiApiClient(
             panelUrl = panel.url,
@@ -157,10 +162,17 @@ class ThreeXUiConfigGenerator(
         }
 
         val tlsCert: Pair<String, String>? = if (effectiveSecurity == ThreeXUiSecurity.TLS) {
-            requireNotNull(api.panelCertificate()) {
+            val cert = requireNotNull(api.panelCertificate()) {
                 "TLS needs a certificate on the server and this panel has none. " +
                     "Use Reality (recommended) or None behind a CDN, or install a certificate in 3X-UI first."
             }
+            // The self-signed certificate Maximus creates for the panel itself is only trusted by
+            // pinning; VPN clients would reject it, so a TLS inbound built on it never connects.
+            require(!cert.first.contains(SELF_SIGNED_CERT_DIR)) {
+                "This server only has the self-signed panel certificate, which VPN clients do not trust. " +
+                    "Use Reality (recommended) or None behind a CDN, or install a domain certificate in 3X-UI first."
+            }
+            cert
         } else null
 
         val used = api.usedPorts() + panelPort(panel)
@@ -195,7 +207,7 @@ class ThreeXUiConfigGenerator(
                         .put("totalGB", 0)
                         .put("expiryTime", 0)
                         .put("enable", true)
-                        .put("tgId", "")
+                        .put("tgId", 0)
                         .put("subId", randomLower(16))
                         .put("comment", "")
                         .put("reset", 0)
@@ -207,7 +219,8 @@ class ThreeXUiConfigGenerator(
             when (protocol) {
                 ThreeXUiProtocol.WEBSOCKET -> stream.put(
                     "wsSettings",
-                    JSONObject().put("path", wsPath).put("headers", JSONObject().put("Host", hostHeader))
+                    // Current Xray reads "host" directly; the old headers.Host form is deprecated.
+                    JSONObject().put("path", wsPath).put("host", hostHeader)
                 )
                 ThreeXUiProtocol.XHTTP -> stream.put(
                     "xhttpSettings",
@@ -447,6 +460,8 @@ class ThreeXUiConfigGenerator(
 
     companion object {
         const val DEFAULT_REALITY_SNI = "www.microsoft.com"
+        /** Where PanelProvisioner stores the pinned self-signed panel certificate. */
+        private const val SELF_SIGNED_CERT_DIR = "/etc/x-ui/maximus-tls/"
         private const val MAX_PORT_ATTEMPTS = 4
 
         /** TCP connect probe used to prove the new inbound is reachable from this device. */
