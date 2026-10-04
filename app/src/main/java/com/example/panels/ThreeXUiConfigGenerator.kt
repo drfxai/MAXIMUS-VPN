@@ -79,7 +79,9 @@ data class InboundGenerationResult(
      * False for UDP inbounds (Hysteria2, WireGuard): a UDP port gives no answer to a connect, so
      * only a real request through the config (the protocol test) shows that it works.
      */
-    val portChecked: Boolean = true
+    val portChecked: Boolean = true,
+    /** The panel's id for the inbound, so a test inbound can be removed again. */
+    val inboundId: Int = -1
 )
 
 /**
@@ -205,6 +207,12 @@ class ThreeXUiConfigGenerator(
 
         val candidates = freePorts(api, panel, protocol, effectiveSecurity, customPort)
 
+        // Xray clients refuse VLESS without TLS to a public address, so an inbound without
+        // transport security gets VLESS Encryption instead. It also keeps the traffic private
+        // from a CDN in front of the server.
+        val vlessEncryption: Pair<String, String>? =
+            if (effectiveSecurity == ThreeXUiSecurity.NONE) api.newVlessEncryption() else null
+
         var lastFailure = ""
         for ((index, port) in candidates.withIndex()) {
             val remark = customRemark ?: when {
@@ -239,8 +247,9 @@ class ThreeXUiConfigGenerator(
                         .put("comment", "")
                         .put("reset", 0)
                 ))
-                .put("decryption", "none")
-                .put("fallbacks", JSONArray())
+                .put("decryption", vlessEncryption?.first ?: "none")
+                // Xray refuses "fallbacks" next to a decryption key, and that stops every inbound on the server.
+                .apply { if (vlessEncryption == null) put("fallbacks", JSONArray()) }
 
             val stream = JSONObject().put("network", protocol.network).put("security", effectiveSecurity.key)
             when (protocol) {
@@ -308,7 +317,7 @@ class ThreeXUiConfigGenerator(
 
             // 1) Read it back and make sure the panel stored exactly what we asked for.
             val stored = api.readBack(port)
-            val problem = verifyStored(stored, uuid, protocol, effectiveSecurity)
+            val problem = verifyStored(stored, uuid, protocol, effectiveSecurity, vlessEncryption?.first ?: "none")
             if (problem != null) {
                 api.deleteInbound(created.id)
                 throw IllegalStateException("3X-UI stored a different inbound than requested: $problem")
@@ -318,12 +327,13 @@ class ThreeXUiConfigGenerator(
             val ownUri = buildVlessUri(
                 uuid, host, port, protocol, effectiveSecurity, flow, realitySni,
                 transportPath,
-                hostHeader, realityPublic, realityShortId, remark
+                hostHeader, realityPublic, realityShortId, remark, vlessEncryption?.second ?: "none"
             )
             val panelUri = api.allLinks().firstOrNull { link ->
                 link.startsWith("vless://") && link.contains(uuid, ignoreCase = true) &&
                     link.contains("@$host:$port") &&
-                    (effectiveSecurity != ThreeXUiSecurity.REALITY || link.contains("pbk="))
+                    (effectiveSecurity != ThreeXUiSecurity.REALITY || link.contains("pbk=")) &&
+                    (vlessEncryption == null || link.contains("encryption=mlkem"))
             }
             val clientUri = panelUri ?: ownUri
 
@@ -341,7 +351,7 @@ class ThreeXUiConfigGenerator(
                 address = host,
                 port = port,
                 uuid = uuid,
-                encryption = "none",
+                encryption = vlessEncryption?.second ?: "none",
                 transport = protocol.network,
                 security = effectiveSecurity.key,
                 sni = when (effectiveSecurity) {
@@ -381,7 +391,8 @@ class ThreeXUiConfigGenerator(
                 publishedToPanel = true,
                 panelHost = host,
                 statusMessage = message,
-                reachable = reachable
+                reachable = reachable,
+                inboundId = created.id
             )
         }
         error("Could not create a reachable inbound ($lastFailure). Check the server firewall.")
@@ -453,6 +464,7 @@ class ThreeXUiConfigGenerator(
         val uri = "hysteria2://${enc(auth)}@${authority(host)}:$port/?${query.joinToString("&")}#${enc(remark)}"
         val profile = ProtocolLinks.parseHysteria2(uri).copy(id = UUID.randomUUID().toString(), name = remark)
         return udpResult(profile, remark, port, auth, settings, stream, sniffing, "hysteria", uri, ThreeXUiProtocol.HYSTERIA2, ThreeXUiSecurity.TLS, host)
+            .copy(inboundId = created.id)
     }
 
     /**
@@ -509,6 +521,7 @@ class ThreeXUiConfigGenerator(
             "?publickey=${enc(serverPublic)}&address=${enc(address)}&mtu=$WG_MTU&keepalive=25#${enc(remark)}"
         val profile = ProtocolLinks.parseWireGuard(uri).copy(id = UUID.randomUUID().toString(), name = remark)
         return udpResult(profile, remark, port, clientPublic, settings, stream, sniffing, "wireguard", uri, ThreeXUiProtocol.WIREGUARD, ThreeXUiSecurity.NONE, host)
+            .copy(inboundId = created.id)
     }
 
     /** First 10.0.0.x/32 that no WireGuard client or peer on the server already uses. */
@@ -607,11 +620,24 @@ class ThreeXUiConfigGenerator(
 
     private fun authority(host: String) = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
 
+    /** Removes an inbound this generator created, e.g. a protocol-test inbound the user did not keep. */
+    fun deleteInbound(panel: ManagedPanel, inboundId: Int) {
+        XuiApiClient(
+            panelUrl = panel.url,
+            apiToken = panel.apiToken,
+            username = panel.username,
+            password = panel.password,
+            httpClient = httpClient,
+            pinnedCertSha256 = panel.certSha256
+        ).deleteInbound(inboundId)
+    }
+
     private fun verifyStored(
         stored: JSONObject?,
         uuid: String,
         protocol: ThreeXUiProtocol,
-        security: ThreeXUiSecurity
+        security: ThreeXUiSecurity,
+        decryption: String
     ): String? {
         if (stored == null) return "the inbound is not listed by the panel"
         if (!stored.optBoolean("enable", true)) return "the inbound is disabled"
@@ -621,6 +647,7 @@ class ThreeXUiConfigGenerator(
             clients.optJSONObject(it)?.optString("id").equals(uuid, ignoreCase = true)
         }
         if (!hasClient) return "client id was not stored"
+        if (settings.optString("decryption", "none") != decryption) return "VLESS decryption was not stored"
         val stream = asObject(stored.opt("streamSettings")) ?: return "stream settings are unreadable"
         if (stream.optString("network") != protocol.network) return "network is ${stream.optString("network")}"
         if (stream.optString("security", "none") != security.key) return "security is ${stream.optString("security")}"
@@ -663,10 +690,12 @@ class ThreeXUiConfigGenerator(
         hostHeader: String,
         publicKey: String,
         shortId: String,
-        remark: String
+        remark: String,
+        encryption: String
     ): String {
         val enc: (String) -> String = { java.net.URLEncoder.encode(it, "UTF-8") }
         val q = mutableListOf("type=${protocol.network}")
+        if (encryption != "none") q.add("encryption=${enc(encryption)}")
         if (security != ThreeXUiSecurity.NONE) q.add("security=${security.key}")
         if (flow.isNotBlank()) q.add("flow=${enc(flow)}")
         when (security) {
