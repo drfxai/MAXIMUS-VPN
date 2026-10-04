@@ -336,7 +336,10 @@ fun PanelManagerScreen(
                         if (activePanel.type == PanelType.BPB_WORKER) viewModel.fixBpbProfiles(activePanel)
                         else viewModel.createQuickConfig(activePanel)
                     },
-                    onDelete = { confirmRemovePanel = activePanel }
+                    onDelete = { confirmRemovePanel = activePanel },
+                    busy = state.busy,
+                    statusText = state.status,
+                    errorText = state.error
                 )
             } else {
                 // STAT CARDS (3 COLUMNS)
@@ -3286,7 +3289,10 @@ private fun InstalledPanelDetailView(
     onUpdatePort: ((Int) -> Unit)? = null,
     onImportToVpn: (() -> Unit)? = null,
     onOneClickReality: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    busy: Boolean = false,
+    statusText: String = "",
+    errorText: String = ""
 ) {
     val panelUri = Uri.parse(panel.url)
     val panelPort = panelUri.port.takeIf { it > 0 } ?: 2053
@@ -3605,6 +3611,7 @@ private fun InstalledPanelDetailView(
                         ) {
                             Button(
                                 onClick = { onImportToVpn?.invoke() },
+                                enabled = !busy,
                                 modifier = Modifier
                                     .weight(1f)
                                     .heightIn(min = 44.dp),
@@ -3632,6 +3639,7 @@ private fun InstalledPanelDetailView(
 
                             OutlinedButton(
                                 onClick = onOneClickReality,
+                                enabled = !busy,
                                 modifier = Modifier
                                     .weight(1f)
                                     .heightIn(min = 44.dp),
@@ -3655,6 +3663,27 @@ private fun InstalledPanelDetailView(
                                     softWrap = false
                                 )
                             }
+                        }
+
+                        // Progress and errors of the actions above; this view hides the
+                        // list-level status banner, so without this a failure looks like nothing happened.
+                        if (busy) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = PanelColors.CyanAccent
+                                )
+                                if (statusText.isNotBlank()) {
+                                    Text(statusText, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.5.sp)
+                                }
+                            }
+                        } else if (errorText.isNotBlank()) {
+                            Text(
+                                text = errorText,
+                                color = Color(0xFFFF5252),
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp
+                            )
                         }
 
                         // Delete option

@@ -8,6 +8,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
@@ -59,6 +60,8 @@ class XuiApiClient(
         .build()
 
     private var sessionReady = false
+    /** CSRF token of the login session; 3X-UI v3 rejects session POSTs without it (HTTP 403). */
+    private var csrfToken = ""
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
     // ---- high level calls ---------------------------------------------------------------------
@@ -161,13 +164,23 @@ class XuiApiClient(
     }
 
     /** Certificate/key paths the panel itself serves HTTPS with, or null when it has none. */
-    fun panelCertificate(): Pair<String, String>? = runCatching {
-        val res = request("POST", "/panel/setting/all", JSONObject())
-        val obj = res.optJSONObject("obj") ?: return@runCatching null
-        val cert = obj.optString("webCertFile")
-        val key = obj.optString("webKeyFile")
-        if (cert.isNotBlank() && key.isNotBlank()) cert to key else null
-    }.getOrNull()
+    fun panelCertificate(): Pair<String, String>? {
+        // 3X-UI v3 serves the paths from /panel/api/...; v2 only had /panel/setting/all.
+        val routes = listOf(
+            "GET" to "/panel/api/server/getWebCertFiles",
+            "POST" to "/panel/api/setting/all",
+            "POST" to "/panel/setting/all"
+        )
+        for ((method, path) in routes) {
+            val obj = runCatching { request(method, path, JSONObject()) }.getOrNull()
+                ?.takeIf { it.optBoolean("success", false) }
+                ?.optJSONObject("obj") ?: continue
+            val cert = obj.optString("webCertFile")
+            val key = obj.optString("webKeyFile")
+            return if (cert.isNotBlank() && key.isNotBlank()) cert to key else null
+        }
+        return null
+    }
 
     /** All share links currently exported by the panel (best effort). */
     fun allLinks(): List<String> = runCatching {
@@ -210,11 +223,14 @@ class XuiApiClient(
 
     private fun ensureSession() {
         if (sessionReady) return
+        csrfToken = fetchCsrfToken()
         val form = FormBody.Builder().add("username", username).add("password", password).build()
-        val req = Request.Builder().url(url("/login")).post(form).build()
+        val req = Request.Builder().url(url("/login")).post(form)
+            .apply { if (csrfToken.isNotBlank()) header(CSRF_HEADER, csrfToken) }
+            .build()
         try {
             http.newCall(req).execute().use { resp ->
-                val text = resp.body?.string().orEmpty()
+                val text = bodyText(resp)
                 if (resp.code in 300..399) throw XuiApiException("Unexpected redirect while logging in", resp.code)
                 if (!resp.isSuccessful) throw XuiApiException("Panel login failed (HTTP ${resp.code})", resp.code)
                 val json = runCatching { JSONObject(text) }.getOrNull()
@@ -226,6 +242,24 @@ class XuiApiClient(
             }
         } catch (e: XuiApiException) {
             throw e
+        } catch (e: IOException) {
+            throw transportFailure(e)
+        }
+    }
+
+    /**
+     * 3X-UI v3 hands out a per-session CSRF token at /csrf-token and requires it on /login and on
+     * every state-changing API call made with the session cookie. Older panels have no such route,
+     * in which case no token is sent.
+     */
+    private fun fetchCsrfToken(): String {
+        val req = Request.Builder().url(url("/csrf-token")).header("Accept", "application/json").get().build()
+        return try {
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return ""
+                val json = runCatching { JSONObject(bodyText(resp)) }.getOrNull() ?: return ""
+                if (json.optBoolean("success", false)) json.optString("obj") else ""
+            }
         } catch (e: IOException) {
             throw transportFailure(e)
         }
@@ -264,11 +298,12 @@ class XuiApiClient(
     private fun execute(method: String, path: String, body: JSONObject?, bearer: Boolean): JSONObject {
         val builder = Request.Builder().url(url(path)).header("Accept", "application/json")
         if (bearer) builder.header("Authorization", "Bearer $apiToken")
+        else if (method != "GET" && csrfToken.isNotBlank()) builder.header(CSRF_HEADER, csrfToken)
         if (method == "GET") builder.get()
         else builder.post((body ?: JSONObject()).toString().toRequestBody(jsonType))
         try {
             http.newCall(builder.build()).execute().use { resp ->
-                val text = resp.body?.string().orEmpty()
+                val text = bodyText(resp)
                 if (resp.code in 300..399) throw XuiApiException("Redirected (HTTP ${resp.code})", 401)
                 if (!resp.isSuccessful) {
                     val msg = runCatching { JSONObject(text).optString("msg") }.getOrNull().orEmpty()
@@ -286,6 +321,18 @@ class XuiApiClient(
         }
     }
 
+    /**
+     * 3X-UI answers rejected requests with an empty body that is still labelled gzip, which makes
+     * OkHttp's transparent decompression throw EOFException. That is an HTTP status, not a
+     * transport failure, so the body is read leniently and the status code decides.
+     */
+    private fun bodyText(resp: Response): String =
+        try {
+            resp.body?.string().orEmpty()
+        } catch (_: java.io.EOFException) {
+            ""
+        }
+
     private fun url(path: String): HttpUrl =
         (baseUrl + path).toHttpUrlOrNull() ?: throw XuiApiException("Invalid panel address: $baseUrl")
 
@@ -302,6 +349,8 @@ class XuiApiClient(
     }
 
     companion object {
+        private const val CSRF_HEADER = "X-CSRF-Token"
+
         /**
          * Panel URL without trailing slash and without a trailing "/panel" page segment, so
          * "http://1.2.3.4:2053/abcd/panel/" and "http://1.2.3.4:2053/abcd/" both become
