@@ -119,212 +119,125 @@ fun LandingHeroBanner(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(if (AppTheme.colors.isDark) 4.dp else 6.dp, RoundedCornerShape(26.dp))
             .testTag("landing_hero_banner"),
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (AppTheme.colors.isDark) Color(0xFF131522) else Color(0xFFF8FAFC)
         ),
         border = BorderStroke(
-            1.5.dp,
+            1.dp,
             Brush.linearGradient(
                 listOf(
                     AppTheme.colors.primary.copy(alpha = glowAlpha),
-                    Color(0xFF00E5FF).copy(alpha = 0.6f),
+                    Color(0xFF00E5FF).copy(alpha = 0.5f),
                     AppTheme.colors.borderSubtle
                 )
             )
         )
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            AppTheme.colors.primary.copy(alpha = if (AppTheme.colors.isDark) 0.18f else 0.08f),
+                            AppTheme.colors.primary.copy(alpha = if (AppTheme.colors.isDark) 0.14f else 0.06f),
                             Color.Transparent
                         ),
-                        center = Offset(200f, 100f),
-                        radius = 800f
+                        center = Offset(120f, 60f),
+                        radius = 600f
                     )
                 )
-                .padding(20.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
-            Column {
-                // Top Badge & Platform Indicator
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = AppTheme.colors.primary.copy(alpha = 0.16f),
-                        border = BorderStroke(1.dp, AppTheme.colors.primary.copy(alpha = 0.35f))
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .weight(1f, fill = false)
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF4ADE80))
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "NEXT-GEN VLESS & XRAY PLATFORM",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = AppTheme.colors.primary,
-                                letterSpacing = 0.35.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF1E293B).copy(alpha = 0.7f),
-                        border = BorderStroke(1.dp, AppTheme.colors.borderSubtle)
-                    ) {
-                        Text(
-                            text = "V${BuildConfig.VERSION_NAME}\nPRO",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF94A3B8),
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                            maxLines = 2,
-                            lineHeight = 12.sp,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Hero Logo + Title Section
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(68.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFF0A0C14))
-                            .border(
-                                2.dp,
-                                Brush.linearGradient(
-                                    listOf(AppTheme.colors.primary, Color(0xFF00E5FF))
-                                ),
-                                RoundedCornerShape(18.dp)
-                            )
-                            .shadow(8.dp, RoundedCornerShape(18.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.ic_maximus_logo),
-                            contentDescription = "Maximus Spartan VPN Emblem",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(18.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
+            // Logo, name, tagline and version
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_maximus_logo),
+                    contentDescription = "Maximus Spartan VPN Emblem",
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(
+                            1.5.dp,
+                            Brush.linearGradient(listOf(AppTheme.colors.primary, Color(0xFF00E5FF))),
+                            RoundedCornerShape(12.dp)
+                        ),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = "Maximus VPN",
-                            style = MaterialTheme.typography.titleLarge,
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Black,
-                            color = AppTheme.colors.textPrimary,
-                            letterSpacing = 0.3.sp
+                            color = AppTheme.colors.textPrimary
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Sovereign Privacy • Anti-DPI • Multi-Engine",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AppTheme.colors.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Engineered with Xray-core, VLESS Reality & P2P Mesh",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AppTheme.colors.textSecondary
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF4ADE80))
                         )
                     }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Value Proposition Chips
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    LandingStatPill(
-                        label = "Zero Logs",
-                        sub = "RAM-Only",
-                        icon = Icons.Default.VisibilityOff,
-                        modifier = Modifier.weight(1f)
-                    )
-                    LandingStatPill(
-                        label = "REALITY TLS",
-                        sub = "Camouflage",
-                        icon = Icons.Default.Lock,
-                        modifier = Modifier.weight(1f)
-                    )
-                    LandingStatPill(
-                        label = "0 DNS Leaks",
-                        sub = "DoH Encrypted",
-                        icon = Icons.Default.Shield,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Action Row: Learn More / Architecture Tour
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
                     Text(
-                        text = "Designed by DrFXAi for high censorship resilience",
+                        text = "Sovereign Privacy • Anti-DPI • Multi-Engine",
                         fontSize = 11.sp,
-                        color = AppTheme.colors.textMuted,
-                        modifier = Modifier.weight(1f),
+                        color = AppTheme.colors.primary,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    OutlinedButton(
-                        onClick = onExploreArchitecture,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, AppTheme.colors.primary.copy(alpha = 0.6f)),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = AppTheme.colors.primary
-                        ),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.height(34.dp).testTag("explore_features_button")
-                    ) {
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = AppTheme.colors.primary.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, AppTheme.colors.primary.copy(alpha = 0.3f))
+                ) {
+                    Text(
+                        text = "v${BuildConfig.VERSION_NAME} PRO",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppTheme.colors.primary,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Value chips and the architecture tour
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LandingStatPill(label = "Zero Logs", icon = Icons.Default.VisibilityOff, modifier = Modifier.weight(1f))
+                LandingStatPill(label = "REALITY", icon = Icons.Default.Lock, modifier = Modifier.weight(1f))
+                LandingStatPill(label = "No DNS Leaks", icon = Icons.Default.Shield, modifier = Modifier.weight(1.25f))
+                Surface(
+                    onClick = onExploreArchitecture,
+                    shape = CircleShape,
+                    color = AppTheme.colors.primary.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, AppTheme.colors.primary.copy(alpha = 0.45f)),
+                    modifier = Modifier
+                        .size(30.dp)
+                        .testTag("explore_features_button")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
+                            contentDescription = "Architecture",
+                            tint = AppTheme.colors.primary,
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Architecture", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -335,46 +248,32 @@ fun LandingHeroBanner(
 @Composable
 private fun LandingStatPill(
     label: String,
-    sub: String,
     icon: ImageVector,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = if (AppTheme.colors.isDark) Color(0xFF181A28) else Color(0xFFEDF2F7),
-        border = BorderStroke(1.dp, AppTheme.colors.borderSubtle)
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (AppTheme.colors.isDark) Color(0xFF1A1C2B) else Color(0xFFEDF2F7))
+            .padding(horizontal = 7.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = AppTheme.colors.primary,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Column {
-                Text(
-                    text = label,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AppTheme.colors.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = sub,
-                    fontSize = 9.sp,
-                    lineHeight = 12.sp,
-                    color = AppTheme.colors.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = AppTheme.colors.primary,
+            modifier = Modifier.size(12.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = AppTheme.colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

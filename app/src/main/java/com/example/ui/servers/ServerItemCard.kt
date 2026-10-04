@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NetworkPing
 import androidx.compose.material.icons.filled.Star
@@ -69,7 +70,8 @@ fun ServerItemCard(
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
     onExportUri: (VlessProfile) -> String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onEdit: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -159,6 +161,19 @@ fun ServerItemCard(
                                 .background(AppTheme.colors.surfaceCard)
                                 .border(1.dp, AppTheme.colors.borderSubtle)
                         ) {
+                            if (onEdit != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Edit Configuration", color = AppTheme.colors.textPrimary) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Edit, contentDescription = null, tint = AppTheme.colors.primary)
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        onEdit()
+                                    },
+                                    modifier = Modifier.testTag("edit_config_${profile.id}")
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Test Connectivity", color = AppTheme.colors.textPrimary) },
                                 leadingIcon = {

@@ -50,6 +50,18 @@ data class ServerProfileEntity(
     val spiderX: String,
     val alpn: String,
     val headerType: String,
+    @ColumnInfo(defaultValue = "0")
+    val allowInsecure: Boolean = false,
+    @ColumnInfo(defaultValue = "")
+    val pinnedPeerCertSha256: String = "",
+    @ColumnInfo(defaultValue = "")
+    val verifyPeerCertByName: String = "",
+    @ColumnInfo(defaultValue = "")
+    val echConfigList: String = "",
+    @ColumnInfo(defaultValue = "")
+    val echSockopt: String = "",
+    @ColumnInfo(defaultValue = "")
+    val targetStrategy: String = "",
     val isFavorite: Boolean,
     val lastLatencyMs: Long?,
     val downloadMbps: Double = 0.0,
@@ -112,6 +124,12 @@ data class ServerProfileEntity(
         spiderX = SecureStorage.decryptOrPlaintext(spiderX),
         alpn = alpn,
         headerType = headerType,
+        allowInsecure = allowInsecure,
+        pinnedPeerCertSha256 = pinnedPeerCertSha256,
+        verifyPeerCertByName = verifyPeerCertByName,
+        echConfigList = echConfigList,
+        echSockopt = echSockopt,
+        targetStrategy = targetStrategy,
         isFavorite = isFavorite,
         lastLatencyMs = lastLatencyMs,
         downloadMbps = downloadMbps,
@@ -171,6 +189,12 @@ data class ServerProfileEntity(
             spiderX = if (p.spiderX.isNotEmpty()) SecureStorage.encrypt(p.spiderX) else "",
             alpn = p.alpn,
             headerType = p.headerType,
+            allowInsecure = p.allowInsecure,
+            pinnedPeerCertSha256 = p.pinnedPeerCertSha256,
+            verifyPeerCertByName = p.verifyPeerCertByName,
+            echConfigList = p.echConfigList,
+            echSockopt = p.echSockopt,
+            targetStrategy = p.targetStrategy,
             isFavorite = p.isFavorite,
             lastLatencyMs = p.lastLatencyMs,
             downloadMbps = p.downloadMbps,

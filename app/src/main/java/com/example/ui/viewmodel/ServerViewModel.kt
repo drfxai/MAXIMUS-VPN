@@ -281,6 +281,37 @@ class ServerViewModel(
         }
     }
 
+    suspend fun getServer(profileId: String): VlessProfile? = repository.getProfileById(profileId)
+
+    /**
+     * Saves an edited node. Returns null on success, or the reason it was refused. When the node is
+     * the one carrying the live tunnel, the tunnel is restarted so the new settings take effect.
+     */
+    suspend fun updateServer(profile: VlessProfile): String? {
+        val error = try {
+            VlessValidator.validate(profile)
+            com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(profile)
+        } catch (e: Exception) {
+            e.localizedMessage ?: "Invalid configuration"
+        }
+        if (error != null) return error
+        val saved = profile.copy(canonicalFingerprint = "")
+        repository.update(saved)
+        XrayLogManager.i("UI", "Edited server profile: '${saved.name}' (${saved.address}:${saved.port})")
+        val settings = settingsRepository.getSettings()
+        if (settings.selectedProfileId == saved.id && com.example.vpn.VpnController.connectionState.value.isConnected) {
+            XrayLogManager.i("VPN", "Applying edited settings of '${saved.name}' to the active tunnel...")
+            com.example.vpn.VpnController.startVpn(RayApplication.instance, saved)
+        }
+        return null
+    }
+
+    /** SHA-256 of the server's TLS certificate, for pinning. */
+    suspend fun fetchCertificateFingerprint(address: String, port: Int, sni: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching { com.example.vpn.CertificateFingerprint.fetch(address, port, sni) }
+        }
+
     fun duplicateServer(profile: VlessProfile) {
         viewModelScope.launch {
             val duplicate = profile.copy(
