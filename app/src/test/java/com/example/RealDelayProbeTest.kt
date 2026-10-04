@@ -75,6 +75,13 @@ class RealDelayProbeTest {
     }
 
     @Test
+    fun missingNativeLibraryFallsBackToTheReachabilityProbe() {
+        // On the JVM the libXray classes are on the classpath but their native library is not.
+        RealDelayProbe.invoker = { throw UnsatisfiedLinkError("no gojni in java.library.path") }
+        assertTrue(RealDelayProbe.measure(bpb, 5) is RealDelayProbe.Outcome.NotRun)
+    }
+
+    @Test
     fun realDelayIsRatedOnItsOwnScale() = runBlocking {
         RealDelayProbe.invoker = { results(JSONObject().put("success", true).put("delay", 640)) }
         assertEquals(ServerTestStatus.Available(640), ServerTester.testServer(bpb).status)
