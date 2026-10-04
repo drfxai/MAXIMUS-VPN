@@ -90,6 +90,13 @@ object ServerTester {
         timeoutMs: Int,
         protectSocket: ((Socket) -> Boolean)?
     ): ServerTestResult {
+        if (profile.protocolType == com.example.data.model.ProtocolType.HYSTERIA2 ||
+            profile.protocolType == com.example.data.model.ProtocolType.WIREGUARD
+        ) {
+            // A UDP server answers no TCP or TLS probe; only a request through the proxy tells.
+            XrayLogManager.d("SERVER", "Skipping the reachability check for UDP server '${profile.name}'; it is tested with a real request while the VPN is off.")
+            return ServerTestResult(serverId = profile.id, status = ServerTestStatus.Idle)
+        }
         XrayLogManager.d("SERVER", "Initiating reachability check for '${profile.name}' (${profile.address}:${profile.port}, transport=${profile.transport}, sec=${profile.security})...")
 
         val startTime = System.nanoTime()

@@ -66,7 +66,7 @@ import com.example.ui.theme.AppTheme
 import kotlinx.coroutines.launch
 
 private val FLOWS = listOf("", "xtls-rprx-vision", "xtls-rprx-vision-udp443")
-private val NETWORKS = listOf("tcp", "ws", "grpc", "xhttp", "http")
+private val NETWORKS = listOf("tcp", "ws", "grpc", "xhttp", "httpupgrade", "http")
 private val SECURITIES = listOf("none", "tls", "reality")
 private val FINGERPRINTS = listOf("", "chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized", "unsafe")
 private val ALPNS = listOf("", "h2", "http/1.1", "h2,http/1.1", "h3", "h3,h2,http/1.1")
@@ -193,7 +193,12 @@ fun EditConfigScreen(
                         keyboardType = KeyboardType.Number
                     ) { portText = it.filter(Char::isDigit).take(5) }
                 }
-                EditField("UUID (id)", draft.uuid, monospace = true) { draft = draft.copy(uuid = it) }
+                val secretLabel = when (draft.protocolType) {
+                    com.example.data.model.ProtocolType.VLESS, com.example.data.model.ProtocolType.VMESS -> "UUID (id)"
+                    com.example.data.model.ProtocolType.WIREGUARD -> "Private key"
+                    else -> "Password"
+                }
+                EditField(secretLabel, draft.uuid, monospace = true) { draft = draft.copy(uuid = it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     EditField("Encryption", draft.encryption, Modifier.weight(1f)) { draft = draft.copy(encryption = it) }
                     EditDropdown("Flow", draft.flow, FLOWS, Modifier.weight(1.4f)) { draft = draft.copy(flow = it) }
@@ -202,17 +207,27 @@ fun EditConfigScreen(
 
             EditSection("Transport") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    EditDropdown("Network", network, NETWORKS, Modifier.weight(1f)) { draft = draft.copy(transport = it) }
+                    val networks = if (draft.protocolType == com.example.data.model.ProtocolType.HYSTERIA2) listOf("hysteria") else NETWORKS
+                    EditDropdown("Network", network, networks, Modifier.weight(1f)) { draft = draft.copy(transport = it) }
                     EditDropdown("Target strategy", draft.targetStrategy.ifBlank { "AsIs" }, TARGET_STRATEGIES, Modifier.weight(1f)) {
                         draft = draft.copy(targetStrategy = if (it == "AsIs") "" else it)
                     }
                 }
                 when (network) {
                     "grpc" -> EditField("Service name", draft.serviceName) { draft = draft.copy(serviceName = it) }
-                    "tcp" -> Unit
+                    "tcp", "hysteria", "udp" -> Unit
                     else -> {
                         EditField("Host", draft.host) { draft = draft.copy(host = it) }
                         EditField("Path", draft.path, monospace = true) { draft = draft.copy(path = it) }
+                        if (network == "xhttp" || network == "splithttp") {
+                            val mode = com.example.vpn.engine.ProfileExtras.read(draft)
+                                .optString(com.example.vpn.engine.ProfileExtras.XHTTP_MODE).ifBlank { "auto" }
+                            EditDropdown("XHTTP mode", mode, com.example.vpn.engine.ProfileExtras.XHTTP_MODES) {
+                                draft = com.example.vpn.engine.ProfileExtras.with(
+                                    draft, com.example.vpn.engine.ProfileExtras.XHTTP_MODE, if (it == "auto") null else it
+                                )
+                            }
+                        }
                     }
                 }
                 EditField(

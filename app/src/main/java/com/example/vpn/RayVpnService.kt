@@ -428,6 +428,9 @@ class RayVpnService : VpnService() {
                 // Plain VLESS is unsupported by current native Xray on public endpoints.
                 // Kotlin carries selected DoH using verified TLS inside the VLESS stream.
                 com.example.vpn.engine.KotlinTunnelEngine.instance
+            } else if (profile.protocolType == ProtocolType.HYSTERIA2 || profile.protocolType == ProtocolType.WIREGUARD) {
+                // Only the bundled Xray core speaks these; the Mihomo adapter has no native runtime.
+                XrayEngineImpl.instance
             } else when (settings.preferredEngine) {
                 EngineType.MIHOMO -> {
                     if (profile.protocolType == ProtocolType.HTTP || profile.protocolType == ProtocolType.SOCKS5) {
@@ -437,7 +440,7 @@ class RayVpnService : VpnService() {
                     }
                 }
                 EngineType.XRAY -> {
-                    if (profile.protocolType == ProtocolType.HYSTERIA2 || profile.protocolType == ProtocolType.TUIC) {
+                    if (profile.protocolType == ProtocolType.TUIC) {
                         com.example.vpn.engine.MihomoEngine.instance
                     } else if (profile.protocolType == ProtocolType.HTTP || profile.protocolType == ProtocolType.SOCKS5) {
                         com.example.vpn.engine.KotlinTunnelEngine.instance
@@ -448,7 +451,6 @@ class RayVpnService : VpnService() {
                 EngineType.AUTO -> {
                     if (profile.engineType == EngineType.MIHOMO ||
                         profile.profileType == ProfileType.MIHOMO_YAML ||
-                        profile.protocolType == ProtocolType.HYSTERIA2 ||
                         profile.protocolType == ProtocolType.TUIC
                     ) {
                         com.example.vpn.engine.MihomoEngine.instance

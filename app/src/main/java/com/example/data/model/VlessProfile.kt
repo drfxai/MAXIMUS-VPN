@@ -39,6 +39,7 @@ data class VlessProfile(
     val echConfigList: String = "",          // TLS ECH config list (base64 or DNS name)
     val echSockopt: String = "",             // raw Xray tlsSettings.echSockopt JSON
     val targetStrategy: String = "",         // outbound targetStrategy, e.g. AsIs, UseIPv4
+    val extraSettings: String = "",          // JSON of protocol extras, see ProfileExtras
     val isFavorite: Boolean = false,
     val lastLatencyMs: Long? = null,
     val downloadMbps: Double = 0.0,
@@ -84,9 +85,10 @@ data class VlessProfile(
 
     val securityBadge: String
         get() = when {
+            protocolType == ProtocolType.HYSTERIA2 -> "HY2"
+            protocolType == ProtocolType.WIREGUARD -> "WG"
             security.equals("reality", ignoreCase = true) -> "REALITY"
             security.equals("tls", ignoreCase = true) || security.equals("ssl", ignoreCase = true) -> "TLS"
-            protocolType == ProtocolType.HYSTERIA2 -> "HY2"
             protocolType == ProtocolType.SHADOWSOCKS -> "SS"
             protocolType == ProtocolType.TROJAN -> "TROJAN"
             protocolType == ProtocolType.VMESS -> "VMESS"
@@ -100,6 +102,6 @@ data class VlessProfile(
         get() = when (engineType) {
             EngineType.MIHOMO -> "MIHOMO"
             EngineType.XRAY -> "XRAY"
-            EngineType.AUTO -> if (profileType == ProfileType.MIHOMO_YAML || protocolType == ProtocolType.HYSTERIA2 || protocolType == ProtocolType.TUIC) "MIHOMO" else "XRAY"
+            EngineType.AUTO -> if (profileType == ProfileType.MIHOMO_YAML || protocolType == ProtocolType.TUIC) "MIHOMO" else "XRAY"
         }
 }

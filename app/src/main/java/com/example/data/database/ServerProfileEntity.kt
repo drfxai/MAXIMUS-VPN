@@ -62,6 +62,8 @@ data class ServerProfileEntity(
     val echSockopt: String = "",
     @ColumnInfo(defaultValue = "")
     val targetStrategy: String = "",
+    @ColumnInfo(defaultValue = "")
+    val extraSettings: String = "",
     val isFavorite: Boolean,
     val lastLatencyMs: Long?,
     val downloadMbps: Double = 0.0,
@@ -130,6 +132,7 @@ data class ServerProfileEntity(
         echConfigList = echConfigList,
         echSockopt = echSockopt,
         targetStrategy = targetStrategy,
+        extraSettings = SecureStorage.decryptOrPlaintext(extraSettings),
         isFavorite = isFavorite,
         lastLatencyMs = lastLatencyMs,
         downloadMbps = downloadMbps,
@@ -195,6 +198,7 @@ data class ServerProfileEntity(
             echConfigList = p.echConfigList,
             echSockopt = p.echSockopt,
             targetStrategy = p.targetStrategy,
+            extraSettings = if (p.extraSettings.isNotEmpty()) SecureStorage.encrypt(p.extraSettings) else "",
             isFavorite = p.isFavorite,
             lastLatencyMs = p.lastLatencyMs,
             downloadMbps = p.downloadMbps,
