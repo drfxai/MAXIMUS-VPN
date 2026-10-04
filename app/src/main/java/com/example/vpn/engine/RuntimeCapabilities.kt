@@ -20,6 +20,14 @@ object RuntimeCapabilities {
             "REALITY requires both the server public key and SNI."
         profile.finalMask.isNotBlank() && runCatching { org.json.JSONObject(profile.finalMask) }.isFailure ->
             "The finalMask setting is not valid JSON."
+        profile.echSockopt.isNotBlank() && runCatching { org.json.JSONObject(profile.echSockopt) }.isFailure ->
+            "The echSockopt setting is not valid JSON."
+        profile.pinnedPeerCertSha256.isNotBlank() && !isValidCertPin(profile.pinnedPeerCertSha256) ->
+            "The certificate fingerprint must be one or more 64-character SHA-256 hex values."
+        profile.allowInsecure && profile.pinnedPeerCertSha256.isBlank() ->
+            "allowInsecure needs the server's certificate fingerprint. Fetch it in Edit Configuration."
+        profile.targetStrategy.isNotBlank() && TARGET_STRATEGIES.none { it.equals(profile.targetStrategy, ignoreCase = true) } ->
+            "Unknown targetStrategy ${profile.targetStrategy}."
         profile.headerType.lowercase() !in setOf("", "none", "http") -> "TCP header ${profile.headerType} is not supported by the Xray configuration adapter."
         profile.protocolType == ProtocolType.VLESS && profile.encryption.lowercase() !in setOf("", "none") ->
             "This VLESS encryption mode requires a native Xray core."
@@ -33,6 +41,17 @@ object RuntimeCapabilities {
             "Authenticated HTTP/SOCKS proxies are not supported by the Kotlin compatibility tunnel."
         else -> null
     }
+    val TARGET_STRATEGIES = listOf(
+        "AsIs", "UseIP", "UseIPv4", "UseIPv6", "UseIPv4v6", "UseIPv6v4",
+        "ForceIP", "ForceIPv4", "ForceIPv6", "ForceIPv4v6", "ForceIPv6v4"
+    )
+
+    /** Xray's pinnedPeerCertSha256: comma separated SHA-256 hashes, hex with optional colons. */
+    fun isValidCertPin(value: String): Boolean {
+        val pins = value.split(',').map { it.trim().replace(":", "") }.filter { it.isNotEmpty() }
+        return pins.isNotEmpty() && pins.all { it.length == 64 && it.all { c -> c.isDigit() || c.lowercaseChar() in 'a'..'f' } }
+    }
+
     fun requireSupported(profile: VlessProfile) {
         unsupportedReason(profile)?.let { throw IllegalArgumentException(it) }
     }

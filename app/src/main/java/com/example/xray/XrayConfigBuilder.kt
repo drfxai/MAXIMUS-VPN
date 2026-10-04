@@ -245,6 +245,9 @@ object XrayConfigBuilder {
     private fun buildOutboundForProfile(profile: VlessProfile): JSONObject {
         val proxyOutbound = JSONObject()
         proxyOutbound.put("tag", "proxy")
+        if (profile.targetStrategy.isNotBlank() && !profile.targetStrategy.equals("AsIs", ignoreCase = true)) {
+            proxyOutbound.put("targetStrategy", profile.targetStrategy)
+        }
 
         val isTlsOrReality = profile.security.equals("tls", ignoreCase = true) ||
                 profile.security.equals("reality", ignoreCase = true)
@@ -333,8 +336,23 @@ object XrayConfigBuilder {
                     if (profile.fingerprint.isNotBlank()) {
                         // Xray's "unsafe" fingerprint means "use Go's standard TLS instead of a uTLS
                         // browser imitation" (needed for custom cipher suites). Certificates are still
-                        // verified because allowInsecure is never set.
+                        // verified: Xray removed allowInsecure, so a self-signed server is trusted only
+                        // through its pinned SHA-256 below.
                         put("fingerprint", profile.fingerprint.lowercase())
+                    }
+                    if (profile.pinnedPeerCertSha256.isNotBlank()) {
+                        put("pinnedPeerCertSha256", profile.pinnedPeerCertSha256.trim())
+                    }
+                    if (profile.verifyPeerCertByName.isNotBlank()) {
+                        put("verifyPeerCertByName", profile.verifyPeerCertByName.trim())
+                    }
+                    if (profile.echConfigList.isNotBlank()) {
+                        put("echConfigList", profile.echConfigList.trim())
+                    }
+                    if (profile.echSockopt.isNotBlank()) {
+                        put("echSockopt", runCatching { JSONObject(profile.echSockopt) }.getOrElse {
+                            throw IllegalArgumentException("The profile's echSockopt is not valid JSON")
+                        })
                     }
                     if (profile.cipherSuites.isNotBlank()) {
                         put("cipherSuites", profile.cipherSuites)

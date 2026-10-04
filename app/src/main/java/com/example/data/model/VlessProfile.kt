@@ -33,6 +33,12 @@ data class VlessProfile(
     val spiderX: String = "",      // REALITY spx
     val alpn: String = "",         // h2,http/1.1
     val headerType: String = "",   // http, none
+    val allowInsecure: Boolean = false,      // trust the pinned certificate instead of public CAs
+    val pinnedPeerCertSha256: String = "",   // TLS pcs: hex SHA-256 of the leaf or CA certificate
+    val verifyPeerCertByName: String = "",   // TLS vcn: names the certificate may be verified against
+    val echConfigList: String = "",          // TLS ECH config list (base64 or DNS name)
+    val echSockopt: String = "",             // raw Xray tlsSettings.echSockopt JSON
+    val targetStrategy: String = "",         // outbound targetStrategy, e.g. AsIs, UseIPv4
     val isFavorite: Boolean = false,
     val lastLatencyMs: Long? = null,
     val downloadMbps: Double = 0.0,
