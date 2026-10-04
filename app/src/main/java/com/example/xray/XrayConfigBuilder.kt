@@ -242,28 +242,6 @@ object XrayConfigBuilder {
         routing.put("rules", rules)
     }
 
-    /**
-     * Removes zero-length segments from fragment masks. A zero-length segment of the TLS ClientHello
-     * becomes an empty handshake record, which TLS forbids (RFC 8446 section 5.1): the server aborts
-     * the handshake, so the config never carries traffic although its server answers pings. The
-     * first FIX BPB mask had one, and profiles saved with it are repaired here.
-     */
-    internal fun dropEmptyFragments(mask: JSONObject): JSONObject {
-        val tcp = mask.optJSONArray("tcp") ?: return mask
-        for (i in 0 until tcp.length()) {
-            val entry = tcp.optJSONObject(i) ?: continue
-            if (entry.optString("type") != "fragment") continue
-            val lengths = entry.optJSONObject("settings")?.optJSONArray("lengths") ?: continue
-            val kept = JSONArray()
-            for (j in 0 until lengths.length()) {
-                val value = lengths.opt(j).toString().trim()
-                if (value != "0" && value != "0-0") kept.put(lengths.get(j))
-            }
-            if (kept.length() in 1 until lengths.length()) entry.getJSONObject("settings").put("lengths", kept)
-        }
-        return mask
-    }
-
     private fun buildOutboundForProfile(profile: VlessProfile): JSONObject {
         val proxyOutbound = JSONObject()
         proxyOutbound.put("tag", "proxy")
@@ -409,7 +387,7 @@ object XrayConfigBuilder {
                 val mask = runCatching { JSONObject(profile.finalMask) }.getOrElse {
                     throw IllegalArgumentException("The profile's finalMask is not valid JSON")
                 }
-                put("finalmask", dropEmptyFragments(mask))
+                put("finalmask", mask)
             }
 
             // Transport Specific Settings

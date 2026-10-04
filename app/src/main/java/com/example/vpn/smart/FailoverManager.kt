@@ -83,6 +83,8 @@ class FailoverManager(
                 delay(12000) // Check health every 12 seconds
 
                 val isHealthy = checkActiveTunnel(currentProfile, settings.failoverThresholdMs)
+                // A blocking probe can outlive a switch or disconnect; its result is stale then.
+                if (!isActive) break
                 if (!isHealthy) {
                     val failures = consecutiveFailures.updateAndGet { (it + 1).coerceAtMost(3) }
                     XrayLogManager.w("FAILOVER", "Node $safeName carried no traffic or exceeded the latency limit ($failures/3).")
@@ -178,7 +180,10 @@ class FailoverManager(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            XrayLogManager.d("FAILOVER", "Request through the tunnel failed: ${SecretRedactor.redact(e.message.orEmpty())}")
+            // After a switch or disconnect the request fails because the tunnel is gone; not worth a log.
+            if (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                XrayLogManager.d("FAILOVER", "Request through the tunnel failed: ${SecretRedactor.redact(e.message.orEmpty())}")
+            }
             false
         }
     }

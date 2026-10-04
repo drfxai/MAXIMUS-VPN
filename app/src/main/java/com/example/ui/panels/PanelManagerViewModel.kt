@@ -675,7 +675,7 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
                     "No request got through this BPB worker, with or without FIX BPB: ${choice.reason}. " +
                         "Check the worker's UUID and proxy IP in the BPB panel; configs were left unchanged."
                 is com.example.panels.BpbFix.Choice.Untested -> {
-                    val changed = applyBpbFix(host, com.example.panels.BpbFix.FINAL_MASK)
+                    val changed = applyBpbFix(host, com.example.panels.BpbFix.FINAL_MASK_ORIGINAL)
                     "FIX BPB applied to $changed config${if (changed == 1) "" else "s"} without a test " +
                         "(${choice.reason}). Disconnect the VPN and tap FIX BPB again to test it.$reconnect"
                 }
@@ -692,7 +692,7 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun bpbFixMask(host: String): String =
         RayApplication.instance.serverRepository.getAllProfilesOnce()
             .firstOrNull { com.example.panels.BpbFix.belongsTo(it, host) && com.example.panels.BpbFix.isApplied(it) }
-            ?.finalMask ?: com.example.panels.BpbFix.FINAL_MASK
+            ?.finalMask ?: com.example.panels.BpbFix.FINAL_MASK_ORIGINAL
 
     /** Returns how many configs now carry the fix. */
     private suspend fun applyBpbFix(host: String, mask: String? = null): Int {
