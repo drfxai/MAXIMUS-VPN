@@ -4,6 +4,7 @@ import com.example.data.model.ServerTestResult
 import com.example.data.model.ServerTestStatus
 import com.example.data.model.VlessProfile
 import com.example.vless.VlessValidator
+import com.example.xray.RealDelayProbe
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,34 +18,80 @@ import javax.net.ssl.SSLSocket
 
 object ServerTester {
 
+    /** A real request through a proxy takes several round trips; below this it is rated fast. */
+    const val REAL_DELAY_FAST_MS = 1000L
+
     /**
-     * Performs a real multi-stage connectivity and latency test against the remote VLESS endpoint.
-     * Tests configuration, DNS, TCP, TLS and WebSocket transport. Does not authenticate a proxy request or prove tunneled internet access.
+     * Tests the server. When the VPN's Xray core is idle this is a real request through the proxy
+     * ([RealDelayProbe]), so a dead config is reported as unavailable even if its server answers.
+     * Otherwise it falls back to the transport probe below, which only shows the server is reachable.
      */
     suspend fun testServer(
         profile: VlessProfile,
         timeoutMs: Int = 4000,
         protectSocket: ((Socket) -> Boolean)? = null
-    ): ServerTestResult = withContext(Dispatchers.IO) {
-        try {
-            VlessValidator.validate(profile)
-            com.example.vpn.engine.RuntimeCapabilities.requireSupported(profile)
-        } catch (e: Exception) {
-            val msg = e.localizedMessage ?: "Invalid configuration"
-            XrayLogManager.w("SERVER", "Validation check failed for '${profile.name}': $msg")
-            return@withContext ServerTestResult(
-                serverId = profile.id,
-                status = ServerTestStatus.InvalidConfig(msg)
-            )
-        }
+    ): ServerTestResult = testServers(listOf(profile), timeoutMs, protectSocket).first()
 
-        XrayLogManager.d("SERVER", "Initiating health check for '${profile.name}' (${profile.address}:${profile.port}, transport=${profile.transport}, sec=${profile.security})...")
+    /** Batch form of [testServer]; real-delay probes run up to five configs at a time. */
+    suspend fun testServers(
+        profiles: List<VlessProfile>,
+        timeoutMs: Int = 4000,
+        protectSocket: ((Socket) -> Boolean)? = null
+    ): List<ServerTestResult> = withContext(Dispatchers.IO) {
+        val invalid = profiles.associate { it.id to validationError(it) }
+        val valid = profiles.filter { invalid[it.id] == null }
+        val outcomes = if (valid.isEmpty()) emptyList()
+        else RealDelayProbe.measure(valid, realDelayTimeoutSec(timeoutMs))
+        val real = valid.zip(outcomes).toMap()
+        profiles.map { profile ->
+            invalid[profile.id]?.let { msg ->
+                XrayLogManager.w("SERVER", "Validation check failed for '${profile.name}': $msg")
+                return@map ServerTestResult(serverId = profile.id, status = ServerTestStatus.InvalidConfig(msg))
+            }
+            when (val outcome = real[profile]) {
+                is RealDelayProbe.Outcome.Delay -> {
+                    val fast = outcome.latencyMs < REAL_DELAY_FAST_MS
+                    XrayLogManager.i("SERVER", "Server '${profile.name}' carried a real request in ${outcome.latencyMs}ms (Status: ${if (fast) "EXCELLENT" else "SLOW"})")
+                    ServerTestResult(profile.id, if (fast) ServerTestStatus.Available(outcome.latencyMs) else ServerTestStatus.Slow(outcome.latencyMs))
+                }
+                is RealDelayProbe.Outcome.Failed -> {
+                    XrayLogManager.w("SERVER", "Server '${profile.name}' did not carry a request through the proxy: ${outcome.reason}")
+                    ServerTestResult(profile.id, ServerTestStatus.Unavailable("No traffic through the proxy: ${outcome.reason}"))
+                }
+                is RealDelayProbe.Outcome.NotRun, null -> {
+                    XrayLogManager.d("SERVER", "Real-delay test not run for '${profile.name}' (${(outcome as? RealDelayProbe.Outcome.NotRun)?.reason}); checking reachability only.")
+                    testTransport(profile, timeoutMs, protectSocket)
+                }
+            }
+        }
+    }
+
+    internal fun realDelayTimeoutSec(timeoutMs: Int): Int = ((timeoutMs + 999) / 1000).coerceAtLeast(5)
+
+    private fun validationError(profile: VlessProfile): String? = try {
+        VlessValidator.validate(profile)
+        com.example.vpn.engine.RuntimeCapabilities.requireSupported(profile)
+        null
+    } catch (e: Exception) {
+        e.localizedMessage ?: "Invalid configuration"
+    }
+
+    /**
+     * Reachability probe: DNS, TCP, TLS and WebSocket upgrade. It does not authenticate a proxy
+     * request, so a Cloudflare Worker config passes it even when it carries no traffic.
+     */
+    private fun testTransport(
+        profile: VlessProfile,
+        timeoutMs: Int,
+        protectSocket: ((Socket) -> Boolean)?
+    ): ServerTestResult {
+        XrayLogManager.d("SERVER", "Initiating reachability check for '${profile.name}' (${profile.address}:${profile.port}, transport=${profile.transport}, sec=${profile.security})...")
 
         val startTime = System.nanoTime()
         var socket: Socket? = null
         var sslSocket: SSLSocket? = null
 
-        try {
+        return try {
             // Stage 1: DNS Resolution
             val inetAddress = InetAddress.getByName(profile.address)
 
@@ -92,7 +139,7 @@ object ServerTester {
                 ServerTestStatus.Slow(finalLatency)
             }
 
-            XrayLogManager.i("SERVER", "Server '${profile.name}' responded in ${finalLatency}ms (Status: ${if (finalLatency < 350) "EXCELLENT" else "SLOW"})")
+            XrayLogManager.i("SERVER", "Server '${profile.name}' is reachable in ${finalLatency}ms (handshake only, not a proxy request; Status: ${if (finalLatency < 350) "EXCELLENT" else "SLOW"})")
 
             ServerTestResult(serverId = profile.id, status = status)
         } catch (e: java.net.SocketTimeoutException) {
