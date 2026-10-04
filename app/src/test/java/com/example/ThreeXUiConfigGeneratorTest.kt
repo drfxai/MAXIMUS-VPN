@@ -43,6 +43,8 @@ private class FakePanel(
     // Unpadded URL-safe base64 of 32 bytes, the form Xray prints X25519 keys in.
     val publicKey = "PUBKEY_0123456789abcdefghijklmnopqrstuvwx-A"
     val privateKey = "PRIVKEY_0123456789abcdefghijklmnopqrstuvw_A"
+    val vlessDecryption = "mlkem768x25519plus.native.600s.SERVERKEY"
+    val vlessEncryption = "mlkem768x25519plus.native.0rtt.CLIENTKEY"
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -95,6 +97,12 @@ private class FakePanel(
                 inbounds.removeAll { it.getInt("id") == id }
                 JSONObject().put("success", true)
             }
+            path.endsWith("/panel/api/server/getNewVlessEnc") -> JSONObject().put("success", true).put(
+                "obj",
+                JSONObject().put("auths", JSONArray()
+                    .put(JSONObject().put("id", "mlkem768").put("decryption", "mlkem768x25519plus.native.600s.PQDEC").put("encryption", "mlkem768x25519plus.native.0rtt.PQENC"))
+                    .put(JSONObject().put("id", "x25519").put("decryption", vlessDecryption).put("encryption", vlessEncryption)))
+            )
             path.endsWith("/panel/api/server/getNewX25519Cert") -> JSONObject().put("success", true)
                 .put("obj", JSONObject().put("privateKey", privateKey).put("publicKey", publicKey))
             path.endsWith("/panel/setting/all") -> JSONObject().put("success", true).put(
@@ -256,6 +264,7 @@ class ThreeXUiConfigGeneratorTest {
         assertEquals(8080, result.port)
         assertEquals("ws", result.profile.transport)
         assertEquals("/ws", result.profile.path)
+        assertEquals(fake.vlessEncryption, result.profile.encryption)
         assertEquals("cdn.example.com", result.profile.host)
         assertTrue(result.clientUri.contains("type=ws"))
     }
@@ -438,6 +447,12 @@ class ThreeXUiConfigGeneratorTest {
         assertEquals("cdn.example.com", result.profile.host)
         val stream = JSONObject(fake.inbounds[0].getString("streamSettings"))
         assertEquals("/maximus-hu", stream.getJSONObject("httpupgradeSettings").getString("path"))
+        // Without TLS the inbound carries VLESS Encryption, which Xray needs for a public server.
+        val settings = JSONObject(fake.inbounds[0].getString("settings"))
+        assertEquals(fake.vlessDecryption, settings.getString("decryption"))
+        assertFalse("Xray will not start with fallbacks next to a decryption key", settings.has("fallbacks"))
+        assertEquals(fake.vlessEncryption, result.profile.encryption)
+        assertTrue(result.clientUri.contains("encryption=mlkem768x25519plus.native.0rtt.CLIENTKEY"))
         val parsed = VlessParser.parse(result.clientUri)
         assertTrue(parsed is AppResult.Success)
         assertEquals("httpupgrade", (parsed as AppResult.Success).data.transport)
