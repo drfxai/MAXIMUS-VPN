@@ -98,6 +98,7 @@ class FailoverManager(
                     }
                 } else {
                     consecutiveFailures.set(0)
+                    failedFamilies.clear()
                 }
             }
         }
@@ -244,8 +245,15 @@ class FailoverManager(
 
         // Non-degraded candidates pool (excluding current failing node, bridges, mesh)
         val nonDegraded = eligibleFallbacks(allProfiles, degradedProfile)
-        val scoredCandidates = nonDegraded.filter { it.overallScore > 0 }
-        val candidateProfiles = if (scoredCandidates.isNotEmpty()) scoredCandidates else nonDegraded
+        // A filter that stops one node usually stops its whole kind (QUIC, a TLS fingerprint, a CDN
+        // path), so the next node is of a kind that has not failed during this outage.
+        failedFamilies.add(protocolFamily(degradedProfile))
+        val otherFamilies = preferUntriedFamilies(nonDegraded, failedFamilies)
+        if (otherFamilies.size < nonDegraded.size && otherFamilies.isNotEmpty()) {
+            XrayLogManager.i("FAILOVER", "Trying a different kind of connection than ${failedFamilies.joinToString()}.")
+        }
+        val scoredCandidates = otherFamilies.filter { it.overallScore > 0 }
+        val candidateProfiles = if (scoredCandidates.isNotEmpty()) scoredCandidates else otherFamilies
 
         // --- GOD MODE CASCADE LADDER ---
         if (settings.operationalMode == OperationalMode.GOD_MODE) {
@@ -309,10 +317,37 @@ class FailoverManager(
             }
         }
 
+        /** Kinds of connection that failed during the current outage; cleared once a node works again. */
+        private val failedFamilies: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+        /**
+         * The kind of traffic a censor sees: QUIC (Hysteria2), WireGuard, REALITY, a CDN path
+         * (WebSocket, gRPC, XHTTP or HTTPUpgrade over TLS), direct TLS, or unencrypted.
+         */
+        internal fun protocolFamily(profile: VlessProfile): String {
+            val security = profile.security.lowercase()
+            return when {
+                profile.protocolType == com.example.data.model.ProtocolType.HYSTERIA2 -> "QUIC"
+                profile.protocolType == com.example.data.model.ProtocolType.WIREGUARD -> "WireGuard"
+                security == "reality" -> "REALITY"
+                security == "tls" && profile.transport.lowercase() in CDN_TRANSPORTS -> "CDN"
+                security == "tls" -> "TLS"
+                else -> "plain"
+            }
+        }
+
+        private val CDN_TRANSPORTS = setOf("ws", "grpc", "xhttp", "splithttp", "httpupgrade", "http", "h2")
+
+        /** Candidates of a kind not in [failed]; all candidates when every kind has failed. */
+        internal fun preferUntriedFamilies(candidates: List<VlessProfile>, failed: Set<String>): List<VlessProfile> =
+            candidates.filter { protocolFamily(it) !in failed }.ifEmpty { candidates }
+
         internal fun eligibleFallbacks(profiles: List<VlessProfile>, current: VlessProfile): List<VlessProfile> = profiles.filter {
             com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null &&
                 it.id != current.id && it.effectiveFingerprint != current.effectiveFingerprint &&
-                !(it.address.equals(current.address, ignoreCase = true) && it.port == current.port) &&
+                // The same host and port over another kind (Hysteria2 on UDP next to REALITY on TCP) is a real alternative.
+                !(it.address.equals(current.address, ignoreCase = true) && it.port == current.port &&
+                    protocolFamily(it) == protocolFamily(current)) &&
                 !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-")
         }
     }

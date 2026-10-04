@@ -217,7 +217,7 @@ object XrayConfigBuilder {
         }
         val outbounds = root.getJSONArray("outbounds")
         val proxy = (0 until outbounds.length()).mapNotNull { outbounds.optJSONObject(it) }
-            .firstOrNull { it.optString("protocol") in setOf("vless", "vmess", "trojan", "shadowsocks", "socks", "http") }
+            .firstOrNull { it.optString("protocol") in setOf("vless", "vmess", "trojan", "shadowsocks", "hysteria", "wireguard", "socks", "http") }
             ?: error("A supported proxy outbound is required for private DNS")
         if (proxy.optString("tag").isBlank()) proxy.put("tag", "private-dns-proxy")
         val proxyTag = proxy.getString("tag")
@@ -258,6 +258,14 @@ object XrayConfigBuilder {
             else -> profile.transport.trim().lowercase().ifBlank { "tcp" }
         }
         val isTcpTransport = normalizedTransport == "tcp"
+        val extras = com.example.vpn.engine.ProfileExtras.read(profile)
+
+        if (profile.protocolType == ProtocolType.WIREGUARD) {
+            return buildWireGuardOutbound(proxyOutbound, profile, extras)
+        }
+        if (profile.protocolType == ProtocolType.HYSTERIA2) {
+            return buildHysteria2Outbound(proxyOutbound, profile)
+        }
 
         when (profile.protocolType) {
             ProtocolType.SHADOWSOCKS -> {
@@ -378,6 +386,9 @@ object XrayConfigBuilder {
                     if (profile.publicKey.isNotBlank()) put("publicKey", profile.publicKey)
                     if (profile.shortId.isNotBlank()) put("shortId", profile.shortId)
                     if (profile.spiderX.isNotBlank()) put("spiderX", profile.spiderX)
+                    extras.optString(com.example.vpn.engine.ProfileExtras.MLDSA65_VERIFY).takeIf { it.isNotBlank() }?.let {
+                        put("mldsa65Verify", it)
+                    }
                 }
                 put("realitySettings", realityObj)
             }
@@ -421,9 +432,16 @@ object XrayConfigBuilder {
                     val xhttpObj = JSONObject().apply {
                         put("path", if (profile.path.isNotBlank()) profile.path else "/")
                         if (profile.host.isNotBlank()) put("host", profile.host)
-                        put("mode", "auto")
+                        put("mode", extras.optString(com.example.vpn.engine.ProfileExtras.XHTTP_MODE).ifBlank { "auto" })
+                        extras.optJSONObject(com.example.vpn.engine.ProfileExtras.XHTTP_EXTRA)?.let { put("extra", it) }
                     }
                     put("xhttpSettings", xhttpObj)
+                }
+                "httpupgrade" -> {
+                    put("httpupgradeSettings", JSONObject().apply {
+                        put("path", if (profile.path.isNotBlank()) profile.path else "/")
+                        if (profile.host.isNotBlank()) put("host", profile.host)
+                    })
                 }
                 "tcp" -> {
                     if (profile.headerType.equals("http", ignoreCase = true)) {
@@ -452,6 +470,77 @@ object XrayConfigBuilder {
 
         proxyOutbound.put("streamSettings", streamSettings)
         return proxyOutbound
+    }
+
+    /** Hysteria2 runs on QUIC; salamander obfs, port hopping and brutal bandwidth live in finalmask. */
+    private fun buildHysteria2Outbound(outbound: JSONObject, profile: VlessProfile): JSONObject {
+        outbound.put("protocol", "hysteria")
+        outbound.put("settings", JSONObject().apply {
+            put("version", 2)
+            put("address", profile.address)
+            put("port", profile.port)
+        })
+        outbound.put("streamSettings", JSONObject().apply {
+            put("network", "hysteria")
+            put("hysteriaSettings", JSONObject().put("version", 2).put("auth", profile.uuid))
+            put("security", "tls")
+            put("tlsSettings", JSONObject().apply {
+                put("serverName", profile.sni.ifBlank { profile.address })
+                put("alpn", JSONArray().apply {
+                    profile.alpn.ifBlank { "h3" }.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { put(it) }
+                })
+                if (profile.pinnedPeerCertSha256.isNotBlank()) put("pinnedPeerCertSha256", profile.pinnedPeerCertSha256.trim())
+                if (profile.verifyPeerCertByName.isNotBlank()) put("verifyPeerCertByName", profile.verifyPeerCertByName.trim())
+            })
+            putFinalMask(this, profile)
+            put("sockopt", JSONObject().put("mark", SO_MARK_VPN))
+        })
+        return outbound
+    }
+
+    private fun buildWireGuardOutbound(outbound: JSONObject, profile: VlessProfile, extras: JSONObject): JSONObject {
+        val host = if (profile.address.contains(':') && !profile.address.startsWith("[")) "[${profile.address}]" else profile.address
+        outbound.put("protocol", "wireguard")
+        outbound.put("settings", JSONObject().apply {
+            put("secretKey", profile.uuid)
+            put("address", JSONArray().apply {
+                extras.optString(com.example.vpn.engine.ProfileExtras.WG_ADDRESS).split(",")
+                    .map { it.trim() }.filter { it.isNotEmpty() }.forEach { put(it) }
+            })
+            put("peers", JSONArray().put(JSONObject().apply {
+                put("publicKey", profile.publicKey)
+                put("endpoint", "$host:${profile.port}")
+                extras.optString(com.example.vpn.engine.ProfileExtras.WG_PRESHARED_KEY).takeIf { it.isNotBlank() }?.let { put("preSharedKey", it) }
+                extras.optInt(com.example.vpn.engine.ProfileExtras.WG_KEEPALIVE, 0).takeIf { it > 0 }?.let { put("keepAlive", it) }
+            }))
+            put("mtu", extras.optInt(com.example.vpn.engine.ProfileExtras.WG_MTU, 1280))
+            wireGuardReserved(extras.optString(com.example.vpn.engine.ProfileExtras.WG_RESERVED))?.let { put("reserved", it) }
+            // Android apps cannot create a kernel TUN for WireGuard; use the userspace one.
+            put("noKernelTun", true)
+        })
+        outbound.put("streamSettings", JSONObject().apply {
+            putFinalMask(this, profile)
+            put("sockopt", JSONObject().put("mark", SO_MARK_VPN))
+        })
+        return outbound
+    }
+
+    /** "1,2,3" or base64 of three bytes (both are used in links) to a JSON byte array. */
+    internal fun wireGuardReserved(raw: String): JSONArray? {
+        if (raw.isBlank()) return null
+        val bytes = if (raw.contains(',') || raw.trim().all { it.isDigit() }) {
+            raw.split(',').mapNotNull { it.trim().toIntOrNull()?.takeIf { b -> b in 0..255 } }
+        } else {
+            runCatching { java.util.Base64.getDecoder().decode(raw.trim()).map { it.toInt() and 0xff } }.getOrNull()
+        }
+        return bytes?.takeIf { it.isNotEmpty() }?.let { list -> JSONArray().apply { list.forEach { put(it) } } }
+    }
+
+    private fun putFinalMask(stream: JSONObject, profile: VlessProfile) {
+        if (profile.finalMask.isBlank()) return
+        stream.put("finalmask", runCatching { JSONObject(profile.finalMask) }.getOrElse {
+            throw IllegalArgumentException("The profile's finalMask is not valid JSON")
+        })
     }
 }
 
