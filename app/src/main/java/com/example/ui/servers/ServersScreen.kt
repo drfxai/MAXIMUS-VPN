@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.NetworkPing
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Search
@@ -82,6 +83,7 @@ fun ServersScreen(
     onNavigateToSubscriptions: () -> Unit,
     onNavigateToBenchmark: () -> Unit,
     onNavigateToPanels: () -> Unit = {},
+    onNavigateToProtocols: () -> Unit = {},
     onNavigateToEditServer: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -153,6 +155,13 @@ fun ServersScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
+                item {
+                    HubChip(
+                        icon = Icons.Default.Hub,
+                        title = "Protocols",
+                        onClick = onNavigateToProtocols
+                    )
+                }
                 item {
                     HubChip(
                         icon = Icons.Default.FileDownload,

@@ -312,6 +312,15 @@ class PanelProvisioner(
                 §SUDO firewall-cmd --permanent --add-port="§p"/tcp >/dev/null 2>&1 || true
               fi
             done
+            # Hysteria2 (QUIC) and WireGuard listen on UDP.
+            for p in 443 8443 51820 2408; do
+              if command -v ufw >/dev/null 2>&1 && §SUDO ufw status 2>/dev/null | grep -q 'Status: active'; then
+                §SUDO ufw allow "§p"/udp >/dev/null 2>&1 || true
+              fi
+              if command -v firewall-cmd >/dev/null 2>&1 && §SUDO firewall-cmd --state >/dev/null 2>&1; then
+                §SUDO firewall-cmd --permanent --add-port="§p"/udp >/dev/null 2>&1 || true
+              fi
+            done
             if command -v firewall-cmd >/dev/null 2>&1; then §SUDO firewall-cmd --reload >/dev/null 2>&1 || true; fi
             # Android refuses plain-HTTP panels, so serve the panel over HTTPS with a certificate that
             # is created here (over this authenticated SSH session) and pinned by the app.

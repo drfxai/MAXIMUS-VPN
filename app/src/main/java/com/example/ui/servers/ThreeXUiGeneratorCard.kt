@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Http
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Router
@@ -564,13 +565,14 @@ fun ThreeXUiGeneratorCard(
                                     ThreeXUiProtocol.XHTTP -> Icons.Default.Speed
                                     ThreeXUiProtocol.REALITY -> Icons.Default.Shield
                                     ThreeXUiProtocol.RAW -> Icons.Default.Dns
+                                    ThreeXUiProtocol.HTTPUPGRADE -> Icons.Default.Http
+                                    ThreeXUiProtocol.HYSTERIA2 -> Icons.Default.Bolt
+                                    ThreeXUiProtocol.WIREGUARD -> Icons.Default.VpnKey
                                 },
                                 onClick = {
                                     selectedProtocol = proto
-                                    if (proto == ThreeXUiProtocol.REALITY) {
-                                        selectedSecurity = ThreeXUiSecurity.REALITY
-                                    } else if (selectedSecurity == ThreeXUiSecurity.REALITY) {
-                                        selectedSecurity = ThreeXUiSecurity.NONE
+                                    if (selectedSecurity !in proto.allowedSecurities) {
+                                        selectedSecurity = proto.fixedSecurity ?: ThreeXUiSecurity.NONE
                                     }
                                 }
                             )
@@ -630,8 +632,9 @@ fun ThreeXUiGeneratorCard(
                                 modifier = Modifier.weight(1f),
                                 onClick = {
                                     selectedSecurity = sec
-                                    if (sec == ThreeXUiSecurity.REALITY && selectedProtocol != ThreeXUiProtocol.REALITY) {
-                                        selectedProtocol = ThreeXUiProtocol.REALITY
+                                    if (sec !in selectedProtocol.allowedSecurities) {
+                                        // Reality only runs on RAW (TCP) or xHTTP; Hysteria2 and WireGuard bring their own security.
+                                        selectedProtocol = if (sec == ThreeXUiSecurity.REALITY) ThreeXUiProtocol.REALITY else ThreeXUiProtocol.RAW
                                     }
                                 }
                             )
