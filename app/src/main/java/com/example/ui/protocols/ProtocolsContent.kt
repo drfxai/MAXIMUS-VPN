@@ -21,7 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AltRoute
+import androidx.compose.material.icons.automirrored.rounded.AltRoute
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -585,7 +585,7 @@ private fun ActionDock(c: LabColors, state: ProtocolsUiState, actions: Protocols
             .padding(start = 16.dp, end = 16.dp, top = 28.dp, bottom = 22.dp)
     ) {
         Row(Modifier.fillMaxWidth().labCard(c, 16.dp).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.AltRoute, null, tint = c.accent, modifier = Modifier.size(20.dp))
+            Icon(Icons.AutoMirrored.Rounded.AltRoute, null, tint = c.accent, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 LabText("Smart failover", c.text, 14.sp, FontWeight.SemiBold, maxLines = 1)
