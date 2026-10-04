@@ -32,7 +32,7 @@ object VlessValidator {
             throw VpnException.InvalidUuid(profile.uuid)
         }
 
-        val validTransports = listOf("tcp", "ws", "grpc", "http", "h2", "quic", "kcp", "xhttp", "splithttp")
+        val validTransports = listOf("tcp", "ws", "grpc", "http", "h2", "quic", "kcp", "xhttp", "splithttp", "httpupgrade", "hysteria", "udp")
         if (profile.transport.lowercase() !in validTransports) {
             throw VpnException.UnsupportedTransport(profile.transport)
         }
@@ -222,7 +222,7 @@ object VlessParser {
                 pinnedPeerCertSha256 = pinnedCert,
                 verifyPeerCertByName = verifyByName,
                 echConfigList = echConfig
-            )
+            ).let { com.example.vpn.engine.ProfileExtras.fromQuery(it, params) }
 
             // Validate
             VlessValidator.validate(profile)
@@ -315,6 +315,16 @@ object VlessParser {
         }
         if (profile.echConfigList.isNotBlank()) {
             queryParams.add("ech=${encodeUrl(profile.echConfigList)}")
+        }
+        val extras = com.example.vpn.engine.ProfileExtras.read(profile)
+        extras.optString(com.example.vpn.engine.ProfileExtras.XHTTP_MODE).takeIf { it.isNotBlank() }?.let {
+            queryParams.add("mode=${encodeUrl(it)}")
+        }
+        extras.optJSONObject(com.example.vpn.engine.ProfileExtras.XHTTP_EXTRA)?.let {
+            queryParams.add("extra=${encodeUrl(it.toString())}")
+        }
+        extras.optString(com.example.vpn.engine.ProfileExtras.MLDSA65_VERIFY).takeIf { it.isNotBlank() }?.let {
+            queryParams.add("pqv=${encodeUrl(it)}")
         }
 
         val queryString = if (queryParams.isNotEmpty()) "?${queryParams.joinToString("&")}" else ""

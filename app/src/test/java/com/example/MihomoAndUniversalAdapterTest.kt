@@ -216,7 +216,8 @@ class MihomoAndUniversalAdapterTest {
         assertEquals(8443, parsedHy2Emoji.port)
         assertEquals("mypassword", parsedHy2Emoji.uuid)
         assertEquals("⚡ Hysteria Node", parsedHy2Emoji.name)
-        assertEquals(EngineType.MIHOMO, parsedHy2Emoji.engineType)
+        // Hysteria2 runs on the bundled Xray core; the Mihomo adapter has no native runtime.
+        assertEquals(EngineType.XRAY, parsedHy2Emoji.engineType)
 
         // 5. UniversalImportEngine with SOCKS5, HTTP, and TUIC
         val socksItem = UniversalImportEngine.parseSocks5Uri("socks5://user:pass@127.0.0.1:1080#Local Socks5")
@@ -265,5 +266,33 @@ class MihomoAndUniversalAdapterTest {
         org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
             com.example.vpn.tunnel.WebSocketCodec.readFrame(java.io.ByteArrayInputStream(encodedFrame))
         }
+    }
+
+    @Test
+    fun mihomoHysteria2NodesRunOnXrayWithObfsAndHopping() {
+        val yaml = """
+            proxies:
+              - name: hy2-node
+                type: hysteria2
+                server: hy.example.com
+                port: 443
+                ports: 20000-30000
+                password: secret
+                obfs: salamander
+                obfs-password: obfs-pass
+                sni: hy.example.com
+                up: 30 Mbps
+                down: 200 Mbps
+        """.trimIndent()
+        val node = MihomoParser.toVlessProfiles(yaml).first { it.profileType == com.example.data.model.ProfileType.VLESS }
+        assertEquals(ProtocolType.HYSTERIA2, node.protocolType)
+        assertEquals(EngineType.XRAY, node.engineType)
+        assertEquals("hysteria", node.transport)
+        assertEquals("secret", node.uuid)
+        val mask = org.json.JSONObject(node.finalMask)
+        assertEquals("salamander", mask.getJSONArray("udp").getJSONObject(0).getString("type"))
+        assertEquals("udphop", mask.getJSONArray("udp").getJSONObject(1).getString("type"))
+        assertEquals("30 mbps", mask.getJSONObject("quicParams").getString("brutalUp"))
+        org.junit.Assert.assertNull(com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(node))
     }
 }

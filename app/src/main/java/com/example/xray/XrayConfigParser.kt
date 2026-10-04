@@ -32,7 +32,7 @@ object XrayConfigParser {
                 }
                 // Do not silently reinterpret unrelated Xray outbounds (dns, wireguard,
                 // socks, etc.) as VLESS profiles.
-                if (protocol !in setOf("vless", "vmess", "trojan", "shadowsocks", "hysteria2", "socks", "http")) {
+                if (protocol !in setOf("vless", "vmess", "trojan", "shadowsocks", "hysteria", "hysteria2", "socks", "http")) {
                     continue
                 }
 
@@ -54,7 +54,7 @@ object XrayConfigParser {
                     "vmess" -> ProtocolType.VMESS
                     "trojan" -> ProtocolType.TROJAN
                     "shadowsocks" -> ProtocolType.SHADOWSOCKS
-                    "hysteria2" -> ProtocolType.HYSTERIA2
+                    "hysteria", "hysteria2" -> ProtocolType.HYSTERIA2
                     "socks" -> ProtocolType.SOCKS5
                     "http" -> ProtocolType.HTTP
                     else -> ProtocolType.VLESS
@@ -80,6 +80,12 @@ object XrayConfigParser {
                         }
                     }
 
+                    if (protocolType == ProtocolType.HYSTERIA2) {
+                        address = settings.optString("address", address)
+                        port = settings.optInt("port", port)
+                        uuid = streamSettings.optJSONObject("hysteriaSettings")?.optString("auth", "").orEmpty()
+                    }
+
                     val servers = settings.optJSONArray("servers")
                     if (servers != null && servers.length() > 0) {
                         val serverObj = servers.optJSONObject(0) ?: continue
@@ -97,12 +103,14 @@ object XrayConfigParser {
                 var publicKey = ""
                 var shortId = ""
                 var spiderX = ""
+                var pinnedCert = ""
 
                 if (security == "tls") {
                     val tls = streamSettings.optJSONObject("tlsSettings")
                     if (tls != null) {
                         sni = tls.optString("serverName", "")
                         fingerprint = tls.optString("fingerprint", "")
+                        pinnedCert = tls.optString("pinnedPeerCertSha256", "")
                         val alpnArr = tls.optJSONArray("alpn")
                         if (alpnArr != null) {
                             alpn = (0 until alpnArr.length()).mapNotNull { index ->
@@ -184,6 +192,8 @@ object XrayConfigParser {
                     spiderX = spiderX,
                     alpn = alpn,
                     headerType = headerType,
+                    pinnedPeerCertSha256 = pinnedCert,
+                    finalMask = streamSettings.optJSONObject("finalmask")?.toString().orEmpty(),
                     profileType = ProfileType.XRAY_JSON,
                     protocolType = protocolType,
                     engineType = EngineType.XRAY,

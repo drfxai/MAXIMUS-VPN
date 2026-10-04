@@ -74,7 +74,7 @@ object UniversalImportEngine {
                             ProtocolType.SHADOWSOCKS -> shadowsocksCount++
                             ProtocolType.SOCKS5 -> socks5Count++
                             ProtocolType.HTTP -> httpCount++
-                            ProtocolType.MIXED -> {}
+                            ProtocolType.WIREGUARD, ProtocolType.MIXED -> {}
                         }
 
                         val fp = if (profile.canonicalFingerprint.isNotBlank()) {
@@ -193,6 +193,9 @@ object UniversalImportEngine {
             }
             lower.startsWith("tuic://") -> {
                 parseTuicUri(uriString, fileName, subUrl)
+            }
+            lower.startsWith("wireguard://") || lower.startsWith("wg://") -> {
+                parseWireGuardUri(uriString, fileName, subUrl)
             }
             lower.startsWith("socks5://") || lower.startsWith("socks://") -> {
                 parseSocks5Uri(uriString, fileName, subUrl)
@@ -360,13 +363,21 @@ object UniversalImportEngine {
                 path = path,
                 host = params["host"] ?: sni,
                 alpn = alpn,
+                serviceName = params["serviceName"].orEmpty(),
+                fingerprint = params["fp"].orEmpty(),
+                publicKey = params["pbk"].orEmpty(),
+                shortId = params["sid"].orEmpty(),
+                spiderX = params["spx"].orEmpty(),
+                headerType = params["headerType"].orEmpty(),
+                pinnedPeerCertSha256 = params["pcs"].orEmpty(),
+                echConfigList = params["ech"].orEmpty(),
                 profileType = ProfileType.VLESS,
                 protocolType = ProtocolType.TROJAN,
                 engineType = EngineType.XRAY,
                 sourceFile = fileName,
                 sourceSubscription = subUrl,
                 nodeCount = 1
-            )
+            ).let { ProfileExtras.fromQuery(it, params) }
             ParsedItem.Success(profile)
         } catch (e: Exception) {
             ParsedItem.Invalid(uriString.take(60), "Malformed Trojan link: ${e.message}")
@@ -467,44 +478,16 @@ object UniversalImportEngine {
         }
     }
 
-    fun parseHysteria2Uri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem {
-        return try {
-            val comp = extractUriComponents(uriString, "hysteria2", "hy2")
-                ?: return ParsedItem.Invalid(uriString.take(60), "Malformed Hysteria2 URI structure")
-            val auth = comp.userInfo
-            if (comp.host.isBlank()) {
-                return ParsedItem.Invalid(uriString.take(60), "Hysteria2 link missing server host")
-            }
-            val name = if (comp.fragment.isNotBlank()) {
-                safeDecodeUrl(comp.fragment)
-            } else "Hysteria2-${comp.host}"
+    fun parseHysteria2Uri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem = try {
+        ParsedItem.Success(ProtocolLinks.parseHysteria2(uriString).copy(sourceFile = fileName, sourceSubscription = subUrl))
+    } catch (e: Exception) {
+        ParsedItem.Invalid(uriString.take(60), "Failed to parse Hysteria2 link: ${e.message}")
+    }
 
-            val params = parseQueryParams(comp.query)
-            val sni = params["sni"] ?: comp.host
-            val alpn = params["alpn"] ?: "h3"
-
-            val profile = VlessProfile(
-                id = UUID.randomUUID().toString(),
-                name = name,
-                address = comp.host,
-                port = if (comp.port in 1..65535) comp.port else 443,
-                uuid = auth,
-                encryption = "none",
-                transport = "udp",
-                security = "tls",
-                sni = sni,
-                alpn = alpn,
-                profileType = ProfileType.VLESS,
-                protocolType = ProtocolType.HYSTERIA2,
-                engineType = EngineType.MIHOMO,
-                sourceFile = fileName,
-                sourceSubscription = subUrl,
-                nodeCount = 1
-            )
-            ParsedItem.Success(profile)
-        } catch (e: Exception) {
-            ParsedItem.Invalid(uriString.take(60), "Failed to parse Hysteria2 link: ${e.message}")
-        }
+    fun parseWireGuardUri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem = try {
+        ParsedItem.Success(ProtocolLinks.parseWireGuard(uriString).copy(sourceFile = fileName, sourceSubscription = subUrl))
+    } catch (e: Exception) {
+        ParsedItem.Invalid(uriString.take(60), "Failed to parse WireGuard link: ${e.message}")
     }
 
     fun parseTuicUri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem {

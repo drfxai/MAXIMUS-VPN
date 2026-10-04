@@ -11,7 +11,7 @@ object SecretRedactor {
     )
 
     private val PROXY_URL_PATTERN = Pattern.compile(
-        "(vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic)://([^@]+)@((?:\\[[^\\]]+\\]|[^:/?#]+)):(\\d+)([^\\s\"'<>]*)"
+        "(vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic|wireguard|wg)://([^@]+)@((?:\\[[^\\]]+\\]|[^:/?#]+)):(\\d+)([^\\s\"'<>]*)"
     )
 
     private val HTTP_USERINFO_PATTERN = Pattern.compile(

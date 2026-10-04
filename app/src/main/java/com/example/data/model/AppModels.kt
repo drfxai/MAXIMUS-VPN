@@ -181,6 +181,7 @@ enum class ProtocolType(val displayName: String) {
     TROJAN("Trojan"),
     VMESS("VMess"),
     TUIC("TUIC"),
+    WIREGUARD("WireGuard"),
     HTTP("HTTP"),
     SOCKS5("SOCKS5"),
     MIXED("Mixed")
@@ -209,6 +210,9 @@ data class ProxyNode(
     val spiderX: String = "", // REALITY spx
     val alpn: List<String> = emptyList(),
     val udp: Boolean = true,
+    val finalMask: String = "", // Hysteria2 obfs, port hopping and bandwidth as Xray finalmask JSON
+    val skipCertVerify: Boolean = false,
+    val certPin: String = "", // SHA-256 of the server certificate
     val latencyMs: Long? = null,
     val countryCode: String? = null
 )

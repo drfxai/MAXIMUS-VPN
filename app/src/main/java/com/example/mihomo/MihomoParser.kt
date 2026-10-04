@@ -169,6 +169,7 @@ object MihomoParser {
         }
 
         val udp = booleanValue(map["udp"], true)
+        val hysteriaMask = if (protocolType == ProtocolType.HYSTERIA2) hysteria2Mask(map) else ""
 
         return ProxyNode(
             id = UUID.randomUUID().toString(),
@@ -192,8 +193,35 @@ object MihomoParser {
             shortId = shortId,
             spiderX = spiderX,
             alpn = alpnList,
-            udp = udp
+            udp = udp,
+            finalMask = hysteriaMask,
+            skipCertVerify = booleanValue(map["skip-cert-verify"], false),
+            // For Hysteria2, Mihomo's "fingerprint" is the certificate's SHA-256, not a uTLS name.
+            certPin = if (protocolType == ProtocolType.HYSTERIA2) {
+                com.example.vpn.engine.ProtocolLinks.normalizePin(map["fingerprint"]?.toString())
+            } else ""
         )
+    }
+
+    /** Mihomo's obfs, ports, hop-interval, up and down as an Xray finalmask. */
+    private fun hysteria2Mask(map: Map<*, *>): String {
+        val mask = org.json.JSONObject()
+        val udp = org.json.JSONArray()
+        val obfsPassword = map["obfs-password"]?.toString().orEmpty()
+        if (map["obfs"]?.toString().equals("salamander", ignoreCase = true) && obfsPassword.isNotBlank()) {
+            udp.put(org.json.JSONObject().put("type", "salamander").put("settings", org.json.JSONObject().put("password", obfsPassword)))
+        }
+        map["ports"]?.toString()?.takeIf { it.isNotBlank() }?.let { ports ->
+            runCatching { com.example.vpn.engine.ProtocolLinks.hopMask(ports, map["hop-interval"]?.toString()) }
+                .getOrNull()?.let { udp.put(it) }
+        }
+        if (udp.length() > 0) mask.put("udp", udp)
+        com.example.vpn.engine.ProtocolLinks.bandwidth(map["up"]?.toString())?.let { up ->
+            mask.put("quicParams", org.json.JSONObject().put("congestion", "brutal").put("brutalUp", up).apply {
+                com.example.vpn.engine.ProtocolLinks.bandwidth(map["down"]?.toString())?.let { put("brutalDown", it) }
+            })
+        }
+        return if (mask.length() > 0) mask.toString() else ""
     }
 
     private fun parseProxyGroup(map: Map<*, *>): ProxyGroup? {
@@ -310,6 +338,28 @@ object MihomoParser {
     }
 
     fun proxyNodeToVlessProfile(node: ProxyNode, sourceUrl: String? = null): VlessProfile {
+        if (node.type == ProtocolType.HYSTERIA2) {
+            // Runs on the bundled Xray core, which needs Xray's field layout.
+            return VlessProfile(
+                id = node.id,
+                name = node.name,
+                address = node.server,
+                port = node.port,
+                uuid = node.password.ifBlank { node.uuid },
+                transport = "hysteria",
+                security = "tls",
+                sni = node.sni.ifBlank { node.server },
+                alpn = node.alpn.joinToString(",").ifBlank { "h3" },
+                allowInsecure = node.skipCertVerify,
+                pinnedPeerCertSha256 = node.certPin,
+                finalMask = node.finalMask,
+                profileType = ProfileType.VLESS,
+                protocolType = ProtocolType.HYSTERIA2,
+                engineType = EngineType.XRAY,
+                subscriptionUrl = sourceUrl,
+                nodeCount = 1
+            )
+        }
         return VlessProfile(
             id = node.id,
             name = node.name,
