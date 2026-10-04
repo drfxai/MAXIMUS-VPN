@@ -621,25 +621,32 @@ class RayVpnService : VpnService() {
         var lastError: Exception? = null
         for (network in networks) {
             try {
-                val addresses = network.getAllByName(hostName)
-                val pick = addresses.firstOrNull { it is java.net.Inet4Address } ?: addresses.firstOrNull()
-                val ip = pick?.hostAddress
-                if (!ip.isNullOrBlank()) {
-                    val usesTls = profile.security.equals("tls", true) || profile.security.equals("reality", true)
-                    val usesHostHeader = profile.transport.lowercase() in setOf("ws", "xhttp", "httpupgrade", "splithttp", "h2", "http")
-                    return profile.copy(
-                        address = ip,
-                        sni = if (usesTls && profile.sni.isBlank()) hostName else profile.sni,
-                        host = if (usesHostHeader && profile.host.isBlank()) hostName else profile.host
-                    )
+                val resolved = EndpointResolver.resolve(
+                    hostName,
+                    system = { network.getAllByName(it).toList() },
+                    open = { url -> network.openConnection(url) as java.net.HttpURLConnection }
+                )
+                if (resolved.viaDoh) {
+                    XrayLogManager.w("VPN", "[DIAGNOSTICS] The network's DNS gave a blocked answer for the server; " +
+                        "resolved it over DNS-over-HTTPS instead")
+                } else if (EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))) {
+                    XrayLogManager.w("VPN", "[DIAGNOSTICS] The server name resolves to a private address, " +
+                        "which filtering networks use for blocked sites; DNS-over-HTTPS was unreachable")
                 }
+                val usesTls = profile.security.equals("tls", true) || profile.security.equals("reality", true)
+                val usesHostHeader = profile.transport.lowercase() in setOf("ws", "xhttp", "httpupgrade", "splithttp", "h2", "http")
+                return profile.copy(
+                    address = resolved.address,
+                    sni = if (usesTls && profile.sni.isBlank()) hostName else profile.sni,
+                    host = if (usesHostHeader && profile.host.isBlank()) hostName else profile.host
+                )
             } catch (e: Exception) {
                 lastError = e
             }
         }
         throw IllegalStateException(
             "cannot resolve the server address '$hostName'" +
-                (lastError?.message?.let { " ($it)" } ?: if (networks.isEmpty()) " (no internet connection)" else "")
+                ((lastError?.cause ?: lastError)?.message?.let { " ($it)" } ?: if (networks.isEmpty()) " (no internet connection)" else "")
         )
     }
 
