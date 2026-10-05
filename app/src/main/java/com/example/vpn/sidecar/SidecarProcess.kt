@@ -5,7 +5,6 @@ import com.example.xray.XrayLogManager
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.util.concurrent.TimeUnit
 
 /** One running engine program. */
 class SidecarProcess(
@@ -29,13 +28,19 @@ class SidecarProcess(
         }
     }, "sidecar-$name-log").apply { isDaemon = true; start() }
 
-    override val isAlive: Boolean get() = process.isAlive
+    // Process.isAlive, waitFor(timeout) and destroyForcibly need API 26; the app supports 24.
+    override val isAlive: Boolean get() = try {
+        process.exitValue()
+        false
+    } catch (_: IllegalThreadStateException) {
+        true
+    }
 
     /** Waits until the SOCKS port accepts connections, the program exits, or [timeoutMs] passes. */
     override fun awaitReady(timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            if (!process.isAlive) return false
+            if (!isAlive) return false
             if (sawReadyLine && portOpen(socksPort)) return true
             Thread.sleep(100)
         }
@@ -43,8 +48,10 @@ class SidecarProcess(
     }
 
     override fun stop() {
+        // destroy() sends SIGTERM, which lets the engines close their connections; nothing else is needed.
         process.destroy()
-        if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
+        val deadline = System.currentTimeMillis() + 2_000
+        while (isAlive && System.currentTimeMillis() < deadline) Thread.sleep(50)
     }
 
     companion object {
