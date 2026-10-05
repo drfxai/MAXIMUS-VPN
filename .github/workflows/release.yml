@@ -69,6 +69,20 @@ jobs:
           else
             echo "No PSIPHON_CONFIG secret; Psiphon stays off in this build"
           fi
+      - name: Free config list key
+        # The app checks the free list's signature with the public half of HUB_SIGNING_KEY. Only the
+        # public key goes into the build; the private key stays in the secret.
+        env:
+          HUB_SIGNING_KEY: ${{ secrets.HUB_SIGNING_KEY }}
+        run: |
+          if [ -n "$HUB_SIGNING_KEY" ]; then
+            public=$(printf '%s\n' "$HUB_SIGNING_KEY" | openssl ec -pubout -outform DER 2>/dev/null | base64 -w0)
+            test -n "$public"
+            echo "HUB_PUBLIC_KEY=$public" >> "$GITHUB_ENV"
+            echo "Free config list enabled"
+          else
+            echo "No HUB_SIGNING_KEY secret; the free config list stays off in this build"
+          fi
       - name: Build the engine programs from pinned, checksum-verified sources
         # ABIs other than arm64-v8a are linked with the NDK's C toolchain, which the runner image has.
         run: bash scripts/build-engines.sh arm64-v8a armeabi-v7a x86_64

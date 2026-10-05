@@ -25,13 +25,14 @@ object OfficialSubscriptions {
         repository: SubscriptionRepository,
         seeded: Set<String>,
         markSeeded: (Set<String>) -> Unit,
-        urls: List<String> = URLS
+        urls: List<String> = URLS,
+        name: String = NAME
     ): SubscriptionInfo? {
         val primary = urls.firstOrNull() ?: return null
         if (primary in seeded) return null
         markSeeded(seeded + urls)
         if (repository.getSubscriptionByUrl(primary) != null) return null
-        val sub = SubscriptionInfo(name = NAME, url = primary, autoRefresh = true, refreshIntervalMinutes = 360, mirrors = urls.drop(1))
+        val sub = SubscriptionInfo(name = name, url = primary, autoRefresh = true, refreshIntervalMinutes = 360, mirrors = urls.drop(1))
         repository.insertOrUpdate(sub)
         return sub
     }

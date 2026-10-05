@@ -270,6 +270,13 @@ so an unsigned or changed list is refused whatever address served it; the key is
 key is created, so nothing is accepted yet. `HubSnapshots` keeps three lists (current, previous, and the
 last whose nodes carried traffic), so a bad update never leaves the app without a list.
 
+Free list live path (added later): nine public GitHub collectors in `sources/sources.json`; the
+`free-configs.yml` workflow publishes the signed list every six hours on the `free-configs` branch; the
+app subscribes to it as "MAXIMUS Free" and accepts a copy from GitHub or its CDN mirrors only with a
+valid signature (`FreeConfigList`). A local run on 2026-10-05: 300 configs published, 285 of them
+importable by the app. Turns on once `HUB_SIGNING_KEY` exists and this branch is on `main` (scheduled
+workflows run only from the default branch). The hub screen with node states is still to come.
+
 ## Steps 15–26: the remaining transports
 
 Already working on the bundled Xray core, verified with real traffic in the simulator: WireGuard

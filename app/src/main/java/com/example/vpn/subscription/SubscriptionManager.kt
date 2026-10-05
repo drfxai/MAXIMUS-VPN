@@ -5,6 +5,7 @@ import com.example.data.model.SubscriptionInfo
 import com.example.data.repository.ServerRepository
 import com.example.data.repository.SubscriptionRepository
 import com.example.vpn.engine.UniversalImportEngine
+import com.example.vpn.hub.FreeConfigList
 import com.example.vpn.routing.RoutingEngine
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.Dispatchers
@@ -224,7 +225,11 @@ class SubscriptionManager(
         rawText = payload,
         sourceFileName = subscription.name,
         sourceSubscriptionUrl = subscription.url
-    )
+    ).let { result ->
+        // Public configs are hostile input: from the free list only what is safe and runnable here is kept.
+        if (FreeConfigList.isList(subscription.url)) result.copy(validProfiles = result.validProfiles.filter(FreeConfigList::usable))
+        else result
+    }
 
     /**
      * Synchronizes a subscription from its address, its mirrors or the CDN copies of a GitHub file,
@@ -245,7 +250,10 @@ class SubscriptionManager(
         val candidates = SubscriptionSources.candidates(subscription.url, subscription.mirrors)
             .filter { isValidSubscriptionUrl(it) }
         val fetcher = SubscriptionFetcher(
-            download = download ?: ::httpDownload,
+            download = (download ?: ::httpDownload).let { get ->
+                // The free list is taken from any address only with a valid signature beside it.
+                if (FreeConfigList.isList(subscription.url)) { url: String -> FreeConfigList.download(url, get) } else get
+            },
             count = { parse(it, subscription).validProfiles.size },
             staggerMs = staggerMs
         )

@@ -13,8 +13,11 @@ import java.security.spec.X509EncodedKeySpec
  * exist, [PUBLIC_KEY_DER_BASE64] is empty and every list is refused as unsigned.
  */
 object HubManifest {
-    /** The aggregator's ECDSA P-256 public key, DER, base64. Empty until the signing key is created. */
-    const val PUBLIC_KEY_DER_BASE64 = ""
+    /**
+     * The aggregator's ECDSA P-256 public key, DER, base64. The release build derives it from the
+     * HUB_SIGNING_KEY secret; it is empty in builds made without that secret.
+     */
+    val PUBLIC_KEY_DER_BASE64: String = com.example.BuildConfig.HUB_PUBLIC_KEY
 
     private const val ALGORITHM = "SHA256withECDSA"
 

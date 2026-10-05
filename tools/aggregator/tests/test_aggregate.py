@@ -37,6 +37,57 @@ class ValidationTests(unittest.TestCase):
         self.assertNotIn("11111111", aggregate.fingerprint(GOOD))
 
 
+def vmess(**fields):
+    body = {"v": "2", "ps": "@SomeChannel ad", "add": "203.0.113.20", "port": "443", "id": "22222222-2222-2222-2222-222222222222",
+            "net": "ws", "tls": "tls", "sni": "v.example", "path": "/"}
+    body.update(fields)
+    return "vmess://" + base64.b64encode(json.dumps(body).encode()).decode()
+
+
+class RealWorldTests(unittest.TestCase):
+    def test_a_malformed_port_is_refused_instead_of_stopping_the_run(self):
+        self.assertEqual("malformed", aggregate.problem("vless://u@203.0.113.7:abc@x?security=tls#M"))
+        self.assertEqual("malformed", aggregate.problem("trojan://pw@203.0.113.7:0?security=tls#Z"))
+
+    def test_links_the_app_would_refuse_are_not_published(self):
+        cases = {
+            GOOD.replace("&pbk=abc", ""): "incomplete reality settings",
+            GOOD.replace("&sni=www.example.com", ""): "incomplete reality settings",
+            GOOD.replace(":443?", ":443/?"): "malformed",
+            GOOD.replace("11111111-1111-1111-1111-111111111111", "%58pnTeam-51"): "malformed",
+            "trojan://pw@203.0.113.9:443?type=tcp#T": "no encryption",
+        }
+        for link, reason in cases.items():
+            self.assertEqual(reason, aggregate.problem(link), link)
+
+    def test_vmess_is_read_from_its_json(self):
+        self.assertIsNone(aggregate.problem(vmess()))
+        self.assertEqual("private or reserved address", aggregate.problem(vmess(add="192.168.1.1")))
+        self.assertEqual("certificate checks disabled", aggregate.problem(vmess(allowInsecure=True)))
+        self.assertEqual("malformed", aggregate.problem("vmess://bm90IGpzb24="))
+        self.assertNotEqual(aggregate.fingerprint(vmess()), aggregate.fingerprint(vmess(add="203.0.113.21")))
+
+    def test_names_with_spaces_or_ads_are_replaced(self):
+        link = GOOD.replace("#R", "#🇩🇪 - DE - @FreeChannel")
+        self.assertIsNone(aggregate.problem(link))
+        self.assertTrue(aggregate.rename(link, "Free VLESS 1").endswith("#Free%20VLESS%201"))
+        renamed = aggregate.rename(vmess(), "Free VMESS 1")
+        body = json.loads(base64.b64decode(renamed[len("vmess://"):]))
+        self.assertEqual("Free VMESS 1", body["ps"])
+        self.assertEqual("203.0.113.20", body["add"])
+
+    def test_sources_take_turns_up_to_the_limit(self):
+        self.assertEqual(["a1", "b1", "a2", "b2", "a3"], aggregate.interleave([["a1", "a2", "a3"], ["b1", "b2"]], limit=10))
+        self.assertEqual(["a1", "b1", "a2"], aggregate.interleave([["a1", "a2", "a3"], ["b1", "b2"]], limit=3))
+
+    def test_servers_that_do_not_answer_are_dropped(self):
+        report = {"rejected": {}}
+        kept = aggregate.keep_alive([GOOD, GOOD2], report, check=lambda link: "203.0.113.7" in link)
+        self.assertEqual([GOOD], kept)
+        self.assertEqual(1, report["rejected"]["not answering"])
+        self.assertEqual([], aggregate.keep_alive([GOOD], {"rejected": {}}, check=lambda link: 1 / 0))
+
+
 class BuildTests(unittest.TestCase):
     def build(self, sources, fetched, key=None):
         """Builds into a temporary directory and returns the manifest plus every file's bytes."""
@@ -55,7 +106,7 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(2, manifest["count"])
         self.assertEqual("2 kept", manifest["report"]["sources"]["up"])
         self.assertTrue(manifest["report"]["sources"]["down"].startswith("not fetched"))
-        self.assertEqual(plain, GOOD + "\n" + GOOD2 + "\n")
+        self.assertEqual(plain, GOOD.replace("#R", "#Free%20VLESS%201") + "\n" + GOOD2.replace("#R", "#Free%20VLESS%202") + "\n")
         self.assertEqual(base64.b64encode(plain.encode()).decode(), files["free-base64.txt"].decode())
         for name, entry in manifest["files"].items():
             self.assertEqual(entry["bytes"], len(files[name]))

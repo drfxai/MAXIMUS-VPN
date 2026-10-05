@@ -10,20 +10,27 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import socket
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import re
 import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit, parse_qs, unquote
+from urllib.parse import urlsplit, parse_qs, quote, unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_BYTES = 5 * 1024 * 1024
 TIMEOUT_SEC = 30
 MAX_PER_SOURCE = 500
+MAX_TOTAL = 300
+ALIVE_TIMEOUT_SEC = 3
+ALIVE_WORKERS = 64
 SCHEMES = ("vless://", "vmess://", "trojan://", "ss://", "hysteria2://", "hy2://", "wireguard://", "wg://")
 ENCRYPTED_SECURITY = ("tls", "reality")
+UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
 def fetch(url: str) -> str:
@@ -44,22 +51,72 @@ def decode_maybe_base64(text: str) -> str:
     return text
 
 
+def endpoint(link: str) -> dict:
+    """Host, port, credential and transport fields of a link; raises ValueError for a malformed one."""
+    if link.startswith("vmess://"):
+        body = link[len("vmess://"):].split("#", 1)[0]
+        data = json.loads(base64.b64decode(body + "=" * (-len(body) % 4), altchars=b"-_").decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("vmess body is not an object")
+        port = int(str(data.get("port", "")).strip())
+        tls = str(data.get("tls", "")).lower()
+        return {
+            "scheme": "vmess", "host": str(data.get("add", "")).strip().lower(), "port": port,
+            "credential": str(data.get("id", "")), "type": str(data.get("net", "")).lower(),
+            "security": tls, "sni": str(data.get("sni", "") or data.get("host", "")).lower(),
+            "path": str(data.get("path", "")), "service": "", "pbk": "",
+            "insecure": str(data.get("allowInsecure", data.get("skip-cert-verify", ""))).lower() in ("1", "true"),
+        }
+    parts = urlsplit(link)
+    port = parts.port  # raises ValueError for a port that is not a number
+    query = parse_qs(parts.query)
+    first = lambda name: (query.get(name, [""])[0] or "")
+    return {
+        "scheme": parts.scheme.lower(), "host": (parts.hostname or "").lower(), "port": port or 0,
+        "credential": unquote(parts.username or ""), "type": first("type").lower(),
+        "security": first("security").lower(), "sni": first("sni").lower(), "path": first("path"),
+        "service": first("serviceName"), "pbk": first("pbk"), "encryption": first("encryption").lower(),
+        # "host:443/?..." puts a slash after the port, which the app (like Xray's own parser) refuses.
+        "path_in_authority": parts.path not in ("",),
+        "insecure": any(v and v[0].lower() in ("1", "true") for k, v in query.items()
+                        if k.lower() in ("allowinsecure", "insecure", "skip-cert-verify")),
+    }
+
+
+def rename(link: str, name: str) -> str:
+    """The link with its display name replaced; source names often carry ads or channel handles."""
+    if link.startswith("vmess://"):
+        body = link[len("vmess://"):].split("#", 1)[0]
+        data = json.loads(base64.b64decode(body + "=" * (-len(body) % 4), altchars=b"-_").decode("utf-8"))
+        data["ps"] = name
+        return "vmess://" + base64.b64encode(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode()).decode()
+    return link.split("#", 1)[0] + "#" + quote(name)
+
+
 def problem(link: str) -> str | None:
-    """Why this link must not be published, or None."""
+    """Why this link must not be published, or None. The display name after # is not checked: it is replaced."""
     if not link.startswith(SCHEMES):
         return "unknown scheme"
-    if len(link) > 2048:
+    if len(link) > 2048 and not link.startswith("vmess://"):
         return "too long"
-    if any(c.isspace() for c in link.strip()) or any(ord(c) < 32 for c in link):
+    if len(link) > 4096:
+        return "too long"
+    body = link if link.startswith("vmess://") else link.split("#", 1)[0]
+    if any(c.isspace() for c in body.strip()) or any(ord(c) < 32 or ord(c) == 127 for c in link):
         return "control characters"
-    parts = urlsplit(link)
-    host = (parts.hostname or "").lower()
+    try:
+        e = endpoint(link)
+    except Exception:
+        return "malformed"
+    host = e["host"]
     if not host or host.endswith(".local") or host in ("localhost", "metadata.google.internal"):
         return "local host"
+    if not 1 <= e["port"] <= 65535:
+        return "malformed"
     if host.replace(".", "").isdigit():
         octets = [int(o) for o in host.split(".") if o.isdigit()]
         if len(octets) == 4 and (
-            octets[0] in (0, 10, 127) or octets[0] >= 240
+            octets[0] in (0, 10, 127) or octets[0] >= 224
             or (octets[0] == 100 and 64 <= octets[1] <= 127)
             or (octets[0] == 169 and octets[1] == 254)
             or (octets[0] == 172 and 16 <= octets[1] <= 31)
@@ -67,33 +124,74 @@ def problem(link: str) -> str | None:
             or (octets[0] == 198 and octets[1] in (18, 19))
         ):
             return "private or reserved address"
-    query = parse_qs(parts.query)
-    if any(v and v[0] in ("1", "true") for k, v in query.items() if k.lower() in ("allowinsecure", "insecure", "skip-cert-verify")):
+    if e["insecure"]:
         return "certificate checks disabled"
-    if link.startswith(("vless://", "trojan://")):
-        security = (query.get("security", [""])[0] or "").lower()
-        encryption = (query.get("encryption", [""])[0] or "").lower()
-        if security not in ENCRYPTED_SECURITY and encryption in ("", "none"):
+    if e["scheme"] in ("vless", "trojan"):
+        if e["security"] not in ENCRYPTED_SECURITY and (e["scheme"] == "trojan" or e.get("encryption", "") in ("", "none")):
             return "no encryption"
+        if e["security"] == "reality" and (not e["pbk"] or not e["sni"]):
+            return "incomplete reality settings"
+        if e.get("path_in_authority"):
+            return "malformed"
+    if e["scheme"] == "vless" and not UUID.match(e["credential"]):
+        return "malformed"
+    if e["scheme"] == "trojan" and not e["credential"]:
+        return "malformed"
     return None
 
 
 def fingerprint(link: str) -> str:
     """Canonical identity: scheme, host, port, transport, security, SNI, path, and the credential hashed."""
-    parts = urlsplit(link)
-    query = parse_qs(parts.query)
-    credential = hashlib.sha256(unquote(parts.username or "").encode()).hexdigest()[:16] if parts.username else ""
-    fields = [
-        parts.scheme.lower(), (parts.hostname or "").lower(), str(parts.port or ""), credential,
-        (query.get("type", [""])[0] or "").lower(), (query.get("security", [""])[0] or "").lower(),
-        (query.get("sni", [""])[0] or "").lower(), query.get("path", [""])[0],
-        query.get("serviceName", [""])[0], query.get("pbk", [""])[0],
-    ]
+    e = endpoint(link)
+    credential = hashlib.sha256(e["credential"].encode()).hexdigest()[:16] if e["credential"] else ""
+    fields = [e["scheme"], e["host"], str(e["port"] or ""), credential, e["type"], e["security"],
+              e["sni"], e["path"], e["service"], e["pbk"]]
     return hashlib.sha256("|".join(fields).encode()).hexdigest()
 
 
-def collect(sources: list[dict], fetcher=fetch) -> tuple[list[str], dict]:
-    links: list[str] = []
+def alive(link: str, timeout: float = ALIVE_TIMEOUT_SEC) -> bool:
+    """True when the server accepts a TCP connection (UDP protocols are kept: TCP says nothing about them)."""
+    e = endpoint(link)
+    if e["scheme"] in ("hysteria2", "hy2", "wireguard", "wg"):
+        return True
+    try:
+        with socket.create_connection((e["host"], e["port"]), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def keep_alive(links: list[str], report: dict, check=alive) -> list[str]:
+    """Drops servers that do not answer from here; a server that answers may still be blocked elsewhere."""
+    with ThreadPoolExecutor(max_workers=ALIVE_WORKERS) as pool:
+        results = list(pool.map(lambda link: _safe(check, link), links))
+    kept = [link for link, ok in zip(links, results) if ok]
+    if len(kept) < len(links):
+        report["rejected"]["not answering"] = report["rejected"].get("not answering", 0) + len(links) - len(kept)
+    return kept
+
+
+def _safe(check, link: str) -> bool:
+    try:
+        return check(link)
+    except Exception:
+        return False
+
+
+def interleave(per_source: list[list[str]], limit: int = MAX_TOTAL) -> list[str]:
+    """Takes from each source in turn, so one large source cannot fill the whole list."""
+    out: list[str] = []
+    index = 0
+    while len(out) < limit and any(index < len(links) for links in per_source):
+        for links in per_source:
+            if index < len(links) and len(out) < limit:
+                out.append(links[index])
+        index += 1
+    return out
+
+
+def collect(sources: list[dict], fetcher=fetch, check=None) -> tuple[list[str], dict]:
+    per_source: list[list[str]] = []
     seen: set[str] = set()
     report = {"sources": {}, "rejected": {}}
     for source in sources:
@@ -103,7 +201,7 @@ def collect(sources: list[dict], fetcher=fetch) -> tuple[list[str], dict]:
         except Exception as error:  # a source that is down must not stop the others
             report["sources"][name] = f"not fetched: {type(error).__name__}"
             continue
-        kept = 0
+        links: list[str] = []
         for raw in text.splitlines():
             link = raw.strip()
             if not link or link.startswith("#"):
@@ -117,12 +215,17 @@ def collect(sources: list[dict], fetcher=fetch) -> tuple[list[str], dict]:
                 report["rejected"]["duplicate"] = report["rejected"].get("duplicate", 0) + 1
                 continue
             seen.add(key)
-            links.append(link)
-            kept += 1
-            if kept >= MAX_PER_SOURCE:
+            try:
+                links.append(rename(link, f"Free {endpoint(link)['scheme'].upper()} {len(seen)}"))
+            except Exception:
+                report["rejected"]["malformed"] = report["rejected"].get("malformed", 0) + 1
+            if len(links) >= MAX_PER_SOURCE:
                 break
-        report["sources"][name] = f"{kept} kept"
-    return links, report
+        if check is not None:
+            links = keep_alive(links, report, check)
+        report["sources"][name] = f"{len(links)} kept"
+        per_source.append(links)
+    return interleave(per_source), report
 
 
 def sign(payload: bytes, pem: str) -> str:
@@ -135,9 +238,9 @@ def sign(payload: bytes, pem: str) -> str:
     return base64.b64encode(key.sign(payload, ec.ECDSA(hashes.SHA256()))).decode()
 
 
-def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem: str | None = None) -> dict:
+def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem: str | None = None, check=None) -> dict:
     config = json.loads(sources_file.read_text())
-    links, report = collect(config.get("sources", []), fetcher)
+    links, report = collect(config.get("sources", []), fetcher, check)
     output_dir.mkdir(parents=True, exist_ok=True)
     plain = ("\n".join(links) + "\n") if links else ""
     (output_dir / "free.txt").write_text(plain)
@@ -163,7 +266,10 @@ def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem
 
 
 def main() -> int:
-    manifest = build(ROOT / "output", ROOT / "sources" / "sources.json", key_pem=os.environ.get("HUB_SIGNING_KEY") or None)
+    # AGGREGATOR_CHECK_ALIVE=0 skips the TCP check (for runs without outbound access).
+    check = None if os.environ.get("AGGREGATOR_CHECK_ALIVE", "1") == "0" else alive
+    manifest = build(ROOT / "output", ROOT / "sources" / "sources.json",
+                     key_pem=os.environ.get("HUB_SIGNING_KEY") or None, check=check)
     print(f"{manifest['count']} configs; manifest {'signed' if (ROOT / 'output' / 'manifest.sig').read_text() else 'UNSIGNED (no key)'}")
     for name, state in manifest["report"]["sources"].items():
         print(f"  {name}: {state}")

@@ -48,8 +48,8 @@ class HubManifestTest {
         assertThrows(HubManifest.Refused::class.java) {
             HubManifest.verify(manifestJson, signature, java.util.Base64.getEncoder().encodeToString(other.public.encoded))
         }
-        // This build has no key yet, so nothing is accepted by default.
-        assertEquals("", HubManifest.PUBLIC_KEY_DER_BASE64)
+        // The built-in key is whatever the build was given, and nothing else.
+        assertEquals(com.example.BuildConfig.HUB_PUBLIC_KEY, HubManifest.PUBLIC_KEY_DER_BASE64)
     }
 
     @Test fun aListThatWorkedIsKeptWhenTheNextOneBringsNothing() {

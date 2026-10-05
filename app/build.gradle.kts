@@ -24,6 +24,12 @@ android {
     versionName = "1.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // The free config list's public key (DER, base64), derived in the release workflow from the
+    // HUB_SIGNING_KEY secret. Without it the app refuses every list, as unsigned.
+    val hubPublicKey = System.getenv("HUB_PUBLIC_KEY").orEmpty().trim()
+    require(hubPublicKey.all { it.isLetterOrDigit() || it in "+/=" }) { "HUB_PUBLIC_KEY must be base64" }
+    buildConfigField("String", "HUB_PUBLIC_KEY", "\"$hubPublicKey\"")
   }
 
   val rootDebugKeystore = file("${rootDir}/debug.keystore")

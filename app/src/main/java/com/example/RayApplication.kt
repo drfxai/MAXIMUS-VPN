@@ -113,6 +113,16 @@ class RayApplication : Application() {
                     seeded = prefs.getStringSet("seeded", emptySet()).orEmpty(),
                     markSeeded = { prefs.edit().putStringSet("seeded", it).apply() }
                 )?.let { launch { subscriptionManager.syncSubscription(it) } }
+                // The signed free list, offered once per install when this build can check its signature.
+                if (com.example.vpn.hub.FreeConfigList.available()) {
+                    com.example.vpn.subscription.OfficialSubscriptions.ensure(
+                        subscriptionRepository,
+                        seeded = prefs.getStringSet("seeded_free", emptySet()).orEmpty(),
+                        markSeeded = { prefs.edit().putStringSet("seeded_free", it).apply() },
+                        urls = listOf(com.example.vpn.hub.FreeConfigList.URL),
+                        name = com.example.vpn.hub.FreeConfigList.NAME
+                    )?.let { launch { subscriptionManager.syncSubscription(it) } }
+                }
                 serverRepository.migrateSensitiveSubscriptionSources()
                 serverRepository.delete("seed-vless-ws-1")
                 serverRepository.delete("seed-vless-reality-1")
