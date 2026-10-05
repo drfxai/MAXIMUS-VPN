@@ -198,6 +198,82 @@ fun SubscriptionsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
+            // Curated Free Config Hub. Sources are public, untrusted third-party data and are
+            // always processed by SubscriptionManager + UniversalImportEngine before persistence.
+            Text(
+                text = "FREE CONFIG HUB",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Curated public sources. Maximus validates, parses and deduplicates every imported node.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            FreeConfigHubSources.sources.forEach { source ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .testTag("free_config_source_${source.id}"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = source.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = source.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = source.protocols,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Button(
+                            onClick = { viewModel.addSubscription(source.name, source.url) },
+                            enabled = !uiState.isSyncing,
+                            modifier = Modifier.testTag("add_free_config_${source.id}")
+                        ) {
+                            if (uiState.isSyncing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Text("Add")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = "Public relays are not trusted infrastructure. Avoid sensitive traffic until a node has passed Maximus health and security checks.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+
             // Subscriptions List
             if (subscriptions.isEmpty()) {
                 Box(
@@ -406,5 +482,40 @@ private fun AddSubscriptionDialog(
                 Text("Cancel")
             }
         }
+    )
+}
+
+
+private data class FreeConfigSource(
+    val id: String,
+    val name: String,
+    val description: String,
+    val protocols: String,
+    val url: String
+)
+
+private object FreeConfigHubSources {
+    val sources = listOf(
+        FreeConfigSource(
+            id = "patterniha",
+            name = "Patterniha Free Configs",
+            description = "Aggregated and tested public configurations; upstream refreshes the list automatically.",
+            protocols = "VLESS • VMess • Trojan • Shadowsocks",
+            url = "https://raw.githubusercontent.com/patterniha/Free-Configs/main/configs.txt"
+        ),
+        FreeConfigSource(
+            id = "whitedns",
+            name = "WhiteDNS Public",
+            description = "Public Mihomo catalogue used by the WhiteVPN ecosystem.",
+            protocols = "Mihomo/Clash • VLESS • VMess • Trojan • Shadowsocks",
+            url = "https://raw.githubusercontent.com/iampedii/whitedns-sub/main/mihomo.yaml"
+        ),
+        FreeConfigSource(
+            id = "vify_vless",
+            name = "Vify Public VLESS",
+            description = "Vify's maintained public VLESS subscription source.",
+            protocols = "VLESS",
+            url = "https://raw.githubusercontent.com/Mr-Meshky/vify/main/configs/vless.txt"
+        )
     )
 }
