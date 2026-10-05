@@ -269,3 +269,24 @@ In the app, `HubManifest` checks the signature against a public key built in and
 so an unsigned or changed list is refused whatever address served it; the key is empty until the signing
 key is created, so nothing is accepted yet. `HubSnapshots` keeps three lists (current, previous, and the
 last whose nodes carried traffic), so a bad update never leaves the app without a list.
+
+## Steps 15–26: the remaining transports
+
+Already working on the bundled Xray core, verified with real traffic in the simulator: WireGuard
+(step 15) and Hysteria2 (step 17).
+
+AmneziaWG (step 16) is partly there: junk packets (Jc/Jmin/Jmax) are sent, but a server that changes
+WireGuard's packet format (S1–S4, H1–H4) is refused with a message saying what to ask for. Supporting it
+needs amneziawg-go as a second native engine.
+
+Steps 18–26 (WARP, Psiphon, Aether, the DNS-rescue transports, Slipstream, NaiveProxy, Tor) each need a
+native library the app does not ship. Every one is listed in `EngineRegistry` with its license, mapping
+to no runtime, so none can be selected or shown as working. Before any of them is bundled it needs:
+
+1. a license decision (Psiphon and Mihomo are GPL-3.0; amneziawg-go, NaiveProxy, Tor and dnstt are
+   permissive) — asked of the owner;
+2. a pinned download with a checked hash, as `scripts/fetch-libxray-android.sh` does;
+3. real traffic through it in the simulator before it may be called working.
+
+The APK also grows with each native engine; adding them all would multiply its size, so they are worth
+adding one at a time, strongest first.

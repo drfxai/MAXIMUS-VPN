@@ -23,6 +23,10 @@ class EngineRegistryTest {
             assertTrue(d.bundled)
             assertNotNull(d.version)
         }
+        // Engines the plan still calls for are listed, with a license, and map to no runtime.
+        val planned = EngineRegistry.ENGINES.filterNot { it.bundled }
+        assertEquals(7, planned.size)
+        assertTrue(planned.all { it.runtime == null && it.version == null && it.license.isNotBlank() })
         assertFalse(EngineRegistry.MIHOMO.bundled)
     }
 

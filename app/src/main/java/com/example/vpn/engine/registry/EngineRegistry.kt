@@ -27,9 +27,21 @@ object EngineRegistry {
         bundled = true, runtime = EngineSelectionPolicy.Runtime.XRAY)
     val KOTLIN_TUNNEL = EngineDescriptor("kotlin-tunnel", "Kotlin packet tunnel", "in app", "Proprietary (this app)",
         bundled = true, runtime = EngineSelectionPolicy.Runtime.KOTLIN_TUNNEL)
+    /**
+     * Engines the plan calls for that are not bundled. Each needs its own native library, a license
+     * decision and a pinned, hash-checked download before it can appear as a runtime.
+     */
     val MIHOMO = EngineDescriptor("mihomo", "Mihomo", null, "GPL-3.0", bundled = false, runtime = null)
+    val AMNEZIAWG = EngineDescriptor("amneziawg", "amneziawg-go", null, "MIT", bundled = false, runtime = null)
+    val WARP = EngineDescriptor("warp", "Cloudflare WARP (WireGuard registration)", null, "MIT (wgcf-style registration)",
+        bundled = false, runtime = null)
+    val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core", null, "GPL-3.0", bundled = false, runtime = null)
+    val TOR = EngineDescriptor("tor", "Tor with pluggable transports", null, "BSD-3-Clause (Tor), MIT (lyrebird)",
+        bundled = false, runtime = null)
+    val NAIVE = EngineDescriptor("naive", "NaiveProxy", null, "BSD-3-Clause", bundled = false, runtime = null)
+    val DNS_TUNNEL = EngineDescriptor("dns-tunnel", "DNS tunnel (dnstt-style)", null, "MIT", bundled = false, runtime = null)
 
-    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, MIHOMO)
+    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, MIHOMO, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL)
 
     fun descriptorFor(runtime: EngineSelectionPolicy.Runtime): EngineDescriptor =
         ENGINES.first { it.runtime == runtime }
