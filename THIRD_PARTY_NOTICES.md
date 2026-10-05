@@ -23,6 +23,15 @@ The Android application bundles the official XTLS/libXray release `v26.9.9` and 
   network settings are issued by Psiphon Inc. and are not part of this repository.
 - dnstt `v1.20260501.0` (David Fifield), CC0 1.0 Universal (public domain). Runs as a separate program
   (`libdnstt.so`); source https://www.bamsoftware.com/git/dnstt.git, built by `scripts/engines/dnstt.sh`.
+- Tor, from the Guardian Project's tor-android `0.4.9.13` (`info.guardianproject:tor-android`, with
+  `jtorctl 0.4.5.7`), BSD 3-Clause License; source https://github.com/guardianproject/tor-android and
+  https://gitlab.torproject.org/tpo/core/tor.
+- lyrebird (The Tor Project), commit `75ef9b2c1f18` (Go module
+  `gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/lyrebird@v0.0.0-20260921142919-75ef9b2c1f18`,
+  checksum `h1:yYIGFPSbU7zzI1HCwgIhTuYi5kiOg9JpvvC7WaQ5Xu4=`), BSD 3-Clause License, with parts under the
+  GNU General Public License v3.0 (see its LICENSE-GPL3.txt). Runs as a separate program
+  (`liblyrebird.so`) started by Tor; built by `scripts/engines/lyrebird.sh`. Its built-in Snowflake bridge
+  lines come from Snowflake v2.11.0. The same source offer as for Mihomo applies.
 - QR codes: ZXing core (https://github.com/zxing/zxing), Apache License 2.0. Camera: AndroidX CameraX, Apache License 2.0.
 
 ## MIT License (libXray)

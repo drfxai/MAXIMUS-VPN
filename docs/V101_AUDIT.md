@@ -385,3 +385,25 @@ These match the Phase 4 numbers exactly (95%, 23 s per run): the safety work cos
 The one outage is the forced cut when server names start being filtered. First-connect times are in the
 step 31 table above (about 9 s under three filters). Battery and real throughput can only be measured on a
 phone; they are item 7 of step 32. Raw results: `tools/censorsim/results/2026-10-05-v101-soak.jsonl`.
+
+## Engines 15–26, built (2026-10-05)
+
+The owner asked for Psiphon and Mihomo to be included and the other engines added by strength. GPL
+engines cannot be linked into an app under a non-commercial license, so every new engine except Tor
+runs as its own program (`lib<name>.so` in the APK, built in CI from a pinned Go module whose hash is
+checked against the Go checksum database and the script). Xray still owns the TUN, DNS and the kill
+switch; its one proxy becomes the engine's SOCKS port on 127.0.0.1, with a random login per connection
+where the engine can check one. While an engine program runs, the app's own traffic is kept out of the
+VPN so the program's sockets do not loop back into it; every other app still goes through the tunnel.
+
+| Engine | Carries | How a user gets it | State |
+|---|---|---|---|
+| Mihomo v1.19.32 (GPL-3.0) | TUIC links, AmneziaWG servers with changed headers, Clash-only proxies (AnyTLS, Mieru, Snell, SSH, Hysteria v1) | imported links and files | TUIC carried TCP and UDP through Xray → Mihomo → TUIC server in the lab: **verified** |
+| Cloudflare WARP (WireGuard on Xray) | free Cloudflare egress | GOD MODE, after the clean-address step | registration untested (Cloudflare's API is unreachable from the lab) |
+| Psiphon tunnel-core (GPL-3.0) | Psiphon's own network | GOD MODE, after WARP | built; needs the network settings Psiphon Inc. issues to the app (the `PSIPHON_CONFIG` secret) |
+| Tor 0.4.9 + lyrebird | Snowflake by default; pasted obfs4, WebTunnel or meek bridge lines | GOD MODE, last step; pasted bridge lines | built; Snowflake needs WebRTC, which the lab cannot reach |
+| dnstt v1.20260501.0 (CC0) | a DNS tunnel to the user's own dnstt server | `dnstt://` links | built; needs a server |
+| NaiveProxy | – | – | not started: it is a Chromium build with no Go source to pin |
+
+Psiphon and Tor are only taken when nothing else carried traffic, and if they cannot connect the
+traffic stays blocked. None of these is shown as working beyond what the lab verified.

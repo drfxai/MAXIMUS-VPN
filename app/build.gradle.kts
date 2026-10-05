@@ -153,6 +153,9 @@ dependencies {
   implementation(libs.okhttp)
   implementation("com.github.mwiede:jsch:2.28.7")
   implementation(libs.snakeyaml)
+  // Tor for the Tor engine (BSD-3-Clause); its bridges run in lyrebird, built by scripts/engines/lyrebird.sh.
+  implementation("info.guardianproject:tor-android:0.4.9.13")
+  implementation("info.guardianproject:jtorctl:0.4.5.7")
   implementation(libs.zxing.core)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)

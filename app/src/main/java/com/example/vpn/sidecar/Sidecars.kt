@@ -14,9 +14,13 @@ object Sidecars {
             PsiphonSidecar(PsiphonSidecar.assetProvider { name ->
                 openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
             }),
-            DnsttSidecar()
+            DnsttSidecar(),
+            TorSidecar { torrc, port -> (torStarter ?: error("Tor needs Android to run")).invoke(torrc, port) }
         )
     }
+
+    /** Starts the Tor library; set once by the VPN service. */
+    @Volatile var torStarter: ((String, Int) -> RunningEngine)? = null
 
     /** Directory Android extracted the APK's native libraries to; set once by the app. */
     @Volatile var nativeLibraryDir: String? = null

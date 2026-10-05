@@ -103,7 +103,7 @@ class RayVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var tunnelManager: TunnelManager? = null
     /** The separate engine program carrying traffic for the current profile, if any. */
-    @Volatile private var sidecar: com.example.vpn.sidecar.SidecarProcess? = null
+    @Volatile private var sidecar: com.example.vpn.sidecar.RunningEngine? = null
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
     private var failoverManager: com.example.vpn.smart.FailoverManager? = null
     private val serviceTxBytes = java.util.concurrent.atomic.AtomicLong(0)
@@ -122,6 +122,7 @@ class RayVpnService : VpnService() {
         super.onCreate()
         com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
         com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
+        com.example.vpn.sidecar.Sidecars.torStarter = { torrc, port -> com.example.vpn.sidecar.TorInApp.start(this, torrc, port) }
         val db = AppDatabase.getInstance(applicationContext)
         serverRepository = ServerRepository(db.serverProfileDao())
         settingsRepository = com.example.RayApplication.instance.settingsRepository
@@ -578,6 +579,14 @@ class RayVpnService : VpnService() {
                         adopt(com.example.vpn.smart.ServerRace.Winner(psiphon, psiphon, 0))
                     }
                 }
+                if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
+                    // Last of all, Tor over Snowflake: slow, but it needs nothing of the user's.
+                    val tor = com.example.vpn.sidecar.TorSidecar.profile()
+                    if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(tor) == null) {
+                        XrayLogManager.i("SMART", "Nothing else carried traffic; starting Tor over Snowflake.")
+                        adopt(com.example.vpn.smart.ServerRace.Winner(tor, tor, 0))
+                    }
+                }
             }
 
             // 4. Diagnostic step 4 & 5: Configure and establish Android VpnService TUN interface
@@ -910,7 +919,8 @@ class RayVpnService : VpnService() {
         )
         val launch = engine.prepare(profile, settings, context)
         showForegroundNotification("Starting the ${engine.id} engine...")
-        val process = com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort)
+        val process = engine.startInApp(launch, context)
+            ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort)
         sidecar = process
         if (!process.awaitReady(launch.readyTimeoutMs)) {
             process.stop()

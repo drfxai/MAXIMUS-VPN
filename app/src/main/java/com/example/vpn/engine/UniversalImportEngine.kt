@@ -201,6 +201,15 @@ object UniversalImportEngine {
             lower.startsWith("hysteria2://") || lower.startsWith("hy2://") -> {
                 parseHysteria2Uri(uriString, fileName, subUrl)
             }
+            lower.startsWith("obfs4 ") || lower.startsWith("webtunnel ") || lower.startsWith("snowflake ") ||
+                lower.startsWith("meek_lite ") || lower.startsWith("bridge ") -> {
+                // A Tor bridge line, as bridges.torproject.org and @GetBridgesBot hand them out.
+                val profile = com.example.vpn.sidecar.TorSidecar.profile(uriString)
+                when (val problem = com.example.vpn.sidecar.TorSidecar.problemOf(profile)) {
+                    null -> ParsedItem.Success(profile.copy(sourceFile = fileName, sourceSubscription = subUrl))
+                    else -> ParsedItem.Invalid(uriString.take(60), problem)
+                }
+            }
             lower.startsWith("dnstt://") -> try {
                 // A DNS tunnel for near-total blackouts, run by the dnstt engine program.
                 ParsedItem.Success(com.example.vpn.sidecar.DnsttSidecar.parse(uriString)

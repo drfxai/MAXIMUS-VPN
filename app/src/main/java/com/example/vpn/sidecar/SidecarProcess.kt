@@ -13,7 +13,7 @@ class SidecarProcess(
     private val process: Process,
     val socksPort: Int,
     private val readyLine: Regex? = null
-) {
+) : RunningEngine {
     @Volatile private var sawReadyLine = readyLine == null
 
     private val logThread = Thread({
@@ -29,10 +29,10 @@ class SidecarProcess(
         }
     }, "sidecar-$name-log").apply { isDaemon = true; start() }
 
-    val isAlive: Boolean get() = process.isAlive
+    override val isAlive: Boolean get() = process.isAlive
 
     /** Waits until the SOCKS port accepts connections, the program exits, or [timeoutMs] passes. */
-    fun awaitReady(timeoutMs: Long): Boolean {
+    override fun awaitReady(timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             if (!process.isAlive) return false
@@ -42,7 +42,7 @@ class SidecarProcess(
         return false
     }
 
-    fun stop() {
+    override fun stop() {
         process.destroy()
         if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
     }

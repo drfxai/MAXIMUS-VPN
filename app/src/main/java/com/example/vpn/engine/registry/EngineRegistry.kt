@@ -40,8 +40,9 @@ object EngineRegistry {
         bundled = true, runtime = null)
     val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core (separate program)", "4d6eb0e8a7e9", "GPL-3.0",
         bundled = true, runtime = null)
-    val TOR = EngineDescriptor("tor", "Tor with pluggable transports", null, "BSD-3-Clause (Tor), MIT (lyrebird)",
-        bundled = false, runtime = null)
+    val TOR = EngineDescriptor("tor", "Tor (in app) with lyrebird bridges (separate program)",
+        "tor-android 0.4.9.13, lyrebird 75ef9b2c1f18", "BSD-3-Clause (Tor, lyrebird), GPL-3.0 parts of lyrebird",
+        bundled = true, runtime = null)
     val NAIVE = EngineDescriptor("naive", "NaiveProxy", null, "BSD-3-Clause", bundled = false, runtime = null)
     val DNS_TUNNEL = EngineDescriptor("dns-tunnel", "DNS tunnel (dnstt, separate program)", "v1.20260501.0", "CC0-1.0",
         bundled = true, runtime = null)
@@ -74,7 +75,7 @@ object EngineRegistry {
         "Cloudflare WARP" to CapabilityState.ENGINE_SUPPORTED,
         "HTTP proxy with login" to CapabilityState.PARSE_SUPPORTED,
         "Psiphon (needs this build's Psiphon settings)" to CapabilityState.ENGINE_SUPPORTED,
-        "Tor" to CapabilityState.NONE,
+        "Tor (Snowflake, obfs4, WebTunnel bridges)" to CapabilityState.ENGINE_SUPPORTED,
         "NaiveProxy" to CapabilityState.NONE,
         "DNS tunnel (dnstt)" to CapabilityState.ENGINE_SUPPORTED
     )

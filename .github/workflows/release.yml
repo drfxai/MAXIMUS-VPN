@@ -70,6 +70,7 @@ jobs:
             echo "No PSIPHON_CONFIG secret; Psiphon stays off in this build"
           fi
       - name: Build the engine programs from pinned, checksum-verified sources
+        # ABIs other than arm64-v8a are linked with the NDK's C toolchain, which the runner image has.
         run: bash scripts/build-engines.sh arm64-v8a armeabi-v7a x86_64
       - name: Build, test and stage standalone APKs
         env:
