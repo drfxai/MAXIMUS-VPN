@@ -5,11 +5,21 @@ CDN mirrors) over Telegram. It is for people who cannot open any web address yet
 still reachable, or reachable through its built-in proxy.
 
 User commands: `/configs`, `/sub`, `/app`, `/help` (English and Persian).
-Admin commands (only the `ADMIN_ID` account): `/list`, `/addsub <url>`, `/editsub <n> <url>`,
-`/delsub <n or url>`, `/addconfig <links>`, `/clearconfigs`.
+Admin commands (only the `ADMIN_ID` account; send `/admin` for the list):
 
-`https://<worker>/sub` is the app's official subscription: every configuration from the admin's links
-and extra configs, in the standard Base64 format. The app adds it on first launch and refreshes it
+| | Free | VIP |
+|---|---|---|
+| Add one or more links | `/addfree <links>` | `/addvip <links>` |
+| Show them, numbered | `/listfree` | `/listvip` |
+| Delete by number or range | `/delfree 2 5-7` | `/delvip 2 5-7` |
+| Delete all | `/clearfree` | `/clearvip` |
+
+Free subscription links: `/addsub <url>`, `/editsub <n> <url>`, `/delsub <n or url>`. `/list` shows an
+overview. `/addconfig` and `/clearconfigs` still work as the older names of `/addfree` and `/clearfree`.
+
+`https://<worker>/sub` is the app's free subscription: every configuration from the admin's links
+and free configs, in the standard Base64 format. `https://<worker>/vip` serves only the VIP configs and
+feeds the app's VIP section. The app adds it on first launch and refreshes it
 every 6 hours (and after each connect), so a change made with `/addsub`, `/editsub` or `/delsub`
 reaches every phone without an app update.
 

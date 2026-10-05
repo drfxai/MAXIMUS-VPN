@@ -1,6 +1,6 @@
 // node tools/telegram-bot/test.mjs
 import assert from "node:assert/strict";
-import worker, { handle, collectConfigs, extractLinks, gitHubMirrors } from "./worker.js";
+import worker, { handle, collectConfigs, extractLinks, gitHubMirrors, describe, pickNumbers } from "./worker.js";
 
 const links = ["vless://u@203.0.113.7:443?security=tls#a", "trojan://p@203.0.113.8:443#b", "tuic://x@203.0.113.9:443#c"];
 const raw = "https://raw.githubusercontent.com/someone/free-subs/main/mix.txt";
@@ -103,5 +103,41 @@ assert.deepEqual(gitHubMirrors("https://panel.example.org/sub/x"), []);
   assert.equal(res.status, 200);
   assert.deepEqual(atob(await res.text()).split("\n"), links.slice(0, 2));
 }
+
+// Free and VIP configs are managed separately; VIP is served only at /vip.
+{
+  const { env, sent } = fakeEnv(() => ({ body: "" }));
+  const kv = new Map();
+  env.STORE = { get: async (k) => kv.get(k) ?? null, put: async (k, v) => void kv.set(k, v) };
+  env.ADMIN_ID = "777";
+  env.SUB_URLS = "";
+  const vip = ["vless://v1@198.51.100.1:443?security=reality#VIP%20DE", "trojan://v2@198.51.100.2:443#VIP2", "ss://v3@198.51.100.3:8388#VIP3"];
+  await handle(5, "/addvip " + vip[0], env, 0);
+  assert.equal(kv.get("vip_configs"), undefined);
+  await handle(777, "/addvip " + vip.join("\n"), env, 0);
+  await handle(777, "/addconfig " + links[1], env, 0);
+  await handle(777, "/addfree " + links[0], env, 0);
+  assert.equal(kv.get("configs"), [links[1], links[0]].join("\n"));
+  assert.equal(kv.get("vip_configs"), vip.join("\n"));
+  sent.length = 0;
+  await handle(777, "/listvip", env, 0);
+  assert.match(sent[1].text, /1\. VLESS · VIP DE · 198\.51\.100\.1:443/);
+  await handle(777, "/delvip 1-2", env, 0);
+  assert.equal(kv.get("vip_configs"), vip[2]);
+  const vipRes = await worker.fetch(new Request("https://bot.example/vip"), env);
+  assert.equal(vipRes.headers.get("profile-title"), "MAXIMUS VIP");
+  assert.deepEqual(atob(await vipRes.text()).split("\n"), [vip[2]]);
+  const freeRes = await worker.fetch(new Request("https://bot.example/sub"), env);
+  assert.deepEqual(atob(await freeRes.text()).split("\n"), [links[1], links[0]]);
+  await handle(777, "/clearfree", env, 0);
+  assert.equal(kv.get("configs"), "");
+  assert.equal(kv.get("vip_configs"), vip[2]);
+  sent.length = 0;
+  await handle(777, "/list", env, 0);
+  assert.match(sent[0].text, /Free configs: 0[\s\S]*VIP configs: 1/);
+}
+
+assert.deepEqual(pickNumbers(["2", "5-7", "x", "9"], 8), [2, 5, 6, 7]);
+assert.equal(describe("vmess://" + btoa(JSON.stringify({ ps: "Fast", add: "203.0.113.1", port: 443 })), 3), "3. VMESS · Fast · 203.0.113.1:443");
 
 console.log("telegram bot: all checks passed");
