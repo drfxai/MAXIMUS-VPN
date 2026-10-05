@@ -225,3 +225,22 @@ connect fails closed. DAILY keeps the faster system-first lookup. Together with 
 run by address, blocked answers refused for plaintext profiles) and the existing in-tunnel rules (FakeDNS
 plus one private resolver with fallback disabled; port 53 always through the proxy), this is the DNS
 policy for both modes.
+
+## Steps 10–11: Smart Connect and failover
+
+Reused from war plan Phase 4 (ServerRace, NetworkMemory, WatchPolicy, FailoverManager), now driven by
+the mode: GOD MODE races the saved servers on every connect and keeps failover on (step 4).
+
+## Step 12 progress: Free Config Hub
+
+There was no hub before; `vpn/hub` is its backend, with no UI yet (a screen needs a preview first).
+- `FreeConfigProvider` / `ProviderRegistry`: provider definitions outside UI code. The official source
+  appears once `OfficialSubscriptions.URLS` has the bot's address; no public lists are built in until
+  the signed aggregator (step 14) exists.
+- `ConfigValidationPipeline`: size limit, parsing, sanitizing (names shortened, ids per provider),
+  security validation, de-duplication by canonical fingerprint (the credential only as a hash) and
+  quarantine. Configs without encryption, without certificate checks, pointing at private or reserved
+  addresses, or that no engine runs are quarantined with a reason.
+- Node states: `SecurityState`, `HealthState`, `PerformanceState`; `ConfigHealthScorer`.
+- `ConfigSyncManager`: fetch, pipeline, then a real request through each accepted node; only nodes that
+  carried traffic are approved.
