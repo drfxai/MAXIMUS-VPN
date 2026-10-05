@@ -41,9 +41,9 @@ jobs:
       - name: Fetch verified native Xray runtime
         run: bash scripts/fetch-libxray-android.sh
       - name: Unit tests
-        run: ./gradlew --no-daemon testDebugUnitTest
+        run: bash gradlew --no-daemon :app:testDebugUnitTest
       - name: Lint
-        run: ./gradlew --no-daemon lintRelease
+        run: bash gradlew --no-daemon :app:lintRelease
       - name: Keep the test and lint reports
         if: always()
         uses: actions/upload-artifact@v4
