@@ -290,3 +290,19 @@ to no runtime, so none can be selected or shown as working. Before any of them i
 
 The APK also grows with each native engine; adding them all would multiply its size, so they are worth
 adding one at a time, strongest first.
+
+## Step 27 progress: GOD MODE orchestration
+
+The cascade is now the ladder of things that exist, in order, each step tried only when the one before
+found nothing:
+
+1. the user's server on the path this network remembers;
+2. the other saved servers, raced with real requests, disguised forms included;
+3. the same server through a clean Cloudflare address;
+4. nodes from the signed free list that carried traffic (once a list is published).
+
+When nothing works the connection is reported as blocked and traffic stays blocked, while the watchdog
+keeps retrying the user's own server, so a filter that lifts is picked up on its own. The old tiers 3 and
+4 (Psiphon bridges, P2P mesh) were labels over code that disabled itself; the service no longer calls
+them. The home screen still shows a ladder with bridge and mesh counts, which now read zero: that is a
+layout change, so it waits for a preview.

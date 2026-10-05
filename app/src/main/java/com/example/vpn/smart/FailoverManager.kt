@@ -24,16 +24,18 @@ import java.net.InetSocketAddress
 import java.net.Socket
 
 /**
- * GOD MODE: Resilient 4-Tier Emergency Cascade & Auto-Failover Watchdog.
+ * Watches the running connection with real requests through the tunnel and switches when it stops
+ * carrying traffic (see WatchPolicy: about 18 seconds). GOD MODE then climbs the ladder of things that
+ * actually exist, each step tried only when the one before it found nothing:
  *
- * Ordered Failover Ladder:
- * 1. Tier 1: Primary Reality / Hysteria2 endpoints (lowest latency, high score)
- * 2. Tier 2: Secondary Reality / VLESS backup nodes
- * 3. Tier 3: Verified Psiphon / Conduit volunteer proxy bridges
- * 4. Tier 4: Local Maximus P2P Mesh relays (WiFi / hotspot offline relay)
+ * 1. the server the user chose, on the path this network remembers;
+ * 2. the other saved servers, raced with real requests, disguised forms included (ServerRace);
+ * 3. the same server through a clean Cloudflare address (CleanIpOptimizer), when it is CDN-fronted;
+ * 4. nodes from the signed free list that carried traffic (the hub), once one is published.
  *
- * Features continuous bidirectional health monitoring (escalates on severe censorship,
- * de-escalates back to Tier 1 when primary network connectivity recovers).
+ * Steps 2 to 4 are driven from the connect path in RayVpnService. When nothing works the connection is
+ * reported as severed and traffic stays blocked; the watchdog keeps retrying the user's own server, so a
+ * filter that lifts is picked up without the user doing anything.
  */
 class FailoverManager(
     private val serverRepository: ServerRepository,
@@ -43,11 +45,11 @@ class FailoverManager(
     private val onTriggerSwitch: (VlessProfile, String) -> Unit
 ) {
     enum class CascadeTier(val stageNumber: Int, val title: String, val badge: String) {
-        TIER_1_PRIMARY_REALITY(1, "Tier 1: Primary Reality / Hysteria2", "TIER 1 - PRIMARY"),
-        TIER_2_SECONDARY_NODES(2, "Tier 2: Backup Reality Nodes", "TIER 2 - BACKUP"),
-        TIER_3_VOLUNTEER_BRIDGES(3, "Tier 3: Psiphon / Conduit Bridges", "TIER 3 - BRIDGES"),
-        TIER_4_LOCAL_MESH(4, "Tier 4: Maximus P2P Mesh Relays", "TIER 4 - P2P MESH"),
-        DEGRADED_OFFLINE(5, "Degraded: Outlets Severed", "DEGRADED")
+        TIER_1_PRIMARY_REALITY(1, "Your server", "YOUR SERVER"),
+        TIER_2_SECONDARY_NODES(2, "Your other servers", "OTHER SERVERS"),
+        TIER_3_CLEAN_ADDRESS(3, "A clean Cloudflare address", "CLEAN ADDRESS"),
+        TIER_4_FREE_LIST(4, "The signed free list", "FREE LIST"),
+        DEGRADED_OFFLINE(5, "Nothing is carrying traffic", "BLOCKED")
     }
 
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -161,13 +163,12 @@ class FailoverManager(
         currentActiveSettings = null
     }
 
-    private fun determineInitialTier(profile: VlessProfile): CascadeTier {
-        return when {
-            profile.id.startsWith("mesh-") -> CascadeTier.TIER_4_LOCAL_MESH
-            profile.id.startsWith("bridge-") -> CascadeTier.TIER_3_VOLUNTEER_BRIDGES
-            profile.overallScore >= 75.0 -> CascadeTier.TIER_1_PRIMARY_REALITY
-            else -> CascadeTier.TIER_2_SECONDARY_NODES
-        }
+    /** Which step of the ladder this profile is: a saved server, a clean address or the free list. */
+    internal fun determineInitialTier(profile: VlessProfile): CascadeTier = when {
+        profile.id.startsWith("hub-") -> CascadeTier.TIER_4_FREE_LIST
+        profile.name.contains("[CF-Optimized]") -> CascadeTier.TIER_3_CLEAN_ADDRESS
+        profile.overallScore >= 75.0 -> CascadeTier.TIER_1_PRIMARY_REALITY
+        else -> CascadeTier.TIER_2_SECONDARY_NODES
     }
 
     /**
@@ -212,14 +213,15 @@ class FailoverManager(
         recoveryProbeJob = scope.launch {
             while (isActive) {
                 delay(30000) // Check primary recovery every 30s
-                if (_currentTier.value == CascadeTier.TIER_3_VOLUNTEER_BRIDGES || _currentTier.value == CascadeTier.TIER_4_LOCAL_MESH) {
+                // Any step past the user's own server: check whether that server works again.
+                if (_currentTier.value.stageNumber > 1) {
                     try {
                         val profiles = serverRepository.allProfiles.first()
-                        val topPrimary = profiles.filter { !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") }
+                        val topPrimary = profiles.filter { !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") && !it.id.startsWith("hub-") }
                             .maxByOrNull { it.overallScore }
 
                         if (topPrimary != null && checkHealth(topPrimary, 450L)) {
-                            val reason = "GOD Mode Recovery: Primary network connectivity restored! De-escalating to Tier 1 (${topPrimary.name})."
+                            val reason = "Your own server answers again; switching back to ${topPrimary.name}."
                             _currentTier.value = CascadeTier.TIER_1_PRIMARY_REALITY
                             _failoverEvents.value = reason
                             XrayLogManager.i("GOD_MODE", reason)
@@ -258,14 +260,14 @@ class FailoverManager(
 
         // --- GOD MODE CASCADE LADDER ---
         if (settings.operationalMode == OperationalMode.GOD_MODE) {
-            XrayLogManager.w("GOD_MODE", "GOD Mode Cascade engaged due to outage on $safeDegraded!")
+            XrayLogManager.w("GOD_MODE", "Nothing is getting through $safeDegraded; trying the other saved servers.")
 
             // Step 1: Secondary Reality / VLESS nodes
             val bestFallback = SmartConnect.selectBestNode(candidateProfiles, settings.scoringProfile)
 
             if (bestFallback != null) {
                 _currentTier.value = CascadeTier.TIER_2_SECONDARY_NODES
-                val reason = "GOD Mode Cascade [Tier 2]: Switched to backup node ${bestFallback.profile.name}"
+                val reason = "Switched to ${bestFallback.profile.name}."
                 _failoverEvents.value = reason
                 XrayLogManager.i("GOD_MODE", reason)
                 onTriggerSwitch(bestFallback.profile, reason)
@@ -275,7 +277,7 @@ class FailoverManager(
             // Discovery and TCP reachability are not authenticated proxy credentials.
             // Never invent a VLESS UUID or send traffic to an unverified LAN beacon.
             _currentTier.value = CascadeTier.DEGRADED_OFFLINE
-            XrayLogManager.e("GOD_MODE", "All cascade tiers exhausted for $safeDegraded. No verified fallback profile is available.")
+            XrayLogManager.e("GOD_MODE", "No other saved server is usable after $safeDegraded failed; the connect path will try a clean address and the free list. Traffic stays blocked meanwhile.")
         }
 
         // Standard Daily Mode fallback

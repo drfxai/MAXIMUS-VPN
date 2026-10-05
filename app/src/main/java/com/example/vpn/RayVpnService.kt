@@ -730,14 +730,9 @@ class RayVpnService : VpnService() {
                     .onFailure { XrayLogManager.w("SUBSCRIPTION", "Refresh after connect failed: ${it.message}") }
             }
 
-            // Initialize Operational Mode features
-            if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) {
-                com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
-                com.example.vpn.godmode.MaximusMeshManager.startMesh()
-                XrayLogManager.i("GOD_MODE", "GOD Mode monitoring active; unauthenticated bridges and mesh remain disabled.")
-            } else {
-                com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
-                com.example.vpn.godmode.MaximusMeshManager.stopMesh()
+            if (policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
+                XrayLogManager.i("GOD_MODE", "Everything through the proxy, IPv6 blocked, server names over DNS-over-HTTPS only, " +
+                    "every server tested, failover on; traffic stays blocked when nothing works.")
             }
 
             // Start Failover Manager & Watchdogs
@@ -995,11 +990,6 @@ class RayVpnService : VpnService() {
             vpnInterface = null
         }
 
-        val currentMode = settingsRepository.getSettings().operationalMode
-        if (currentMode != com.example.data.model.OperationalMode.GOD_MODE) {
-            com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
-            com.example.vpn.godmode.MaximusMeshManager.stopMesh()
-        }
     }
 
     private fun registerNetworkCallback() {
