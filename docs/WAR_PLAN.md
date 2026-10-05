@@ -29,7 +29,7 @@ Sources: [WhiteVPN](https://github.com/WhiteDNS/WhiteVPN), [WhiteAestherMobile](
 |---|---|---|---|
 | 1 | **Connection success under disruption** | Share of connect attempts that end with a real HTTP request through the tunnel, per censorship scenario | 100% for every scenario that has *any* working path |
 | 2 | **Time to connect** | From tapping connect to the first successful request through the chosen path (median / p90) | < 10 s, including under disruption |
-| 3 | **Connection survival** | Drops per hour on a held connection | Not measured yet. Phase 4 adds a soak run to the simulator. |
+| 3 | **Connection survival** | Outages (2+ failed requests in a row) and time without traffic on a held connection while the censor changes (`soak.sh`) | Fewer outages and less time without traffic every phase |
 
 ### How it is measured: the censorship simulator (`tools/censorsim`)
 
@@ -90,7 +90,7 @@ Measured 2026-10-05 against `main` at 965e23e. "main" connects with the saved pr
 |---|---|---|
 | 1. Connected | **45%** (68/150) | **100%** (150/150) |
 | 2. Connected in under 10 s | 45% | **97%** (146/150) |
-| 3. Drops per hour | not measured | not measured (Phase 4) |
+| 3. Drops per hour | not measured | measured from Phase 4 on (see below) |
 
 Per scenario (time is wall time to the first successful request, including Xray process start-up in the simulator):
 
@@ -160,11 +160,63 @@ Not done yet:
 - **Built-in sources** (official plus 2–3 public): these need addresses you trust.
 - **QR sharing on real phones:** the codec is tested and the build compiles; the camera path still needs a test between two phones.
 
-## Phases 4–7: next steps
+## Phase 4 — Sub-10-second auto-connect (this branch)
+
+What changed in the app:
+
+- **Server race** (`vpn/smart/ServerRace.kt`). When the chosen server carries no traffic, the other saved servers are tested with real requests, five at a time, with the kinds of connection spread over each round so one filter cannot empty it. The best TLS-looking servers are also tried in disguise in the same round. Used at connect (after the path finder found nothing), by Smart Connect and by failover.
+- **The race picks the path least likely to be cut next, not the fastest.** Kinds that look like ordinary HTTPS (REALITY, CDN, TLS) come before QUIC, WireGuard and unencrypted ones, and latency decides within a kind. Kinds that failed on this network in the last 30 minutes go last, and after a failover the cut server is tried again in disguise first.
+- **Per-network memory** (`NetworkMemory`, `NetworkKey`). Each carrier (by MCC+MNC: Irancell, Hamrah-e Aval, Rightel...) and Wi-Fi keeps its own stealth winners, working kinds, recent failures and average latency. The latency sets the probe time limits: 3 s and 4 s on a fast network, up to 6 s and 7 s on a slow one, 4 s and 5 s before anything is known. These are the "per-carrier thresholds": learned on the phone, not hard-coded.
+- **Faster watchdog** (`WatchPolicy`). A healthy connection is still checked every 12 s; after a failed check it is re-checked every 3 s, so a dead connection is given up after about 18 s instead of 36 s, still after three failures in a row.
+- **Smart Connect** tests the recommended server alone first (one request when it works), then races the others.
+
+Not possible: returning the moment the first server in a round answers. libXray's `pingBatch` holds one lock for the whole batch and returns only when every member has finished, so a round with a blocked member always takes its time limit.
+
+### Results (simulator)
+
+KPI 1 and 2, first connect on a new network ("branch", the Phase 2/3 code) against a network the phone has used before (Phase 4), 2 trials × 5 profiles per scenario:
+
+| Scenario | branch: time (median / p90) | branch under 10 s | Phase 4: time (median / p90) | Phase 4 under 10 s |
+|---|---|---|---|---|
+| none | 0.0 s / 0.0 s | 100% | 0.0 s / 0.1 s | 100% |
+| sni | 0.1 s / 8.2 s | 100% | 0.1 s / 8.2 s | 100% |
+| fe | 0.0 s / 0.2 s | 100% | 0.1 s / 0.3 s | 100% |
+| udp-block | 0.1 s / 9.1 s | 100% | 0.1 s / 7.1 s | 100% |
+| udp-dpi | 0.1 s / 9.1 s | 100% | 0.1 s / 7.1 s | 100% |
+| throttle | 0.9 s / 1.1 s | 100% | 0.9 s / 2.9 s | 100% |
+| sni,fe,udp-dpi | 9.1 s / 14.3 s | 80% | 8.1 s / 12.3 s | 80% |
+
+Every attempt connected in both. Under all filters at once the slowest case (VLESS Encryption, rescued by another kind in disguise on round three) is still over 10 s; a faster round there needs the probe to return early, which libXray does not allow.
+
+**Saved server down** (its address accepts nothing, like a blocked IP), time to a working connection:
+
+| Scenario | before Phase 4 | Phase 4 |
+|---|---|---|
+| none | 45.1 s | 9.4 s |
+| sni | 53.2 s | 13.2 s |
+| fe | 45.1 s | 9.3 s |
+| udp-block | 45.1 s | 14.2 s |
+| udp-dpi | 45.1 s | 14.2 s |
+| throttle | 46.2 s | 10.7 s |
+| sni,fe,udp-dpi | 54.2 s | 14.2 s |
+
+Before Phase 4 the dead path was started and the watchdog switched after three 12 s checks (36 s added to the measured probing).
+
+**KPI 3, soak** (`soak.sh`): a connection held for 8 minutes, a request every second, while the censor goes none → sni → sni+udp-dpi → sni+fe+udp-dpi → udp-block → none, changing every 90 s and cutting open flows it now blocks. Two runs each:
+
+| Failover logic | requests through | outages | time without traffic | longest outage |
+|---|---|---|---|---|
+| before Phase 4 | 90% | 2 | 93 s | 45 s |
+| Phase 4 | 95% | 2 | 46 s | 23 s |
+
+The same number of outages (each run has one forced cut, when server names start being filtered), half the time without traffic. The soak also caught two mistakes before they shipped: taking the fastest working path landed on WireGuard or VLESS Encryption, which the next filter killed (4 outages, 149 s without traffic), and leaving out the server that was just cut removed its disguised form, the one path that survived (2 outages, 57 s).
+
+Raw results: `tools/censorsim/results/2026-10-05-phase4.jsonl`, `2026-10-05-soak.jsonl`.
+
+## Phases 5–7: next steps
 
 | Phase | First concrete step | Needs from you |
 |---|---|---|
-| 4 Sub-10 s auto-connect | Persist the stealth winner per network/carrier; probe 5–8 saved nodes in parallel for Smart Connect; add the soak run for KPI 3 | Carrier thresholds need real logs from Irancell/Hamrah/TCI users |
 | 5 Emergency tiers | Wire the existing tiers into one "route N of 6" ladder | Psiphon needs official sponsor/propagation channel IDs from Psiphon Inc.; its library is GPL-3.0 (license decision) |
 | 6 Anti-censorship loop | Opt-in "protocol X failed on carrier Y" reports | A collection endpoint and a privacy policy |
 | 7 Combat verification | Every scenario above plus total blackout and sub-domain block, then `testDebugUnitTest`, `lintRelease`, both APKs and `check-apk.py` | — |
