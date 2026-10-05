@@ -69,6 +69,7 @@ class VpnViewModel(
     fun startOrRequestPermission(
         context: Context,
         profile: VlessProfile?,
+        smart: Boolean = false,
         onRequestPermission: (Intent) -> Unit
     ) {
         val targetProfile = profile ?: selectedProfile.value ?: smartRecommendation.value?.profile
@@ -78,7 +79,7 @@ class VpnViewModel(
             prepareConnect(targetProfile)
             onRequestPermission(prepareIntent)
         } else if (targetProfile != null) {
-            VpnController.startVpn(context, targetProfile)
+            VpnController.startVpn(context, targetProfile, smart)
         } else {
             viewModelScope.launch {
                 val fallback = serverRepository.getAllProfilesOnce().firstOrNull()
@@ -149,7 +150,7 @@ class VpnViewModel(
         val smartProfile = smartRecommendation.value?.profile
         if (smartProfile != null) {
             selectServer(smartProfile)
-            startOrRequestPermission(context, smartProfile) { intent ->
+            startOrRequestPermission(context, smartProfile, smart = true) { intent ->
                 onRequestPermission?.invoke(intent)
             }
         } else {

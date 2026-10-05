@@ -63,6 +63,7 @@ class RayVpnService : VpnService() {
         const val ACTION_DISCONNECT = "com.drfxai.maximusvpn.ACTION_DISCONNECT"
         const val ACTION_RECONNECT = "com.drfxai.maximusvpn.ACTION_RECONNECT"
         const val EXTRA_PROFILE_ID = "com.drfxai.maximusvpn.EXTRA_PROFILE_ID"
+        const val EXTRA_SMART = "com.drfxai.maximusvpn.EXTRA_SMART"
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
@@ -198,6 +199,7 @@ class RayVpnService : VpnService() {
             return START_STICKY
         }
         val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
+        val smart = intent?.getBooleanExtra(EXTRA_SMART, false) == true
 
         when (action) {
             ACTION_CONNECT -> {
@@ -223,7 +225,7 @@ class RayVpnService : VpnService() {
                         ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
                     if (targetProfile != null) {
-                        connect(targetProfile)
+                        connect(targetProfile, smart = smart)
                     } else {
                         val err = "No valid server profile found to connect."
                         XrayLogManager.e("VPN", err)
@@ -276,11 +278,38 @@ class RayVpnService : VpnService() {
         return if (action == ACTION_CONNECT || action == ACTION_RECONNECT) START_STICKY else START_NOT_STICKY
     }
 
-    private suspend fun connect(profile: VlessProfile): Unit = connectionMutex.withLock {
-        connectLocked(profile)
+    /**
+     * [smart]: race the saved servers with real requests first ([profile] leads) and connect the fastest
+     * that works; [exclude] are servers to leave out (one the watchdog just gave up on).
+     */
+    private suspend fun connect(profile: VlessProfile, smart: Boolean = false, exclude: Set<String> = emptySet()): Unit =
+        connectionMutex.withLock { connectLocked(profile, smart, exclude) }
+
+    /** What worked on each carrier or Wi-Fi: stealth alternates, kinds of connection, probe time limits. */
+    private val networkMemory by lazy {
+        val prefs = getSharedPreferences("network_memory", Context.MODE_PRIVATE)
+        com.example.vpn.smart.NetworkMemory(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
     }
 
-    private suspend fun connectLocked(userProfile: VlessProfile): Unit = withContext(Dispatchers.IO) {
+    /** Races the saved servers other than [exclude] (see ServerRace) and returns the fastest that works. */
+    private suspend fun raceServers(exclude: Set<String>, network: String, timeoutSec: Int): com.example.vpn.smart.ServerRace.Winner? {
+        val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+        val candidates = com.example.vpn.smart.ServerRace.rank(all, networkMemory.workingKinds(network), exclude = exclude)
+        if (candidates.isEmpty()) return null
+        XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
+        return com.example.vpn.smart.ServerRace().run(candidates, resolve = { p ->
+            if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p
+        }, timeoutSec = timeoutSec)
+    }
+
+    private suspend fun connectLocked(
+        userProfile: VlessProfile,
+        smart: Boolean = false,
+        exclude: Set<String> = emptySet()
+    ): Unit = withContext(Dispatchers.IO) {
         // The saved profile the connection belongs to; a same-server switch below can change it.
         var requestedProfile = userProfile
         // Engines receive [profile]; a hostname endpoint is replaced by its resolved IP below.
@@ -354,20 +383,62 @@ class RayVpnService : VpnService() {
             val safeName = com.example.core.SecretRedactor.redact(profile.name)
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 3. Profile configuration validated for '$safeName'")
 
+            // 3a. Smart Connect and failover: the chosen server first, then a race of the other saved
+            // servers. What worked on this carrier or Wi-Fi (NetworkMemory) orders the race and sets the
+            // probe time limits. The probe's sockets bypass the traffic-blocking interface.
+            val network = com.example.vpn.smart.NetworkKey.current(this@RayVpnService)
+            val timeouts = networkMemory.timeouts(network)
+            var raced = false
+            fun adopt(win: com.example.vpn.smart.ServerRace.Winner) {
+                com.example.vless.VlessValidator.validate(win.profile)
+                com.example.vpn.engine.RuntimeCapabilities.requireSupported(win.profile)
+                requestedProfile = win.owner
+                activeProfile = win.owner
+                profile = win.profile
+                raced = true
+                networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(win.profile), win.latencyMs)
+                updateState(_vpnState.value.copy(activeProfile = win.owner))
+            }
+            val finder = com.example.vpn.stealth.StealthPathFinder(
+                memory = networkMemory.variants(network),
+                firstTimeoutSec = timeouts.firstSec,
+                alternateTimeoutSec = timeouts.alternateSec
+            )
+            var firstFailed = false
+            if (smart) {
+                // The chosen server alone first, so a working one costs a single request; only when it
+                // carries no traffic are the other servers raced (several kinds of connection per round).
+                showForegroundNotification("Finding the fastest server...")
+                val first = finder.firstPath(requestedProfile, profile)
+                when (val outcome = com.example.xray.RealDelayProbe.measure(first.profile, timeouts.firstSec)) {
+                    is com.example.xray.RealDelayProbe.Outcome.Delay -> {
+                        profile = first.profile
+                        raced = true
+                        networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(first.profile), outcome.latencyMs)
+                    }
+                    is com.example.xray.RealDelayProbe.Outcome.Failed -> {
+                        firstFailed = true
+                        raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec)?.let { adopt(it) }
+                    }
+                    is com.example.xray.RealDelayProbe.Outcome.NotRun -> Unit
+                }
+            }
+
             // 3b. Find a path that carries traffic before the core starts: the saved profile, its stealth
             // alternates (split handshake, other fingerprint, ECH, UDP junk) or another kind on the same
             // server. The probe's sockets bypass the traffic-blocking interface (RealDelayProbe.socketProtector).
-            if (com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
+            if (!raced && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
                 showForegroundNotification("Finding a working route...")
                 val resolvedRequested = profile
                 val siblings = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
-                val choice = com.example.vpn.stealth.StealthPathFinder().choose(
+                val choice = finder.choose(
                     requested = requestedProfile,
                     resolve = { p ->
                         if (p.id == requestedProfile.id) resolvedRequested
                         else if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p
                     },
-                    siblings = siblings
+                    siblings = siblings,
+                    firstFailed = firstFailed
                 )
                 if (choice.owner.id != requestedProfile.id) {
                     com.example.vless.VlessValidator.validate(choice.profile)
@@ -376,6 +447,16 @@ class RayVpnService : VpnService() {
                     activeProfile = choice.owner
                 }
                 profile = choice.profile
+                choice.latencyMs?.let {
+                    networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(choice.profile), it)
+                }
+                // Nothing on this server carried traffic: try the other saved servers now rather than
+                // starting a dead connection and waiting for the watchdog.
+                if (choice.nothingWorked && !smart && settings.autoFailoverEnabled) {
+                    showForegroundNotification("Server not answering, trying others...")
+                    raceServers(exclude + requestedProfile.id + userProfile.id, network, timeouts.alternateSec)
+                        ?.let { adopt(it) }
+                }
             }
 
             // 4. Diagnostic step 4 & 5: Configure and establish Android VpnService TUN interface
@@ -581,9 +662,11 @@ class RayVpnService : VpnService() {
                 protectSocket = { socket -> safeProtectSocket(socket) },
                 tunnelProbe = { com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) },
                 onTriggerSwitch = { newProfile, reason ->
+                    val degraded = requestedProfile.id
                     serviceScope.launch {
-                        XrayLogManager.w("FAILOVER", "Executing auto-failover to '${newProfile.name}': $reason")
-                        connect(newProfile)
+                        XrayLogManager.w("FAILOVER", "Executing auto-failover, '${newProfile.name}' first: $reason")
+                        // Race the saved servers so the switch lands on one that carries traffic now.
+                        connect(newProfile, smart = true, exclude = setOf(degraded))
                     }
                 }
             ).apply {

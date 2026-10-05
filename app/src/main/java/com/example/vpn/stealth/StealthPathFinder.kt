@@ -23,7 +23,11 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class StealthPathFinder(
     private val probe: (List<VlessProfile>, Int) -> List<RealDelayProbe.Outcome> = { p, t -> RealDelayProbe.measure(p, t) },
-    private val log: (String) -> Unit = { XrayLogManager.i("STEALTH", it) }
+    private val log: (String) -> Unit = { XrayLogManager.i("STEALTH", it) },
+    /** Profile id -> alternate that last worked; the app passes the current network's (see NetworkMemory). */
+    private val memory: MutableMap<String, String> = Companion.memory,
+    private val firstTimeoutSec: Int = FIRST_TIMEOUT_SEC,
+    private val alternateTimeoutSec: Int = ALTERNATE_TIMEOUT_SEC
 ) {
     data class Choice(
         /** What the engine runs. */
@@ -33,31 +37,44 @@ class StealthPathFinder(
         val label: String,
         val latencyMs: Long? = null,
         /** The [StealthVariants] key, when this is an alternate of the requested profile. */
-        val variantKey: String? = null
-    )
+        val variantKey: String? = null,
+        /** False when no test ran (no alternates, or the probe was unavailable). */
+        val tested: Boolean = true
+    ) {
+        /** Every path was tested and none carried traffic. */
+        val nothingWorked: Boolean get() = tested && latencyMs == null
+    }
+
+    /** The path tried first for [requested] ([resolved] is its host turned into an address): the alternate that worked last time, or the profile as saved. */
+    fun firstPath(requested: VlessProfile, resolved: VlessProfile): Choice {
+        val remembered = memory[requested.id]?.let { key -> StealthVariants.of(resolved).firstOrNull { it.key == key } }
+        return remembered?.let { Choice(it.profile, requested, it.label, variantKey = it.key) } ?: Choice(resolved, requested, "as saved")
+    }
 
     /**
      * [requested] is the profile the user picked, [resolve] turns a profile's host into an address
-     * outside the tunnel (identity in tests), [siblings] are the other saved profiles.
+     * outside the tunnel (identity in tests), [siblings] are the other saved profiles. [firstFailed]:
+     * the caller already tried [firstPath] and it carried no traffic.
      */
     fun choose(
         requested: VlessProfile,
         resolve: (VlessProfile) -> VlessProfile,
-        siblings: List<VlessProfile>
+        siblings: List<VlessProfile>,
+        firstFailed: Boolean = false
     ): Choice {
         val resolved = resolve(requested)
         val variants = StealthVariants.of(resolved)
         val asSaved = Choice(resolved, requested, "as saved")
-        if (variants.isEmpty()) return asSaved
+        if (variants.isEmpty()) return asSaved.copy(tested = firstFailed)
 
         // Stage 1: the last winner (if any) or the saved profile, alone, so a working path costs one request.
-        val remembered = memory[requested.id]?.let { key -> variants.firstOrNull { it.key == key } }
-        val first = remembered?.let { Choice(it.profile, requested, it.label, variantKey = it.key) } ?: asSaved
-        when (val outcome = probe(listOf(first.profile), FIRST_TIMEOUT_SEC).first()) {
+        val first = firstPath(requested, resolved)
+        val remembered = first.variantKey?.let { key -> variants.firstOrNull { it.key == key } }
+        if (!firstFailed) when (val outcome = probe(listOf(first.profile), firstTimeoutSec).first()) {
             is RealDelayProbe.Outcome.Delay -> return first.copy(latencyMs = outcome.latencyMs)
             is RealDelayProbe.Outcome.NotRun -> {
                 log("Path test unavailable (${outcome.reason}); connecting as saved.")
-                return asSaved
+                return asSaved.copy(tested = false)
             }
             is RealDelayProbe.Outcome.Failed -> log("No traffic through ${first.label}: ${SecretRedactor.redact(outcome.reason)}")
         }
@@ -108,7 +125,7 @@ class StealthPathFinder(
     /** First batch that has a working path wins; the user's own profile is preferred over a switch. */
     private fun best(candidates: List<Choice>, ownId: String): Choice? {
         for (batch in parallelSafeBatches(candidates)) {
-            val working = batch.zip(probe(batch.map { it.profile }, ALTERNATE_TIMEOUT_SEC))
+            val working = batch.zip(probe(batch.map { it.profile }, alternateTimeoutSec))
                 .mapNotNull { (c, o) -> (o as? RealDelayProbe.Outcome.Delay)?.let { c.copy(latencyMs = it.latencyMs) } }
             (working.filter { it.owner.id == ownId }.ifEmpty { working })
                 .minByOrNull { it.latencyMs ?: Long.MAX_VALUE }
@@ -123,13 +140,15 @@ class StealthPathFinder(
          * server follows the newest source address of a key, so parallel handshakes knock each other
          * out (seen in the censorship simulator). Order is kept.
          */
-        internal fun parallelSafeBatches(candidates: List<Choice>): List<List<Choice>> {
-            val batches = mutableListOf<MutableList<Choice>>()
+        internal fun parallelSafeBatches(candidates: List<Choice>): List<List<Choice>> = parallelSafeBatches(candidates) { it.profile }
+
+        fun <T> parallelSafeBatches(candidates: List<T>, profileOf: (T) -> VlessProfile): List<List<T>> {
+            fun wgKey(p: VlessProfile) = p.uuid.takeIf { p.protocolType == com.example.data.model.ProtocolType.WIREGUARD }
+            val batches = mutableListOf<MutableList<T>>()
             for (c in candidates) {
-                val key = c.profile.takeIf { it.protocolType == com.example.data.model.ProtocolType.WIREGUARD }?.uuid
+                val key = wgKey(profileOf(c))
                 val target = batches.firstOrNull { batch ->
-                    batch.size < RealDelayProbe.MAX_BATCH &&
-                        (key == null || batch.none { it.profile.protocolType == com.example.data.model.ProtocolType.WIREGUARD && it.profile.uuid == key })
+                    batch.size < RealDelayProbe.MAX_BATCH && (key == null || batch.none { wgKey(profileOf(it)) == key })
                 }
                 if (target != null) target += c else batches += mutableListOf(c)
             }

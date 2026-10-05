@@ -25,15 +25,21 @@ import java.util.concurrent.atomic.AtomicInteger
  * process start-up per probe that the app does not have.
  *
  * Usage: SimRunner <xray binary> <sim.json> <host ip> <scenario name> <trials>
+ *        SimRunner <xray binary> <sim.json> <host ip> soak <before|after> <censor modes file>
  */
 fun main(args: Array<String>) {
     val (xray, simJson, host, scenario) = args
-    val trials = args[4].toInt()
     val links = JSONObject(File(simJson).readText()).getJSONObject("links")
     val profiles = links.keys().asSequence().toList().sorted().map { name ->
         UniversalImportEngine.importText(links.getString(name)).validProfiles.single().copy(id = name, name = name)
     }
     val probe = XrayProbe(xray, host)
+    if (scenario == "soak") {
+        soak(xray, probe, profiles, host, File(args[5]), SOAK_TIMELINE, phase4 = args[4] == "after")
+        probe.close()
+        return
+    }
+    val trials = args[4].toInt()
     if (scenario == "variants") {
         // Every stealth alternate must still work when nothing is filtered.
         for (profile in profiles) {
@@ -66,10 +72,11 @@ fun main(args: Array<String>) {
             emit(scenario, trial, profile.name, "branch", choice.latencyMs != null, ms, choice.label)
         }
     }
+    phase4Trials(probe, profiles, scenario, trials, host)
     probe.close()
 }
 
-private fun emit(scenario: String, trial: Int, profile: String, mode: String, ok: Boolean, ms: Long, path: String) =
+fun emit(scenario: String, trial: Int, profile: String, mode: String, ok: Boolean, ms: Long, path: String) =
     println(JSONObject().put("scenario", scenario).put("trial", trial).put("profile", profile).put("mode", mode)
         .put("ok", ok).put("ms", ms).put("path", path))
 
@@ -120,3 +127,14 @@ class XrayProbe(private val xray: String, private val host: String) {
 
     fun close() = pool.shutdownNow()
 }
+
+/** Seconds from the start and what the censor blocks from then on: a very bad day, compressed. */
+val SOAK_TIMELINE = listOf(
+    0 to "none",
+    60 to "sni",
+    150 to "sni,udp-dpi",
+    240 to "sni,fe,udp-dpi",
+    330 to "udp-block",
+    420 to "none",
+    480 to "end"
+)

@@ -80,17 +80,18 @@ class FailoverManager(
             XrayLogManager.i("FAILOVER", "Failover watchdog active for '$safeName' [Mode: ${settings.operationalMode.displayName}, Tier: ${_currentTier.value.badge}].")
 
             while (isActive) {
-                delay(12000) // Check health every 12 seconds
+                // Every 12 s while healthy, every 3 s after a failed check (see WatchPolicy).
+                delay(WatchPolicy.nextCheckDelayMs(consecutiveFailures.get()))
 
                 val isHealthy = checkActiveTunnel(currentProfile, settings.failoverThresholdMs)
                 // A blocking probe can outlive a switch or disconnect; its result is stale then.
                 if (!isActive) break
                 if (!isHealthy) {
-                    val failures = consecutiveFailures.updateAndGet { (it + 1).coerceAtMost(3) }
-                    XrayLogManager.w("FAILOVER", "Node $safeName carried no traffic or exceeded the latency limit ($failures/3).")
+                    val failures = consecutiveFailures.updateAndGet { (it + 1).coerceAtMost(WatchPolicy.FAILURES_TO_SWITCH) }
+                    XrayLogManager.w("FAILOVER", "Node $safeName carried no traffic or exceeded the latency limit ($failures/${WatchPolicy.FAILURES_TO_SWITCH}).")
 
-                    // Require 3 consecutive failures to avoid flapping
-                    if (failures >= 3) {
+                    // Several failures in a row, so one lost request does not cause flapping.
+                    if (failures >= WatchPolicy.FAILURES_TO_SWITCH) {
                         // The cooldown must survive a service switch, which creates a new manager.
                         if (acquireFailoverCooldown(25000)) {
                             attemptFailover(currentProfile, settings)
