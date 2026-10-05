@@ -104,6 +104,8 @@ jobs:
           retention-days: 30
           if-no-files-found: error
       - name: Publish release
+        # A test build (tag starting with "dry-run") checks everything above and publishes nothing.
+        if: ${{ !startsWith(inputs.tag, 'dry-run') }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN || github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
