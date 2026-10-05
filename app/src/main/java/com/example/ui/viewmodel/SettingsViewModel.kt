@@ -67,6 +67,10 @@ class SettingsViewModel(
     }
 
     fun setDnsServer(dns: String) {
+        if (!com.example.vpn.safety.DnsResolvers.isUsable(dns)) {
+            XrayLogManager.w("SETTINGS", "DNS server refused: it must be an IP address or a DNS-over-HTTPS URL with one")
+            return
+        }
         val current = settingsRepository.getSettings()
         XrayLogManager.i("SETTINGS", "DNS server updated: ${current.dnsServer} -> $dns")
         settingsRepository.updateSettings(current.copy(dnsServer = dns))

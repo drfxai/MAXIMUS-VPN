@@ -1,0 +1,350 @@
+{"mode":"main","path":"as saved","scenario":"none","ms":85,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"none","ms":44,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"none","ms":44,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"none","ms":42,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"none","ms":30,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"none","ms":29,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"main","path":"refused by main","scenario":"none","ms":31,"profile":"VLESS Encryption","ok":false,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"none","ms":126,"profile":"VLESS Encryption","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"none","ms":38,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"none","ms":32,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"none","ms":40,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"none","ms":78,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"none","ms":43,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"none","ms":47,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"none","ms":29,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"none","ms":28,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"main","path":"refused by main","scenario":"none","ms":132,"profile":"VLESS Encryption","ok":false,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"none","ms":142,"profile":"VLESS Encryption","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"none","ms":28,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"none","ms":28,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"none","ms":38,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"none","ms":38,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"none","ms":40,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"none","ms":40,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"none","ms":29,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"none","ms":29,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"main","path":"refused by main","scenario":"none","ms":32,"profile":"VLESS Encryption","ok":false,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"none","ms":119,"profile":"VLESS Encryption","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"none","ms":27,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"none","ms":28,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"none","ms":39,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"none","ms":38,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"none","ms":39,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"none","ms":39,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"none","ms":29,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"none","ms":28,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"main","path":"refused by main","scenario":"none","ms":60,"profile":"VLESS Encryption","ok":false,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"none","ms":88,"profile":"VLESS Encryption","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"none","ms":27,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"none","ms":28,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"none","ms":37,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"none","ms":38,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"none","ms":40,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"none","ms":39,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"none","ms":28,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"none","ms":28,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"main","path":"refused by main","scenario":"none","ms":71,"profile":"VLESS Encryption","ok":false,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"none","ms":49,"profile":"VLESS Encryption","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"none","ms":29,"profile":"WireGuard","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"none","ms":28,"profile":"WireGuard","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4078,"profile":"CDN (WS+TLS)","ok":false,"trial":0}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni","ms":8182,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"sni","ms":65,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":43,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4048,"profile":"REALITY","ok":false,"trial":0}
+{"mode":"branch","path":"Split handshake with a firefox fingerprint","scenario":"sni","ms":8159,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"main","path":"refused by main","scenario":"sni","ms":133,"profile":"VLESS Encryption","ok":false,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":102,"profile":"VLESS Encryption","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"sni","ms":35,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":28,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4053,"profile":"CDN (WS+TLS)","ok":false,"trial":1}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni","ms":8145,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"sni","ms":40,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":39,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4045,"profile":"REALITY","ok":false,"trial":1}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni","ms":8139,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"main","path":"refused by main","scenario":"sni","ms":55,"profile":"VLESS Encryption","ok":false,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":120,"profile":"VLESS Encryption","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"sni","ms":3004,"profile":"WireGuard","ok":false,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":29,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4076,"profile":"CDN (WS+TLS)","ok":false,"trial":2}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni","ms":8172,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"sni","ms":44,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":42,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4066,"profile":"REALITY","ok":false,"trial":2}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni","ms":8163,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"main","path":"refused by main","scenario":"sni","ms":58,"profile":"VLESS Encryption","ok":false,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":96,"profile":"VLESS Encryption","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"sni","ms":28,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":28,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4052,"profile":"CDN (WS+TLS)","ok":false,"trial":3}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni","ms":8151,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"sni","ms":41,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":61,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4044,"profile":"REALITY","ok":false,"trial":3}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni","ms":8137,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"main","path":"refused by main","scenario":"sni","ms":103,"profile":"VLESS Encryption","ok":false,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":69,"profile":"VLESS Encryption","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"sni","ms":49,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":28,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4055,"profile":"CDN (WS+TLS)","ok":false,"trial":4}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni","ms":8160,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"sni","ms":61,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":39,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"sni","ms":4044,"profile":"REALITY","ok":false,"trial":4}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni","ms":8142,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"main","path":"refused by main","scenario":"sni","ms":107,"profile":"VLESS Encryption","ok":false,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":82,"profile":"VLESS Encryption","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"sni","ms":30,"profile":"WireGuard","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"sni","ms":27,"profile":"WireGuard","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"fe","ms":83,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":48,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"fe","ms":45,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":42,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"fe","ms":31,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":31,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"main","path":"refused by main","scenario":"fe","ms":122,"profile":"VLESS Encryption","ok":false,"trial":0}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"fe","ms":238,"profile":"VLESS Encryption","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"fe","ms":32,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":27,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"fe","ms":62,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":39,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"fe","ms":45,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":39,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"fe","ms":29,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":29,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"main","path":"refused by main","scenario":"fe","ms":28,"profile":"VLESS Encryption","ok":false,"trial":1}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"fe","ms":199,"profile":"VLESS Encryption","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"fe","ms":30,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":31,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"fe","ms":41,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":40,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"fe","ms":61,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":41,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"fe","ms":29,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":29,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"main","path":"refused by main","scenario":"fe","ms":181,"profile":"VLESS Encryption","ok":false,"trial":2}
+{"mode":"branch","path":"First packet split into random pieces","scenario":"fe","ms":692,"profile":"VLESS Encryption","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"fe","ms":30,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":51,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"fe","ms":103,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":70,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"fe","ms":41,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":44,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"fe","ms":32,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":31,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"main","path":"refused by main","scenario":"fe","ms":32,"profile":"VLESS Encryption","ok":false,"trial":3}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"fe","ms":199,"profile":"VLESS Encryption","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"fe","ms":27,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":28,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"fe","ms":39,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":39,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"fe","ms":40,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":39,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"fe","ms":30,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":30,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"main","path":"refused by main","scenario":"fe","ms":122,"profile":"VLESS Encryption","ok":false,"trial":4}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"fe","ms":174,"profile":"VLESS Encryption","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"fe","ms":27,"profile":"WireGuard","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"fe","ms":27,"profile":"WireGuard","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":63,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":45,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4032,"profile":"Hysteria2","ok":false,"trial":0}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"udp-block","ms":9120,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":51,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":30,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"main","path":"refused by main","scenario":"udp-block","ms":122,"profile":"VLESS Encryption","ok":false,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":45,"profile":"VLESS Encryption","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4029,"profile":"WireGuard","ok":false,"trial":0}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"udp-block","ms":9094,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":45,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":42,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4035,"profile":"Hysteria2","ok":false,"trial":1}
+{"mode":"branch","path":"CDN on the same server (CDN (WS+TLS))","scenario":"udp-block","ms":9125,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":28,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":28,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"main","path":"refused by main","scenario":"udp-block","ms":81,"profile":"VLESS Encryption","ok":false,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":97,"profile":"VLESS Encryption","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4031,"profile":"WireGuard","ok":false,"trial":1}
+{"mode":"branch","path":"CDN on the same server (CDN (WS+TLS))","scenario":"udp-block","ms":9096,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":43,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":37,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4029,"profile":"Hysteria2","ok":false,"trial":2}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"udp-block","ms":9096,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":29,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":31,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"main","path":"refused by main","scenario":"udp-block","ms":27,"profile":"VLESS Encryption","ok":false,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":51,"profile":"VLESS Encryption","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4029,"profile":"WireGuard","ok":false,"trial":2}
+{"mode":"branch","path":"CDN on the same server (CDN (WS+TLS))","scenario":"udp-block","ms":9123,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":39,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":39,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4028,"profile":"Hysteria2","ok":false,"trial":3}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"udp-block","ms":9111,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":28,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":29,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"main","path":"refused by main","scenario":"udp-block","ms":113,"profile":"VLESS Encryption","ok":false,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":97,"profile":"VLESS Encryption","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4029,"profile":"WireGuard","ok":false,"trial":3}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"udp-block","ms":9093,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":60,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":39,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4028,"profile":"Hysteria2","ok":false,"trial":4}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"udp-block","ms":9105,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":29,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":28,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"main","path":"refused by main","scenario":"udp-block","ms":88,"profile":"VLESS Encryption","ok":false,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"udp-block","ms":109,"profile":"VLESS Encryption","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"udp-block","ms":4026,"profile":"WireGuard","ok":false,"trial":4}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"udp-block","ms":9130,"profile":"WireGuard","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":68,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":45,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4031,"profile":"Hysteria2","ok":false,"trial":0}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"udp-dpi","ms":9138,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":52,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":30,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"main","path":"refused by main","scenario":"udp-dpi","ms":114,"profile":"VLESS Encryption","ok":false,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":55,"profile":"VLESS Encryption","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4027,"profile":"WireGuard","ok":false,"trial":0}
+{"mode":"branch","path":"CDN on the same server (CDN (WS+TLS))","scenario":"udp-dpi","ms":9108,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":60,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":41,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4025,"profile":"Hysteria2","ok":false,"trial":1}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"udp-dpi","ms":9107,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":29,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":28,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"main","path":"refused by main","scenario":"udp-dpi","ms":59,"profile":"VLESS Encryption","ok":false,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":79,"profile":"VLESS Encryption","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4029,"profile":"WireGuard","ok":false,"trial":1}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"udp-dpi","ms":9097,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":45,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":41,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4027,"profile":"Hysteria2","ok":false,"trial":2}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"udp-dpi","ms":9108,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":30,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":28,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"main","path":"refused by main","scenario":"udp-dpi","ms":27,"profile":"VLESS Encryption","ok":false,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":94,"profile":"VLESS Encryption","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4053,"profile":"WireGuard","ok":false,"trial":2}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"udp-dpi","ms":9087,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":65,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":64,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4050,"profile":"Hysteria2","ok":false,"trial":3}
+{"mode":"branch","path":"Burst of junk packets before the handshake","scenario":"udp-dpi","ms":9106,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":50,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":49,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"main","path":"refused by main","scenario":"udp-dpi","ms":134,"profile":"VLESS Encryption","ok":false,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":120,"profile":"VLESS Encryption","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4049,"profile":"WireGuard","ok":false,"trial":3}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"udp-dpi","ms":9113,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":40,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":39,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4028,"profile":"Hysteria2","ok":false,"trial":4}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"udp-dpi","ms":9143,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":31,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":28,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"main","path":"refused by main","scenario":"udp-dpi","ms":29,"profile":"VLESS Encryption","ok":false,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"udp-dpi","ms":104,"profile":"VLESS Encryption","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"udp-dpi","ms":4025,"profile":"WireGuard","ok":false,"trial":4}
+{"mode":"branch","path":"REALITY on the same server (REALITY)","scenario":"udp-dpi","ms":9099,"profile":"WireGuard","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":1147,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1124,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":949,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1653,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":786,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":785,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"main","path":"refused by main","scenario":"throttle","ms":634,"profile":"VLESS Encryption","ok":false,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":655,"profile":"VLESS Encryption","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":942,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":935,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":1098,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1101,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":949,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1544,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":785,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":784,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"main","path":"refused by main","scenario":"throttle","ms":634,"profile":"VLESS Encryption","ok":false,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":633,"profile":"VLESS Encryption","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":955,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":935,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":1118,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1118,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":966,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":966,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":782,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":783,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"main","path":"refused by main","scenario":"throttle","ms":632,"profile":"VLESS Encryption","ok":false,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":654,"profile":"VLESS Encryption","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":935,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1741,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":1097,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1105,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":959,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1148,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":784,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":787,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"main","path":"refused by main","scenario":"throttle","ms":631,"profile":"VLESS Encryption","ok":false,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":631,"profile":"VLESS Encryption","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":934,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":935,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":1097,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1095,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":1349,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":1934,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":783,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":784,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"main","path":"refused by main","scenario":"throttle","ms":634,"profile":"VLESS Encryption","ok":false,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":631,"profile":"VLESS Encryption","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"throttle","ms":4030,"profile":"WireGuard","ok":false,"trial":4}
+{"mode":"branch","path":"as saved","scenario":"throttle","ms":935,"profile":"WireGuard","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4077,"profile":"CDN (WS+TLS)","ok":false,"trial":0}
+{"mode":"branch","path":"Split handshake with a firefox fingerprint","scenario":"sni,fe,udp-dpi","ms":9134,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4028,"profile":"Hysteria2","ok":false,"trial":0}
+{"mode":"branch","path":"Burst of junk packets before the handshake","scenario":"sni,fe,udp-dpi","ms":9101,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4045,"profile":"REALITY","ok":false,"trial":0}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni,fe,udp-dpi","ms":9110,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"main","path":"refused by main","scenario":"sni,fe,udp-dpi","ms":137,"profile":"VLESS Encryption","ok":false,"trial":0}
+{"mode":"branch","path":"First packet split into random pieces","scenario":"sni,fe,udp-dpi","ms":5197,"profile":"VLESS Encryption","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4029,"profile":"WireGuard","ok":false,"trial":0}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":9086,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4055,"profile":"CDN (WS+TLS)","ok":false,"trial":1}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni,fe,udp-dpi","ms":9134,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4030,"profile":"Hysteria2","ok":false,"trial":1}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":9088,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4044,"profile":"REALITY","ok":false,"trial":1}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni,fe,udp-dpi","ms":9125,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"main","path":"refused by main","scenario":"sni,fe,udp-dpi","ms":146,"profile":"VLESS Encryption","ok":false,"trial":1}
+{"mode":"branch","path":"QUIC on the same server (Hysteria2), junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":14308,"profile":"VLESS Encryption","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4029,"profile":"WireGuard","ok":false,"trial":1}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":9085,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4058,"profile":"CDN (WS+TLS)","ok":false,"trial":2}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni,fe,udp-dpi","ms":9100,"profile":"CDN (WS+TLS)","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4029,"profile":"Hysteria2","ok":false,"trial":2}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":9084,"profile":"Hysteria2","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4046,"profile":"REALITY","ok":false,"trial":2}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni,fe,udp-dpi","ms":9134,"profile":"REALITY","ok":true,"trial":2}
+{"mode":"main","path":"refused by main","scenario":"sni,fe,udp-dpi","ms":128,"profile":"VLESS Encryption","ok":false,"trial":2}
+{"mode":"branch","path":"QUIC on the same server (Hysteria2), junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":14335,"profile":"VLESS Encryption","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4025,"profile":"WireGuard","ok":false,"trial":2}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":9108,"profile":"WireGuard","ok":true,"trial":2}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4055,"profile":"CDN (WS+TLS)","ok":false,"trial":3}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni,fe,udp-dpi","ms":9120,"profile":"CDN (WS+TLS)","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4029,"profile":"Hysteria2","ok":false,"trial":3}
+{"mode":"branch","path":"Burst of junk packets before the handshake","scenario":"sni,fe,udp-dpi","ms":9088,"profile":"Hysteria2","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4043,"profile":"REALITY","ok":false,"trial":3}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni,fe,udp-dpi","ms":9094,"profile":"REALITY","ok":true,"trial":3}
+{"mode":"main","path":"refused by main","scenario":"sni,fe,udp-dpi","ms":129,"profile":"VLESS Encryption","ok":false,"trial":3}
+{"mode":"branch","path":"QUIC on the same server (Hysteria2), junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":14371,"profile":"VLESS Encryption","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4028,"profile":"WireGuard","ok":false,"trial":3}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":9081,"profile":"WireGuard","ok":true,"trial":3}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4058,"profile":"CDN (WS+TLS)","ok":false,"trial":4}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni,fe,udp-dpi","ms":9114,"profile":"CDN (WS+TLS)","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4028,"profile":"Hysteria2","ok":false,"trial":4}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":9083,"profile":"Hysteria2","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4044,"profile":"REALITY","ok":false,"trial":4}
+{"mode":"branch","path":"TLS handshake split into small pieces","scenario":"sni,fe,udp-dpi","ms":9100,"profile":"REALITY","ok":true,"trial":4}
+{"mode":"main","path":"refused by main","scenario":"sni,fe,udp-dpi","ms":66,"profile":"VLESS Encryption","ok":false,"trial":4}
+{"mode":"branch","path":"QUIC on the same server (Hysteria2), junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":14290,"profile":"VLESS Encryption","ok":true,"trial":4}
+{"mode":"main","path":"as saved","scenario":"sni,fe,udp-dpi","ms":4028,"profile":"WireGuard","ok":false,"trial":4}
+{"mode":"branch","path":"Junk packet before the handshake","scenario":"sni,fe,udp-dpi","ms":9084,"profile":"WireGuard","ok":true,"trial":4}

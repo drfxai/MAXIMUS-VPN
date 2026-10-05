@@ -14,13 +14,20 @@ object SecretRedactor {
         "(vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic|wireguard|wg)://([^@]+)@((?:\\[[^\\]]+\\]|[^:/?#]+)):(\\d+)([^\\s\"'<>]*)"
     )
 
+    /** vmess:// and legacy ss:// links carry the whole config, credentials included, as base64. */
+    private val BASE64_LINK_PATTERN = Pattern.compile(
+        "\\b(vmess|ss|ssr)://([A-Za-z0-9+/=_-]{12,})"
+    )
+
     private val HTTP_USERINFO_PATTERN = Pattern.compile(
-        "(https?://)([^/@\\s]+)@",
+        "((?:https?|socks5?h?)://)([^/@\\s]+)@",
         Pattern.CASE_INSENSITIVE
     )
 
+    // A profile's uuid field holds the WireGuard private key or the Trojan/Hysteria2 password on
+    // non-VLESS profiles, which the UUID pattern does not catch.
     private val REALITY_PBK_PATTERN = Pattern.compile(
-        "(pbk|publicKey|public_key|secretKey|private_key|privateKey)=([^&\\s,}{\"]+)"
+        "(pbk|publicKey|public_key|secretKey|private_key|privateKey|uuid)=([^&\\s,}{\"]+)"
     )
 
     private val REALITY_SID_PATTERN = Pattern.compile(
@@ -37,7 +44,7 @@ object SecretRedactor {
     )
 
     private val JSON_PBK_PATTERN = Pattern.compile(
-        "\"(publicKey|privateKey|password|secret|key|token)\"\\s*:\\s*\"[^\"]+\""
+        "\"(publicKey|privateKey|password|secret|key|token|auth|secretKey|preSharedKey|uuid)\"\\s*:\\s*\"[^\"]+\""
     )
 
     private val JSON_SID_PATTERN = Pattern.compile(
@@ -74,6 +81,7 @@ object SecretRedactor {
         if (proxyMatcher.find()) {
             result = proxyMatcher.replaceAll("$1://[REDACTED_CREDENTIALS]@$3:$4[REDACTED_PARAMS]")
         }
+        result = BASE64_LINK_PATTERN.matcher(result).replaceAll("$1://[REDACTED_LINK]")
         result = HTTP_USERINFO_PATTERN.matcher(result).replaceAll("$1[REDACTED_CREDENTIALS]@")
 
         // Redact standalone UUIDs

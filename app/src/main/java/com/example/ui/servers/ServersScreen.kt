@@ -48,6 +48,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.example.data.model.VlessProfile
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -97,6 +98,7 @@ fun ServersScreen(
     val selectedProfileId by serverViewModel.selectedProfileId.collectAsStateWithLifecycle()
     val connectionState by vpnViewModel.connectionState.collectAsStateWithLifecycle()
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
+    var shareProfile by remember { mutableStateOf<VlessProfile?>(null) }
 
     val managedPanels by serverViewModel.managedPanels.collectAsStateWithLifecycle()
     val selected3xuiPanel by serverViewModel.selected3xuiPanel.collectAsStateWithLifecycle()
@@ -481,6 +483,7 @@ fun ServersScreen(
                             onExportUri = {
                                 serverViewModel.exportUri(it)
                             },
+                            onShareOffline = { shareProfile = profile },
                             onEdit = if (profile.profileType == com.example.data.model.ProfileType.VLESS) {
                                 { onNavigateToEditServer(profile.id) }
                             } else null
@@ -507,6 +510,23 @@ fun ServersScreen(
                 modifier = Modifier.size(28.dp)
             )
         }
+    }
+
+    shareProfile?.let { profile ->
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+        val allProfiles by androidx.compose.runtime.produceState(initialValue = serverList, profile) {
+            value = com.example.RayApplication.instance.serverRepository.getAllProfilesOnce()
+        }
+        com.example.ui.share.ShareOfflineSheet(
+            profile = profile,
+            allProfiles = allProfiles,
+            onCopy = { text ->
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                android.widget.Toast.makeText(context, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { shareProfile = null }
+        )
     }
 }
 

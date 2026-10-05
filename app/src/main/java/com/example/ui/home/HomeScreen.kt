@@ -310,7 +310,7 @@ fun HomeScreen(
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "1. VLESS Reality ➔ 2. Hysteria2 ➔ 3. Psiphon/Conduit ➔ 4. P2P Mesh",
+                                text = "1. REALITY ➔ 2. CDN / TLS ➔ 3. Hysteria2 ➔ 4. WireGuard",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = Color(0xFFE0E0E0)

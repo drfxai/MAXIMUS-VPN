@@ -24,6 +24,12 @@ android {
     versionName = "1.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // The free config list's public key (DER, base64), derived in the release workflow from the
+    // HUB_SIGNING_KEY secret. Without it the app refuses every list, as unsigned.
+    val hubPublicKey = System.getenv("HUB_PUBLIC_KEY").orEmpty().trim()
+    require(hubPublicKey.all { it.isLetterOrDigit() || it in "+/=" }) { "HUB_PUBLIC_KEY must be base64" }
+    buildConfigField("String", "HUB_PUBLIC_KEY", "\"$hubPublicKey\"")
   }
 
   val rootDebugKeystore = file("${rootDir}/debug.keystore")
@@ -127,6 +133,10 @@ dependencies {
   coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.activity.compose)
+  implementation(libs.androidx.camera.camera2)
+  implementation(libs.androidx.camera.core)
+  implementation(libs.androidx.camera.lifecycle)
+  implementation(libs.androidx.camera.view)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
@@ -149,6 +159,12 @@ dependencies {
   implementation(libs.okhttp)
   implementation("com.github.mwiede:jsch:2.28.7")
   implementation(libs.snakeyaml)
+  // Tor for the Tor engine (BSD-3-Clause); its bridges run in lyrebird, built by scripts/engines/lyrebird.sh.
+  // 0.4.9.5.1 is the newest release that builds against compileSdk 36. It is plain Java, so its
+  // newer Kotlin standard library is left out to keep the app's own.
+  implementation("info.guardianproject:tor-android:0.4.9.5.1") { exclude(group = "org.jetbrains.kotlin") }
+  implementation("info.guardianproject:jtorctl:0.4.5.7")
+  implementation(libs.zxing.core)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

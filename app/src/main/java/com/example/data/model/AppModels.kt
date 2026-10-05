@@ -245,8 +245,8 @@ data class RoutingConfiguration(
 )
 
 enum class OperationalMode(val displayName: String, val subtitle: String, val badge: String) {
-    DAILY("Daily Mode", "High Speed • Cloudflare Workers & Reality CDN • Light/Balanced Desync", "⚡ DAILY"),
-    GOD_MODE("GOD Mode", "Anti-Censorship Shield • Psiphon + Conduit • P2P Mesh • E2EE Chat", "🛡️ GOD MODE")
+    DAILY("Daily Mode", "High Speed • Your routing choices • Smart Connect when you ask", "⚡ DAILY"),
+    GOD_MODE("GOD Mode", "Survival • Everything through the proxy • Fails closed • Tests every server", "🛡️ GOD MODE")
 }
 
 enum class DesyncMethod(val displayName: String, val description: String) {
@@ -286,7 +286,9 @@ data class SubscriptionInfo(
     val autoRefresh: Boolean = true,
     val refreshIntervalMinutes: Int = 1440,
     val nodeCount: Int = 0,
-    val lastError: String? = null
+    val lastError: String? = null,
+    /** Other addresses that serve the same subscription, tried when [url] is blocked. */
+    val mirrors: List<String> = emptyList()
 )
 
 data class AppSettings(

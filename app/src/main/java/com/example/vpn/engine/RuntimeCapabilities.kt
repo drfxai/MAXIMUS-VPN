@@ -6,7 +6,16 @@ import com.example.data.model.VlessProfile
 
 /** Import compatibility is broader than the Xray-core and Kotlin forwarding runtimes. */
 object RuntimeCapabilities {
-    fun unsupportedReason(profile: VlessProfile): String? = when {
+    fun unsupportedReason(profile: VlessProfile): String? {
+        // Profiles a separate engine program carries (Mihomo, Psiphon, Tor, DNS tunnel) are checked by it.
+        com.example.vpn.sidecar.Sidecars.forProfile(profile)?.let { engine ->
+            return engine.problem(profile) ?: if (com.example.vpn.sidecar.Sidecars.isBundled(engine)) null
+                else "This profile needs the ${engine.id} engine, which is not included in this build for this phone."
+        }
+        return xrayProblem(profile)
+    }
+
+    private fun xrayProblem(profile: VlessProfile): String? = when {
         profile.profileType == ProfileType.MIHOMO_YAML ->
             "A bundled Mihomo configuration needs the native Mihomo core, which is not included. Select an Xray-compatible node instead."
         profile.profileType == ProfileType.XRAY_JSON -> null

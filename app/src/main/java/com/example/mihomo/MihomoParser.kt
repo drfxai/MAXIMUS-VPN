@@ -290,11 +290,10 @@ object MihomoParser {
     }
 
     /**
-     * Converts Mihomo/Clash YAML into one profile per proxy, each run on the bundled Xray core.
-     *
-     * There is no native Mihomo core in the app, so a "whole config" bundle profile (proxy groups,
-     * rules) could never carry traffic and is no longer created. TUIC proxies are skipped: Xray has no
-     * TUIC client. WireGuard proxies (also AmneziaWG with a standard packet format) are kept.
+     * Converts Mihomo/Clash YAML into one profile per proxy. Proxies the bundled Xray core speaks run
+     * there; the ones it cannot (TUIC, AnyTLS, Mieru, Snell, SSH, Hysteria v1, AmneziaWG with a changed
+     * packet format) become Mihomo engine profiles. Proxy groups and rules are not kept: each profile
+     * is one server, and the app does the server choice itself.
      */
     fun toVlessProfiles(yamlContent: String, sourceUrl: String? = null): List<VlessProfile> {
         val config = parseYaml(yamlContent)
@@ -303,13 +302,23 @@ object MihomoParser {
             if (node.type == ProtocolType.TUIC) continue
             result.add(proxyNodeToVlessProfile(node, sourceUrl))
         }
-        result.addAll(wireGuardProfiles(yamlContent, sourceUrl))
+        val raw = rawProxies(yamlContent)
+        result.addAll(wireGuardProfiles(raw, sourceUrl))
+        raw.filter { it["type"]?.toString()?.trim()?.lowercase() in MIHOMO_ONLY }
+            .forEach { map ->
+                val profile = com.example.vpn.sidecar.MihomoSidecar.profile(map, sourceUrl = sourceUrl)
+                val problem = com.example.vpn.sidecar.MihomoSidecar.problem(profile)
+                if (problem == null) result.add(profile)
+                else XrayLogManager.appendLog("Skipped proxy '${map["name"]}': $problem", "MIHOMO")
+            }
         return result
     }
 
-    /** `type: wireguard` proxies; ones whose server needs the AmneziaWG core are skipped and logged. */
-    private fun wireGuardProfiles(yamlContent: String, sourceUrl: String?): List<VlessProfile> {
-        if (!yamlContent.contains("wireguard", ignoreCase = true) || yamlContent.length > MAX_YAML_CODE_POINTS) return emptyList()
+    /** Clash proxy types only the Mihomo engine carries. */
+    private val MIHOMO_ONLY = setOf("tuic", "anytls", "mieru", "snell", "ssh", "hysteria")
+
+    private fun rawProxies(yamlContent: String): List<Map<*, *>> {
+        if (yamlContent.length > MAX_YAML_CODE_POINTS) return emptyList()
         val options = LoaderOptions().apply {
             codePointLimit = MAX_YAML_CODE_POINTS
             nestingDepthLimit = 50
@@ -317,7 +326,11 @@ object MihomoParser {
         }
         val root = runCatching { Yaml(SafeConstructor(options)).load<Any>(yamlContent) as? Map<*, *> }.getOrNull() ?: return emptyList()
         return (root["proxies"] as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
-            .filter { it["type"]?.toString()?.trim().equals("wireguard", ignoreCase = true) }
+    }
+
+    /** `type: wireguard` proxies: on Xray when the packet format is standard, otherwise on Mihomo. */
+    private fun wireGuardProfiles(raw: List<Map<*, *>>, sourceUrl: String?): List<VlessProfile> =
+        raw.filter { it["type"]?.toString()?.trim().equals("wireguard", ignoreCase = true) }
             .mapNotNull { map ->
                 try {
                     com.example.vpn.engine.WireGuardConf.fromMihomo(map).copy(subscriptionUrl = sourceUrl)
@@ -326,7 +339,6 @@ object MihomoParser {
                     null
                 }
             }
-    }
 
     fun proxyNodeToVlessProfile(node: ProxyNode, sourceUrl: String? = null): VlessProfile {
         if (node.type == ProtocolType.HYSTERIA2) {

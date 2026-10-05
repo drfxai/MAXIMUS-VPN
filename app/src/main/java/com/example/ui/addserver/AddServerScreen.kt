@@ -77,7 +77,8 @@ import kotlinx.coroutines.launch
 fun AddServerScreen(
     serverViewModel: ServerViewModel,
     onNavigateBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onScanFromPhone: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -318,6 +319,32 @@ fun AddServerScreen(
                         softWrap = false
                     )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Button(
+                onClick = onScanFromPhone,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("scan_from_phone"),
+                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surfaceElevated),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    Icons.Default.QrCodeScanner,
+                    contentDescription = null,
+                    tint = AppTheme.colors.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Scan from another phone",
+                    color = AppTheme.colors.primary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
             }
 
             // Remote Download Button if input is a URL

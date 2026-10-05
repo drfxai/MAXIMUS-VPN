@@ -14,7 +14,11 @@ import java.net.URL
 class EndpointResolverTest {
     private val host = "maximus-bpb-abc.acme.workers.dev"
 
-    private fun doh(body: String, seen: MutableList<String> = mutableListOf()): (URL) -> HttpURLConnection = { url ->
+    // The resolvers are asked from several threads at once, so the record of what was asked is shared.
+    private fun doh(
+        body: String,
+        seen: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+    ): (URL) -> HttpURLConnection = { url ->
         seen += url.toString()
         object : HttpURLConnection(url) {
             override fun connect() {}
@@ -42,8 +46,13 @@ class EndpointResolverTest {
         val seen = java.util.Collections.synchronizedList(mutableListOf<String>())
         val result = EndpointResolver.resolve(host, { listOf(InetAddress.getByName("10.10.34.36")) }, doh(answer, seen))
         assertEquals(EndpointResolver.Result("104.21.30.40", viaDoh = true), result)
-        // All resolvers are asked in parallel; the first public answer wins.
-        assertTrue(seen.toList().any { it.startsWith("https://1.1.1.1/dns-query?name=$host") })
+        // All resolvers are asked in parallel and the first public answer wins, so which of them
+        // was reached is a race. What matters is that every query went to a pinned resolver
+        // address, so asking them never needs a lookup of its own.
+        val asked = seen.toList()
+        assertTrue(asked.isNotEmpty())
+        val addresses = EndpointResolver.DOH_ENDPOINTS.map { it.removePrefix("wire:").substringBefore("/dns-query").substringBefore("/resolve") }
+        asked.forEach { url -> assertTrue(url, addresses.any { url.startsWith("$it/") }) }
     }
 
     @Test
@@ -57,5 +66,13 @@ class EndpointResolverTest {
         listOf("10.10.34.36", "192.168.1.1", "127.0.0.1", "0.0.0.0", "169.254.1.1", "fc00::1")
             .forEach { assertTrue(it, EndpointResolver.isBlockedAnswer(InetAddress.getByName(it))) }
         assertFalse(EndpointResolver.isBlockedAnswer(InetAddress.getByName("104.16.1.2")))
+    }
+
+    @Test
+    fun godModeNeverAsksTheNetworksDns() {
+        var asked = false
+        val result = EndpointResolver.resolve(host, { asked = true; listOf(InetAddress.getByName("104.16.1.2")) }, doh(answer), private = true)
+        assertEquals(EndpointResolver.Result("104.21.30.40", viaDoh = true), result)
+        assertFalse(asked)
     }
 }

@@ -31,7 +31,8 @@ class AiAgentPreferences(context: Context = RayApplication.instance) {
     private fun loadConfig(): AiAgentConfig {
         val encryptedKey = prefs.getString(KEY_API_KEY, "") ?: ""
         val decryptedKey = if (encryptedKey.isNotBlank()) {
-            SecureStorage.decrypt(encryptedKey).ifBlank { encryptedKey } // Support legacy unencrypted migration
+            // A key saved before encryption is read as is; a failed decrypt never yields the ciphertext.
+            SecureStorage.decryptOrPlaintext(encryptedKey)
         } else {
             ""
         }

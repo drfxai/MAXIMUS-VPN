@@ -44,13 +44,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -63,6 +63,10 @@ class RayVpnService : VpnService() {
         const val ACTION_DISCONNECT = "com.drfxai.maximusvpn.ACTION_DISCONNECT"
         const val ACTION_RECONNECT = "com.drfxai.maximusvpn.ACTION_RECONNECT"
         const val EXTRA_PROFILE_ID = "com.drfxai.maximusvpn.EXTRA_PROFILE_ID"
+        const val EXTRA_SMART = "com.drfxai.maximusvpn.EXTRA_SMART"
+        private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
+        /** How long a clean-address scan may take before the connect goes on without one. */
+        private const val CLEAN_IP_SCAN_LIMIT_MS = 12_000L
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
         const val NOTIFICATION_ID = 1001
@@ -73,6 +77,14 @@ class RayVpnService : VpnService() {
         fun updateState(state: ConnectionState) {
             _vpnState.value = state
         }
+
+        private val _lockdown = MutableStateFlow(com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.UNKNOWN)
+        private val _environment = MutableStateFlow<com.example.vpn.smart.NetworkEnvironment.Report?>(null)
+        /** How hostile the network looked at the last connect. */
+        val environment: StateFlow<com.example.vpn.smart.NetworkEnvironment.Report?> = _environment.asStateFlow()
+
+        /** Whether Android keeps traffic blocked if this app's process dies; read at each connect. */
+        val lockdown: StateFlow<com.example.vpn.safety.MaximusVpnSupervisor.Lockdown> = _lockdown.asStateFlow()
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -81,9 +93,17 @@ class RayVpnService : VpnService() {
     private var durationJob: Job? = null
     private var pingJob: Job? = null
 
-    private var protectionRequested = false
+    private val supervisor = com.example.vpn.safety.MaximusVpnSupervisor { XrayLogManager.i("VPN", it) }
+    private val protectionRequested: Boolean get() = supervisor.protectionRequested
+    private val engineBreaker = com.example.vpn.engine.registry.EngineCircuitBreaker()
+    /** The last server-name lookup met a blocked DNS answer. */
+    @Volatile private var dnsPoisoned = false
+    /** GOD MODE: server names are looked up only over DNS-over-HTTPS (see OperatingModePolicy). */
+    @Volatile private var privateServerLookup = false
     private var vpnInterface: ParcelFileDescriptor? = null
     private var tunnelManager: TunnelManager? = null
+    /** The separate engine program carrying traffic for the current profile, if any. */
+    @Volatile private var sidecar: com.example.vpn.sidecar.RunningEngine? = null
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
     private var failoverManager: com.example.vpn.smart.FailoverManager? = null
     private val serviceTxBytes = java.util.concurrent.atomic.AtomicLong(0)
@@ -100,6 +120,9 @@ class RayVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
+        com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
+        com.example.vpn.sidecar.Sidecars.torStarter = { torrc, port -> com.example.vpn.sidecar.TorInApp.start(this, torrc, port) }
         val db = AppDatabase.getInstance(applicationContext)
         serverRepository = ServerRepository(db.serverProfileDao())
         settingsRepository = com.example.RayApplication.instance.settingsRepository
@@ -117,58 +140,42 @@ class RayVpnService : VpnService() {
                 val prevMode = lastObservedMode
                 lastObservedMode = settings.operationalMode
                 if (prevMode != null && prevMode != settings.operationalMode && _vpnState.value.isConnected) {
-                    handleLiveModeSwitch(prevMode, settings.operationalMode, settings)
+                    handleLiveModeSwitch(prevMode, settings.operationalMode)
                 }
             }
         }
     }
 
+    /**
+     * The modes route differently (see OperatingModePolicy), so a switch while connected reconnects
+     * the same server under the new mode. The traffic block holds during the reconnect.
+     */
     private suspend fun handleLiveModeSwitch(
         oldMode: com.example.data.model.OperationalMode,
-        newMode: com.example.data.model.OperationalMode,
-        settings: com.example.data.model.AppSettings
+        newMode: com.example.data.model.OperationalMode
     ) {
         val safeProfileName = com.example.core.SecretRedactor.redact(activeProfile?.name ?: "")
-        if (newMode == com.example.data.model.OperationalMode.GOD_MODE) {
-            XrayLogManager.i("GOD_MODE", "⚡ LIVE RECONFIGURATION: Switched to GOD Mode on active tunnel '$safeProfileName'.")
-            com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
-            com.example.vpn.godmode.MaximusMeshManager.startMesh()
+        XrayLogManager.i("VPN", "Mode switched from ${oldMode.name} to ${newMode.name}; reconnecting '$safeProfileName' under the new mode.")
+        activeProfile?.let { connect(it) }
+    }
 
-            activeProfile?.let { prof ->
-                failoverManager?.startMonitoring(prof, settings)
-            }
-            showForegroundNotification("⚡ GOD Mode Active: ${activeProfile?.name ?: "Tunnel"}")
+    /** Records whether Android blocks traffic if the app dies, and says what to change when it does not. */
+    private fun checkLockdown() {
+        val state = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            com.example.vpn.safety.MaximusVpnSupervisor.lockdownOf(Build.VERSION.SDK_INT, { isAlwaysOn }, { isLockdownEnabled })
         } else {
-            XrayLogManager.i("DAILY_MODE", "LIVE RECONFIGURATION: Switched to Daily Mode on active tunnel '$safeProfileName'.")
-            com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
-            com.example.vpn.godmode.MaximusMeshManager.stopMesh()
-
-            if (activeProfile?.id?.startsWith("bridge-") == true || activeProfile?.id?.startsWith("mesh-") == true) {
-                val allProfiles = try {
-                    serverRepository.allProfiles.first()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) { emptyList() }
-                val standardNodes = allProfiles.filter { !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") }
-                val bestDaily = com.example.vpn.smart.SmartConnect.selectBestNode(standardNodes, settings.scoringProfile)?.profile ?: standardNodes.firstOrNull()
-                if (bestDaily != null) {
-                    XrayLogManager.i("DAILY_MODE", "Reverting from emergency bridge to primary daily node: ${bestDaily.name}")
-                    connect(bestDaily)
-                    return
-                }
-            }
-
-            activeProfile?.let { prof ->
-                failoverManager?.startMonitoring(prof, settings)
-            }
-            showForegroundNotification("Connected to ${activeProfile?.name ?: "Maximus"}")
+            com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.UNKNOWN
         }
+        _lockdown.value = state
+        com.example.vpn.safety.MaximusVpnSupervisor.lockdownAdvice(state, settingsRepository.getSettings().operationalMode)
+            ?.let { XrayLogManager.w("VPN", it) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         if (action == null || action == ACTION_CONNECT || action == ACTION_RECONNECT) {
-            protectionRequested = true
+            supervisor.requestProtection()
+            checkLockdown()
             if (!showForegroundNotification("Protecting traffic while connecting...")) return START_NOT_STICKY
             try { ensureBlockingInterface() } catch (e: Exception) {
                 updateState(ConnectionState(status = ConnectionStatus.FAILED, errorMessage = "Unable to establish traffic protection"))
@@ -197,6 +204,7 @@ class RayVpnService : VpnService() {
             return START_STICKY
         }
         val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
+        val smart = intent?.getBooleanExtra(EXTRA_SMART, false) == true
 
         when (action) {
             ACTION_CONNECT -> {
@@ -222,7 +230,7 @@ class RayVpnService : VpnService() {
                         ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
                     if (targetProfile != null) {
-                        connect(targetProfile)
+                        connect(targetProfile, smart = smart, startedByUser = true)
                     } else {
                         val err = "No valid server profile found to connect."
                         XrayLogManager.e("VPN", err)
@@ -275,17 +283,118 @@ class RayVpnService : VpnService() {
         return if (action == ACTION_CONNECT || action == ACTION_RECONNECT) START_STICKY else START_NOT_STICKY
     }
 
-    private suspend fun connect(profile: VlessProfile): Unit = connectionMutex.withLock {
-        connectLocked(profile)
+    /**
+     * [smart]: race the saved servers with real requests first ([profile] leads) and connect the fastest
+     * that works; [exclude] are servers to leave out (one the watchdog just gave up on).
+     */
+    private suspend fun connect(
+        profile: VlessProfile,
+        smart: Boolean = false,
+        exclude: Set<String> = emptySet(),
+        /** The user pressed Connect (not failover, reconnect or Always-on); see FailClosedPolicy. */
+        startedByUser: Boolean = false
+    ): Unit = connectionMutex.withLock { connectLocked(profile, smart, exclude, startedByUser) }
+
+    /** What worked on each carrier or Wi-Fi: stealth alternates, kinds of connection, probe time limits. */
+    private val networkMemory by lazy {
+        val prefs = getSharedPreferences("network_memory", Context.MODE_PRIVATE)
+        com.example.vpn.smart.NetworkMemory(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
     }
 
-    private suspend fun connectLocked(userProfile: VlessProfile): Unit = withContext(Dispatchers.IO) {
+    /**
+     * Races the saved servers other than [exclude] (see ServerRace) and returns the fastest that works.
+     * When none works as saved (a network that filters every kind), the best-ranked one is tried in
+     * disguise with [finder] (its saved form was just tested, so that step is skipped).
+     */
+    private suspend fun raceServers(
+        exclude: Set<String>,
+        network: String,
+        timeoutSec: Int,
+        finder: com.example.vpn.stealth.StealthPathFinder,
+        /** Also try the [exclude]d servers in disguise (only their saved form was tested). */
+        retryDisguised: Boolean
+    ): com.example.vpn.smart.ServerRace.Winner? {
+        // Profiles carried by an engine program cannot be measured before it runs, so they are not raced.
+        val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+            .filter { com.example.vpn.sidecar.Sidecars.forProfile(it) == null }
+        val candidates = com.example.vpn.smart.ServerRace.rank(
+            all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude
+        )
+        // Servers left out because their saved form just failed are still tried in disguise.
+        val dead = if (retryDisguised) all.filter { it.id in exclude } else emptyList()
+        if (candidates.isEmpty() && dead.isEmpty()) return null
+        XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
+        val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
+        com.example.vpn.smart.ServerRace().run(candidates, resolve, timeoutSec, onFailure = {
+            networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
+        }, disguiseOnly = dead)?.let { return it }
+        val best = candidates.firstOrNull() ?: return null
+        val choice = runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() ?: return null
+        return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
+    }
+
+    /**
+     * A Cloudflare-fronted server whose address is blocked usually still answers on another Cloudflare
+     * address: this scans for one and returns the same server reached through it, if it carries traffic.
+     */
+    private suspend fun cleanIpPath(profile: VlessProfile, timeoutSec: Int): com.example.vpn.smart.ServerRace.Winner? {
+        val fronted = profile.transport.lowercase() in setOf("ws", "xhttp", "splithttp", "httpupgrade", "grpc", "h2") &&
+            (profile.security.equals("tls", true) || profile.security.equals("reality", true))
+        if (!fronted) return null
+        showForegroundNotification("Looking for a clean address...")
+        val best = withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
+            runCatching { com.example.panels.CleanIpOptimizer.findBestCleanIpSync() }.getOrNull()
+        } ?: return null
+        val candidate = com.example.panels.CleanIpOptimizer.variant(profile, best)
+        if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(candidate) != null) return null
+        val outcome = com.example.xray.RealDelayProbe.measure(candidate, timeoutSec)
+        return (outcome as? com.example.xray.RealDelayProbe.Outcome.Delay)?.let {
+            XrayLogManager.i("SMART", "Reached ${com.example.core.SecretRedactor.redact(profile.name)} through a clean address (${it.latencyMs} ms).")
+            com.example.vpn.smart.ServerRace.Winner(candidate, profile, it.latencyMs)
+        }
+    }
+
+    /**
+     * GOD MODE's last step before reporting no path: Cloudflare WARP on the WireGuard path, which needs
+     * no server of the user's. The first use registers a device over the phone's own network.
+     */
+    private suspend fun warpPath(timeoutSec: Int): com.example.vpn.smart.ServerRace.Winner? {
+        showForegroundNotification("Trying Cloudflare WARP...")
+        val cm = getSystemService(android.net.ConnectivityManager::class.java)
+        val network = cm?.allNetworks.orEmpty().firstOrNull { n ->
+            cm?.getNetworkCapabilities(n)?.let { caps ->
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            } == true
+        } ?: return null
+        val warp = runCatching {
+            com.example.vpn.warp.WarpProvider.profile(this) { url ->
+                network.openConnection(url, java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
+            }
+        }.onFailure { XrayLogManager.w("SMART", "Cloudflare WARP registration failed: ${it.message}") }.getOrNull() ?: return null
+        if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(warp) != null) return null
+        val outcome = com.example.xray.RealDelayProbe.measure(warp, timeoutSec)
+        return (outcome as? com.example.xray.RealDelayProbe.Outcome.Delay)?.let {
+            XrayLogManager.i("SMART", "Cloudflare WARP carries traffic (${it.latencyMs} ms).")
+            com.example.vpn.smart.ServerRace.Winner(warp, warp, it.latencyMs)
+        }
+    }
+
+    private suspend fun connectLocked(
+        userProfile: VlessProfile,
+        smart: Boolean = false,
+        exclude: Set<String> = emptySet(),
+        startedByUser: Boolean = false
+    ): Unit = withContext(Dispatchers.IO) {
         // The saved profile the connection belongs to; a same-server switch below can change it.
         var requestedProfile = userProfile
         // Engines receive [profile]; a hostname endpoint is replaced by its resolved IP below.
         var profile = requestedProfile
         try {
-            protectionRequested = true
+            supervisor.requestProtection()
             ensureBlockingInterface()
             disconnectResources()
             protectionFailureHandled.set(false)
@@ -306,7 +415,11 @@ class RayVpnService : VpnService() {
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 1. VpnService.prepare() check: Permission GRANTED.")
 
             activeProfile = profile
-            val settings = settingsRepository.getSettings()
+            val policy = com.example.vpn.safety.OperatingModePolicy.of(settingsRepository.getSettings().operationalMode)
+            dnsPoisoned = false
+            privateServerLookup = policy.privateServerLookup
+            val settings = policy.apply(settingsRepository.getSettings())
+            val raceFirst = smart || policy.alwaysSmartConnect
 
             updateState(ConnectionState(
                 status = ConnectionStatus.PREPARING,
@@ -326,47 +439,110 @@ class RayVpnService : VpnService() {
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 2. Foreground service started successfully.")
 
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
+            var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
             try {
-                if (profile.profileType != ProfileType.XRAY_JSON && !isLiteralIp(profile.address)) {
+                // Engine programs (Mihomo, Psiphon, the DNS tunnel) look up their own servers privately.
+                if (profile.profileType != ProfileType.XRAY_JSON && com.example.vpn.sidecar.Sidecars.forProfile(profile) == null &&
+                    !isLiteralIp(profile.address)) {
                     // Resolve outside the tunnel: once traffic is captured, DNS for the proxy itself
                     // would loop back into the VPN.
+                    failure = com.example.vpn.safety.FailClosedPolicy.Failure.UNRESOLVABLE_SERVER
                     profile = resolveEndpoint(profile)
+                    failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
                     XrayLogManager.i("VPN", "[DIAGNOSTICS] 3. Server host resolved outside the tunnel")
                 }
                 com.example.vless.VlessValidator.validate(profile)
                 com.example.vpn.engine.RuntimeCapabilities.requireSupported(profile)
             } catch (e: Exception) {
                 XrayLogManager.e("VPN", "Profile validation error: ${e.message}", e)
-                // A broken or unresolvable profile is not a network outage: release the traffic
-                // block completely so the device keeps working and the VPN can be started again.
-                protectionRequested = false
+                val release = com.example.vpn.safety.FailClosedPolicy.mayReleaseBlock(
+                    failure, startedByUser, settingsRepository.getSettings().operationalMode)
+                if (release) supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.INVALID_PROFILE_BY_USER)
                 disconnectResources()
                 updateState(ConnectionState(
                     status = ConnectionStatus.FAILED,
                     activeProfile = requestedProfile,
-                    errorMessage = "Cannot use this profile: ${e.localizedMessage}"
+                    errorMessage = if (release) "Cannot use this profile: ${e.localizedMessage}"
+                        else "Traffic blocked: ${e.localizedMessage}. Disconnect to use the network without the VPN."
                 ))
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                if (release) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                } else {
+                    showForegroundNotification("Traffic blocked: server unreachable")
+                }
                 return@withContext
             }
             val safeName = com.example.core.SecretRedactor.redact(profile.name)
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 3. Profile configuration validated for '$safeName'")
 
+            // 3a. Smart Connect and failover: the chosen server first, then a race of the other saved
+            // servers. What worked on this carrier or Wi-Fi (NetworkMemory) orders the race and sets the
+            // probe time limits. The probe's sockets bypass the traffic-blocking interface.
+            val network = com.example.vpn.smart.NetworkKey.current(this@RayVpnService)
+            val timeouts = networkMemory.timeouts(network)
+            runCatching { com.example.vpn.smart.NetworkEnvironment.observe(this@RayVpnService, networkMemory, dnsPoisoned) }
+                .onSuccess { report ->
+                    _environment.value = report
+                    XrayLogManager.i("SMART", "Network: ${report.describe()}")
+                    if (policy.mode == com.example.data.model.OperationalMode.DAILY && com.example.vpn.smart.NetworkEnvironment.suggestsGodMode(report)) {
+                        XrayLogManager.w("SMART", "Filtering on this network is heavy; GOD MODE proxies everything and tests every server.")
+                    }
+                }
+            var raced = false
+            fun adopt(win: com.example.vpn.smart.ServerRace.Winner) {
+                com.example.vless.VlessValidator.validate(win.profile)
+                com.example.vpn.engine.RuntimeCapabilities.requireSupported(win.profile)
+                requestedProfile = win.owner
+                activeProfile = win.owner
+                profile = win.profile
+                raced = true
+                win.variantKey?.let { networkMemory.variants(network)[win.owner.id] = it }
+                networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(win.profile), win.latencyMs)
+                updateState(_vpnState.value.copy(activeProfile = win.owner))
+            }
+            val finder = com.example.vpn.stealth.StealthPathFinder(
+                memory = networkMemory.variants(network),
+                firstTimeoutSec = timeouts.firstSec,
+                alternateTimeoutSec = timeouts.alternateSec
+            )
+            var firstFailed = false
+            if (raceFirst) {
+                // The chosen server alone first, so a working one costs a single request; only when it
+                // carries no traffic are the other servers raced (several kinds of connection per round).
+                showForegroundNotification("Finding the fastest server...")
+                val first = finder.firstPath(requestedProfile, profile)
+                when (val outcome = com.example.xray.RealDelayProbe.measure(first.profile, timeouts.firstSec)) {
+                    is com.example.xray.RealDelayProbe.Outcome.Delay -> {
+                        profile = first.profile
+                        raced = true
+                        networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(first.profile), outcome.latencyMs)
+                    }
+                    is com.example.xray.RealDelayProbe.Outcome.Failed -> {
+                        firstFailed = true
+                        networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(first.profile))
+                        raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder, retryDisguised = true)?.let { adopt(it) }
+                    }
+                    is com.example.xray.RealDelayProbe.Outcome.NotRun -> Unit
+                }
+            }
+
             // 3b. Find a path that carries traffic before the core starts: the saved profile, its stealth
             // alternates (split handshake, other fingerprint, ECH, UDP junk) or another kind on the same
             // server. The probe's sockets bypass the traffic-blocking interface (RealDelayProbe.socketProtector).
-            if (com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
+            if (!raced && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
                 showForegroundNotification("Finding a working route...")
                 val resolvedRequested = profile
                 val siblings = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
-                val choice = com.example.vpn.stealth.StealthPathFinder().choose(
+                val choice = finder.choose(
                     requested = requestedProfile,
                     resolve = { p ->
                         if (p.id == requestedProfile.id) resolvedRequested
-                        else if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p
+                        else if (p.profileType != ProfileType.XRAY_JSON && com.example.vpn.sidecar.Sidecars.forProfile(p) == null &&
+                            !isLiteralIp(p.address)) resolveEndpoint(p) else p
                     },
-                    siblings = siblings
+                    siblings = siblings,
+                    firstFailed = firstFailed
                 )
                 if (choice.owner.id != requestedProfile.id) {
                     com.example.vless.VlessValidator.validate(choice.profile)
@@ -375,6 +551,42 @@ class RayVpnService : VpnService() {
                     activeProfile = choice.owner
                 }
                 profile = choice.profile
+                choice.latencyMs?.let {
+                    networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(choice.profile), it)
+                }
+                // Nothing on this server carried traffic: try the other saved servers now rather than
+                // starting a dead connection and waiting for the watchdog.
+                if (choice.nothingWorked) networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(requestedProfile))
+                if (choice.nothingWorked && !raceFirst && settings.autoFailoverEnabled) {
+                    showForegroundNotification("Server not answering, trying others...")
+                    raceServers(exclude + requestedProfile.id + userProfile.id, network, timeouts.alternateSec, finder, retryDisguised = false)
+                        ?.let { adopt(it) }
+                }
+                // Nothing worked, and the server sits behind Cloudflare: its address may be blocked
+                // while other Cloudflare addresses are not. Scan for one and try the same server there.
+                if (choice.nothingWorked && !raced) {
+                    cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
+                }
+                if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
+                    warpPath(timeouts.alternateSec)?.let { adopt(it) }
+                }
+                if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
+                    // Psiphon finds its own servers. It cannot be measured before it starts, so it is
+                    // only taken when this build carries it; if it finds nothing, traffic stays blocked.
+                    val psiphon = com.example.vpn.sidecar.PsiphonSidecar.profile()
+                    if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(psiphon) == null) {
+                        XrayLogManager.i("SMART", "Nothing else carried traffic; starting Psiphon.")
+                        adopt(com.example.vpn.smart.ServerRace.Winner(psiphon, psiphon, 0))
+                    }
+                }
+                if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
+                    // Last of all, Tor over Snowflake: slow, but it needs nothing of the user's.
+                    val tor = com.example.vpn.sidecar.TorSidecar.profile()
+                    if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(tor) == null) {
+                        XrayLogManager.i("SMART", "Nothing else carried traffic; starting Tor over Snowflake.")
+                        adopt(com.example.vpn.smart.ServerRace.Winner(tor, tor, 0))
+                    }
+                }
             }
 
             // 4. Diagnostic step 4 & 5: Configure and establish Android VpnService TUN interface
@@ -390,6 +602,12 @@ class RayVpnService : VpnService() {
                 // Always capture IPv6. Unsupported engines drop it inside the TUN.
                 .addAddress("fdfe:dcba:9876::1", 126)
                 .addRoute("::", 0)
+            val sidecarEngine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
+            if (sidecarEngine != null) {
+                // A separate engine program cannot ask Android to keep its own sockets out of the VPN,
+                // so the app's own traffic is left out; every other app still goes through the tunnel.
+                builder.addDisallowedApplication(packageName)
+            }
 
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 4. Builder.establish() invoked (MTU=$safeMtu, Address=172.19.0.1/30, DNS=$primaryDns).")
             val pfd = try {
@@ -453,7 +671,15 @@ class RayVpnService : VpnService() {
             if (settings.preferredEngine == EngineType.MIHOMO) {
                 XrayLogManager.w("VPN", "The Mihomo engine has no native core in this build; using Xray instead.")
             }
-            activeEngine = when (EngineSelectionPolicy.select(profile)) {
+            if (sidecarEngine != null) profile = startSidecar(sidecarEngine, profile, settings)
+            val runtime = EngineSelectionPolicy.select(profile)
+            val engineId = com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
+            if (!engineBreaker.allows(engineId)) {
+                // Each profile has one engine today, so this only reports; with a second engine for
+                // the same protocol the selection will skip an open breaker.
+                XrayLogManager.w("VPN", "Engine $engineId failed to start several times in a row; trying it again.")
+            }
+            activeEngine = when (runtime) {
                 EngineSelectionPolicy.Runtime.KOTLIN_TUNNEL -> com.example.vpn.engine.KotlinTunnelEngine.instance
                 EngineSelectionPolicy.Runtime.XRAY -> XrayEngineImpl.instance
             }
@@ -474,7 +700,11 @@ class RayVpnService : VpnService() {
                 )
             }
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 7. Proxy engine start result: $startResult.")
-            if (startResult is com.example.core.AppResult.Error) throw startResult.exception
+            if (startResult is com.example.core.AppResult.Error) {
+                engineBreaker.recordFailure(engineId)
+                throw startResult.exception
+            }
+            engineBreaker.recordSuccess(engineId)
 
             if (!coroutineContext.isActive) {
                 disconnectResources()
@@ -551,14 +781,21 @@ class RayVpnService : VpnService() {
             showForegroundNotification("Connected to ${profile.name}")
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 10. Connection lifecycle complete. Final state: CONNECTED.")
 
-            // Initialize Operational Mode features
-            if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) {
-                com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
-                com.example.vpn.godmode.MaximusMeshManager.startMesh()
-                XrayLogManager.i("GOD_MODE", "GOD Mode monitoring active; unauthenticated bridges and mesh remain disabled.")
-            } else {
-                com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
-                com.example.vpn.godmode.MaximusMeshManager.stopMesh()
+            // Refresh due subscriptions through the new tunnel: their addresses may be blocked outside it.
+            serviceScope.launch {
+                kotlinx.coroutines.delay(SUBSCRIPTION_REFRESH_DELAY_MS)
+                if (_vpnState.value.status != ConnectionStatus.CONNECTED) return@launch
+                runCatching { com.example.RayApplication.instance.subscriptionManager.refreshDue() }
+                    .onSuccess { results ->
+                        val restored = results.filter { it.isSuccess }.sumOf { it.addedCount }
+                        if (results.isNotEmpty()) XrayLogManager.i("SUBSCRIPTION", "Refreshed ${results.count { it.isSuccess }} of ${results.size} due subscriptions through the tunnel; $restored new servers.")
+                    }
+                    .onFailure { XrayLogManager.w("SUBSCRIPTION", "Refresh after connect failed: ${it.message}") }
+            }
+
+            if (policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
+                XrayLogManager.i("GOD_MODE", "Everything through the proxy, IPv6 blocked, server names over DNS-over-HTTPS only, " +
+                    "every server tested, failover on; traffic stays blocked when nothing works.")
             }
 
             // Start Failover Manager & Watchdogs
@@ -568,9 +805,16 @@ class RayVpnService : VpnService() {
                 protectSocket = { socket -> safeProtectSocket(socket) },
                 tunnelProbe = { com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) },
                 onTriggerSwitch = { newProfile, reason ->
+                    val degraded = requestedProfile.id
+                    // The kind that just stopped carrying traffic goes last in the race.
+                    networkMemory.recordFailure(
+                        com.example.vpn.smart.NetworkKey.current(this@RayVpnService),
+                        com.example.vpn.stealth.ConnectionKind.of(profile)
+                    )
                     serviceScope.launch {
-                        XrayLogManager.w("FAILOVER", "Executing auto-failover to '${newProfile.name}': $reason")
-                        connect(newProfile)
+                        XrayLogManager.w("FAILOVER", "Executing auto-failover, '${newProfile.name}' first: $reason")
+                        // Race the saved servers so the switch lands on one that carries traffic now.
+                        connect(newProfile, smart = true, exclude = setOf(degraded))
                     }
                 }
             ).apply {
@@ -622,16 +866,22 @@ class RayVpnService : VpnService() {
                 val resolved = EndpointResolver.resolve(
                     hostName,
                     system = { network.getAllByName(it).toList() },
-                    open = { url -> network.openConnection(url) as java.net.HttpURLConnection }
+                    open = { url -> network.openConnection(url) as java.net.HttpURLConnection },
+                    private = privateServerLookup
                 )
+                dnsPoisoned = resolved.viaDoh ||
+                    EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))
                 if (resolved.viaDoh) {
                     XrayLogManager.w("VPN", "[DIAGNOSTICS] The network's DNS gave a blocked answer for the server; " +
                         "resolved it over DNS-over-HTTPS instead")
-                } else if (EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))) {
-                    XrayLogManager.w("VPN", "[DIAGNOSTICS] The server name resolves to a private address, " +
-                        "which filtering networks use for blocked sites; DNS-over-HTTPS was unreachable")
                 }
                 val usesTls = profile.security.equals("tls", true) || profile.security.equals("reality", true)
+                if (!resolved.viaDoh && EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))) {
+                    XrayLogManager.w("VPN", "[DIAGNOSTICS] The server name resolves to a private address, " +
+                        "which filtering networks use for blocked sites; DNS-over-HTTPS was unreachable")
+                    // Without TLS the login (UUID, password) would go to whoever holds that address.
+                    check(usesTls) { "the network's DNS points the server at a filtering address" }
+                }
                 val usesHostHeader = profile.transport.lowercase() in setOf("ws", "xhttp", "httpupgrade", "splithttp", "h2", "http")
                 return profile.copy(
                     address = resolved.address,
@@ -646,6 +896,47 @@ class RayVpnService : VpnService() {
             "cannot resolve the server address '$hostName'" +
                 ((lastError?.cause ?: lastError)?.message?.let { " ($it)" } ?: if (networks.isEmpty()) " (no internet connection)" else "")
         )
+    }
+
+    /**
+     * Starts the engine program for [profile] and returns the profile Xray runs instead: a SOCKS5
+     * outbound to that program. If the program dies later, Xray's proxy stops answering and traffic
+     * stays blocked until failover picks another path.
+     */
+    private fun startSidecar(engine: com.example.vpn.sidecar.SidecarEngine, profile: VlessProfile, settings: AppSettings): VlessProfile {
+        sidecar?.stop()
+        sidecar = null
+        val executable = com.example.vpn.sidecar.Sidecars.executable(engine)
+            ?: error("The ${engine.id} engine is not included in this build for this phone")
+        val workDir = java.io.File(noBackupFilesDir, "engines/${engine.id}").apply { mkdirs() }
+        val context = com.example.vpn.sidecar.SidecarContext(
+            workDir = workDir,
+            executable = executable,
+            socksPort = com.example.vpn.sidecar.Sidecars.freeLoopbackPort(),
+            socksUser = com.example.vpn.sidecar.Sidecars.randomToken(9),
+            socksPass = com.example.vpn.sidecar.Sidecars.randomToken(),
+            mode = settings.operationalMode
+        )
+        val launch = engine.prepare(profile, settings, context)
+        showForegroundNotification("Starting the ${engine.id} engine...")
+        val process = engine.startInApp(launch, context)
+            ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort)
+        sidecar = process
+        if (!process.awaitReady(launch.readyTimeoutMs)) {
+            process.stop()
+            sidecar = null
+            error("The ${engine.id} engine did not start")
+        }
+        XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
+        val watched = process
+        serviceScope.launch(Dispatchers.IO) {
+            while (isActive && sidecar === watched && watched.isAlive) delay(1_000)
+            if (sidecar === watched) {
+                XrayLogManager.w("VPN", "Engine ${engine.id} stopped; traffic stays blocked until another path works")
+                failoverManager?.reportTunnelError("engine ${engine.id} stopped")
+            }
+        }
+        return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, context, launch)
     }
 
     private fun ensureBlockingInterface() {
@@ -752,7 +1043,7 @@ class RayVpnService : VpnService() {
         XrayLogManager.appendLog("Initiating clean VPN disconnection...", "VPN")
         updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING))
 
-        protectionRequested = false
+        supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.USER_DISCONNECT)
         disconnectResources()
 
         updateState(ConnectionState(
@@ -794,6 +1085,8 @@ class RayVpnService : VpnService() {
 
         // Stop Xray before closing the TUN descriptor it owns.
         activeEngine.stop()
+        sidecar?.stop()
+        sidecar = null
 
         if (previousInterface !== vpnInterface) {
             try { previousInterface?.close() } catch (_: Exception) {}
@@ -803,11 +1096,6 @@ class RayVpnService : VpnService() {
             vpnInterface = null
         }
 
-        val currentMode = settingsRepository.getSettings().operationalMode
-        if (currentMode != com.example.data.model.OperationalMode.GOD_MODE) {
-            com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
-            com.example.vpn.godmode.MaximusMeshManager.stopMesh()
-        }
     }
 
     private fun registerNetworkCallback() {
@@ -926,7 +1214,7 @@ class RayVpnService : VpnService() {
 
     override fun onRevoke() {
         XrayLogManager.appendLog("VPN service revoked by system or another VPN application.", "VPN")
-        protectionRequested = false
+        supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.REVOKED)
         disconnectResources()
         updateState(ConnectionState(status = ConnectionStatus.DISCONNECTED))
         if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
@@ -936,7 +1224,7 @@ class RayVpnService : VpnService() {
 
     override fun onDestroy() {
         com.example.xray.RealDelayProbe.socketProtector = null
-        protectionRequested = false
+        supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.SERVICE_DESTROYED)
         connectJob?.cancel()
         serviceScope.coroutineContext[Job]?.cancel()
         settingsObserverJob?.cancel()

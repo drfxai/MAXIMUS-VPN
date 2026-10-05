@@ -7,5 +7,9 @@ with zipfile.ZipFile(path) as apk:
     assert {"AndroidManifest.xml", "classes.dex", "resources.arsc"} <= set(apk.namelist())
     abis = {name.split("/")[1] for name in apk.namelist() if name.startswith("lib/") and name.endswith(".so")}
     assert abis == {"arm64-v8a"} if requested == "arm64-v8a" else {"arm64-v8a", "x86_64"} <= abis, abis
+    # The engine programs ship for every 64-bit ABI the app is tested on.
+    for abi in (["arm64-v8a"] if requested == "arm64-v8a" else ["arm64-v8a", "x86_64"]):
+        for engine in ("mihomo", "psiphon", "dnstt", "lyrebird", "tor"):
+            assert f"lib/{abi}/lib{engine}.so" in apk.namelist(), f"{engine} engine missing for {abi}"
     assert all(item.compress_type == zipfile.ZIP_DEFLATED for item in apk.infolist() if item.filename.endswith(".so")), "Expected extracted native libraries"
     print(path, "verified native ABIs:", sorted(abis))

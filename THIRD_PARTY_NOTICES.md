@@ -6,6 +6,33 @@ The Android application bundles the official XTLS/libXray release `v26.9.9` and 
 - Xray-core source: https://github.com/XTLS/Xray-core
 - Pinned Android artifact: `libxray-android.zip` from the libXray `v26.9.9` release. CI verifies SHA-256 `4998a8b56e4a78a164b5359d5690036f83da3b575465cea57ddf29c0149c345f` before extracting the AAR.
 - The AAR is downloaded during CI and is not stored in this repository.
+- Mihomo (MetaCubeX) `v1.19.32`, GNU General Public License v3.0. It runs as a separate program
+  (`libmihomo.so`, an executable), started by the app and reached only over a local SOCKS port; it is
+  not linked into the app. The exact source it is built from is
+  https://github.com/MetaCubeX/mihomo/tree/v1.19.32 (Go module `github.com/metacubex/mihomo@v1.19.32`,
+  checksum `h1:uD7ZC3P77isWD554NNvtee65L+99+/C5hyc+Lk8rVEk=`), built by `scripts/engines/mihomo.sh`.
+  You may obtain, modify and redistribute that program under the GPL-3.0; the full license text is at
+  https://www.gnu.org/licenses/gpl-3.0.txt. On request, the corresponding source for any release is
+  provided by the MAXIMUS VPN maintainer.
+- Psiphon tunnel-core, commit `4d6eb0e8a7e91d3f9a615f70ef65668b8b3595ec` (Go module
+  `github.com/Psiphon-Labs/psiphon-tunnel-core@v0.0.14-beta-ios.0.20260928190446-4d6eb0e8a7e9`,
+  checksum `h1:Ay/hVsv+zLoml03OvdAuzQXQ64t4N9DW0Sc8XG28BNE=`), GNU General Public License v3.0. Like
+  Mihomo it runs as a separate program (`libpsiphon.so`) reached over a local SOCKS port; its source is
+  https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/4d6eb0e8a7e91d3f9a615f70ef65668b8b3595ec and
+  it is built by `scripts/engines/psiphon.sh`. The same source offer as for Mihomo applies. Psiphon's
+  network settings are issued by Psiphon Inc. and are not part of this repository.
+- dnstt `v1.20260501.0` (David Fifield), CC0 1.0 Universal (public domain). Runs as a separate program
+  (`libdnstt.so`); source https://www.bamsoftware.com/git/dnstt.git, built by `scripts/engines/dnstt.sh`.
+- Tor, from the Guardian Project's tor-android `0.4.9.5.1` (`info.guardianproject:tor-android`, with
+  `jtorctl 0.4.5.7`), BSD 3-Clause License; source https://github.com/guardianproject/tor-android and
+  https://gitlab.torproject.org/tpo/core/tor.
+- lyrebird (The Tor Project), commit `75ef9b2c1f18` (Go module
+  `gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/lyrebird@v0.0.0-20260921142919-75ef9b2c1f18`,
+  checksum `h1:yYIGFPSbU7zzI1HCwgIhTuYi5kiOg9JpvvC7WaQ5Xu4=`), BSD 3-Clause License, with parts under the
+  GNU General Public License v3.0 (see its LICENSE-GPL3.txt). Runs as a separate program
+  (`liblyrebird.so`) started by Tor; built by `scripts/engines/lyrebird.sh`. Its built-in Snowflake bridge
+  lines come from Snowflake v2.11.0. The same source offer as for Mihomo applies.
+- QR codes: ZXing core (https://github.com/zxing/zxing), Apache License 2.0. Camera: AndroidX CameraX, Apache License 2.0.
 
 ## MIT License (libXray)
 

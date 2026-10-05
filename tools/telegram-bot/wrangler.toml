@@ -1,0 +1,17 @@
+name = "maximus-bot"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+# Subscription addresses, best first, one per line (you can also add them later with /addsub).
+SUB_URLS = ""
+APP_URL = "https://github.com/drfxai/MAXIMUS-VPN/releases/latest"
+MAX_CONFIGS = "20"
+# BOT_TOKEN, WEBHOOK_SECRET and ADMIN_ID (your numeric Telegram ID) are secrets, never written here:
+# wrangler secret put BOT_TOKEN / WEBHOOK_SECRET / ADMIN_ID
+
+# Storage for the admin commands. Create it with: npx wrangler kv namespace create STORE
+# then paste the id it prints here and remove the leading #.
+# [[kv_namespaces]]
+# binding = "STORE"
+# id = ""

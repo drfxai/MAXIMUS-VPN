@@ -1,0 +1,60 @@
+name: Free config list
+
+# Builds the app's free configuration list from the public sources in tools/aggregator/sources,
+# drops unsafe entries and servers that do not answer, signs the manifest with HUB_SIGNING_KEY and
+# publishes the result on the free-configs branch, where the app and its CDN mirrors read it.
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: free-configs
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install cryptography
+      - name: Test the aggregator
+        run: python3 -m unittest discover -s tools/aggregator/tests
+      - name: Build and sign the list
+        env:
+          HUB_SIGNING_KEY: ${{ secrets.HUB_SIGNING_KEY }}
+        run: python3 tools/aggregator/scripts/aggregate.py
+      - name: Publish to the free-configs branch
+        env:
+          SIGNED: ${{ secrets.HUB_SIGNING_KEY != '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          out=tools/aggregator/output
+          if [ "$SIGNED" != "true" ] || [ ! -s "$out/manifest.sig" ]; then
+            echo "::warning::HUB_SIGNING_KEY is not set, so the list was built but not published (the app only accepts a signed list)."
+            exit 0
+          fi
+          count=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["count"])' "$out/manifest.json")
+          if [ "$count" -lt 1 ]; then
+            echo "::warning::The list is empty; the published list is left as it is."
+            exit 0
+          fi
+          publish=$(mktemp -d)
+          cp "$out/free.txt" "$out/free-base64.txt" "$out/manifest.json" "$out/manifest.sig" "$publish/"
+          cd "$publish"
+          git init -q -b free-configs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -q -m "Free config list: $count configs"
+          # One commit only, so the branch does not grow with every update.
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" free-configs
+          echo "Published $count configs."

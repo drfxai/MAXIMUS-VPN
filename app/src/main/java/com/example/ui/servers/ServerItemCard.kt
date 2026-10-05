@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NetworkPing
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
@@ -71,7 +72,8 @@ fun ServerItemCard(
     onDelete: () -> Unit,
     onExportUri: (VlessProfile) -> String,
     modifier: Modifier = Modifier,
-    onEdit: (() -> Unit)? = null
+    onEdit: (() -> Unit)? = null,
+    onShareOffline: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -194,6 +196,18 @@ fun ServerItemCard(
                                     onDuplicate()
                                 }
                             )
+                            if (onShareOffline != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Share offline (QR)", color = AppTheme.colors.textPrimary) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.QrCode2, contentDescription = null, tint = AppTheme.colors.primary)
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        onShareOffline()
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Copy VLESS Link", color = AppTheme.colors.textPrimary) },
                                 leadingIcon = {

@@ -108,7 +108,6 @@ object XrayConfigBuilder {
                         put("169.254.0.0/16")
                         put("172.16.0.0/12")
                         put("192.168.0.0/16")
-                        put("198.18.0.0/15")
                         put("fc00::/7")
                         put("fe80::/10")
                         put("::1/128")
@@ -157,7 +156,6 @@ object XrayConfigBuilder {
                         put("169.254.0.0/16")
                         put("172.16.0.0/12")
                         put("192.168.0.0/16")
-                        put("198.18.0.0/15")
                     })
                 })
                 rulesArray.put(JSONObject().apply {
@@ -210,7 +208,7 @@ object XrayConfigBuilder {
     }
 
     internal fun applyPrivateDns(root: JSONObject, settings: AppSettings) {
-        val resolver = settings.dnsServer.trim()
+        val resolver = com.example.vpn.safety.DnsResolvers.literal(settings.dnsServer)
         val host = if (resolver.startsWith("https://")) java.net.URI(resolver).host.orEmpty() else resolver
         require(com.example.vpn.tunnel.ProxyDnsTransport.isLiteralAddress(host)) {
             "Resolver bootstrap requires a literal IP; plaintext or system fallback is never substituted"

@@ -272,12 +272,26 @@ object XrayConfigParser {
                         if (key == "address") require(com.example.vpn.tunnel.ProxyDnsTransport.isLiteralAddress(value.optString(key))) {
                             "Imported proxy endpoints require literal IPs for private bootstrap"
                         }
+                        // WireGuard peers name their server as "host:port".
+                        if (key == "endpoint" && value.opt(key) is String) {
+                            val host = value.optString(key).substringBeforeLast(':').removePrefix("[").removeSuffix("]")
+                            require(com.example.vpn.tunnel.ProxyDnsTransport.isLiteralAddress(host)) {
+                                "Imported proxy endpoints require literal IPs for private bootstrap"
+                            }
+                        }
                         rejectHostnameEndpoints(value.opt(key))
                     }
                     is JSONArray -> (0 until value.length()).forEach { rejectHostnameEndpoints(value.opt(it)) }
                 }
             }
             rejectHostnameEndpoints(root.optJSONArray("outbounds"))
+            // The first outbound carries everything no rule matches: a direct or blocking one there
+            // would send all traffic around the tunnel (or nowhere) while the app shows "connected".
+            val firstProtocol = root.optJSONArray("outbounds")?.optJSONObject(0)?.optString("protocol").orEmpty()
+            require(firstProtocol in PROXY_PROTOCOLS) {
+                "The config's first outbound must be a proxy, not '$firstProtocol'"
+            }
+            if (!com.example.vpn.safety.OperatingModePolicy.of(settings.operationalMode).importedDirectRules) dropDirectRules(root)
             XrayConfigBuilder.applyPrivateDns(root, settings)
 
             // Ensure log exists
@@ -307,4 +321,21 @@ object XrayConfigParser {
             throw IllegalArgumentException("Xray configuration rejected by security validation", e)
         }
     }
+
+    /** GOD MODE: routing rules that send matching traffic around the proxy are removed. */
+    private fun dropDirectRules(root: JSONObject) {
+        val outbounds = root.optJSONArray("outbounds") ?: return
+        val direct = (0 until outbounds.length()).mapNotNull { outbounds.optJSONObject(it) }
+            .filter { it.optString("protocol") == "freedom" }.map { it.optString("tag") }.toSet()
+        val routing = root.optJSONObject("routing") ?: return
+        val rules = routing.optJSONArray("rules") ?: return
+        val kept = JSONArray()
+        for (i in 0 until rules.length()) {
+            val rule = rules.optJSONObject(i) ?: continue
+            if (rule.optString("outboundTag") !in direct) kept.put(rule)
+        }
+        routing.put("rules", kept)
+    }
+
+    private val PROXY_PROTOCOLS = setOf("vless", "vmess", "trojan", "shadowsocks", "hysteria", "wireguard", "socks", "http")
 }

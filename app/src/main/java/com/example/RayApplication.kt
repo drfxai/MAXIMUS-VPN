@@ -84,7 +84,15 @@ class RayApplication : Application() {
             serverRepository = ServerRepository(database.serverProfileDao())
             subscriptionRepository = SubscriptionRepository(database.subscriptionDao())
             benchmarkRepository = BenchmarkRepository(database.benchmarkDao())
-            subscriptionManager = SubscriptionManager(subscriptionRepository, serverRepository)
+            subscriptionManager = SubscriptionManager(
+                subscriptionRepository,
+                serverRepository,
+                snapshots = com.example.vpn.subscription.SubscriptionSnapshots(
+                    java.io.File(filesDir, "subscription-snapshots"),
+                    encrypt = { com.example.data.security.SecureStorage.encrypt(it, this) },
+                    decrypt = { com.example.data.security.SecureStorage.decrypt(it, this) }
+                )
+            )
             benchmarkEngine = BenchmarkEngine(serverRepository, benchmarkRepository)
             settingsRepository = SettingsRepository(this)
             XrayLogManager.i("APP", "Database, server repository, and settings repository initialized successfully.")
@@ -99,6 +107,22 @@ class RayApplication : Application() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 subscriptionRepository.migrateSensitiveUrls()
+                val prefs = getSharedPreferences("official_subscriptions", MODE_PRIVATE)
+                com.example.vpn.subscription.OfficialSubscriptions.ensure(
+                    subscriptionRepository,
+                    seeded = prefs.getStringSet("seeded", emptySet()).orEmpty(),
+                    markSeeded = { prefs.edit().putStringSet("seeded", it).apply() }
+                )?.let { launch { subscriptionManager.syncSubscription(it) } }
+                // The signed free list, offered once per install when this build can check its signature.
+                if (com.example.vpn.hub.FreeConfigList.available()) {
+                    com.example.vpn.subscription.OfficialSubscriptions.ensure(
+                        subscriptionRepository,
+                        seeded = prefs.getStringSet("seeded_free", emptySet()).orEmpty(),
+                        markSeeded = { prefs.edit().putStringSet("seeded_free", it).apply() },
+                        urls = listOf(com.example.vpn.hub.FreeConfigList.URL),
+                        name = com.example.vpn.hub.FreeConfigList.NAME
+                    )?.let { launch { subscriptionManager.syncSubscription(it) } }
+                }
                 serverRepository.migrateSensitiveSubscriptionSources()
                 serverRepository.delete("seed-vless-ws-1")
                 serverRepository.delete("seed-vless-reality-1")

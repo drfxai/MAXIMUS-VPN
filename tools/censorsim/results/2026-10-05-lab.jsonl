@@ -1,0 +1,28 @@
+{"mode":"lab-connect","path":"CDN (WS+TLS)","scenario":"none+lab","ms":101,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"lab-connect","path":"Hysteria2","scenario":"none+lab","ms":67,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"lab-connect","path":"REALITY","scenario":"none+lab","ms":35,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"lab-connect","path":"VLESS Encryption","scenario":"none+lab","ms":101,"profile":"VLESS Encryption","ok":true,"trial":0}
+{"mode":"lab-connect","path":"WireGuard","scenario":"none+lab","ms":40,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"lab-fail-closed","path":"reported no path","scenario":"none+lab","ms":14149,"profile":"only server down","ok":true,"trial":0}
+{"mode":"lab-fail-closed","path":"reported no path","scenario":"none+lab","ms":44533,"profile":"all servers down","ok":true,"trial":0}
+{"mode":"lab-connect","path":"CDN (WS+TLS)","scenario":"none+lab","ms":39,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"lab-connect","path":"Hysteria2","scenario":"none+lab","ms":41,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"lab-connect","path":"REALITY","scenario":"none+lab","ms":29,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"lab-connect","path":"VLESS Encryption","scenario":"none+lab","ms":140,"profile":"VLESS Encryption","ok":true,"trial":1}
+{"mode":"lab-connect","path":"WireGuard","scenario":"none+lab","ms":53,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"lab-fail-closed","path":"reported no path","scenario":"none+lab","ms":14126,"profile":"only server down","ok":true,"trial":1}
+{"mode":"lab-fail-closed","path":"reported no path","scenario":"none+lab","ms":44546,"profile":"all servers down","ok":true,"trial":1}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":9202,"profile":"CDN (WS+TLS)","ok":true,"trial":0}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":8123,"profile":"Hysteria2","ok":true,"trial":0}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":9160,"profile":"REALITY","ok":true,"trial":0}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":5159,"profile":"VLESS Encryption","ok":true,"trial":0}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":9120,"profile":"WireGuard","ok":true,"trial":0}
+{"mode":"lab-fail-closed","path":"reported no path","scenario":"sni,fe,udp-dpi+lab","ms":14137,"profile":"only server down","ok":true,"trial":0}
+{"mode":"lab-fail-closed","path":"reported no path","scenario":"sni,fe,udp-dpi+lab","ms":44611,"profile":"all servers down","ok":true,"trial":0}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":9121,"profile":"CDN (WS+TLS)","ok":true,"trial":1}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":8130,"profile":"Hysteria2","ok":true,"trial":1}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":9108,"profile":"REALITY","ok":true,"trial":1}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":5094,"profile":"VLESS Encryption","ok":true,"trial":1}
+{"mode":"lab-connect","path":"REALITY","scenario":"sni,fe,udp-dpi+lab","ms":9093,"profile":"WireGuard","ok":true,"trial":1}
+{"mode":"lab-fail-closed","path":"reported no path","scenario":"sni,fe,udp-dpi+lab","ms":14111,"profile":"only server down","ok":true,"trial":1}
+{"mode":"lab-fail-closed","path":"reported no path","scenario":"sni,fe,udp-dpi+lab","ms":44528,"profile":"all servers down","ok":true,"trial":1}
