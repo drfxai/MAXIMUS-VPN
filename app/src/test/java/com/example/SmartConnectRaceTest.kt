@@ -8,6 +8,7 @@ import com.example.vpn.smart.ServerRace
 import com.example.vpn.smart.WatchPolicy
 import com.example.vpn.stealth.ConnectionKind
 import com.example.vpn.stealth.StealthPathFinder
+import com.example.vpn.stealth.StealthVariants
 import com.example.xray.RealDelayProbe
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -51,17 +52,39 @@ class SmartConnectRaceTest {
         assertEquals(listOf("h2"), ranked.map { it.id })
     }
 
-    @Test fun theRaceStopsAtTheFirstRoundWithAWorkingServerAndTakesTheFastest() {
+    @Test fun theRaceStopsAtTheFirstRoundWithAWorkingPathAndTriesTheBestServersInDisguise() {
         val pool = ServerRace.rank((1..8).map { reality("$it") })
-        val rounds = mutableListOf<Int>()
+        val rounds = mutableListOf<List<String>>()
+        // A server-name filter: only split handshakes get through.
         val win = ServerRace(probe = { list, _ ->
-            rounds += list.size
-            list.map {
-                when (it.id) { "2" -> RealDelayProbe.Outcome.Delay(900); "4" -> RealDelayProbe.Outcome.Delay(300); else -> RealDelayProbe.Outcome.Failed("timeout") }
-            }
+            rounds += list.map { it.id }
+            list.map { if (it.finalMask.contains("tlshello") && it.id == "2") RealDelayProbe.Outcome.Delay(300) else RealDelayProbe.Outcome.Failed("reset") }
         }, log = {}).run(pool, { it }, timeoutSec = 4)!!
-        assertEquals("4", win.owner.id)
-        assertEquals(listOf(5), rounds)
+        assertEquals("2", win.owner.id)
+        assertEquals(StealthVariants.FRAGMENT, win.variantKey)
+        // Servers 1 and 2 as saved and disguised, then server 3; nothing more once one works.
+        assertEquals(listOf(listOf("1", "1", "2", "2", "3")), rounds)
+    }
+
+    @Test fun theWinnerIsTheKindLeastLikelyToBeCutNextNotTheFastest() {
+        val failed = mutableListOf<String>()
+        val win = ServerRace(probe = { list, _ ->
+            list.map { if (it.protocolType == ProtocolType.HYSTERIA2) RealDelayProbe.Outcome.Delay(40) else if (it.id == "1") RealDelayProbe.Outcome.Delay(700) else RealDelayProbe.Outcome.Failed("reset") }
+        }, log = {}).run(listOf(hy2("5"), reality("1"), reality("2")), { it }, timeoutSec = 4, onFailure = { failed += it.id })!!
+        assertEquals("1", win.owner.id)
+        assertTrue("2" in failed)
+    }
+
+    @Test fun kindsThatJustFailedOnThisNetworkGoLast() {
+        val ranked = ServerRace.rank(listOf(reality("1", score = 99.0), hy2("2", score = 1.0)), failedKinds = setOf("REALITY"))
+        assertEquals(listOf("h2", "1"), ranked.map { it.id })
+        var stored: String? = null
+        val memory = NetworkMemory({ stored }, { stored = it })
+        memory.recordFailure("wifi", "REALITY", now = 1_000)
+        assertEquals(setOf("REALITY"), NetworkMemory({ stored }, { stored = it }).recentFailures("wifi", now = 2_000))
+        assertTrue(memory.recentFailures("wifi", now = 1_000 + NetworkMemory.FAILURE_MEMORY_MS).isEmpty())
+        memory.recordSuccess("wifi", "REALITY", 300)
+        assertTrue(memory.recentFailures("wifi", now = 2_000).isEmpty())
     }
 
     @Test fun aSecondRoundIsTriedAndAnUnresolvableServerIsSkipped() {

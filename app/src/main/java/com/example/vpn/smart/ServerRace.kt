@@ -6,6 +6,7 @@ import com.example.data.model.VlessProfile
 import com.example.vpn.engine.RuntimeCapabilities
 import com.example.vpn.stealth.ConnectionKind
 import com.example.vpn.stealth.StealthPathFinder
+import com.example.vpn.stealth.StealthVariants
 import com.example.xray.RealDelayProbe
 import com.example.xray.XrayLogManager
 import java.util.concurrent.Callable
@@ -19,8 +20,14 @@ import java.util.concurrent.TimeUnit
  *
  * [rank] orders the candidates (what worked on this network first, then recent successes, favorites
  * and scores) and spreads the kinds of connection over each batch, so a filter that blocks one kind
- * cannot empty a whole round. [run] probes five at a time and stops at the first batch with a working
- * server, taking the fastest one in it.
+ * cannot empty a whole round. [run] probes five at a time, together with a disguised form (a split
+ * handshake, say) of the best TLS-looking servers, and stops at the first batch with a working path.
+ *
+ * A race only runs on a hostile network (the chosen server just carried no traffic), so the winner is
+ * the working path most likely to keep working, not the fastest: kinds that look like ordinary HTTPS
+ * (REALITY, CDN, TLS) before QUIC, WireGuard and unencrypted ones, which censors drop first when they
+ * escalate. Latency decides within a kind. In the censorship simulator, taking the fastest landed on
+ * a kind the next filter killed and cost three extra outages in eight minutes.
  */
 class ServerRace(
     private val probe: (List<VlessProfile>, Int) -> List<RealDelayProbe.Outcome> = { p, t -> RealDelayProbe.measure(p, t) },
@@ -31,7 +38,9 @@ class ServerRace(
         val profile: VlessProfile,
         /** The saved profile. */
         val owner: VlessProfile,
-        val latencyMs: Long
+        val latencyMs: Long,
+        /** The StealthVariants key when the winner is a disguised form of [owner]. */
+        val variantKey: String? = null
     )
 
     /**
@@ -42,27 +51,49 @@ class ServerRace(
         candidates: List<VlessProfile>,
         resolve: (VlessProfile) -> VlessProfile,
         timeoutSec: Int,
-        maxBatches: Int = MAX_BATCHES
+        maxBatches: Int = MAX_BATCHES,
+        /** Called for each candidate that carried no traffic. */
+        onFailure: (VlessProfile) -> Unit = {}
     ): Winner? {
         if (candidates.isEmpty()) return null
-        val prepared = resolveAll(candidates, resolve)
-        val batches = StealthPathFinder.parallelSafeBatches(prepared) { it.second }.take(maxBatches)
+        val paths = withDisguises(resolveAll(candidates, resolve)).take(MAX_CANDIDATES)
+        val batches = StealthPathFinder.parallelSafeBatches(paths) { it.profile }.take(maxBatches)
         for ((round, batch) in batches.withIndex()) {
-            val outcomes = probe(batch.map { it.second }, timeoutSec)
+            val outcomes = probe(batch.map { it.profile }, timeoutSec)
             if (outcomes.all { it is RealDelayProbe.Outcome.NotRun }) {
                 log("Server test unavailable (${(outcomes.first() as RealDelayProbe.Outcome.NotRun).reason}).")
                 return null
             }
+            batch.zip(outcomes).filter { it.second is RealDelayProbe.Outcome.Failed }.forEach { onFailure(it.first.owner) }
             val winner = batch.zip(outcomes)
-                .mapNotNull { (c, o) -> (o as? RealDelayProbe.Outcome.Delay)?.let { Winner(c.second, c.first, it.latencyMs) } }
-                .minByOrNull { it.latencyMs }
+                .mapNotNull { (c, o) -> (o as? RealDelayProbe.Outcome.Delay)?.let { Winner(c.profile, c.owner, it.latencyMs, c.variantKey) } }
+                .minWithOrNull(compareBy<Winner>({ kindRank(it.profile) }, { it.latencyMs }))
             if (winner != null) {
-                log("Fastest working server in round ${round + 1}: ${SecretRedactor.redact(winner.owner.name)} (${winner.latencyMs} ms).")
+                log("Working server in round ${round + 1}: ${SecretRedactor.redact(winner.owner.name)}" +
+                    "${if (winner.variantKey != null) " (disguised)" else ""} (${winner.latencyMs} ms).")
                 return winner
             }
             log("Round ${round + 1}: none of ${batch.size} servers carried traffic.")
         }
         return null
+    }
+
+    private data class Path(val owner: VlessProfile, val profile: VlessProfile, val variantKey: String? = null)
+
+    /** Each server as saved; after each of the first [DISGUISED] TLS-looking ones, its first stealth alternate. */
+    private fun withDisguises(prepared: List<Pair<VlessProfile, VlessProfile>>): List<Path> {
+        val paths = mutableListOf<Path>()
+        var disguised = 0
+        for ((owner, resolved) in prepared) {
+            paths += Path(owner, resolved)
+            if (disguised < DISGUISED && ConnectionKind.of(resolved) in TLS_LOOKING) {
+                StealthVariants.of(resolved).firstOrNull()?.let {
+                    paths += Path(owner, it.profile, it.key)
+                    disguised++
+                }
+            }
+        }
+        return paths
     }
 
     private fun resolveAll(candidates: List<VlessProfile>, resolve: (VlessProfile) -> VlessProfile): List<Pair<VlessProfile, VlessProfile>> {
@@ -82,18 +113,25 @@ class ServerRace(
 
     companion object {
         const val MAX_BATCHES = 2
+        private const val DISGUISED = 2
+        private val TLS_LOOKING = setOf("REALITY", "CDN", "TLS")
+
+        internal fun kindRank(profile: VlessProfile): Int =
+            ConnectionKind.ORDER.indexOf(ConnectionKind.of(profile)).let { if (it < 0) ConnectionKind.ORDER.size else it }
         const val MAX_CANDIDATES = RealDelayProbe.MAX_BATCH * MAX_BATCHES
         private const val RESOLVE_LIMIT_SEC = 6L
         private const val RECENT_MS = 24 * 60 * 60 * 1000L
 
         /**
          * The candidates to race, best first, at most [limit]. [workingKinds] are the kinds that worked
-         * on this network (most recent first), [first] goes ahead of everything (the server the user
-         * picked), and [exclude] are left out (a server that just failed).
+         * on this network (most recent first), [failedKinds] the ones that recently carried no traffic
+         * there (they go last: a filter that just started rarely lifts within minutes), [first] goes
+         * ahead of everything (the server the user picked), and [exclude] are left out.
          */
         fun rank(
             profiles: List<VlessProfile>,
             workingKinds: List<String> = emptyList(),
+            failedKinds: Set<String> = emptySet(),
             first: VlessProfile? = null,
             exclude: Set<String> = emptySet(),
             now: Long = System.currentTimeMillis(),
@@ -113,6 +151,7 @@ class ServerRace(
                 }
                 if (p.isFavorite) s += 15.0
                 if (p.category == ServerCategory.OFFLINE) s -= 50.0
+                if (ConnectionKind.of(p) in failedKinds) s -= 1000.0
                 return s
             }
             val sorted = eligible.sortedByDescending(::score).toMutableList()

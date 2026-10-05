@@ -41,13 +41,16 @@ class Pipeline(private val probe: XrayProbe, private val profiles: List<VlessPro
         val finder = StealthPathFinder(measure, log = {}, memory = memory.variants(NET),
             firstTimeoutSec = timeouts.firstSec, alternateTimeoutSec = timeouts.alternateSec)
         fun race(ex: Set<String>): Path? {
-            val candidates = ServerRace.rank(profiles, memory.workingKinds(NET), exclude = ex)
-            val win = ServerRace(measure, log = {}).run(candidates, { it }, timeouts.alternateSec)
+            val candidates = ServerRace.rank(profiles, memory.workingKinds(NET), memory.recentFailures(NET), exclude = ex)
+            val win = ServerRace(measure, log = {}).run(candidates, { it }, timeouts.alternateSec,
+                onFailure = { memory.recordFailure(NET, ConnectionKind.of(it)) })
                 ?: candidates.firstOrNull()?.let { best ->
                     finder.choose(best, { it }, profiles, firstFailed = true).takeIf { it.latencyMs != null }
                         ?.let { ServerRace.Winner(it.profile, it.owner, it.latencyMs!!) }
                 }
-            return win?.let { memory.recordSuccess(NET, ConnectionKind.of(it.profile), it.latencyMs); Path(it.profile, it.owner, true) }
+            return win?.let {
+                it.variantKey?.let { key -> memory.variants(NET)[it.owner.id] = key }
+                memory.recordSuccess(NET, ConnectionKind.of(it.profile), it.latencyMs); Path(it.profile, it.owner, true) }
         }
         var firstFailed = false
         if (smart) {
@@ -59,6 +62,7 @@ class Pipeline(private val probe: XrayProbe, private val profiles: List<VlessPro
                 }
                 is RealDelayProbe.Outcome.Failed -> {
                     firstFailed = true
+                    memory.recordFailure(NET, ConnectionKind.of(first.profile))
                     race(exclude + requested.id)?.let { return it }
                 }
                 else -> Unit
@@ -66,6 +70,7 @@ class Pipeline(private val probe: XrayProbe, private val profiles: List<VlessPro
         }
         val c = finder.choose(requested, { it }, profiles, firstFailed)
         c.latencyMs?.let { memory.recordSuccess(NET, ConnectionKind.of(c.profile), it) }
+        if (c.nothingWorked) memory.recordFailure(NET, ConnectionKind.of(requested))
         if (c.nothingWorked && !smart) race(exclude + requested.id)?.let { return it }
         return Path(c.profile, c.owner, c.latencyMs != null)
     }
@@ -139,7 +144,8 @@ fun soak(xray: String, probe: XrayProbe, profiles: List<VlessProfile>, host: Str
     fun up(path: Pipeline.Path) {
         tunnel.getAndSet(Tunnel(xray, path.profile))?.close()
         println(JSONObject().put("soak", label).put("t", now()).put("event", "connected").put("server", path.owner.name)
-            .put("path", path.profile.name).put("works", path.works))
+            .put("disguised", path.profile.finalMask != path.owner.finalMask || path.profile.fingerprint != path.owner.fingerprint)
+            .put("works", path.works))
     }
     var current = profiles.first { it.security == "reality" }
     up(pipeline.connect(current))
@@ -176,6 +182,7 @@ fun soak(xray: String, probe: XrayProbe, profiles: List<VlessProfile>, host: Str
         if (failures < 3 || now() - lastSwitch < 25) continue
         lastSwitch = now()
         failedKinds += ConnectionKind.of(current)
+        if (phase4) pipeline.memory.recordFailure(Pipeline.NET, ConnectionKind.of(current))
         val others = profiles.filter { it.id != current.id }
         val blind = others.filter { ConnectionKind.of(it) !in failedKinds }.ifEmpty { others }.first()
         println(JSONObject().put("soak", label).put("t", now()).put("event", "failover").put("from", current.name).put("to", blind.name))

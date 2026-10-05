@@ -306,11 +306,15 @@ class RayVpnService : VpnService() {
         finder: com.example.vpn.stealth.StealthPathFinder
     ): com.example.vpn.smart.ServerRace.Winner? {
         val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
-        val candidates = com.example.vpn.smart.ServerRace.rank(all, networkMemory.workingKinds(network), exclude = exclude)
+        val candidates = com.example.vpn.smart.ServerRace.rank(
+            all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude
+        )
         if (candidates.isEmpty()) return null
         XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
         val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
-        com.example.vpn.smart.ServerRace().run(candidates, resolve, timeoutSec)?.let { return it }
+        com.example.vpn.smart.ServerRace().run(candidates, resolve, timeoutSec, onFailure = {
+            networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
+        })?.let { return it }
         val best = candidates.first()
         val choice = runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() ?: return null
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
@@ -407,6 +411,7 @@ class RayVpnService : VpnService() {
                 activeProfile = win.owner
                 profile = win.profile
                 raced = true
+                win.variantKey?.let { networkMemory.variants(network)[win.owner.id] = it }
                 networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(win.profile), win.latencyMs)
                 updateState(_vpnState.value.copy(activeProfile = win.owner))
             }
@@ -429,6 +434,7 @@ class RayVpnService : VpnService() {
                     }
                     is com.example.xray.RealDelayProbe.Outcome.Failed -> {
                         firstFailed = true
+                        networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(first.profile))
                         raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder)?.let { adopt(it) }
                     }
                     is com.example.xray.RealDelayProbe.Outcome.NotRun -> Unit
@@ -463,6 +469,7 @@ class RayVpnService : VpnService() {
                 }
                 // Nothing on this server carried traffic: try the other saved servers now rather than
                 // starting a dead connection and waiting for the watchdog.
+                if (choice.nothingWorked) networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(requestedProfile))
                 if (choice.nothingWorked && !smart && settings.autoFailoverEnabled) {
                     showForegroundNotification("Server not answering, trying others...")
                     raceServers(exclude + requestedProfile.id + userProfile.id, network, timeouts.alternateSec, finder)
@@ -674,6 +681,11 @@ class RayVpnService : VpnService() {
                 tunnelProbe = { com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) },
                 onTriggerSwitch = { newProfile, reason ->
                     val degraded = requestedProfile.id
+                    // The kind that just stopped carrying traffic goes last in the race.
+                    networkMemory.recordFailure(
+                        com.example.vpn.smart.NetworkKey.current(this@RayVpnService),
+                        com.example.vpn.stealth.ConnectionKind.of(profile)
+                    )
                     serviceScope.launch {
                         XrayLogManager.w("FAILOVER", "Executing auto-failover, '${newProfile.name}' first: $reason")
                         // Race the saved servers so the switch lands on one that carries traffic now.

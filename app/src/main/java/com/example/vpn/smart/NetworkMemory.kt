@@ -20,7 +20,9 @@ class NetworkMemory(private val load: () -> String?, private val save: (String) 
     private class Entry(
         val variants: ConcurrentHashMap<String, String> = ConcurrentHashMap(),
         val kinds: MutableList<String> = mutableListOf(),
-        var latencyMs: Long? = null
+        var latencyMs: Long? = null,
+        /** Kind -> when it last carried no traffic. */
+        val failures: MutableMap<String, Long> = mutableMapOf()
     )
 
     private val entries: LinkedHashMap<String, Entry> by lazy { parse(load()) }
@@ -41,9 +43,24 @@ class NetworkMemory(private val load: () -> String?, private val save: (String) 
     @Synchronized
     fun timeouts(network: String): Timeouts = timeoutsFor(entries[network]?.latencyMs)
 
+    /**
+     * Kinds that carried no traffic on [network] in the last [FAILURE_MEMORY_MS] and have not worked
+     * since. A filter that just started rarely lifts within minutes, so a race puts them last.
+     */
+    @Synchronized
+    fun recentFailures(network: String, now: Long = System.currentTimeMillis()): Set<String> =
+        entries[network]?.failures?.filterValues { now - it < FAILURE_MEMORY_MS }?.keys.orEmpty()
+
+    @Synchronized
+    fun recordFailure(network: String, kind: String, now: Long = System.currentTimeMillis()) {
+        entry(network).failures[kind] = now
+        persist()
+    }
+
     @Synchronized
     fun recordSuccess(network: String, kind: String, latencyMs: Long) {
         val e = entry(network)
+        e.failures.remove(kind)
         e.kinds.remove(kind)
         e.kinds.add(0, kind)
         while (e.kinds.size > MAX_KINDS) e.kinds.removeAt(e.kinds.size - 1)
@@ -58,6 +75,7 @@ class NetworkMemory(private val load: () -> String?, private val save: (String) 
             root.put(network, JSONObject()
                 .put("v", JSONObject(e.variants as Map<*, *>))
                 .put("k", JSONArray(e.kinds))
+                .put("f", JSONObject(e.failures as Map<*, *>))
                 .apply { e.latencyMs?.let { put("l", it) } })
         }
         save(root.toString())
@@ -82,6 +100,7 @@ class NetworkMemory(private val load: () -> String?, private val save: (String) 
         const val MAX_NETWORKS = 8
         const val MAX_KINDS = 6
         private const val ALPHA = 0.3
+        const val FAILURE_MEMORY_MS = 30 * 60 * 1000L
 
         /** Before anything is known: the limits the simulator was tuned with. */
         val DEFAULT = Timeouts(firstSec = 4, alternateSec = 5)
@@ -104,6 +123,7 @@ class NetworkMemory(private val load: () -> String?, private val save: (String) 
                 val e = Entry(latencyMs = if (o.has("l")) o.optLong("l") else null)
                 o.optJSONObject("v")?.let { v -> v.keys().forEach { id -> e.variants[id] = v.optString(id) } }
                 o.optJSONArray("k")?.let { k -> for (i in 0 until k.length()) e.kinds += k.optString(i) }
+                o.optJSONObject("f")?.let { f -> f.keys().forEach { kind -> e.failures[kind] = f.optLong(kind) } }
                 result[network] = e
             }
             return result
