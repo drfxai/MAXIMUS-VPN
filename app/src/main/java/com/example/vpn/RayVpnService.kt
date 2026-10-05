@@ -26,12 +26,10 @@ import com.example.data.model.ConnectionState
 import com.example.data.model.ConnectionStatus
 import com.example.data.model.EngineType
 import com.example.data.model.ProfileType
-import com.example.data.model.ProtocolType
 import com.example.data.model.RoutingMode
 import com.example.data.model.VlessProfile
 import com.example.data.repository.ServerRepository
 import com.example.data.repository.SettingsRepository
-import com.example.vpn.engine.MihomoEngine
 import com.example.vpn.engine.EngineSelectionPolicy
 import com.example.vpn.engine.VpnEngine
 import com.example.vpn.engine.NativeTunVpnEngine
@@ -281,7 +279,9 @@ class RayVpnService : VpnService() {
         connectLocked(profile)
     }
 
-    private suspend fun connectLocked(requestedProfile: VlessProfile): Unit = withContext(Dispatchers.IO) {
+    private suspend fun connectLocked(userProfile: VlessProfile): Unit = withContext(Dispatchers.IO) {
+        // The saved profile the connection belongs to; a same-server switch below can change it.
+        var requestedProfile = userProfile
         // Engines receive [profile]; a hostname endpoint is replaced by its resolved IP below.
         var profile = requestedProfile
         try {
@@ -352,6 +352,30 @@ class RayVpnService : VpnService() {
             }
             val safeName = com.example.core.SecretRedactor.redact(profile.name)
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 3. Profile configuration validated for '$safeName'")
+
+            // 3b. Find a path that carries traffic before the core starts: the saved profile, its stealth
+            // alternates (split handshake, other fingerprint, ECH, UDP junk) or another kind on the same
+            // server. The probe's sockets bypass the traffic-blocking interface (RealDelayProbe.socketProtector).
+            if (com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
+                showForegroundNotification("Finding a working route...")
+                val resolvedRequested = profile
+                val siblings = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                val choice = com.example.vpn.stealth.StealthPathFinder().choose(
+                    requested = requestedProfile,
+                    resolve = { p ->
+                        if (p.id == requestedProfile.id) resolvedRequested
+                        else if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p
+                    },
+                    siblings = siblings
+                )
+                if (choice.owner.id != requestedProfile.id) {
+                    com.example.vless.VlessValidator.validate(choice.profile)
+                    com.example.vpn.engine.RuntimeCapabilities.requireSupported(choice.profile)
+                    requestedProfile = choice.owner
+                    activeProfile = choice.owner
+                }
+                profile = choice.profile
+            }
 
             // 4. Diagnostic step 4 & 5: Configure and establish Android VpnService TUN interface
             val safeMtu = settings.mtu.coerceIn(1280, 1500)
@@ -424,42 +448,14 @@ class RayVpnService : VpnService() {
             showForegroundNotification("Android VPN Active (Establishing Proxy...)")
 
             // 7. Diagnostic step 7: Select and start active engine
-            activeEngine = if (EngineSelectionPolicy.requiresKotlinTunnel(profile)) {
-                // Plain VLESS is unsupported by current native Xray on public endpoints.
-                // Kotlin carries selected DoH using verified TLS inside the VLESS stream.
-                com.example.vpn.engine.KotlinTunnelEngine.instance
-            } else if (profile.protocolType == ProtocolType.HYSTERIA2 || profile.protocolType == ProtocolType.WIREGUARD) {
-                // Only the bundled Xray core speaks these; the Mihomo adapter has no native runtime.
-                XrayEngineImpl.instance
-            } else when (settings.preferredEngine) {
-                EngineType.MIHOMO -> {
-                    if (profile.protocolType == ProtocolType.HTTP || profile.protocolType == ProtocolType.SOCKS5) {
-                        com.example.vpn.engine.KotlinTunnelEngine.instance
-                    } else {
-                        com.example.vpn.engine.MihomoEngine.instance
-                    }
-                }
-                EngineType.XRAY -> {
-                    if (profile.protocolType == ProtocolType.TUIC) {
-                        com.example.vpn.engine.MihomoEngine.instance
-                    } else if (profile.protocolType == ProtocolType.HTTP || profile.protocolType == ProtocolType.SOCKS5) {
-                        com.example.vpn.engine.KotlinTunnelEngine.instance
-                    } else {
-                        XrayEngineImpl.instance
-                    }
-                }
-                EngineType.AUTO -> {
-                    if (profile.engineType == EngineType.MIHOMO ||
-                        profile.profileType == ProfileType.MIHOMO_YAML ||
-                        profile.protocolType == ProtocolType.TUIC
-                    ) {
-                        com.example.vpn.engine.MihomoEngine.instance
-                    } else if (profile.protocolType == ProtocolType.HTTP || profile.protocolType == ProtocolType.SOCKS5) {
-                        com.example.vpn.engine.KotlinTunnelEngine.instance
-                    } else {
-                        XrayEngineImpl.instance
-                    }
-                }
+            // Plain VLESS is unsupported by current native Xray on public endpoints; Kotlin carries it
+            // (and HTTP/SOCKS) with selected DoH using verified TLS. Everything else runs on Xray.
+            if (settings.preferredEngine == EngineType.MIHOMO) {
+                XrayLogManager.w("VPN", "The Mihomo engine has no native core in this build; using Xray instead.")
+            }
+            activeEngine = when (EngineSelectionPolicy.select(profile)) {
+                EngineSelectionPolicy.Runtime.KOTLIN_TUNNEL -> com.example.vpn.engine.KotlinTunnelEngine.instance
+                EngineSelectionPolicy.Runtime.XRAY -> XrayEngineImpl.instance
             }
 
             updateState(_vpnState.value.copy(activeEngineName = activeEngine.engineVersion))

@@ -66,7 +66,9 @@ configuration with a single tap.
 - VLESS, VMess, Trojan and Shadowsocks with the native **Xray** core
 - Reality, TLS, WebSocket, gRPC, HTTP/2 and xHTTP transports
 - Works with hostname and IP servers, including Cloudflare Workers endpoints
-- Universal import: links, Base64 subscriptions, Xray JSON and Clash/Mihomo YAML
+- Hysteria2, WireGuard and AmneziaWG (junk packets) on the same core
+- Universal import: links, Base64 subscriptions, Xray JSON, Clash/Mihomo YAML and WireGuard `.conf` files
+- Finds a working route before connecting: split TLS handshake, another browser fingerprint, ECH, UDP junk packets, or another protocol on the same server
 - Subscriptions with automatic updates
 
 **Server & panel workspace**

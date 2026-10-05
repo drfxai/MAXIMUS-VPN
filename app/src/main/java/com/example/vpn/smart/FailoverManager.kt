@@ -320,23 +320,8 @@ class FailoverManager(
         /** Kinds of connection that failed during the current outage; cleared once a node works again. */
         private val failedFamilies: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
-        /**
-         * The kind of traffic a censor sees: QUIC (Hysteria2), WireGuard, REALITY, a CDN path
-         * (WebSocket, gRPC, XHTTP or HTTPUpgrade over TLS), direct TLS, or unencrypted.
-         */
-        internal fun protocolFamily(profile: VlessProfile): String {
-            val security = profile.security.lowercase()
-            return when {
-                profile.protocolType == com.example.data.model.ProtocolType.HYSTERIA2 -> "QUIC"
-                profile.protocolType == com.example.data.model.ProtocolType.WIREGUARD -> "WireGuard"
-                security == "reality" -> "REALITY"
-                security == "tls" && profile.transport.lowercase() in CDN_TRANSPORTS -> "CDN"
-                security == "tls" -> "TLS"
-                else -> "plain"
-            }
-        }
-
-        private val CDN_TRANSPORTS = setOf("ws", "grpc", "xhttp", "splithttp", "httpupgrade", "http", "h2")
+        /** The kind of traffic a censor sees; see [com.example.vpn.stealth.ConnectionKind]. */
+        internal fun protocolFamily(profile: VlessProfile): String = com.example.vpn.stealth.ConnectionKind.of(profile)
 
         /** Candidates of a kind not in [failed]; all candidates when every kind has failed. */
         internal fun preferUntriedFamilies(candidates: List<VlessProfile>, failed: Set<String>): List<VlessProfile> =
