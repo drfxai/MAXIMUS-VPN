@@ -204,3 +204,10 @@ heavy or blackout, from Android's own check (validated, metered, roaming), wheth
 a blocked DNS answer, and which kinds of connection recently failed or worked on that carrier or Wi-Fi
 (NetworkMemory). It is logged with each connect and shown in the diagnostics report; in DAILY mode a
 heavy or blackout network logs a suggestion to use GOD MODE.
+
+## Step 7 progress: Xray
+
+libXray stays pinned at v26.9.9 (archive SHA-256 checked before extracting). `scripts/fetch-libxray-android.sh`
+no longer trusts an AAR that is already in `app/libs`: it is reused only when a stamp written at
+extraction names the same version and archive hash and the AAR still matches the hash recorded then;
+otherwise it is fetched and checked again. The engine registry records the version and licenses.
