@@ -77,6 +77,10 @@ class SubscriptionManager(
                 if (b0 == 198 && (b1 in 18..19)) return true
                 // 0.0.0.0/8
                 if (b0 == 0) return true
+                // 192.0.0.0/24 IETF protocol assignments
+                if (b0 == 192 && b1 == 0 && (raw[2].toInt() and 0xFF) == 0) return true
+                // 240.0.0.0/4 reserved, including 255.255.255.255
+                if (b0 >= 240) return true
             } else if (raw.size == 16) {
                 val b0 = raw[0].toInt() and 0xFF
                 // Unique Local Address fc00::/7 (fc00... or fd00...)
@@ -88,6 +92,15 @@ class SubscriptionManager(
                     val v4 = raw.sliceArray(12..15)
                     val v4Addr = java.net.InetAddress.getByAddress(v4)
                     return isRestrictedIp(v4Addr)
+                }
+                // NAT64 64:ff9b::/96 carries an IPv4 address in its last four bytes
+                val nat64 = byteArrayOf(0, 0x64, 0xff.toByte(), 0x9b.toByte(), 0, 0, 0, 0, 0, 0, 0, 0)
+                if (raw.sliceArray(0..11).contentEquals(nat64)) {
+                    return isRestrictedIp(java.net.InetAddress.getByAddress(raw.sliceArray(12..15)))
+                }
+                // 6to4 2002::/16 carries an IPv4 address in bytes 2-5
+                if (b0 == 0x20 && raw[1] == 0x02.toByte()) {
+                    return isRestrictedIp(java.net.InetAddress.getByAddress(raw.sliceArray(2..5)))
                 }
             }
             return false
@@ -159,6 +172,8 @@ class SubscriptionManager(
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(25, TimeUnit.SECONDS)
         .dns(resilientDns)
+        // A system HTTP proxy would resolve the host itself and skip the address checks above.
+        .proxy(java.net.Proxy.NO_PROXY)
         // Validate redirect destinations before opening their sockets.
         .addInterceptor(safeRedirectInterceptor)
         .followRedirects(false)

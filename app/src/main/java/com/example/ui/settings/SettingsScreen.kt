@@ -392,8 +392,8 @@ fun SettingsScreen(
                     ) {
                         listOf(
                             "https://1.1.1.1/dns-query" to "Cloudflare DoH (Encrypted)",
-                            "https://dns.google/dns-query" to "Google DoH (Encrypted)",
-                            "https://dns.quad9.net/dns-query" to "Quad9 DoH (Secure)",
+                            "https://8.8.8.8/dns-query" to "Google DoH (Encrypted)",
+                            "https://9.9.9.9/dns-query" to "Quad9 DoH (Secure)",
                             "1.1.1.1" to "Cloudflare UDP (1.1.1.1)",
                             "8.8.8.8" to "Google DNS UDP (8.8.8.8)",
                             "9.9.9.9" to "Quad9 Secure UDP (9.9.9.9)"
@@ -874,8 +874,8 @@ private fun getDnsLabel(dns: String): String {
         "8.8.8.8" -> "Google DNS UDP (8.8.8.8)"
         "9.9.9.9" -> "Quad9 Secure UDP (9.9.9.9)"
         "https://1.1.1.1/dns-query" -> "Cloudflare DoH (Encrypted)"
-        "https://dns.google/dns-query" -> "Google DoH (Encrypted)"
-        "https://dns.quad9.net/dns-query" -> "Quad9 DoH (Secure)"
+        "https://8.8.8.8/dns-query", "https://dns.google/dns-query" -> "Google DoH (Encrypted)"
+        "https://9.9.9.9/dns-query", "https://dns.quad9.net/dns-query" -> "Quad9 DoH (Secure)"
         else -> dns
     }
 }

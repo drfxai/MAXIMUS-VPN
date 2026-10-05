@@ -225,7 +225,7 @@ class RayVpnService : VpnService() {
                         ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
                     if (targetProfile != null) {
-                        connect(targetProfile, smart = smart)
+                        connect(targetProfile, smart = smart, startedByUser = true)
                     } else {
                         val err = "No valid server profile found to connect."
                         XrayLogManager.e("VPN", err)
@@ -282,8 +282,13 @@ class RayVpnService : VpnService() {
      * [smart]: race the saved servers with real requests first ([profile] leads) and connect the fastest
      * that works; [exclude] are servers to leave out (one the watchdog just gave up on).
      */
-    private suspend fun connect(profile: VlessProfile, smart: Boolean = false, exclude: Set<String> = emptySet()): Unit =
-        connectionMutex.withLock { connectLocked(profile, smart, exclude) }
+    private suspend fun connect(
+        profile: VlessProfile,
+        smart: Boolean = false,
+        exclude: Set<String> = emptySet(),
+        /** The user pressed Connect (not failover, reconnect or Always-on); see FailClosedPolicy. */
+        startedByUser: Boolean = false
+    ): Unit = connectionMutex.withLock { connectLocked(profile, smart, exclude, startedByUser) }
 
     /** What worked on each carrier or Wi-Fi: stealth alternates, kinds of connection, probe time limits. */
     private val networkMemory by lazy {
@@ -327,7 +332,8 @@ class RayVpnService : VpnService() {
     private suspend fun connectLocked(
         userProfile: VlessProfile,
         smart: Boolean = false,
-        exclude: Set<String> = emptySet()
+        exclude: Set<String> = emptySet(),
+        startedByUser: Boolean = false
     ): Unit = withContext(Dispatchers.IO) {
         // The saved profile the connection belongs to; a same-server switch below can change it.
         var requestedProfile = userProfile
@@ -375,28 +381,36 @@ class RayVpnService : VpnService() {
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 2. Foreground service started successfully.")
 
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
+            var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
             try {
                 if (profile.profileType != ProfileType.XRAY_JSON && !isLiteralIp(profile.address)) {
                     // Resolve outside the tunnel: once traffic is captured, DNS for the proxy itself
                     // would loop back into the VPN.
+                    failure = com.example.vpn.safety.FailClosedPolicy.Failure.UNRESOLVABLE_SERVER
                     profile = resolveEndpoint(profile)
+                    failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
                     XrayLogManager.i("VPN", "[DIAGNOSTICS] 3. Server host resolved outside the tunnel")
                 }
                 com.example.vless.VlessValidator.validate(profile)
                 com.example.vpn.engine.RuntimeCapabilities.requireSupported(profile)
             } catch (e: Exception) {
                 XrayLogManager.e("VPN", "Profile validation error: ${e.message}", e)
-                // A broken or unresolvable profile is not a network outage: release the traffic
-                // block completely so the device keeps working and the VPN can be started again.
-                protectionRequested = false
+                val release = com.example.vpn.safety.FailClosedPolicy.mayReleaseBlock(
+                    failure, startedByUser, settingsRepository.getSettings().operationalMode)
+                if (release) protectionRequested = false
                 disconnectResources()
                 updateState(ConnectionState(
                     status = ConnectionStatus.FAILED,
                     activeProfile = requestedProfile,
-                    errorMessage = "Cannot use this profile: ${e.localizedMessage}"
+                    errorMessage = if (release) "Cannot use this profile: ${e.localizedMessage}"
+                        else "Traffic blocked: ${e.localizedMessage}. Disconnect to use the network without the VPN."
                 ))
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                if (release) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                } else {
+                    showForegroundNotification("Traffic blocked: server unreachable")
+                }
                 return@withContext
             }
             val safeName = com.example.core.SecretRedactor.redact(profile.name)
@@ -750,11 +764,14 @@ class RayVpnService : VpnService() {
                 if (resolved.viaDoh) {
                     XrayLogManager.w("VPN", "[DIAGNOSTICS] The network's DNS gave a blocked answer for the server; " +
                         "resolved it over DNS-over-HTTPS instead")
-                } else if (EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))) {
-                    XrayLogManager.w("VPN", "[DIAGNOSTICS] The server name resolves to a private address, " +
-                        "which filtering networks use for blocked sites; DNS-over-HTTPS was unreachable")
                 }
                 val usesTls = profile.security.equals("tls", true) || profile.security.equals("reality", true)
+                if (!resolved.viaDoh && EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))) {
+                    XrayLogManager.w("VPN", "[DIAGNOSTICS] The server name resolves to a private address, " +
+                        "which filtering networks use for blocked sites; DNS-over-HTTPS was unreachable")
+                    // Without TLS the login (UUID, password) would go to whoever holds that address.
+                    check(usesTls) { "the network's DNS points the server at a filtering address" }
+                }
                 val usesHostHeader = profile.transport.lowercase() in setOf("ws", "xhttp", "httpupgrade", "splithttp", "h2", "http")
                 return profile.copy(
                     address = resolved.address,

@@ -210,7 +210,7 @@ object XrayConfigBuilder {
     }
 
     internal fun applyPrivateDns(root: JSONObject, settings: AppSettings) {
-        val resolver = settings.dnsServer.trim()
+        val resolver = com.example.vpn.safety.DnsResolvers.literal(settings.dnsServer)
         val host = if (resolver.startsWith("https://")) java.net.URI(resolver).host.orEmpty() else resolver
         require(com.example.vpn.tunnel.ProxyDnsTransport.isLiteralAddress(host)) {
             "Resolver bootstrap requires a literal IP; plaintext or system fallback is never substituted"

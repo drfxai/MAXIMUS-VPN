@@ -127,3 +127,28 @@ Tests first, then fixes, for: fail-open on resolve failure (1), the dead kill-sw
 watcher in RECONNECTING (4), raw-JSON direct outbounds (5), the blocked bootstrap answer, hostname DoH
 presets, the SSRF proxy bypass and missing ranges, redactor gaps, silent secret loss and the AI-key
 fallback. Process death (2) needs the Supervisor (Step 3) and an Always-on lockdown prompt.
+
+## Step 2 progress: security baseline
+
+Fixed, with `SecurityBaselineTest` guarding each:
+- Gap 1: a server name that cannot be looked up no longer releases the block, in any mode
+  (`vpn/safety/FailClosedPolicy`). Only a profile that can never run, picked by the user in DAILY mode,
+  releases it. The status says "Traffic blocked … Disconnect to use the network without the VPN".
+- A filtering-range DNS answer (now also 100.64/10, 198.18/15, 240/4) is refused for profiles without
+  TLS or REALITY, so their login is never sent to the filter's address.
+- Named DoH presets (`dns.google`, `dns.quad9.net`, `cloudflare-dns.com`) run by address
+  (`vpn/safety/DnsResolvers`); the presets now store the address; a resolver that needs a lookup is refused
+  in Settings.
+- Raw Xray JSON: a first outbound that is not a proxy (`freedom`, `blackhole`) and WireGuard peers named
+  by host are refused.
+- Subscriptions ignore a system HTTP proxy and refuse 192.0.0/24, 240/4, and NAT64 / 6to4 addresses that
+  wrap a private one.
+- Logs hide base64 `vmess://` / `ss://` links, `socks5://` logins and `auth` / `secretKey` /
+  `preSharedKey` / `uuid` JSON values.
+- A stored AI key that fails to decrypt is no longer used as the key.
+
+Left for the Supervisor (step 3): process death and the Always-on lockdown prompt (2), the dead in-app
+kill-switch flag (3), engine-death detection while reconnecting (4). Left for OperatingModePolicy
+(step 4): user direct rules in raw JSON and broad bypass entries (5, 6), CGNAT direct in Global (8).
+Still open: silent secret loss when encryption fails, the unpinned BPB `worker.js`, the build-time Gemini
+key fallback.

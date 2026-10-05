@@ -96,11 +96,17 @@ object EndpointResolver {
         if (endpoint.startsWith("wire:")) queryWire(endpoint.removePrefix("wire:"), host, open)
         else queryDoh(String.format(endpoint, URLEncoder.encode(host, "UTF-8")), open)
 
-    /** True for addresses a public server name cannot have: private, loopback, link-local or unspecified. */
-    fun isBlockedAnswer(address: InetAddress): Boolean =
-        address.isSiteLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
+    /**
+     * True for addresses a public server name cannot have: private, loopback, link-local, unspecified,
+     * carrier-grade NAT (100.64.0.0/10), benchmarking (198.18.0.0/15) or reserved (240.0.0.0/4).
+     */
+    fun isBlockedAnswer(address: InetAddress): Boolean {
+        val b = address.address.map { it.toInt() and 0xff }
+        return address.isSiteLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
             address.isAnyLocalAddress || address.isMulticastAddress ||
-            (address.address.size == 16 && (address.address[0].toInt() and 0xfe) == 0xfc)
+            (b.size == 16 && (b[0] and 0xfe) == 0xfc) ||
+            (b.size == 4 && ((b[0] == 100 && b[1] and 0xc0 == 64) || (b[0] == 198 && b[1] and 0xfe == 18) || b[0] >= 240))
+    }
 
     internal fun queryDoh(url: String, open: (URL) -> HttpURLConnection): String? {
         val connection = open(URL(url))
