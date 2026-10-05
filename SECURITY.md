@@ -14,7 +14,7 @@ Please do **not** open a public issue for security problems. Use GitHub's **Repo
 - Plain VLESS without TLS/REALITY is not confidential between the device and the server.
 - For leak protection when the app is not running, enable Android **Always-on VPN** and **Block connections without VPN**.
 - Secret Chat has no authenticated key exchange or peer transport yet and must not be used for private messaging.
-- Mihomo, Hysteria2 and TUIC profiles are parsed but not executed.
+- Every imported profile runs on the bundled Xray core or the Kotlin tunnel, including Hysteria2, WireGuard and the proxies of Clash/Mihomo YAML files (their proxy groups and rules are not applied). TUIC links and AmneziaWG servers that change WireGuard's packet format (S1/S2, H1–H4) are refused at import with the reason, because Xray cannot run them.
 
 ## Verifying downloads
 

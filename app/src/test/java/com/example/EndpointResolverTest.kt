@@ -39,10 +39,11 @@ class EndpointResolverTest {
     @Test
     fun aBlockPageAnswerIsReplacedByDnsOverHttps() {
         // Filtering networks answer blocked names with their block page, for example 10.10.34.36.
-        val seen = mutableListOf<String>()
+        val seen = java.util.Collections.synchronizedList(mutableListOf<String>())
         val result = EndpointResolver.resolve(host, { listOf(InetAddress.getByName("10.10.34.36")) }, doh(answer, seen))
         assertEquals(EndpointResolver.Result("104.21.30.40", viaDoh = true), result)
-        assertTrue(seen.first().startsWith("https://1.1.1.1/dns-query?name=$host"))
+        // All resolvers are asked in parallel; the first public answer wins.
+        assertTrue(seen.toList().any { it.startsWith("https://1.1.1.1/dns-query?name=$host") })
     }
 
     @Test

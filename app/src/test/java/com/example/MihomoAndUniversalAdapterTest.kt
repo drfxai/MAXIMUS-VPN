@@ -177,9 +177,10 @@ class MihomoAndUniversalAdapterTest {
         // 1. YAML Detection and Conversion
         val yamlProfiles = ConfigurationAdapter.importConfiguration(sampleMihomoYaml, "https://sub.url/mihomo.yaml")
         assertTrue(yamlProfiles.isNotEmpty())
-        val firstYaml = yamlProfiles.first()
-        assertEquals(EngineType.MIHOMO, firstYaml.engineType)
-        assertEquals(2, firstYaml.nodeCount)
+        // One runnable profile per proxy, all on the bundled Xray core; no Mihomo-only bundle.
+        assertEquals(2, yamlProfiles.size)
+        assertTrue(yamlProfiles.all { it.engineType == EngineType.XRAY && it.nodeCount == 1 })
+        assertEquals(listOf("Tokyo-VLESS-Reality", "SG-Shadowsocks"), yamlProfiles.map { it.name })
 
         // 2. JSON Detection and Conversion
         val jsonProfiles = ConfigurationAdapter.importConfiguration(sampleXrayJson)

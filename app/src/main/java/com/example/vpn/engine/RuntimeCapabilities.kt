@@ -10,6 +10,8 @@ object RuntimeCapabilities {
         profile.profileType == ProfileType.MIHOMO_YAML ->
             "A bundled Mihomo configuration needs the native Mihomo core, which is not included. Select an Xray-compatible node instead."
         profile.profileType == ProfileType.XRAY_JSON -> null
+        profile.protocolType == ProtocolType.TUIC ->
+            "TUIC needs a sing-box or Mihomo core; the bundled Xray core has no TUIC client. Ask for a Hysteria2 link (also QUIC) instead."
         profile.protocolType !in setOf(
             ProtocolType.VLESS, ProtocolType.TROJAN, ProtocolType.VMESS, ProtocolType.SHADOWSOCKS,
             ProtocolType.HYSTERIA2, ProtocolType.WIREGUARD, ProtocolType.HTTP, ProtocolType.SOCKS5
@@ -34,8 +36,8 @@ object RuntimeCapabilities {
         profile.targetStrategy.isNotBlank() && TARGET_STRATEGIES.none { it.equals(profile.targetStrategy, ignoreCase = true) } ->
             "Unknown targetStrategy ${profile.targetStrategy}."
         profile.headerType.lowercase() !in setOf("", "none", "http") -> "TCP header ${profile.headerType} is not supported by the Xray configuration adapter."
-        profile.protocolType == ProtocolType.VLESS && profile.encryption.lowercase() !in setOf("", "none") ->
-            "This VLESS encryption mode requires a native Xray core."
+        profile.protocolType == ProtocolType.VLESS && !isVlessEncryption(profile.encryption) ->
+            "Unknown VLESS encryption '${profile.encryption.take(40)}'. Xray expects none or an mlkem768x25519plus key."
         profile.protocolType == ProtocolType.TROJAN && !profile.security.equals("tls", ignoreCase = true) ->
             "Trojan requires TLS; refusing to send credentials over an unencrypted transport."
         profile.flow.isNotBlank() && (profile.protocolType != ProtocolType.VLESS || profile.transport.lowercase() !in setOf("", "tcp") || profile.security.lowercase() !in setOf("tls", "reality")) ->
@@ -67,6 +69,18 @@ object RuntimeCapabilities {
         profile.finalMask.isNotBlank() && runCatching { org.json.JSONObject(profile.finalMask) }.isFailure ->
             "The finalMask setting is not valid JSON."
         else -> null
+    }
+
+    /**
+     * VLESS Encryption as the bundled Xray core runs it (3X-UI's getNewVlessEnc and Quick Config
+     * produce these): "mlkem768x25519plus.<mode>.<rtt>[.<padding>...].<key>[.<key>...]".
+     */
+    fun isVlessEncryption(value: String): Boolean {
+        val v = value.trim()
+        if (v.isEmpty() || v.equals("none", ignoreCase = true)) return true
+        val parts = v.split('.')
+        return parts.size >= 4 && parts[0] == "mlkem768x25519plus" &&
+            parts[1] in setOf("native", "xorpub", "random") && parts.all { it.isNotEmpty() }
     }
 
     val TARGET_STRATEGIES = listOf(
