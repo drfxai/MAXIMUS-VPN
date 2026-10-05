@@ -20,8 +20,9 @@ import java.security.spec.ECGenParameterSpec
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class FreeConfigListTest {
+    private val now = System.currentTimeMillis() / 1000
     private val list = "vless://11111111-1111-1111-1111-111111111111@203.0.113.7:443?security=reality&sni=www.example.com&pbk=abc&sid=ab&type=tcp#Free%20VLESS%201\n"
-    private val manifest = """{"count":1,"created":"2026-10-05T18:00:00Z","files":{"free.txt":{"bytes":${list.length},"sha256":"${sha(list)}"}},"version":1}"""
+    private val manifest = """{"count":1,"created":"2026-10-05T18:00:00Z","files":{"free.txt":{"bytes":${list.length},"sha256":"${sha(list)}"}},"verification":{"policy":"iran-proxy-v1","minimum_networks":2,"valid_until":${now + 3600}},"version":1}"""
     private val keys = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
     private val publicKey = java.util.Base64.getEncoder().encodeToString(keys.public.encoded)
     private val signature = java.util.Base64.getEncoder().encodeToString(
@@ -64,6 +65,51 @@ class FreeConfigListTest {
         assertThrows(HubManifest.Refused::class.java) { FreeConfigList.download(FreeConfigList.URL, server(base), "") }
         assertFalse(FreeConfigList.available(""))
         assertTrue(FreeConfigList.available(publicKey))
+    }
+
+    @Test fun expiredAndOversizedFreeListsAreRefusedEvenWithValidSignatures() {
+        val base = FreeConfigList.URL.substringBeforeLast('/')
+        assertThrows(HubManifest.Refused::class.java) {
+            FreeConfigList.download(FreeConfigList.URL, server(base), publicKey, nowSeconds = now + 7200)
+        }
+        for (replacement in listOf(
+            manifest.replace("\"count\":1", "\"count\":30"),
+            manifest.replace("iran-proxy-v1", "tcp-only"),
+            manifest.replace("\"minimum_networks\":2", "\"minimum_networks\":1")
+        )) {
+            val sig = java.util.Base64.getEncoder().encodeToString(Signature.getInstance("SHA256withECDSA").run {
+                initSign(keys.private); update(replacement.toByteArray()); sign()
+            })
+            assertThrows(HubManifest.Refused::class.java) {
+                FreeConfigList.download(FreeConfigList.URL, { url ->
+                    when { url.endsWith("manifest.json") -> replacement
+                           url.endsWith("manifest.sig") -> sig
+                           else -> list }
+                }, publicKey)
+            }
+        }
+    }
+
+    @Test fun theAppCapsLegacyAndImportedFreeProfilesAt29() {
+        val profiles = (1..100).map { profile("Free $it", "203.0.113.$it") }
+        assertEquals(29, FreeConfigList.prepare(profiles).size)
+        assertEquals(1, FreeConfigList.prepare(listOf(profiles.first(), profiles.first())).size)
+    }
+
+    @Test fun aSignedEmptyListRevokesTheFeedAndCountMismatchIsRefused() {
+        val empty = """{"count":0,"files":{"free.txt":{"sha256":"${sha("")}"}},"verification":{"policy":"iran-proxy-v1","minimum_networks":2,"valid_until":0},"version":1}"""
+        fun serve(body: String, text: String): (String) -> String {
+            val sig = java.util.Base64.getEncoder().encodeToString(Signature.getInstance("SHA256withECDSA").run {
+                initSign(keys.private); update(body.toByteArray()); sign()
+            })
+            return { url -> when { url.endsWith("manifest.json") -> body
+                                   url.endsWith("manifest.sig") -> sig
+                                   else -> text } }
+        }
+        assertEquals("", FreeConfigList.download(FreeConfigList.URL, serve(empty, ""), publicKey))
+        assertThrows(HubManifest.Refused::class.java) {
+            FreeConfigList.download(FreeConfigList.URL, serve(manifest.replace("\"count\":1", "\"count\":2"), list), publicKey)
+        }
     }
 
     private fun profile(name: String, host: String, favorite: Boolean = false) = VlessProfile(

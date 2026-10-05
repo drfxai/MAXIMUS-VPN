@@ -100,20 +100,24 @@ fun FreeConfigsContent(
                     item { SectionHead(c, "ONLINE · ${state.visible.size}", if (state.testing) null else "Test all", actions.onTestAll) }
                     val rows = state.visible
                     if (rows.isEmpty()) item {
-                        EmptyCard(c, if (state.testing || state.queued > 0) "Testing servers" else "Nothing online",
-                            if (state.testing || state.queued > 0) "Servers appear here as they answer." else "None of these servers answered on your network. Try again later.",
-                            busy = state.testing)
-                    } else item {
+                        EmptyCard(c, when { state.testing -> "Testing servers"
+                                           state.queued > 0 -> "Test on your connection"
+                                           else -> "Nothing online" },
+                            when { state.testing -> "Servers appear here as they answer."
+                                   state.queued > 0 -> "Run a local test to find which verified servers work on this network."
+                                   else -> "None of these servers answered on your network. Try again later." },
+                            busy = state.testing, action = if (!state.testing && state.queued > 0) "Test servers" else null,
+                            onAction = actions.onTestAll)
+                    } else items(rows, key = { "online-${it.profile.id}" }) { node ->
                         Column(Modifier.labCard(c)) {
-                            rows.forEachIndexed { i, node ->
-                                NodeRow(c, node, best = node == best, last = i == rows.lastIndex) { actions.onConnect(node) }
-                            }
+                            NodeRow(c, node, best = node == best, last = true) { actions.onConnect(node) }
                         }
                     }
                     item { Hidden(c, state, actions.onToggleHidden) }
-                    if (state.showHidden && state.offline.isNotEmpty()) item {
+                    val offline = state.offline
+                    if (state.showHidden) items(offline, key = { "offline-${it.profile.id}" }) { node ->
                         Column(Modifier.padding(top = 8.dp).labCard(c)) {
-                            state.offline.forEachIndexed { i, node -> NodeRow(c, node, best = false, last = i == state.offline.lastIndex) { actions.onConnect(node) } }
+                            NodeRow(c, node, best = false, last = true) { actions.onConnect(node) }
                         }
                     }
                     item { Note(c) }

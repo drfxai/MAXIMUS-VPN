@@ -15,6 +15,8 @@ import com.example.vpn.subscription.SubscriptionSources
  * or changed file is refused and the next one is tried.
  */
 object FreeConfigList {
+    const val MAX_CONFIGS = 29
+    const val VERIFICATION_POLICY = "iran-proxy-v1"
     const val NAME = "MAXIMUS Free"
     const val OWNER = "drfxai"
     const val REPO = "MAXIMUS-VPN"
@@ -35,16 +37,29 @@ object FreeConfigList {
      * Downloads the list at [url] with [get], together with the manifest and signature beside it, and
      * returns the list only when both checks pass; throws [HubManifest.Refused] otherwise.
      */
-    fun download(url: String, get: (String) -> String, key: String = HubManifest.PUBLIC_KEY_DER_BASE64): String {
+    fun download(url: String, get: (String) -> String, key: String = HubManifest.PUBLIC_KEY_DER_BASE64,
+                 nowSeconds: Long = System.currentTimeMillis() / 1000): String {
         val base = url.substringBeforeLast('/')
         val manifest = HubManifest.verify(
             get("$base/manifest.json").toByteArray(Charsets.UTF_8),
             get("$base/manifest.sig"),
             key
         )
+        if (manifest.count !in 0..MAX_CONFIGS || manifest.verificationPolicy != VERIFICATION_POLICY ||
+            manifest.minimumNetworks < 2) {
+            throw HubManifest.Refused("The free list needs recent Iranian-network proxy verification and at most $MAX_CONFIGS entries")
+        }
+        // A signed empty list revokes the previous feed; it has no measurements to expire.
+        if (manifest.count > 0 && (manifest.validUntilSeconds <= nowSeconds ||
+                    manifest.validUntilSeconds > nowSeconds + 6 * 60 * 60)) {
+            throw HubManifest.Refused("The Iranian-network measurements have expired or are dated in the future")
+        }
         val list = get(url)
         if (!HubManifest.matches(manifest, FILE, list.toByteArray(Charsets.UTF_8))) {
             throw HubManifest.Refused("The configuration list does not match its signed manifest")
+        }
+        if (list.lineSequence().count { it.isNotBlank() } != manifest.count) {
+            throw HubManifest.Refused("The configuration count does not match its signed manifest")
         }
         return list
     }
@@ -56,7 +71,8 @@ object FreeConfigList {
 
     /** A config from the list, ready to save: only usable ones, with their country recorded. */
     fun prepare(profiles: List<VlessProfile>): List<VlessProfile> =
-        profiles.filter(::usable).map { it.copy(countryCode = countryOf(it.name) ?: it.countryCode) }
+        profiles.asSequence().filter(::usable).distinctBy { it.effectiveFingerprint }.take(MAX_CONFIGS)
+            .map { it.copy(countryCode = countryOf(it.name) ?: it.countryCode) }.toList()
 
     /**
      * Saved servers from an earlier list that the new list no longer has. Favourites and the server

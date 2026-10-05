@@ -96,6 +96,32 @@ class SubscriptionManagerResilienceTest {
     }
 
     @Test
+    fun `an unverifiable free list cannot restore its legacy snapshot or retain expired free rows`() = runBlocking {
+        val url = com.example.vpn.hub.FreeConfigList.URL
+        val sub = com.example.data.model.SubscriptionInfo(name = "MAXIMUS Free", url = url)
+        subscriptions.insertOrUpdate(sub)
+        val profiles = com.example.vpn.engine.UniversalImportEngine.importText(
+            payload, sourceSubscriptionUrl = url).validProfiles
+        assertEquals(2, profiles.size)
+        servers.insertAllWithDeduplication(profiles)
+        servers.toggleFavorite(profiles.first().id, true)
+        val snapshots = SubscriptionSnapshots(tmp.root, encrypt = { it.reversed() }, decrypt = { it.reversed() })
+        snapshots.save(sub.id, url, payload)
+        val result = SubscriptionManager(subscriptions, servers, snapshots = snapshots,
+            download = { throw IOException("No authenticated measurements available") }, staggerMs = 1)
+            .syncSubscription(sub)
+        assertFalse(result.isSuccess)
+        assertFalse(result.fromOfflineCopy)
+        assertEquals(null, snapshots.load(sub.id))
+        val remaining = servers.getAllProfilesOnce()
+        assertEquals(1, remaining.size)
+        assertTrue(remaining.single().isFavorite)
+        assertEquals(null, remaining.single().sourceSubscription)
+        assertEquals(null, remaining.single().subscriptionUrl)
+        assertEquals(0, subscriptions.getSubscriptionByUrl(url)!!.nodeCount)
+    }
+
+    @Test
     fun `the official subscription is added once and stays deleted when the user removes it`() = runBlocking {
         val bot = listOf("https://maximus-bot.example.workers.dev/sub", "https://sub.example.org/sub")
         var seeded = emptySet<String>()

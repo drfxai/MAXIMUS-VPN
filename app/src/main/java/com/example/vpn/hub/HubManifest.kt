@@ -21,7 +21,11 @@ object HubManifest {
 
     private const val ALGORITHM = "SHA256withECDSA"
 
-    data class Manifest(val version: Int, val created: String, val count: Int, val sha256: Map<String, String>)
+    data class Manifest(
+        val version: Int, val created: String, val count: Int, val sha256: Map<String, String>,
+        val verificationPolicy: String? = null, val validUntilSeconds: Long = 0,
+        val minimumNetworks: Int = 0
+    )
 
     class Refused(message: String) : IllegalArgumentException(message)
 
@@ -48,7 +52,10 @@ object HubManifest {
             ?: throw Refused("The configuration list's manifest is unreadable")
         val files = root.optJSONObject("files") ?: throw Refused("The manifest lists no files")
         val sha = files.keys().asSequence().associateWith { files.getJSONObject(it).optString("sha256") }
-        return Manifest(root.optInt("version", 0), root.optString("created"), root.optInt("count"), sha)
+        val verification = root.optJSONObject("verification")
+        return Manifest(root.optInt("version", 0), root.optString("created"), root.optInt("count"), sha,
+            verification?.optString("policy"), verification?.optLong("valid_until") ?: 0,
+            verification?.optInt("minimum_networks") ?: 0)
     }
 
     /** True when [content] is the file [name] as the manifest describes it. */
