@@ -14,8 +14,7 @@ import com.example.data.repository.SubscriptionRepository
 object OfficialSubscriptions {
     const val NAME = "MAXIMUS"
 
-    /** Filled in once the bot's Worker is deployed. */
-    val URLS: List<String> = emptyList()
+    val URLS: List<String> = listOf("https://maximus-bot.drpouriafx.workers.dev/sub")
 
     /**
      * Adds the official subscription if it was never added on this install. [seeded] and [markSeeded]

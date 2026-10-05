@@ -6,16 +6,17 @@
 //   BOT_TOKEN       token from @BotFather
 //   WEBHOOK_SECRET  any long random string; Telegram sends it back on every update
 //   SUB_URLS        subscription addresses, one per line, best first
-//   CONFIGS         optional extra links (vless://, trojan://, hysteria2://, ...), one per line
+//   CONFIGS         optional extra free links (vless://, trojan://, hysteria2://, ...), one per line
+//   VIP_CONFIGS     optional extra VIP links, one per line
 //   APP_URL         optional download page for the app
 //   MAX_CONFIGS     optional, default 20
-//   ADMIN_ID        your numeric Telegram ID; lets you change the lists from Telegram:
-//                   /addsub, /editsub, /delsub, /addconfig, /clearconfigs, /list
+//   ADMIN_ID        your numeric Telegram ID; lets you change the lists from Telegram (send /admin)
 //   SUB_MAX         optional, most configurations served at /sub, default 300
 // Binding (optional, needed for the admin commands): a KV namespace named STORE.
 //
 // Routes: POST /webhook (Telegram), GET /setup?secret=WEBHOOK_SECRET (registers the webhook),
-// GET /sub (the app's official subscription: every configuration from the admin's links, Base64).
+// GET /sub (the app's free subscription: the admin's subscription links plus free configs, Base64),
+// GET /vip (the app's VIP subscription: the admin's VIP configs, Base64).
 
 // Only what the app runs (TUIC is refused at import).
 const LINK = /^(vless|vmess|trojan|ss|hysteria2|hy2|wireguard):\/\/\S+$/i;
@@ -29,6 +30,7 @@ export default {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/setup") return setup(url, env);
     if (request.method === "GET" && url.pathname === "/sub") return subscription(env);
+    if (request.method === "GET" && url.pathname === "/vip") return subscription(env, "vip");
     if (request.method === "POST" && url.pathname === "/webhook") {
       if (!env.WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.WEBHOOK_SECRET) {
         return new Response("forbidden", { status: 403 });
@@ -44,9 +46,15 @@ export default {
   },
 };
 
-/** The app's subscription: everything the admin's links and extra configs hold, as standard Base64. */
-export async function subscription(env) {
-  const configs = await collectConfigs({ ...env, MAX_CONFIGS: env.SUB_MAX || 300 });
+/**
+ * The app's subscriptions as standard Base64. Free: everything the admin's links and free configs hold.
+ * VIP: only the configs the admin added with /addvip.
+ */
+export async function subscription(env, tier = "free") {
+  const vip = tier === "vip";
+  const configs = vip
+    ? (await tierConfigs(env, "vip")).filter((l) => LINK.test(l))
+    : await collectConfigs({ ...env, MAX_CONFIGS: env.SUB_MAX || 300 });
   const bytes = new TextEncoder().encode(configs.join("\n"));
   let binary = "";
   for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
@@ -56,7 +64,7 @@ export async function subscription(env) {
     headers: {
       "content-type": "text/plain; charset=utf-8",
       "cache-control": "public, max-age=300",
-      "profile-title": "MAXIMUS",
+      "profile-title": vip ? "MAXIMUS VIP" : "MAXIMUS",
       "profile-update-interval": "6",
     },
   });
@@ -80,10 +88,40 @@ async function setup(url, env) {
       { command: "help", description: "How to use / راهنما" },
     ],
   });
+  if (env.ADMIN_ID) {
+    // The admin's own chat also lists the management commands.
+    await telegram(env, "setMyCommands", {
+      scope: { type: "chat", chat_id: Number(String(env.ADMIN_ID).trim()) },
+      commands: ADMIN_MENU.map(([command, description]) => ({ command: command.slice(1), description })),
+    });
+  }
   return new Response(JSON.stringify(res), { headers: { "content-type": "application/json" } });
 }
 
-const ADMIN_COMMANDS = ["/addsub", "/editsub", "/delsub", "/addconfig", "/clearconfigs", "/list"];
+const ADMIN_MENU = [
+  ["/admin", "Admin help"],
+  ["/list", "Overview of everything"],
+  ["/addfree", "Add free configs"],
+  ["/listfree", "Show free configs"],
+  ["/delfree", "Delete free configs by number"],
+  ["/clearfree", "Delete all free configs"],
+  ["/addvip", "Add VIP configs"],
+  ["/listvip", "Show VIP configs"],
+  ["/delvip", "Delete VIP configs by number"],
+  ["/clearvip", "Delete all VIP configs"],
+  ["/addsub", "Add a free subscription link"],
+  ["/editsub", "Replace a subscription link"],
+  ["/delsub", "Delete a subscription link"],
+];
+// /addconfig and /clearconfigs are the older names of /addfree and /clearfree.
+const ALIASES = { "/addconfig": "/addfree", "/clearconfigs": "/clearfree" };
+const ADMIN_COMMANDS = [...ADMIN_MENU.map(([c]) => c), ...Object.keys(ALIASES)];
+// KV keys and variables per tier. "configs" keeps the free list saved by older versions.
+const TIERS = {
+  free: { key: "configs", env: "CONFIGS", label: "Free" },
+  vip: { key: "vip_configs", env: "VIP_CONFIGS", label: "VIP" },
+};
+const MAX_STORED = 200;
 
 export async function handle(chatId, text, env, now = Date.now()) {
   const command = text.split(/[\s@]/)[0].toLowerCase();
@@ -199,19 +237,104 @@ async function subUrls(env) {
 }
 
 async function extraConfigs(env) {
-  return [...new Set([...lines(env.CONFIGS), ...(await stored(env, "configs"))])];
+  return tierConfigs(env, "free");
+}
+
+async function tierConfigs(env, tier) {
+  const t = TIERS[tier];
+  return [...new Set([...lines(env[t.env]), ...(await stored(env, t.key))])];
+}
+
+/** "1. VLESS · Germany fast · 203.0.113.7:443" for the admin lists. */
+export function describe(link, n) {
+  const scheme = link.slice(0, link.indexOf("://")).toUpperCase();
+  let name = "";
+  let host = "";
+  if (scheme === "VMESS") {
+    try {
+      const j = JSON.parse(atob(link.slice(8).split("#")[0]));
+      name = j.ps || "";
+      host = j.add ? `${j.add}:${j.port}` : "";
+    } catch (_) {}
+  } else {
+    const hash = link.indexOf("#");
+    if (hash >= 0) {
+      try { name = decodeURIComponent(link.slice(hash + 1)); } catch (_) { name = link.slice(hash + 1); }
+    }
+    const m = link.match(/^[a-z0-9]+:\/\/(?:[^@/?#]*@)?([^/?#]+)/i);
+    host = m ? m[1] : "";
+  }
+  return `${n}. ${scheme}${name ? ` · ${name.slice(0, 40)}` : ""}${host ? ` · ${host}` : ""}`;
+}
+
+/** "2 5-7" → [2, 5, 6, 7], keeping only 1..max. */
+export function pickNumbers(args, max) {
+  const out = new Set();
+  for (const a of args) {
+    const m = a.match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) continue;
+    const from = Number(m[1]);
+    const to = Number(m[2] || m[1]);
+    for (let n = Math.min(from, to); n <= Math.max(from, to) && n <= max; n++) if (n >= 1) out.add(n);
+  }
+  return [...out];
+}
+
+async function tierCommand(chatId, action, tier, text, args, env) {
+  const t = TIERS[tier];
+  const current = await stored(env, t.key);
+  if (action === "add") {
+    const found = extractLinks(text.split(/\s+/).slice(1).join("\n"));
+    if (found.length === 0) return send(env, chatId, `Usage: /add${tier} vless://... (one or more links, one per line)`);
+    const next = [...new Set([...current, ...found])].slice(-MAX_STORED);
+    await env.STORE.put(t.key, next.join("\n"));
+    const added = next.length - current.length;
+    return send(env, chatId, `${t.label}: ${added} added, ${next.length} in total. Apps pick it up on their next refresh.`);
+  }
+  if (action === "list") {
+    if (current.length === 0) return send(env, chatId, `No ${t.label} configs yet. Add some with /add${tier}.`);
+    return sendChunks(env, chatId, `${t.label} configs (${current.length}). Delete with /del${tier} N (for example /del${tier} 2 5-7).`,
+      current.map((l, i) => describe(l, i + 1)));
+  }
+  if (action === "del") {
+    const numbers = pickNumbers(args, current.length);
+    const next = current.filter((l, i) => !numbers.includes(i + 1) && !args.includes(l));
+    if (next.length === current.length) return send(env, chatId, `Usage: /del${tier} N (numbers from /list${tier}, for example 2 5-7)`);
+    await env.STORE.put(t.key, next.join("\n"));
+    return send(env, chatId, `${t.label}: ${current.length - next.length} deleted, ${next.length} left. Numbers have shifted, check /list${tier}.`);
+  }
+  if (action === "clear") {
+    await env.STORE.put(t.key, "");
+    return send(env, chatId, `All ${current.length} ${t.label} configs deleted.`);
+  }
+}
+
+function adminHelp() {
+  return ["Admin commands", "",
+    "Free (everyone, MAXIMUS subscription):",
+    "/addfree LINKS · /listfree · /delfree N · /clearfree", "",
+    "VIP (the app's VIP section, MAXIMUS VIP subscription):",
+    "/addvip LINKS · /listvip · /delvip N · /clearvip", "",
+    "Free subscription links:",
+    "/addsub URL · /editsub N URL · /delsub N", "",
+    "/list shows everything. N can be several numbers or a range: /delvip 2 5-7"].join("\n");
 }
 
 async function admin(chatId, command, text, env) {
   if (!env.ADMIN_ID || String(chatId) !== String(env.ADMIN_ID).trim()) return send(env, chatId, helpText());
   if (!env.STORE) return send(env, chatId, "Add a KV namespace binding named STORE to the Worker first.");
+  command = ALIASES[command] || command;
   const args = text.split(/\s+/).slice(1).filter(Boolean);
+  if (command === "/admin") return send(env, chatId, adminHelp());
+  const tiered = command.match(/^\/(add|list|del|clear)(free|vip)$/);
+  if (tiered) return tierCommand(chatId, tiered[1], tiered[2], text, args, env);
   if (command === "/list") {
     const subs = await stored(env, "subs");
-    const configs = await stored(env, "configs");
+    const free = await stored(env, TIERS.free.key);
+    const vip = await stored(env, TIERS.vip.key);
     const numbered = subs.map((u, i) => `${i + 1}. ${u}`).join("\n") || "none";
-    return send(env, chatId, `Subscriptions (${subs.length}):\n${numbered}\n\nExtra configs: ${configs.length}\n\n` +
-      "/addsub URL · /editsub N URL · /delsub N");
+    return send(env, chatId, `Free subscription links (${subs.length}):\n${numbered}\n\n` +
+      `Free configs: ${free.length} (/listfree)\nVIP configs: ${vip.length} (/listvip)\n\nAll commands: /admin`);
   }
   if (command === "/addsub") {
     const urls = args.filter((a) => /^https:\/\/\S+$/i.test(a));
@@ -238,17 +361,7 @@ async function admin(chatId, command, text, env) {
     await env.STORE.put("subs", next.join("\n"));
     return send(env, chatId, `Deleted. ${next.length} subscription(s) left.`);
   }
-  if (command === "/addconfig") {
-    const found = extractLinks(text.split(/\s+/).slice(1).join("\n"));
-    if (found.length === 0) return send(env, chatId, "Usage: /addconfig vless://... (one or more links)");
-    const next = [...new Set([...(await stored(env, "configs")), ...found])].slice(-200);
-    await env.STORE.put("configs", next.join("\n"));
-    return send(env, chatId, `Saved. ${next.length} extra config(s).`);
-  }
-  if (command === "/clearconfigs") {
-    await env.STORE.put("configs", "");
-    return send(env, chatId, "Extra configs cleared.");
-  }
+  return send(env, chatId, adminHelp());
 }
 
 function limited(chatId, now) {

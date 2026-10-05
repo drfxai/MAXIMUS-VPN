@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.NetworkPing
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Search
@@ -87,6 +88,7 @@ fun ServersScreen(
     onNavigateToPanels: () -> Unit = {},
     onNavigateToProtocols: () -> Unit = {},
     onNavigateToFreeConfigs: () -> Unit = {},
+    onNavigateToVip: () -> Unit = {},
     onNavigateToEditServer: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -159,6 +161,7 @@ fun ServersScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
+                item { VipChip(onClick = onNavigateToVip) }
                 item {
                     HubChip(
                         icon = Icons.Default.Hub,
@@ -536,6 +539,28 @@ fun ServersScreen(
             },
             onDismiss = { shareProfile = null }
         )
+    }
+}
+
+/** The gold entry to the VIP section, first in the row. */
+@Composable
+private fun VipChip(onClick: () -> Unit) {
+    val ink = androidx.compose.ui.graphics.Color(0xFF1A1205)
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(androidx.compose.ui.graphics.Color(0xFFF7DFA0), androidx.compose.ui.graphics.Color(0xFFD4A651), androidx.compose.ui.graphics.Color(0xFF9C7230))
+                )
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(imageVector = Icons.Default.WorkspacePremium, contentDescription = null, tint = ink, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(text = "VIP", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.ExtraBold, color = ink)
     }
 }
 
