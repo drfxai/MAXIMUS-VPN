@@ -294,15 +294,26 @@ class RayVpnService : VpnService() {
         )
     }
 
-    /** Races the saved servers other than [exclude] (see ServerRace) and returns the fastest that works. */
-    private suspend fun raceServers(exclude: Set<String>, network: String, timeoutSec: Int): com.example.vpn.smart.ServerRace.Winner? {
+    /**
+     * Races the saved servers other than [exclude] (see ServerRace) and returns the fastest that works.
+     * When none works as saved (a network that filters every kind), the best-ranked one is tried in
+     * disguise with [finder] (its saved form was just tested, so that step is skipped).
+     */
+    private suspend fun raceServers(
+        exclude: Set<String>,
+        network: String,
+        timeoutSec: Int,
+        finder: com.example.vpn.stealth.StealthPathFinder
+    ): com.example.vpn.smart.ServerRace.Winner? {
         val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
         val candidates = com.example.vpn.smart.ServerRace.rank(all, networkMemory.workingKinds(network), exclude = exclude)
         if (candidates.isEmpty()) return null
         XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
-        return com.example.vpn.smart.ServerRace().run(candidates, resolve = { p ->
-            if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p
-        }, timeoutSec = timeoutSec)
+        val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
+        com.example.vpn.smart.ServerRace().run(candidates, resolve, timeoutSec)?.let { return it }
+        val best = candidates.first()
+        val choice = runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() ?: return null
+        return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
     }
 
     private suspend fun connectLocked(
@@ -418,7 +429,7 @@ class RayVpnService : VpnService() {
                     }
                     is com.example.xray.RealDelayProbe.Outcome.Failed -> {
                         firstFailed = true
-                        raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec)?.let { adopt(it) }
+                        raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder)?.let { adopt(it) }
                     }
                     is com.example.xray.RealDelayProbe.Outcome.NotRun -> Unit
                 }
@@ -454,7 +465,7 @@ class RayVpnService : VpnService() {
                 // starting a dead connection and waiting for the watchdog.
                 if (choice.nothingWorked && !smart && settings.autoFailoverEnabled) {
                     showForegroundNotification("Server not answering, trying others...")
-                    raceServers(exclude + requestedProfile.id + userProfile.id, network, timeouts.alternateSec)
+                    raceServers(exclude + requestedProfile.id + userProfile.id, network, timeouts.alternateSec, finder)
                         ?.let { adopt(it) }
                 }
             }

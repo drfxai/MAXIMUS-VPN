@@ -22,14 +22,23 @@ def times(rs):
     return f"{statistics.median(ok) / 1000:.1f} s / {p90 / 1000:.1f} s"
 
 
-scenarios = list(dict.fromkeys(r["scenario"] for r in rows))
-profiles = sorted({r["profile"] for r in rows})
-print("| Scenario | main: connected | branch: connected | branch: time to connect (median / p90) | under 10 s (branch) |")
-print("|---|---|---|---|---|")
+def under10(rs):
+    return f"{100 * sum(r['ok'] and r['ms'] < 10000 for r in rs) / len(rs):.0f}%" if rs else "–"
+
+
+def pct_or_dash(rs):
+    return pct(rs) if rs else "–"
+
+
+scenarios = [s for s in dict.fromkeys(r["scenario"] for r in rows) if not s.endswith("+dead")]
+profiles = sorted({r["profile"] for r in rows if not r["scenario"].endswith("+dead")})
+print("| Scenario | main: connected | branch: connected | branch: time (median / p90) | branch under 10 s "
+      "| Phase 4: connected | Phase 4: time (median / p90) | Phase 4 under 10 s |")
+print("|---|---|---|---|---|---|---|---|")
 for s in scenarios:
-    m, b = by[(s, "main")], by[(s, "branch")]
-    under = f"{100 * sum(r['ok'] and r['ms'] < 10000 for r in b) / len(b):.0f}%"
-    print(f"| {s} | {pct(m)} | {pct(b)} | {times(b)} | {under} |")
+    m, b, p4 = by[(s, "main")], by[(s, "branch")], by[(s, "phase4")]
+    print(f"| {s} | {pct_or_dash(m)} | {pct_or_dash(b)} | {times(b)} | {under10(b)} "
+          f"| {pct_or_dash(p4)} | {times(p4)} | {under10(p4)} |")
 print()
 print("| Scenario | " + " | ".join(profiles) + " |")
 print("|---|" + "---|" * len(profiles))
@@ -42,5 +51,15 @@ for s in scenarios:
             if r["ok"]:
                 paths[r["path"]] += 1
         top = max(paths, key=paths.get) if paths else "none"
-        cells.append(f"{pct(m)} → {pct(b)} ({top})")
+        cells.append(f"{pct_or_dash(m)} → {pct_or_dash(b)} ({top})")
     print(f"| {s} | " + " | ".join(cells) + " |")
+dead = [s for s in dict.fromkeys(r["scenario"] for r in rows) if s.endswith("+dead")]
+if dead:
+    print()
+    print("Saved server down (its address answers nothing):")
+    print()
+    print("| Scenario | before Phase 4: connected | before: time to a working server | Phase 4: connected | Phase 4: time (median / p90) |")
+    print("|---|---|---|---|---|")
+    for s in dead:
+        b, p4 = by[(s, "branch")], by[(s, "phase4")]
+        print(f"| {s.removesuffix('+dead')} | {pct_or_dash(b)} | {times(b)} | {pct_or_dash(p4)} | {times(p4)} |")

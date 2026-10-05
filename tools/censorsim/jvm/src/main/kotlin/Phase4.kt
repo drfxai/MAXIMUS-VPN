@@ -40,9 +40,15 @@ class Pipeline(private val probe: XrayProbe, private val profiles: List<VlessPro
         val timeouts = memory.timeouts(NET)
         val finder = StealthPathFinder(measure, log = {}, memory = memory.variants(NET),
             firstTimeoutSec = timeouts.firstSec, alternateTimeoutSec = timeouts.alternateSec)
-        fun race(ex: Set<String>): Path? = ServerRace(measure, log = {})
-            .run(ServerRace.rank(profiles, memory.workingKinds(NET), exclude = ex), { it }, timeouts.alternateSec)
-            ?.let { memory.recordSuccess(NET, ConnectionKind.of(it.profile), it.latencyMs); Path(it.profile, it.owner, true) }
+        fun race(ex: Set<String>): Path? {
+            val candidates = ServerRace.rank(profiles, memory.workingKinds(NET), exclude = ex)
+            val win = ServerRace(measure, log = {}).run(candidates, { it }, timeouts.alternateSec)
+                ?: candidates.firstOrNull()?.let { best ->
+                    finder.choose(best, { it }, profiles, firstFailed = true).takeIf { it.latencyMs != null }
+                        ?.let { ServerRace.Winner(it.profile, it.owner, it.latencyMs!!) }
+                }
+            return win?.let { memory.recordSuccess(NET, ConnectionKind.of(it.profile), it.latencyMs); Path(it.profile, it.owner, true) }
+        }
         var firstFailed = false
         if (smart) {
             val first = finder.firstPath(requested, requested)
