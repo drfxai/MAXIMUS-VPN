@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "comment": "Each source is untrusted input: HTTPS only, size-limited, parsed and validated before anything is published. Add one entry per public list.",
+  "sources": []
+}

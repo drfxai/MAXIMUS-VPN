@@ -254,3 +254,18 @@ when a Cloudflare-fronted server (WebSocket, XHTTP, gRPC or HTTP/2 with TLS or R
 traffic on any path, the connect scans for a clean Cloudflare address, for at most 12 seconds, and uses
 the same server through it when a real request succeeds. The existing staged scan (TCP, TLS, WebSocket,
 download) and its scoring stay as they are, in the panel manager's Clean IP tab.
+
+## Step 14 progress: signed aggregator
+
+`tools/aggregator` builds the free list outside the app: it reads `sources/sources.json` (empty until
+sources are chosen), fetches each over HTTPS with a size limit, refuses entries that are unencrypted,
+disable certificate checks, point at private or reserved addresses or use an unknown scheme, drops
+duplicates by a canonical fingerprint (the credential only as a hash), and writes `free.txt`,
+`free-base64.txt` and a manifest with each file's SHA-256. With `HUB_SIGNING_KEY` from the repository's
+secrets (ECDSA P-256) the manifest is signed; without it the manifest is written unsigned, for dry runs.
+Eight tests in `tools/aggregator/tests`.
+
+In the app, `HubManifest` checks the signature against a public key built in and then each file's hash,
+so an unsigned or changed list is refused whatever address served it; the key is empty until the signing
+key is created, so nothing is accepted yet. `HubSnapshots` keeps three lists (current, previous, and the
+last whose nodes carried traffic), so a bad update never leaves the app without a list.
