@@ -58,4 +58,12 @@ class EndpointResolverTest {
             .forEach { assertTrue(it, EndpointResolver.isBlockedAnswer(InetAddress.getByName(it))) }
         assertFalse(EndpointResolver.isBlockedAnswer(InetAddress.getByName("104.16.1.2")))
     }
+
+    @Test
+    fun godModeNeverAsksTheNetworksDns() {
+        var asked = false
+        val result = EndpointResolver.resolve(host, { asked = true; listOf(InetAddress.getByName("104.16.1.2")) }, doh(answer), private = true)
+        assertEquals(EndpointResolver.Result("104.21.30.40", viaDoh = true), result)
+        assertFalse(asked)
+    }
 }

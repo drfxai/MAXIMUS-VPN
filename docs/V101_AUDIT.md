@@ -211,3 +211,17 @@ libXray stays pinned at v26.9.9 (archive SHA-256 checked before extracting). `sc
 no longer trusts an AAR that is already in `app/libs`: it is reused only when a stamp written at
 extraction names the same version and archive hash and the AAR still matches the hash recorded then;
 otherwise it is fetched and checked again. The engine registry records the version and licenses.
+
+## Step 8: Mihomo
+
+Mihomo is GPL-3.0. Bundling it (and Psiphon, step 19) is a license decision put to the owner; until then
+Clash / Mihomo YAML keeps importing its servers onto Xray, and `EngineRegistry.MIHOMO` stays unbundled.
+
+## Step 9 progress: DNS
+
+GOD MODE looks up server names only over DNS-over-HTTPS at resolver IPs (`EndpointResolver.resolve`
+with `private = true`), so the name never reaches the ISP's DNS in plaintext; if every resolver fails the
+connect fails closed. DAILY keeps the faster system-first lookup. Together with step 2 (named DoH presets
+run by address, blocked answers refused for plaintext profiles) and the existing in-tunnel rules (FakeDNS
+plus one private resolver with fallback disabled; port 53 always through the proxy), this is the DNS
+policy for both modes.

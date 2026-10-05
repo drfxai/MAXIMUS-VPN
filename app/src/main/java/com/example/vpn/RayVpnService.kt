@@ -95,6 +95,8 @@ class RayVpnService : VpnService() {
     private val engineBreaker = com.example.vpn.engine.registry.EngineCircuitBreaker()
     /** The last server-name lookup met a blocked DNS answer. */
     @Volatile private var dnsPoisoned = false
+    /** GOD MODE: server names are looked up only over DNS-over-HTTPS (see OperatingModePolicy). */
+    @Volatile private var privateServerLookup = false
     private var vpnInterface: ParcelFileDescriptor? = null
     private var tunnelManager: TunnelManager? = null
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
@@ -358,6 +360,7 @@ class RayVpnService : VpnService() {
             activeProfile = profile
             val policy = com.example.vpn.safety.OperatingModePolicy.of(settingsRepository.getSettings().operationalMode)
             dnsPoisoned = false
+            privateServerLookup = policy.privateServerLookup
             val settings = policy.apply(settingsRepository.getSettings())
             val raceFirst = smart || policy.alwaysSmartConnect
 
@@ -776,7 +779,8 @@ class RayVpnService : VpnService() {
                 val resolved = EndpointResolver.resolve(
                     hostName,
                     system = { network.getAllByName(it).toList() },
-                    open = { url -> network.openConnection(url) as java.net.HttpURLConnection }
+                    open = { url -> network.openConnection(url) as java.net.HttpURLConnection },
+                    private = privateServerLookup
                 )
                 dnsPoisoned = resolved.viaDoh ||
                     EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))

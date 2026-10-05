@@ -40,29 +40,33 @@ object EndpointResolver {
      * system answer when it is a public address. When it is a block-page address, fails, or does not
      * arrive within [SYSTEM_GRACE_MS] (DNS dropped), every DoH resolver is asked in parallel and the
      * first public answer wins; a late public system answer is still accepted.
+     *
+     * [private] (GOD MODE): the network's DNS is never asked, so the server's name is not sent to the
+     * ISP in plaintext; only the DoH resolvers answer.
      */
     fun resolve(
         host: String,
         system: (String) -> List<InetAddress>,
-        open: (URL) -> HttpURLConnection
+        open: (URL) -> HttpURLConnection,
+        private: Boolean = false
     ): Result {
         val pool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "endpoint-resolver").apply { isDaemon = true } }
         try {
             val done = java.util.concurrent.ExecutorCompletionService<Pair<String?, Boolean>>(pool)
             var systemError: Exception? = null
             var systemPick: InetAddress? = null
-            val systemFuture = done.submit {
+            val systemFuture = if (private) null else done.submit {
                 val answers = try { system(host) } catch (e: Exception) { systemError = e; emptyList() }
                 systemPick = answers.firstOrNull { it is java.net.Inet4Address } ?: answers.firstOrNull()
                 systemPick?.takeIf { !isBlockedAnswer(it) }?.hostAddress to false
             }
-            val first = done.poll(SYSTEM_GRACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            val first = if (private) null else done.poll(SYSTEM_GRACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
             if (first != null) {
                 first.get().first?.let { return Result(it, viaDoh = false) }
             }
 
             var dohError: Exception? = null
-            val pending = DOH_ENDPOINTS.size + if (first == null) 1 else 0
+            val pending = DOH_ENDPOINTS.size + if (first == null && !private) 1 else 0
             DOH_ENDPOINTS.forEach { endpoint ->
                 done.submit {
                     try {
@@ -81,7 +85,7 @@ object EndpointResolver {
                 if (ip != null) return Result(ip, viaDoh)
             }
             // A blocked answer is still better than nothing: the error then shows in the proxy's log.
-            if (!systemFuture.isDone) systemFuture.cancel(true)
+            if (systemFuture != null && !systemFuture.isDone) systemFuture.cancel(true)
             systemPick?.let { return Result(it.hostAddress.orEmpty(), viaDoh = false) }
             throw IllegalStateException(
                 "cannot resolve the server address '$host'",
