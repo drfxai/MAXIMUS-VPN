@@ -368,3 +368,20 @@ device can run them. Each one names what to look for.
 
 Until 1, 2, 3 and 5 pass on a device, no transport may be shown to users as working, and the V1.0.1 tag
 stays unpublished: that is the Phase 73 blocker this project cannot clear by itself.
+
+## Step 34: performance after the safety changes
+
+The V1.0.1 changes add checks on every connect (fail-closed decisions, the engine breaker, private DNS
+lookups in GOD MODE), so the 8-minute soak from the war plan was run again on this code: a request every
+second while the censor changes every 90 seconds (none, server names, server names with UDP inspection,
+all three filters, UDP blocked, none).
+
+| Failover logic | requests through | outages | time without traffic | longest outage |
+|---|---|---|---|---|
+| before Phase 4 | 90% | 1 | 46 s | 45 s |
+| V1.0.1 code | 95% | 1 | 23 s | 23 s |
+
+These match the Phase 4 numbers exactly (95%, 23 s per run): the safety work cost nothing in survival.
+The one outage is the forced cut when server names start being filtered. First-connect times are in the
+step 31 table above (about 9 s under three filters). Battery and real throughput can only be measured on a
+phone; they are item 7 of step 32. Raw results: `tools/censorsim/results/2026-10-05-v101-soak.jsonl`.
