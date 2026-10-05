@@ -115,13 +115,16 @@ class RayApplication : Application() {
                 )?.let { launch { subscriptionManager.syncSubscription(it) } }
                 // The signed free list, offered once per install when this build can check its signature.
                 if (com.example.vpn.hub.FreeConfigList.available()) {
-                    com.example.vpn.subscription.OfficialSubscriptions.ensure(
+                    val freeSubscription = com.example.vpn.subscription.OfficialSubscriptions.ensure(
                         subscriptionRepository,
                         seeded = prefs.getStringSet("seeded_free", emptySet()).orEmpty(),
                         markSeeded = { prefs.edit().putStringSet("seeded_free", it).apply() },
                         urls = listOf(com.example.vpn.hub.FreeConfigList.URL),
                         name = com.example.vpn.hub.FreeConfigList.NAME
-                    )?.let { launch { subscriptionManager.syncSubscription(it) } }
+                    ) ?: subscriptionRepository.getSubscriptionByUrl(com.example.vpn.hub.FreeConfigList.URL)
+                    // Recheck the signed admission policy on upgrades/startup; an old 300-node
+                    // cache is not evidence of current Iranian-network performance.
+                    freeSubscription?.let { subscriptionManager.syncSubscription(it) }
                 }
                 serverRepository.migrateSensitiveSubscriptionSources()
                 serverRepository.delete("seed-vless-ws-1")

@@ -46,7 +46,14 @@ jobs:
       - name: Build and sign the list
         env:
           HUB_SIGNING_KEY: ${{ secrets.HUB_SIGNING_KEY }}
-        run: python3 tools/aggregator/scripts/aggregate.py
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Probe operators publish signed reports here. GitHub validates them against the
+          # independently enrolled keys/ASNs in main; this branch cannot enroll its own keys.
+          reports=$(mktemp)
+          gh api "repos/$GITHUB_REPOSITORY/contents/reports.json?ref=iran-probes" --jq .content | base64 --decode > "$reports"
+          IRAN_REPORTS="$reports" python3 tools/aggregator/scripts/aggregate.py
       - name: Publish to the free-configs branch
         env:
           SIGNED: ${{ secrets.HUB_SIGNING_KEY != '' }}
@@ -59,9 +66,9 @@ jobs:
             exit 0
           fi
           count=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["count"])' "$out/manifest.json")
-          if [ "$count" -lt 1 ]; then
-            echo "::warning::The list is empty; the published list is left as it is."
-            exit 0
+          if [ "$count" -gt 30 ]; then
+            echo "::error::Free configuration cap exceeded."
+            exit 1
           fi
           publish=$(mktemp -d)
           cp "$out/free.txt" "$out/free-base64.txt" "$out/manifest.json" "$out/manifest.sig" "$publish/"

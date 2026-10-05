@@ -49,9 +49,9 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
             val s = _state.value
             when {
                 !s.available -> Unit
-                // First visit, the list has not arrived yet, or it is due: fetch it, then test it.
+                // Fetch when due. Full native probing is an explicit user action.
                 s.total == 0 || s.lastUpdated == 0L || System.currentTimeMillis() >= s.nextUpdate -> refresh()
-                else -> testAll()
+                else -> Unit
             }
         }
     }
@@ -71,7 +71,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun publish(profiles: List<VlessProfile>) {
-        val nodes = profiles.map { p ->
+        val nodes = profiles.take(FreeConfigList.MAX_CONFIGS).map { p ->
             val ms = latency[p.id]
             FreeNode(
                 profile = p,
@@ -89,7 +89,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(nodes = nodes) }
     }
 
-    /** Fetches the list again (adding the subscription if this install never had it), then tests it. */
+    /** Fetches the verified list, adding the subscription if this install never had it. */
     fun refresh() {
         if (!_state.value.available || _state.value.syncing) return
         _state.update { it.copy(syncing = true, message = null) }
@@ -107,7 +107,6 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(message = "Could not update the list. The last verified list stays in use.") }
             }
             _state.update { it.copy(syncing = false) }
-            testAll()
         }
     }
 
@@ -156,7 +155,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
-        private const val BATCH = 24
+        private const val BATCH = RealDelayProbe.MAX_BATCH
         private const val TIMEOUT_SEC = 6
     }
 }

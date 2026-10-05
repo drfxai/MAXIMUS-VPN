@@ -254,7 +254,10 @@ class SubscriptionManager(
                 // The free list is taken from any address only with a valid signature beside it.
                 if (FreeConfigList.isList(subscription.url)) { url: String -> FreeConfigList.download(url, get) } else get
             },
-            count = { parse(it, subscription).validProfiles.size },
+            // Only the free-list downloader has authenticated the manifest/count already. Its
+            // signed empty payload is an explicit revocation, not a block page to fall back from.
+            count = { if (FreeConfigList.isList(subscription.url) && it.isBlank()) 1
+                      else parse(it, subscription).validProfiles.size },
             staggerMs = staggerMs
         )
         try {
@@ -263,7 +266,8 @@ class SubscriptionManager(
                     val importResult = parse(outcome.payload, subscription)
                     if (FreeConfigList.isList(subscription.url)) pruneFreeList(subscription, importResult.validProfiles)
                     val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
-                    snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
+                    if (FreeConfigList.isList(subscription.url)) snapshots?.delete(subscription.id)
+                    else snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
                     val viaMirror = outcome.url.takeIf { it != subscription.url }
                     outcome.failures.forEach { (url, why) ->
                         XrayLogManager.w("SUBSCRIPTION", "Source ${SecretRedactor.redact(url)} failed: ${SecretRedactor.redact(why)}")
@@ -279,11 +283,16 @@ class SubscriptionManager(
                 is SubscriptionFetcher.Outcome.AllFailed -> {
                     val reason = outcome.failures.firstOrNull()?.second ?: "no source to try"
                     val tried = outcome.failures.count { it.first.startsWith("http") }
-                    val snapshot = snapshots?.load(subscription.id)
+                    val isFree = FreeConfigList.isList(subscription.url)
+                    if (isFree) {
+                        pruneFreeList(subscription, emptyList())
+                        snapshots?.delete(subscription.id)
+                    }
+                    val snapshot = if (isFree) null else snapshots?.load(subscription.id)
                     if (snapshot == null) {
                         val errMsg = if (tried > 1) "All $tried sources failed. First: $reason" else reason
                         XrayLogManager.e("SUBSCRIPTION", "Sync failed for '${subscription.name}': ${SecretRedactor.redact(errMsg)}")
-                        subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
+                        subscriptionRepository.updateSyncStatus(subscription.id, if (isFree) 0 else subscription.nodeCount, errMsg)
                         return@withContext SyncResult(subscription.id, 0, 0, 0, false, errMsg)
                     }
                     val importResult = parse(snapshot.payload, subscription)
@@ -300,7 +309,12 @@ class SubscriptionManager(
         } catch (e: Exception) {
             val errMsg = e.localizedMessage ?: "Network connection failure"
             XrayLogManager.e("SUBSCRIPTION", "Error syncing '${subscription.name}': $errMsg")
-            subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
+            val isFree = FreeConfigList.isList(subscription.url)
+            if (isFree) {
+                pruneFreeList(subscription, emptyList())
+                snapshots?.delete(subscription.id)
+            }
+            subscriptionRepository.updateSyncStatus(subscription.id, if (isFree) 0 else subscription.nodeCount, errMsg)
             SyncResult(subscription.id, 0, 0, 0, false, errMsg)
         }
     }
@@ -311,7 +325,13 @@ class SubscriptionManager(
             it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
         }
         val keep = runCatching { com.example.RayApplication.instance.settingsRepository.getSettings().selectedProfileId }.getOrNull()
-        FreeConfigList.stale(saved, fresh, keep).forEach { serverRepository.delete(it.id) }
+        val current = fresh.map { it.effectiveFingerprint }.toSet()
+        saved.filter { it.effectiveFingerprint !in current }.forEach {
+            // Keep a live connection and user favourites as personal profiles; expired entries
+            // must no longer be offered or counted as verified free configurations.
+            if (it.isFavorite || it.id == keep) serverRepository.update(it.copy(sourceSubscription = null, subscriptionUrl = null))
+            else serverRepository.delete(it.id)
+        }
     }
 
     private suspend fun nodeCountOf(subscription: SubscriptionInfo) = serverRepository.getAllProfilesOnce().count {

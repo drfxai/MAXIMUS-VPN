@@ -20,12 +20,13 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs, quote, unquote
+from iran_verification import config_digest
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_BYTES = 5 * 1024 * 1024
 TIMEOUT_SEC = 30
 MAX_PER_SOURCE = 500
-MAX_TOTAL = 300
+MAX_TOTAL = 30
 ALIVE_TIMEOUT_SEC = 3
 ALIVE_WORKERS = 64
 SCHEMES = ("vless://", "vmess://", "trojan://", "ss://", "hysteria2://", "hy2://", "wireguard://", "wg://")
@@ -190,7 +191,7 @@ def interleave(per_source: list[list[str]], limit: int = MAX_TOTAL) -> list[str]
     return out
 
 
-def collect(sources: list[dict], fetcher=fetch, check=None) -> tuple[list[str], dict]:
+def collect(sources: list[dict], fetcher=fetch, check=None, evidence=None) -> tuple[list[str], dict]:
     per_source: list[list[str]] = []
     seen: set[str] = set()
     report = {"sources": {}, "rejected": {}}
@@ -210,7 +211,10 @@ def collect(sources: list[dict], fetcher=fetch, check=None) -> tuple[list[str], 
             if reason:
                 report["rejected"][reason] = report["rejected"].get(reason, 0) + 1
                 continue
-            key = fingerprint(link)
+            if evidence is not None and not evidence.accepts(link):
+                report["rejected"]["no recent Iran proxy proof"] = report["rejected"].get("no recent Iran proxy proof", 0) + 1
+                continue
+            key = config_digest(link) if evidence is not None else fingerprint(link)
             if key in seen:
                 report["rejected"]["duplicate"] = report["rejected"].get("duplicate", 0) + 1
                 continue
@@ -222,6 +226,21 @@ def collect(sources: list[dict], fetcher=fetch, check=None) -> tuple[list[str], 
             links = keep_alive(links, report, check)
         report["sources"][name] = f"{len(links)} kept"
         per_source.append(links)
+    if evidence is not None:
+        # Rank the whole verified pool before taking the cap, rather than source order.
+        ranked = sorted((link for links in per_source for link in links), key=evidence.rank)
+        # Avoid filling the list with many credentials/variants on one endpoint.
+        hosts: dict[str, int] = {}
+        chosen: list[str] = []
+        for link in ranked:
+            host = endpoint(link)["host"]
+            if hosts.get(host, 0) >= 2:
+                continue
+            chosen.append(link)
+            hosts[host] = hosts.get(host, 0) + 1
+            if len(chosen) == MAX_TOTAL:
+                break
+        return chosen, report
     return interleave(per_source), report
 
 
@@ -286,9 +305,12 @@ class Geo:
         return self.country_of_ip(ip)
 
 
-def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem: str | None = None, check=None, locate=None) -> dict:
+def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem: str | None = None, check=None, locate=None, evidence=None) -> dict:
+    if key_pem and evidence is None:
+        raise ValueError("Signing requires authenticated Iran proxy measurements")
     config = json.loads(sources_file.read_text())
-    links, report = collect(config.get("sources", []), fetcher, check)
+    links, report = collect(config.get("sources", []), fetcher, check, evidence)
+    verification = evidence.summary(links) if evidence is not None else None
     links = [rename(link, display_name(link, i + 1, locate)) for i, link in enumerate(links)]
     output_dir.mkdir(parents=True, exist_ok=True)
     plain = ("\n".join(links) + "\n") if links else ""
@@ -304,6 +326,7 @@ def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem
         "count": len(links),
         "files": files,
         "report": report,
+        "verification": verification,
     }
     payload = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     (output_dir / "manifest.json").write_bytes(payload)
@@ -315,13 +338,16 @@ def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem
 
 
 def main() -> int:
+    from iran_verification import IranEvidence
+    # Missing reports/keys fail closed, before any signing or publication. No TCP-only fallback.
+    evidence = IranEvidence.load(Path(os.environ["IRAN_REPORTS"]), ROOT / "sources" / "iran-probes.json")
     # AGGREGATOR_CHECK_ALIVE=0 skips the TCP check (for runs without outbound access).
     check = None if os.environ.get("AGGREGATOR_CHECK_ALIVE", "1") == "0" else alive
     # AGGREGATOR_GEO names an IPv4 country CSV (start,end,CC); without it names carry no country.
     geo_path = os.environ.get("AGGREGATOR_GEO")
     locate = Geo(Path(geo_path)) if geo_path else None
     manifest = build(ROOT / "output", ROOT / "sources" / "sources.json",
-                     key_pem=os.environ.get("HUB_SIGNING_KEY") or None, check=check, locate=locate)
+                     key_pem=os.environ.get("HUB_SIGNING_KEY") or None, check=check, locate=locate, evidence=evidence)
     print(f"{manifest['count']} configs; manifest {'signed' if (ROOT / 'output' / 'manifest.sig').read_text() else 'UNSIGNED (no key)'}")
     for name, state in manifest["report"]["sources"].items():
         print(f"  {name}: {state}")

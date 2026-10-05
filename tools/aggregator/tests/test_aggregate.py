@@ -106,13 +106,17 @@ class RealWorldTests(unittest.TestCase):
 
 
 class BuildTests(unittest.TestCase):
+    def setUp(self):
+        from test_iran_verification import signed_evidence
+        self.evidence = signed_evidence([GOOD, GOOD2])[0]
+
     def build(self, sources, fetched, key=None):
         """Builds into a temporary directory and returns the manifest plus every file's bytes."""
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "output"
             src = Path(tmp) / "sources.json"
             src.write_text(json.dumps({"version": 1, "sources": sources}))
-            manifest = aggregate.build(out, src, fetcher=lambda url: fetched[url], key_pem=key)
+            manifest = aggregate.build(out, src, fetcher=lambda url: fetched[url], key_pem=key, evidence=self.evidence if key else None)
             files = {f.name: f.read_bytes() for f in out.iterdir()}
             return manifest, files, files["free.txt"].decode(), files["manifest.sig"].decode()
 
