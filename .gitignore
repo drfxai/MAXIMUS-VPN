@@ -25,3 +25,6 @@ app/libs/
 *.p12
 /release.jks
 release-notes.md
+
+# Engine programs built by scripts/build-engines.sh
+app/src/main/jniLibs/

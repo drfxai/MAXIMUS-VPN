@@ -6,6 +6,14 @@ The Android application bundles the official XTLS/libXray release `v26.9.9` and 
 - Xray-core source: https://github.com/XTLS/Xray-core
 - Pinned Android artifact: `libxray-android.zip` from the libXray `v26.9.9` release. CI verifies SHA-256 `4998a8b56e4a78a164b5359d5690036f83da3b575465cea57ddf29c0149c345f` before extracting the AAR.
 - The AAR is downloaded during CI and is not stored in this repository.
+- Mihomo (MetaCubeX) `v1.19.32`, GNU General Public License v3.0. It runs as a separate program
+  (`libmihomo.so`, an executable), started by the app and reached only over a local SOCKS port; it is
+  not linked into the app. The exact source it is built from is
+  https://github.com/MetaCubeX/mihomo/tree/v1.19.32 (Go module `github.com/metacubex/mihomo@v1.19.32`,
+  checksum `h1:uD7ZC3P77isWD554NNvtee65L+99+/C5hyc+Lk8rVEk=`), built by `scripts/engines/mihomo.sh`.
+  You may obtain, modify and redistribute that program under the GPL-3.0; the full license text is at
+  https://www.gnu.org/licenses/gpl-3.0.txt. On request, the corresponding source for any release is
+  provided by the MAXIMUS VPN maintainer.
 - QR codes: ZXing core (https://github.com/zxing/zxing), Apache License 2.0. Camera: AndroidX CameraX, Apache License 2.0.
 
 ## MIT License (libXray)

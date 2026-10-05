@@ -31,10 +31,13 @@ object EngineRegistry {
      * Engines the plan calls for that are not bundled. Each needs its own native library, a license
      * decision and a pinned, hash-checked download before it can appear as a runtime.
      */
-    val MIHOMO = EngineDescriptor("mihomo", "Mihomo", null, "GPL-3.0", bundled = false, runtime = null)
+    /** Separate engine programs (vpn/sidecar): bundled, but carried behind Xray rather than being a runtime. */
+    val MIHOMO = EngineDescriptor("mihomo", "Mihomo (separate program)", com.example.vpn.sidecar.MihomoSidecar.VERSION, "GPL-3.0",
+        bundled = true, runtime = null)
     val AMNEZIAWG = EngineDescriptor("amneziawg", "amneziawg-go", null, "MIT", bundled = false, runtime = null)
-    val WARP = EngineDescriptor("warp", "Cloudflare WARP (WireGuard registration)", null, "MIT (wgcf-style registration)",
-        bundled = false, runtime = null)
+    /** WARP needs no engine of its own: a registered device runs on Xray's WireGuard client. */
+    val WARP = EngineDescriptor("warp", "Cloudflare WARP (WireGuard on Xray)", "in app", "Proprietary (this app)",
+        bundled = true, runtime = null)
     val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core", null, "GPL-3.0", bundled = false, runtime = null)
     val TOR = EngineDescriptor("tor", "Tor with pluggable transports", null, "BSD-3-Clause (Tor), MIT (lyrebird)",
         bundled = false, runtime = null)
@@ -63,13 +66,13 @@ object EngineRegistry {
         "SOCKS5 without login" to CapabilityState.ENGINE_SUPPORTED,
         "Xray JSON" to CapabilityState.ENGINE_SUPPORTED,
         "AmneziaWG junk packets" to CapabilityState.ENGINE_SUPPORTED,
-        "Mihomo / Clash YAML" to CapabilityState.PARSE_SUPPORTED,
-        "AmneziaWG custom headers" to CapabilityState.PARSE_SUPPORTED,
+        "TUIC (Mihomo)" to CapabilityState.VERIFIED_WORKING,
+        "Mihomo / Clash proxies" to CapabilityState.ENGINE_SUPPORTED,
+        "AmneziaWG custom headers (Mihomo)" to CapabilityState.ENGINE_SUPPORTED,
+        "Cloudflare WARP" to CapabilityState.ENGINE_SUPPORTED,
         "HTTP proxy with login" to CapabilityState.PARSE_SUPPORTED,
-        "TUIC" to CapabilityState.NONE,
         "Psiphon" to CapabilityState.NONE,
         "Tor" to CapabilityState.NONE,
-        "WARP" to CapabilityState.NONE,
         "NaiveProxy" to CapabilityState.NONE,
         "DNS tunnels" to CapabilityState.NONE
     )

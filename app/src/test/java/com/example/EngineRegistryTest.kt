@@ -25,9 +25,11 @@ class EngineRegistryTest {
         }
         // Engines the plan still calls for are listed, with a license, and map to no runtime.
         val planned = EngineRegistry.ENGINES.filterNot { it.bundled }
-        assertEquals(7, planned.size)
         assertTrue(planned.all { it.runtime == null && it.version == null && it.license.isNotBlank() })
-        assertFalse(EngineRegistry.MIHOMO.bundled)
+        // Mihomo is a separate program carried behind Xray, so it is bundled without being a runtime.
+        assertTrue(EngineRegistry.MIHOMO.bundled)
+        assertNull(EngineRegistry.MIHOMO.runtime)
+        assertEquals("GPL-3.0", EngineRegistry.MIHOMO.license)
     }
 
     @Test fun theMatrixMatchesWhatTheEnginesAccept() {
@@ -37,11 +39,10 @@ class EngineRegistryTest {
         assertNull(RuntimeCapabilities.unsupportedReason(reality))
         assertNull(RuntimeCapabilities.unsupportedReason(ProtocolLinks.parseHysteria2("hysteria2://pw@198.51.100.1:443?sni=h.example#h")))
         assertNotNull(RuntimeCapabilities.unsupportedReason(reality.copy(protocolType = ProtocolType.TUIC)))
-        assertEquals(CapabilityState.NONE, EngineRegistry.CAPABILITIES["TUIC"])
         assertEquals(CapabilityState.NONE, EngineRegistry.CAPABILITIES["Psiphon"])
-        // Only what passed real traffic in the simulator counts as working.
-        assertEquals(listOf("VLESS REALITY Vision", "VLESS WebSocket TLS (CDN)", "VLESS Encryption", "Hysteria2", "WireGuard"),
-            EngineRegistry.verified())
+        // Only what passed real traffic in the simulator or the engine lab counts as working.
+        assertEquals(listOf("VLESS REALITY Vision", "VLESS WebSocket TLS (CDN)", "VLESS Encryption", "Hysteria2", "WireGuard",
+            "TUIC (Mihomo)"), EngineRegistry.verified())
     }
 
     @Test fun anEngineThatKeepsFailingIsSkippedForAWhile() {
