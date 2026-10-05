@@ -341,3 +341,30 @@ Telemetry (step 30) is not built: it needs a collection endpoint and a privacy p
 exists, and nothing may be sent off the phone without the owner's decision. What a user can already give
 is the diagnostics report (now naming Android's lockdown state and how hostile the network looked), which
 is redacted and shared only when they choose to.
+
+## Step 32: tests that need a real phone
+
+Everything above was proved against a real Xray core on a machine, which cannot show how Android itself
+behaves: the kill switch, Always-on, lockdown, doze and a real carrier network are the phone's own
+behaviour. These are the checks that decide whether V1.0.1 can be published, and only the owner of a
+device can run them. Each one names what to look for.
+
+1. **Kill switch under failure.** Connect, then make the server unreachable (airplane mode on the server
+   side, or a wrong port). The app must keep reporting blocked traffic and no app may reach the network
+   until Disconnect is pressed. Check with a browser and a second app, not only the app's own screen.
+2. **Always-on and Block connections without VPN.** Turn both on in Android settings, reboot, and before
+   touching the app open a browser: nothing may load. The app's screen must name the lockdown state.
+3. **An invalid profile.** Import a broken config and press Connect: the error must appear and the
+   network must work again afterwards in Daily mode, while GOD MODE keeps traffic blocked.
+4. **A hostile network.** On a network that filters (mobile data in a filtered country, or a hotspot with
+   DNS interception), Connect in GOD MODE and confirm it lands on a working path, and that the path it
+   names matches what carried traffic.
+5. **DNS leaks.** While connected, check a DNS leak page and confirm no resolver from the carrier appears,
+   and that queries do not leave the tunnel.
+6. **Doze.** Leave the phone connected and idle for an hour, then use it: the connection must either still
+   carry traffic or have reconnected on its own, with traffic blocked in between.
+7. **Battery and speed.** A download and a speed test in Daily mode, and the same in GOD MODE, so the cost
+   of survival mode is known rather than guessed.
+
+Until 1, 2, 3 and 5 pass on a device, no transport may be shown to users as working, and the V1.0.1 tag
+stays unpublished: that is the Phase 73 blocker this project cannot clear by itself.
