@@ -353,6 +353,32 @@ class RayVpnService : VpnService() {
         }
     }
 
+    /**
+     * GOD MODE's last step before reporting no path: Cloudflare WARP on the WireGuard path, which needs
+     * no server of the user's. The first use registers a device over the phone's own network.
+     */
+    private suspend fun warpPath(timeoutSec: Int): com.example.vpn.smart.ServerRace.Winner? {
+        showForegroundNotification("Trying Cloudflare WARP...")
+        val cm = getSystemService(android.net.ConnectivityManager::class.java)
+        val network = cm?.allNetworks.orEmpty().firstOrNull { n ->
+            cm?.getNetworkCapabilities(n)?.let { caps ->
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            } == true
+        } ?: return null
+        val warp = runCatching {
+            com.example.vpn.warp.WarpProvider.profile(this) { url ->
+                network.openConnection(url, java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
+            }
+        }.onFailure { XrayLogManager.w("SMART", "Cloudflare WARP registration failed: ${it.message}") }.getOrNull() ?: return null
+        if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(warp) != null) return null
+        val outcome = com.example.xray.RealDelayProbe.measure(warp, timeoutSec)
+        return (outcome as? com.example.xray.RealDelayProbe.Outcome.Delay)?.let {
+            XrayLogManager.i("SMART", "Cloudflare WARP carries traffic (${it.latencyMs} ms).")
+            com.example.vpn.smart.ServerRace.Winner(warp, warp, it.latencyMs)
+        }
+    }
+
     private suspend fun connectLocked(
         userProfile: VlessProfile,
         smart: Boolean = false,
@@ -534,6 +560,9 @@ class RayVpnService : VpnService() {
                 // while other Cloudflare addresses are not. Scan for one and try the same server there.
                 if (choice.nothingWorked && !raced) {
                     cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
+                }
+                if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
+                    warpPath(timeouts.alternateSec)?.let { adopt(it) }
                 }
             }
 

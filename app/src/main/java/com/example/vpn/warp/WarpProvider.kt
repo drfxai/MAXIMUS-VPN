@@ -21,15 +21,22 @@ object WarpProvider {
     private var cached: WarpAccount? = null
 
     /** The WARP WireGuard profile, registering a device on first use. Throws IOException when that fails. */
-    suspend fun profile(context: Context): VlessProfile = WarpRegistration.toProfile(account(context))
+    suspend fun profile(
+        context: Context,
+        open: (java.net.URL) -> java.net.HttpURLConnection = WarpRegistration.directOpener
+    ): VlessProfile = WarpRegistration.toProfile(account(context, open))
 
-    suspend fun account(context: Context): WarpAccount = lock.withLock {
+    /** [open] lets the VPN service register over the phone's own network while its tunnel is up. */
+    suspend fun account(
+        context: Context,
+        open: (java.net.URL) -> java.net.HttpURLConnection = WarpRegistration.directOpener
+    ): WarpAccount = lock.withLock {
         cached ?: withContext(Dispatchers.IO) {
             val storage = SecureStorage(context.applicationContext)
             WarpRegistration.loadOrRegister(
                 stored = storage.getAndDecrypt(STORAGE_KEY),
                 save = { storage.encryptAndSave(STORAGE_KEY, it) },
-                register = { WarpRegistration.register() }
+                register = { WarpRegistration.register(open) }
             )
         }.also { cached = it }
     }
