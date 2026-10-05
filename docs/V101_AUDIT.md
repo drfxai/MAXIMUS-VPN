@@ -401,7 +401,7 @@ VPN so the program's sockets do not loop back into it; every other app still goe
 | Mihomo v1.19.32 (GPL-3.0) | TUIC links, AmneziaWG servers with changed headers, Clash-only proxies (AnyTLS, Mieru, Snell, SSH, Hysteria v1) | imported links and files | TUIC carried TCP and UDP through Xray → Mihomo → TUIC server in the lab: **verified** |
 | Cloudflare WARP (WireGuard on Xray) | free Cloudflare egress | GOD MODE, after the clean-address step | registration untested (Cloudflare's API is unreachable from the lab) |
 | Psiphon tunnel-core (GPL-3.0) | Psiphon's own network | GOD MODE, after WARP | built; needs the network settings Psiphon Inc. issues to the app (the `PSIPHON_CONFIG` secret) |
-| Tor 0.4.9 + lyrebird | Snowflake by default; pasted obfs4, WebTunnel or meek bridge lines | GOD MODE, last step; pasted bridge lines | built; Snowflake needs WebRTC, which the lab cannot reach |
+| Tor 0.4.9.5 + lyrebird | Snowflake by default; pasted obfs4, WebTunnel or meek bridge lines | GOD MODE, last step; pasted bridge lines | built; Snowflake needs WebRTC, which the lab cannot reach |
 | dnstt v1.20260501.0 (CC0) | a DNS tunnel to the user's own dnstt server | `dnstt://` links | built; needs a server |
 | NaiveProxy | – | – | not started: it is a Chromium build with no Go source to pin |
 

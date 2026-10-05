@@ -23,7 +23,7 @@ The Android application bundles the official XTLS/libXray release `v26.9.9` and 
   network settings are issued by Psiphon Inc. and are not part of this repository.
 - dnstt `v1.20260501.0` (David Fifield), CC0 1.0 Universal (public domain). Runs as a separate program
   (`libdnstt.so`); source https://www.bamsoftware.com/git/dnstt.git, built by `scripts/engines/dnstt.sh`.
-- Tor, from the Guardian Project's tor-android `0.4.9.13` (`info.guardianproject:tor-android`, with
+- Tor, from the Guardian Project's tor-android `0.4.9.5.1` (`info.guardianproject:tor-android`, with
   `jtorctl 0.4.5.7`), BSD 3-Clause License; source https://github.com/guardianproject/tor-android and
   https://gitlab.torproject.org/tpo/core/tor.
 - lyrebird (The Tor Project), commit `75ef9b2c1f18` (Go module

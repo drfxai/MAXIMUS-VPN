@@ -41,7 +41,7 @@ object EngineRegistry {
     val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core (separate program)", "4d6eb0e8a7e9", "GPL-3.0",
         bundled = true, runtime = null)
     val TOR = EngineDescriptor("tor", "Tor (in app) with lyrebird bridges (separate program)",
-        "tor-android 0.4.9.13, lyrebird 75ef9b2c1f18", "BSD-3-Clause (Tor, lyrebird), GPL-3.0 parts of lyrebird",
+        "tor-android 0.4.9.5.1, lyrebird 75ef9b2c1f18", "BSD-3-Clause (Tor, lyrebird), GPL-3.0 parts of lyrebird",
         bundled = true, runtime = null)
     val NAIVE = EngineDescriptor("naive", "NaiveProxy", null, "BSD-3-Clause", bundled = false, runtime = null)
     val DNS_TUNNEL = EngineDescriptor("dns-tunnel", "DNS tunnel (dnstt, separate program)", "v1.20260501.0", "CC0-1.0",
