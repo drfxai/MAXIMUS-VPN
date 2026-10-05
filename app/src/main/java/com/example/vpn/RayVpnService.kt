@@ -309,13 +309,15 @@ class RayVpnService : VpnService() {
         val candidates = com.example.vpn.smart.ServerRace.rank(
             all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude
         )
-        if (candidates.isEmpty()) return null
+        // Servers left out because their saved form just failed are still tried in disguise.
+        val dead = all.filter { it.id in exclude }
+        if (candidates.isEmpty() && dead.isEmpty()) return null
         XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
         val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
         com.example.vpn.smart.ServerRace().run(candidates, resolve, timeoutSec, onFailure = {
             networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
-        })?.let { return it }
-        val best = candidates.first()
+        }, disguiseOnly = dead)?.let { return it }
+        val best = candidates.firstOrNull() ?: return null
         val choice = runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() ?: return null
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
     }

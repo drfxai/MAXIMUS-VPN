@@ -75,6 +75,22 @@ class SmartConnectRaceTest {
         assertTrue("2" in failed)
     }
 
+    @Test fun afterAFailoverTheFailedServerIsTriedInDisguiseAheadOfAFragileKind() {
+        // Server names are now filtered: the REALITY server that was cut still works with a split handshake.
+        val cut = reality("1")
+        val win = ServerRace(probe = { list, _ ->
+            list.map {
+                when {
+                    it.protocolType == ProtocolType.HYSTERIA2 -> RealDelayProbe.Outcome.Delay(40)
+                    it.finalMask.contains("tlshello") -> RealDelayProbe.Outcome.Delay(500)
+                    else -> RealDelayProbe.Outcome.Failed("reset")
+                }
+            }
+        }, log = {}).run(ServerRace.rank(listOf(cut, hy2("2")), exclude = setOf("1")), { it }, timeoutSec = 4, disguiseOnly = listOf(cut))!!
+        assertEquals("1", win.owner.id)
+        assertEquals(StealthVariants.FRAGMENT, win.variantKey)
+    }
+
     @Test fun kindsThatJustFailedOnThisNetworkGoLast() {
         val ranked = ServerRace.rank(listOf(reality("1", score = 99.0), hy2("2", score = 1.0)), failedKinds = setOf("REALITY"))
         assertEquals(listOf("h2", "1"), ranked.map { it.id })

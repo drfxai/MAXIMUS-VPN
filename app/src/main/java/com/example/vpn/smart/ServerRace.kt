@@ -53,10 +53,17 @@ class ServerRace(
         timeoutSec: Int,
         maxBatches: Int = MAX_BATCHES,
         /** Called for each candidate that carried no traffic. */
-        onFailure: (VlessProfile) -> Unit = {}
+        onFailure: (VlessProfile) -> Unit = {},
+        /**
+         * Servers whose saved form just failed (the one the watchdog gave up on): only their disguised
+         * form is tried, ahead of the others'. A filter that starts reading server names cuts a REALITY
+         * connection, but the same server with a split handshake usually still works.
+         */
+        disguiseOnly: List<VlessProfile> = emptyList()
     ): Winner? {
-        if (candidates.isEmpty()) return null
-        val paths = withDisguises(resolveAll(candidates, resolve)).take(MAX_CANDIDATES)
+        if (candidates.isEmpty() && disguiseOnly.isEmpty()) return null
+        val dead = disguiseOnly.filter { ConnectionKind.of(it) in TLS_LOOKING }.take(DISGUISED)
+        val paths = withDisguises(resolveAll(dead + candidates, resolve), dead.map { it.id }.toSet()).take(MAX_CANDIDATES)
         val batches = StealthPathFinder.parallelSafeBatches(paths) { it.profile }.take(maxBatches)
         for ((round, batch) in batches.withIndex()) {
             val outcomes = probe(batch.map { it.profile }, timeoutSec)
@@ -80,12 +87,15 @@ class ServerRace(
 
     private data class Path(val owner: VlessProfile, val profile: VlessProfile, val variantKey: String? = null)
 
-    /** Each server as saved; after each of the first [DISGUISED] TLS-looking ones, its first stealth alternate. */
-    private fun withDisguises(prepared: List<Pair<VlessProfile, VlessProfile>>): List<Path> {
+    /**
+     * Each server as saved (except [deadIds], whose saved form just failed); after each of the first
+     * [DISGUISED] TLS-looking ones, its first stealth alternate.
+     */
+    private fun withDisguises(prepared: List<Pair<VlessProfile, VlessProfile>>, deadIds: Set<String>): List<Path> {
         val paths = mutableListOf<Path>()
         var disguised = 0
         for ((owner, resolved) in prepared) {
-            paths += Path(owner, resolved)
+            if (owner.id !in deadIds) paths += Path(owner, resolved)
             if (disguised < DISGUISED && ConnectionKind.of(resolved) in TLS_LOOKING) {
                 StealthVariants.of(resolved).firstOrNull()?.let {
                     paths += Path(owner, it.profile, it.key)

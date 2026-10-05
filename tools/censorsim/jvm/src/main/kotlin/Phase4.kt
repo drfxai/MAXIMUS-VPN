@@ -43,7 +43,7 @@ class Pipeline(private val probe: XrayProbe, private val profiles: List<VlessPro
         fun race(ex: Set<String>): Path? {
             val candidates = ServerRace.rank(profiles, memory.workingKinds(NET), memory.recentFailures(NET), exclude = ex)
             val win = ServerRace(measure, log = {}).run(candidates, { it }, timeouts.alternateSec,
-                onFailure = { memory.recordFailure(NET, ConnectionKind.of(it)) })
+                onFailure = { memory.recordFailure(NET, ConnectionKind.of(it)) }, disguiseOnly = profiles.filter { it.id in ex })
                 ?: candidates.firstOrNull()?.let { best ->
                     finder.choose(best, { it }, profiles, firstFailed = true).takeIf { it.latencyMs != null }
                         ?.let { ServerRace.Winner(it.profile, it.owner, it.latencyMs!!) }
