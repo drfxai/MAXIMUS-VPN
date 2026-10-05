@@ -50,7 +50,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -124,52 +123,23 @@ class RayVpnService : VpnService() {
                 val prevMode = lastObservedMode
                 lastObservedMode = settings.operationalMode
                 if (prevMode != null && prevMode != settings.operationalMode && _vpnState.value.isConnected) {
-                    handleLiveModeSwitch(prevMode, settings.operationalMode, settings)
+                    handleLiveModeSwitch(prevMode, settings.operationalMode)
                 }
             }
         }
     }
 
+    /**
+     * The modes route differently (see OperatingModePolicy), so a switch while connected reconnects
+     * the same server under the new mode. The traffic block holds during the reconnect.
+     */
     private suspend fun handleLiveModeSwitch(
         oldMode: com.example.data.model.OperationalMode,
-        newMode: com.example.data.model.OperationalMode,
-        settings: com.example.data.model.AppSettings
+        newMode: com.example.data.model.OperationalMode
     ) {
         val safeProfileName = com.example.core.SecretRedactor.redact(activeProfile?.name ?: "")
-        if (newMode == com.example.data.model.OperationalMode.GOD_MODE) {
-            XrayLogManager.i("GOD_MODE", "⚡ LIVE RECONFIGURATION: Switched to GOD Mode on active tunnel '$safeProfileName'.")
-            com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
-            com.example.vpn.godmode.MaximusMeshManager.startMesh()
-
-            activeProfile?.let { prof ->
-                failoverManager?.startMonitoring(prof, settings)
-            }
-            showForegroundNotification("⚡ GOD Mode Active: ${activeProfile?.name ?: "Tunnel"}")
-        } else {
-            XrayLogManager.i("DAILY_MODE", "LIVE RECONFIGURATION: Switched to Daily Mode on active tunnel '$safeProfileName'.")
-            com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
-            com.example.vpn.godmode.MaximusMeshManager.stopMesh()
-
-            if (activeProfile?.id?.startsWith("bridge-") == true || activeProfile?.id?.startsWith("mesh-") == true) {
-                val allProfiles = try {
-                    serverRepository.allProfiles.first()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) { emptyList() }
-                val standardNodes = allProfiles.filter { !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") }
-                val bestDaily = com.example.vpn.smart.SmartConnect.selectBestNode(standardNodes, settings.scoringProfile)?.profile ?: standardNodes.firstOrNull()
-                if (bestDaily != null) {
-                    XrayLogManager.i("DAILY_MODE", "Reverting from emergency bridge to primary daily node: ${bestDaily.name}")
-                    connect(bestDaily)
-                    return
-                }
-            }
-
-            activeProfile?.let { prof ->
-                failoverManager?.startMonitoring(prof, settings)
-            }
-            showForegroundNotification("Connected to ${activeProfile?.name ?: "Maximus"}")
-        }
+        XrayLogManager.i("VPN", "Mode switched from ${oldMode.name} to ${newMode.name}; reconnecting '$safeProfileName' under the new mode.")
+        activeProfile?.let { connect(it) }
     }
 
     /** Records whether Android blocks traffic if the app dies, and says what to change when it does not. */
@@ -379,7 +349,9 @@ class RayVpnService : VpnService() {
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 1. VpnService.prepare() check: Permission GRANTED.")
 
             activeProfile = profile
-            val settings = settingsRepository.getSettings()
+            val policy = com.example.vpn.safety.OperatingModePolicy.of(settingsRepository.getSettings().operationalMode)
+            val settings = policy.apply(settingsRepository.getSettings())
+            val raceFirst = smart || policy.alwaysSmartConnect
 
             updateState(ConnectionState(
                 status = ConnectionStatus.PREPARING,
@@ -457,7 +429,7 @@ class RayVpnService : VpnService() {
                 alternateTimeoutSec = timeouts.alternateSec
             )
             var firstFailed = false
-            if (smart) {
+            if (raceFirst) {
                 // The chosen server alone first, so a working one costs a single request; only when it
                 // carries no traffic are the other servers raced (several kinds of connection per round).
                 showForegroundNotification("Finding the fastest server...")
@@ -506,7 +478,7 @@ class RayVpnService : VpnService() {
                 // Nothing on this server carried traffic: try the other saved servers now rather than
                 // starting a dead connection and waiting for the watchdog.
                 if (choice.nothingWorked) networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(requestedProfile))
-                if (choice.nothingWorked && !smart && settings.autoFailoverEnabled) {
+                if (choice.nothingWorked && !raceFirst && settings.autoFailoverEnabled) {
                     showForegroundNotification("Server not answering, trying others...")
                     raceServers(exclude + requestedProfile.id + userProfile.id, network, timeouts.alternateSec, finder, retryDisguised = false)
                         ?.let { adopt(it) }

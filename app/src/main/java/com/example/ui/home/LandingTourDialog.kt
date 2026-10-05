@@ -193,7 +193,7 @@ fun LandingTourDialog(
                 PillarRow(
                     icon = Icons.Default.Shield,
                     title = "Quad-Tier Failover Cascade",
-                    desc = "When primary routes face interference, the tunnel cascades across VLESS -> Hysteria2 (QUIC/UDP) -> Psiphon Conduit -> Local P2P Mesh.",
+                    desc = "When a route is cut, the tunnel tries your other servers with real requests, disguised forms first, and keeps traffic blocked until one works.",
                     color = Color(0xFFFF5252)
                 )
 

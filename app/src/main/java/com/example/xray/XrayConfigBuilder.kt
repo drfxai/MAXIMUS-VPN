@@ -108,7 +108,6 @@ object XrayConfigBuilder {
                         put("169.254.0.0/16")
                         put("172.16.0.0/12")
                         put("192.168.0.0/16")
-                        put("198.18.0.0/15")
                         put("fc00::/7")
                         put("fe80::/10")
                         put("::1/128")
@@ -157,7 +156,6 @@ object XrayConfigBuilder {
                         put("169.254.0.0/16")
                         put("172.16.0.0/12")
                         put("192.168.0.0/16")
-                        put("198.18.0.0/15")
                     })
                 })
                 rulesArray.put(JSONObject().apply {

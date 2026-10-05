@@ -291,6 +291,7 @@ object XrayConfigParser {
             require(firstProtocol in PROXY_PROTOCOLS) {
                 "The config's first outbound must be a proxy, not '$firstProtocol'"
             }
+            if (!com.example.vpn.safety.OperatingModePolicy.of(settings.operationalMode).importedDirectRules) dropDirectRules(root)
             XrayConfigBuilder.applyPrivateDns(root, settings)
 
             // Ensure log exists
@@ -319,6 +320,21 @@ object XrayConfigParser {
         } catch (e: Exception) {
             throw IllegalArgumentException("Xray configuration rejected by security validation", e)
         }
+    }
+
+    /** GOD MODE: routing rules that send matching traffic around the proxy are removed. */
+    private fun dropDirectRules(root: JSONObject) {
+        val outbounds = root.optJSONArray("outbounds") ?: return
+        val direct = (0 until outbounds.length()).mapNotNull { outbounds.optJSONObject(it) }
+            .filter { it.optString("protocol") == "freedom" }.map { it.optString("tag") }.toSet()
+        val routing = root.optJSONObject("routing") ?: return
+        val rules = routing.optJSONArray("rules") ?: return
+        val kept = JSONArray()
+        for (i in 0 until rules.length()) {
+            val rule = rules.optJSONObject(i) ?: continue
+            if (rule.optString("outboundTag") !in direct) kept.put(rule)
+        }
+        routing.put("rules", kept)
     }
 
     private val PROXY_PROTOCOLS = setOf("vless", "vmess", "trojan", "shadowsocks", "hysteria", "wireguard", "socks", "http")

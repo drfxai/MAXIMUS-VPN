@@ -169,3 +169,21 @@ Gap 4 is not a leak: while reconnecting, the tunnel interface stays up, so a sto
 captured and dropped, not direct. Gap 3: the in-app kill-switch flag has no effect because the blocking
 interface is always used; the setting is left as is until the mode screens are redesigned (UI changes
 need a preview first).
+
+## Step 4 progress: OperatingModePolicy
+
+`vpn/safety/OperatingModePolicy` is now what the two modes change at runtime:
+
+| | DAILY | GOD MODE |
+|---|---|---|
+| Routing | the user's choice (LAN bypass, custom list) | everything through the proxy |
+| Direct rules in imported Xray configs | kept | dropped |
+| IPv6 | the user's setting | blocked |
+| Smart Connect | when the user asks | every connect |
+| Failover and reconnect | the user's setting | always on |
+| Unusable profile picked by the user | releases the block | keeps it |
+| Android lockdown off | logged | asked for |
+
+Switching mode while connected reconnects the same server under the new mode. The FakeDNS pool
+(198.18.0.0/15) is no longer in the direct lists. The mode subtitles, the landing tour and the home
+screen's failover line no longer name Psiphon or a P2P mesh, which do not run.
