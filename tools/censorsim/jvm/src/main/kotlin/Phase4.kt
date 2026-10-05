@@ -111,6 +111,41 @@ fun phase4Trials(probe: XrayProbe, profiles: List<VlessProfile>, scenario: Strin
     }
 }
 
+/**
+ * The failure lab: what the app does when things go wrong, under whatever the censor is blocking now.
+ *
+ * Each case records whether a working path was found and how long it took. The point of the last cases
+ * is the opposite of the others: when nothing can work, the app must report failure instead of starting
+ * a connection that carries nothing, because that is what keeps traffic blocked rather than leaking.
+ */
+fun failureLab(probe: XrayProbe, profiles: List<VlessProfile>, scenario: String, trials: Int) {
+    repeat(trials) { trial ->
+        // 1. Every saved server as the user picked it.
+        for (profile in profiles) {
+            val pipeline = Pipeline(probe, profiles, phase4 = true)
+            val t = System.nanoTime()
+            val path = pipeline.connect(profile, smart = true)
+            emit("$scenario+lab", trial, profile.name, "lab-connect", path.works, (System.nanoTime() - t) / 1_000_000, path.owner.name)
+        }
+        // 2. One saved server, which is down, and no others: nothing can work.
+        Blackhole().use { hole ->
+            val dead = profiles.first().copy(id = "dead", name = "Dead server", address = "127.0.0.2", port = hole.port)
+            val t = System.nanoTime()
+            val path = Pipeline(probe, listOf(dead), phase4 = true).connect(dead, smart = true)
+            emit("$scenario+lab", trial, "only server down", "lab-fail-closed", !path.works,
+                (System.nanoTime() - t) / 1_000_000, if (path.works) "claimed a path" else "reported no path")
+        }
+        // 3. Every server down: the race and the disguises must all come back empty.
+        Blackhole().use { hole ->
+            val dead = profiles.mapIndexed { i, p -> p.copy(id = "dead$i", name = "Dead ${p.name}", address = "127.0.0.2", port = hole.port) }
+            val t = System.nanoTime()
+            val path = Pipeline(probe, dead, phase4 = true).connect(dead.first(), smart = true)
+            emit("$scenario+lab", trial, "all servers down", "lab-fail-closed", !path.works,
+                (System.nanoTime() - t) / 1_000_000, if (path.works) "claimed a path" else "reported no path")
+        }
+    }
+}
+
 const val WATCH_BEFORE_PHASE4_MS = 12_000L
 
 /** Accepts TCP connections and never answers, like a blocked server address. */

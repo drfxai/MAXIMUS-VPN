@@ -24,7 +24,7 @@ sourceSets {
             "com/example/vpn/engine/UniversalImportEngine.kt", "com/example/vpn/engine/ConfigurationAdapter.kt",
             "com/example/vpn/stealth/**", "com/example/vpn/EndpointResolver.kt",
             "com/example/vpn/smart/ServerRace.kt", "com/example/vpn/smart/NetworkMemory.kt", "com/example/vpn/smart/WatchPolicy.kt",
-            "com/example/vpn/share/**"
+            "com/example/vpn/share/**", "com/example/vpn/safety/**"
         )
     }
 }

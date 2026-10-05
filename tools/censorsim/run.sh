@@ -19,4 +19,12 @@ for scenario in ${SCENARIOS:-none sni fe udp-block udp-dpi throttle sni,fe,udp-d
     | grep --line-buffered '^{' | tee -a "$WORK/results.jsonl" | tail -n 2
   kill $CENSOR; wait $CENSOR 2>/dev/null || true
 done
+# The failure lab: the app's behaviour when things go wrong, with everything filtered at once.
+if [[ "${LAB:-1}" == "1" ]]; then
+  python3 "$HERE/censor.py" "$WORK/sim.json" "sni,fe,udp-dpi" >"$WORK/censor-lab.log" 2>&1 & CENSOR=$!
+  sleep 0.5
+  LAB=1 "$HERE/jvm/build/install/censorsim/bin/censorsim" "$XRAY" "$WORK/sim.json" "$HOST" "sni,fe,udp-dpi" "$TRIALS" \
+    | grep --line-buffered '^{' | tee -a "$WORK/results.jsonl" | tail -n 2
+  kill $CENSOR; wait $CENSOR 2>/dev/null || true
+fi
 python3 "$HERE/report.py" "$WORK/results.jsonl"

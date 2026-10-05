@@ -30,8 +30,12 @@ def pct_or_dash(rs):
     return pct(rs) if rs else "–"
 
 
-scenarios = [s for s in dict.fromkeys(r["scenario"] for r in rows) if not s.endswith("+dead")]
-profiles = sorted({r["profile"] for r in rows if not r["scenario"].endswith("+dead")})
+def plain(scenario):
+    return not scenario.endswith("+dead") and not scenario.endswith("+lab")
+
+
+scenarios = [s for s in dict.fromkeys(r["scenario"] for r in rows) if plain(s)]
+profiles = sorted({r["profile"] for r in rows if plain(r["scenario"])})
 print("| Scenario | main: connected | branch: connected | branch: time (median / p90) | branch under 10 s "
       "| Phase 4: connected | Phase 4: time (median / p90) | Phase 4 under 10 s |")
 print("|---|---|---|---|---|---|---|---|")
@@ -63,3 +67,16 @@ if dead:
     for s in dead:
         b, p4 = by[(s, "branch")], by[(s, "phase4")]
         print(f"| {s.removesuffix('+dead')} | {pct_or_dash(b)} | {times(b)} | {pct_or_dash(p4)} | {times(p4)} |")
+
+
+# The failure lab: what the app does when things go wrong (run.sh LAB=1).
+lab = [s for s in dict.fromkeys(r["scenario"] for r in rows) if s.endswith("+lab")]
+if lab:
+    print()
+    print("### Failure lab")
+    print()
+    print("| Filtering | each saved server connects | time (median / p90) | nothing can work: no path claimed | time to give up |")
+    print("|---|---|---|---|---|")
+    for s in lab:
+        c, f = by[(s, "lab-connect")], by[(s, "lab-fail-closed")]
+        print(f"| {s.removesuffix('+lab')} | {pct_or_dash(c)} | {times(c)} | {pct_or_dash(f)} | {times(f)} |")

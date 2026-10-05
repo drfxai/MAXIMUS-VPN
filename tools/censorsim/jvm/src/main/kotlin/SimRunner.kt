@@ -40,6 +40,11 @@ fun main(args: Array<String>) {
         return
     }
     val trials = args[4].toInt()
+    if (scenario.endsWith("+lab") || System.getenv("LAB") == "1") {
+        failureLab(probe, profiles, scenario.removeSuffix("+lab"), trials)
+        probe.close()
+        return
+    }
     if (scenario == "variants") {
         // Every stealth alternate must still work when nothing is filtered.
         for (profile in profiles) {

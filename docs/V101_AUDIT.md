@@ -306,3 +306,23 @@ keeps retrying the user's own server, so a filter that lifts is picked up on its
 4 (Psiphon bridges, P2P mesh) were labels over code that disabled itself; the service no longer calls
 them. The home screen still shows a ladder with bridge and mesh counts, which now read zero: that is a
 layout change, so it waits for a preview.
+
+## Step 31 progress: failure lab
+
+`tools/censorsim` has a lab pass (`LAB=1 ./run.sh …`, results in
+`results/2026-10-05-lab.jsonl`, a table in `report.py`). It connects each saved server under the current
+filtering and then runs two cases where nothing can work: the only saved server is down, and every saved
+server is down. There the app must report no path rather than start a connection that carries nothing,
+since that is what keeps traffic blocked.
+
+Results, real traffic through a real Xray core:
+
+| Filtering | each saved server connects | time (median / p90) | nothing can work: no path claimed | time to give up |
+|---|---|---|---|---|
+| nothing filtered | 100% | 0.0 s / 0.1 s | 100% | 29.3 s / 44.5 s |
+| server names + fingerprint + UDP inspection | 100% | 9.1 s / 9.2 s | 100% | 29.3 s / 44.6 s |
+
+Under all three filters every profile still connected, each landing on REALITY, in about 9 seconds. No
+case ever claimed a working path that carried nothing. Giving up takes 14 seconds with one dead server
+and 45 with five, because every server, disguise and alternate is tried before the app says nothing
+works; traffic stays blocked throughout, so this is slow rather than unsafe.
