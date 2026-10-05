@@ -39,7 +39,7 @@ class EngineRegistryTest {
         assertNull(RuntimeCapabilities.unsupportedReason(reality))
         assertNull(RuntimeCapabilities.unsupportedReason(ProtocolLinks.parseHysteria2("hysteria2://pw@198.51.100.1:443?sni=h.example#h")))
         assertNotNull(RuntimeCapabilities.unsupportedReason(reality.copy(protocolType = ProtocolType.TUIC)))
-        assertEquals(CapabilityState.NONE, EngineRegistry.CAPABILITIES["Psiphon"])
+        assertEquals(CapabilityState.NONE, EngineRegistry.CAPABILITIES["Tor"])
         // Only what passed real traffic in the simulator or the engine lab counts as working.
         assertEquals(listOf("VLESS REALITY Vision", "VLESS WebSocket TLS (CDN)", "VLESS Encryption", "Hysteria2", "WireGuard",
             "TUIC (Mihomo)"), EngineRegistry.verified())

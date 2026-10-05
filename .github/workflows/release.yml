@@ -55,9 +55,21 @@ jobs:
         with:
           go-version: '1.24'
           cache: false
-      - name: Build the engine programs from pinned, checksum-verified sources
+      - name: Psiphon network settings
+        # Issued to this app by Psiphon Inc. and kept only as a repository secret; without it the
+        # Psiphon engine is built but reports that its settings are missing.
         env:
-          GOTOOLCHAIN: auto
+          PSIPHON_CONFIG: ${{ secrets.PSIPHON_CONFIG }}
+        run: |
+          if [ -n "$PSIPHON_CONFIG" ]; then
+            mkdir -p app/src/main/assets/psiphon
+            printf '%s' "$PSIPHON_CONFIG" > app/src/main/assets/psiphon/config.json
+            python3 -c 'import json; json.load(open("app/src/main/assets/psiphon/config.json"))'
+            echo "Psiphon settings included"
+          else
+            echo "No PSIPHON_CONFIG secret; Psiphon stays off in this build"
+          fi
+      - name: Build the engine programs from pinned, checksum-verified sources
         run: bash scripts/build-engines.sh arm64-v8a armeabi-v7a x86_64
       - name: Build, test and stage standalone APKs
         env:

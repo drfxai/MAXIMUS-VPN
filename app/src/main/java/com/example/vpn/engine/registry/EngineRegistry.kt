@@ -38,11 +38,13 @@ object EngineRegistry {
     /** WARP needs no engine of its own: a registered device runs on Xray's WireGuard client. */
     val WARP = EngineDescriptor("warp", "Cloudflare WARP (WireGuard on Xray)", "in app", "Proprietary (this app)",
         bundled = true, runtime = null)
-    val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core", null, "GPL-3.0", bundled = false, runtime = null)
+    val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core (separate program)", "4d6eb0e8a7e9", "GPL-3.0",
+        bundled = true, runtime = null)
     val TOR = EngineDescriptor("tor", "Tor with pluggable transports", null, "BSD-3-Clause (Tor), MIT (lyrebird)",
         bundled = false, runtime = null)
     val NAIVE = EngineDescriptor("naive", "NaiveProxy", null, "BSD-3-Clause", bundled = false, runtime = null)
-    val DNS_TUNNEL = EngineDescriptor("dns-tunnel", "DNS tunnel (dnstt-style)", null, "MIT", bundled = false, runtime = null)
+    val DNS_TUNNEL = EngineDescriptor("dns-tunnel", "DNS tunnel (dnstt, separate program)", "v1.20260501.0", "CC0-1.0",
+        bundled = true, runtime = null)
 
     val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, MIHOMO, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL)
 
@@ -71,10 +73,10 @@ object EngineRegistry {
         "AmneziaWG custom headers (Mihomo)" to CapabilityState.ENGINE_SUPPORTED,
         "Cloudflare WARP" to CapabilityState.ENGINE_SUPPORTED,
         "HTTP proxy with login" to CapabilityState.PARSE_SUPPORTED,
-        "Psiphon" to CapabilityState.NONE,
+        "Psiphon (needs this build's Psiphon settings)" to CapabilityState.ENGINE_SUPPORTED,
         "Tor" to CapabilityState.NONE,
         "NaiveProxy" to CapabilityState.NONE,
-        "DNS tunnels" to CapabilityState.NONE
+        "DNS tunnel (dnstt)" to CapabilityState.ENGINE_SUPPORTED
     )
 
     fun verified(): List<String> = CAPABILITIES.filterValues { it == CapabilityState.VERIFIED_WORKING }.keys.toList()

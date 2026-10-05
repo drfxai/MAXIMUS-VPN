@@ -201,6 +201,13 @@ object UniversalImportEngine {
             lower.startsWith("hysteria2://") || lower.startsWith("hy2://") -> {
                 parseHysteria2Uri(uriString, fileName, subUrl)
             }
+            lower.startsWith("dnstt://") -> try {
+                // A DNS tunnel for near-total blackouts, run by the dnstt engine program.
+                ParsedItem.Success(com.example.vpn.sidecar.DnsttSidecar.parse(uriString)
+                    .copy(sourceFile = fileName, sourceSubscription = subUrl))
+            } catch (e: IllegalArgumentException) {
+                ParsedItem.Invalid(uriString.take(60), e.message ?: "Invalid DNS tunnel link")
+            }
             lower.startsWith("tuic://") -> {
                 // Xray has no TUIC client; these run on the Mihomo engine.
                 parseTuicUri(uriString, fileName, subUrl)

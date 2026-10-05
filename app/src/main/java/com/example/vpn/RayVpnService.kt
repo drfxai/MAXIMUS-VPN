@@ -121,6 +121,7 @@ class RayVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
+        com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
         val db = AppDatabase.getInstance(applicationContext)
         serverRepository = ServerRepository(db.serverProfileDao())
         settingsRepository = com.example.RayApplication.instance.settingsRepository
@@ -315,7 +316,9 @@ class RayVpnService : VpnService() {
         /** Also try the [exclude]d servers in disguise (only their saved form was tested). */
         retryDisguised: Boolean
     ): com.example.vpn.smart.ServerRace.Winner? {
+        // Profiles carried by an engine program cannot be measured before it runs, so they are not raced.
         val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+            .filter { com.example.vpn.sidecar.Sidecars.forProfile(it) == null }
         val candidates = com.example.vpn.smart.ServerRace.rank(
             all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude
         )
@@ -437,7 +440,8 @@ class RayVpnService : VpnService() {
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
             var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
             try {
-                if (profile.profileType != ProfileType.XRAY_JSON && profile.profileType != ProfileType.MIHOMO_YAML &&
+                // Engine programs (Mihomo, Psiphon, the DNS tunnel) look up their own servers privately.
+                if (profile.profileType != ProfileType.XRAY_JSON && com.example.vpn.sidecar.Sidecars.forProfile(profile) == null &&
                     !isLiteralIp(profile.address)) {
                     // Resolve outside the tunnel: once traffic is captured, DNS for the proxy itself
                     // would loop back into the VPN.
@@ -533,7 +537,8 @@ class RayVpnService : VpnService() {
                     requested = requestedProfile,
                     resolve = { p ->
                         if (p.id == requestedProfile.id) resolvedRequested
-                        else if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p
+                        else if (p.profileType != ProfileType.XRAY_JSON && com.example.vpn.sidecar.Sidecars.forProfile(p) == null &&
+                            !isLiteralIp(p.address)) resolveEndpoint(p) else p
                     },
                     siblings = siblings,
                     firstFailed = firstFailed
@@ -563,6 +568,15 @@ class RayVpnService : VpnService() {
                 }
                 if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
                     warpPath(timeouts.alternateSec)?.let { adopt(it) }
+                }
+                if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
+                    // Psiphon finds its own servers. It cannot be measured before it starts, so it is
+                    // only taken when this build carries it; if it finds nothing, traffic stays blocked.
+                    val psiphon = com.example.vpn.sidecar.PsiphonSidecar.profile()
+                    if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(psiphon) == null) {
+                        XrayLogManager.i("SMART", "Nothing else carried traffic; starting Psiphon.")
+                        adopt(com.example.vpn.smart.ServerRace.Winner(psiphon, psiphon, 0))
+                    }
                 }
             }
 

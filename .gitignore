@@ -28,3 +28,4 @@ release-notes.md
 
 # Engine programs built by scripts/build-engines.sh
 app/src/main/jniLibs/
+app/src/main/assets/psiphon/

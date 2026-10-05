@@ -46,5 +46,10 @@ data class SidecarLaunch(
     /** Some engines (Psiphon, Tor) need their own network setup before the port answers. */
     val readyTimeoutMs: Long = 15_000,
     /** False when the engine cannot check a SOCKS login (Psiphon, Tor); Xray then sends none. */
-    val socksAuth: Boolean = true
+    val socksAuth: Boolean = true,
+    /**
+     * For engines whose port opens before they can carry anything (Psiphon opens it before it has a
+     * tunnel): a line of their output that means they now can. Ready then needs both.
+     */
+    val readyLine: Regex? = null
 )

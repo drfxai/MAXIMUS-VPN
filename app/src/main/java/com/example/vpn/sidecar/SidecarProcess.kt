@@ -11,13 +11,19 @@ import java.util.concurrent.TimeUnit
 class SidecarProcess(
     private val name: String,
     private val process: Process,
-    val socksPort: Int
+    val socksPort: Int,
+    private val readyLine: Regex? = null
 ) {
+    @Volatile private var sawReadyLine = readyLine == null
+
     private val logThread = Thread({
         try {
             process.inputStream.bufferedReader().useLines { lines ->
                 // Engines can print server addresses and keys; only redacted, bounded lines reach the log.
-                lines.take(MAX_LOG_LINES).forEach { XrayLogManager.d(name, SecretRedactor.redact(it.take(300))) }
+                lines.forEachIndexed { index, line ->
+                    if (!sawReadyLine && readyLine?.containsMatchIn(line) == true) sawReadyLine = true
+                    if (index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line.take(300)))
+                }
             }
         } catch (_: Exception) {
         }
@@ -30,7 +36,7 @@ class SidecarProcess(
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             if (!process.isAlive) return false
-            if (portOpen(socksPort)) return true
+            if (sawReadyLine && portOpen(socksPort)) return true
             Thread.sleep(100)
         }
         return false
@@ -47,7 +53,7 @@ class SidecarProcess(
         fun start(name: String, launch: SidecarLaunch, workDir: File, socksPort: Int): SidecarProcess {
             val builder = ProcessBuilder(launch.command).directory(workDir).redirectErrorStream(true)
             builder.environment().putAll(launch.environment)
-            return SidecarProcess(name, builder.start(), socksPort)
+            return SidecarProcess(name, builder.start(), socksPort, launch.readyLine)
         }
 
         fun portOpen(port: Int): Boolean = try {
