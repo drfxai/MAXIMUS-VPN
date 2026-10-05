@@ -76,6 +76,10 @@ class RayVpnService : VpnService() {
         }
 
         private val _lockdown = MutableStateFlow(com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.UNKNOWN)
+        private val _environment = MutableStateFlow<com.example.vpn.smart.NetworkEnvironment.Report?>(null)
+        /** How hostile the network looked at the last connect. */
+        val environment: StateFlow<com.example.vpn.smart.NetworkEnvironment.Report?> = _environment.asStateFlow()
+
         /** Whether Android keeps traffic blocked if this app's process dies; read at each connect. */
         val lockdown: StateFlow<com.example.vpn.safety.MaximusVpnSupervisor.Lockdown> = _lockdown.asStateFlow()
     }
@@ -89,6 +93,8 @@ class RayVpnService : VpnService() {
     private val supervisor = com.example.vpn.safety.MaximusVpnSupervisor { XrayLogManager.i("VPN", it) }
     private val protectionRequested: Boolean get() = supervisor.protectionRequested
     private val engineBreaker = com.example.vpn.engine.registry.EngineCircuitBreaker()
+    /** The last server-name lookup met a blocked DNS answer. */
+    @Volatile private var dnsPoisoned = false
     private var vpnInterface: ParcelFileDescriptor? = null
     private var tunnelManager: TunnelManager? = null
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
@@ -351,6 +357,7 @@ class RayVpnService : VpnService() {
 
             activeProfile = profile
             val policy = com.example.vpn.safety.OperatingModePolicy.of(settingsRepository.getSettings().operationalMode)
+            dnsPoisoned = false
             val settings = policy.apply(settingsRepository.getSettings())
             val raceFirst = smart || policy.alwaysSmartConnect
 
@@ -412,6 +419,14 @@ class RayVpnService : VpnService() {
             // probe time limits. The probe's sockets bypass the traffic-blocking interface.
             val network = com.example.vpn.smart.NetworkKey.current(this@RayVpnService)
             val timeouts = networkMemory.timeouts(network)
+            runCatching { com.example.vpn.smart.NetworkEnvironment.observe(this@RayVpnService, networkMemory, dnsPoisoned) }
+                .onSuccess { report ->
+                    _environment.value = report
+                    XrayLogManager.i("SMART", "Network: ${report.describe()}")
+                    if (policy.mode == com.example.data.model.OperationalMode.DAILY && com.example.vpn.smart.NetworkEnvironment.suggestsGodMode(report)) {
+                        XrayLogManager.w("SMART", "Filtering on this network is heavy; GOD MODE proxies everything and tests every server.")
+                    }
+                }
             var raced = false
             fun adopt(win: com.example.vpn.smart.ServerRace.Winner) {
                 com.example.vless.VlessValidator.validate(win.profile)
@@ -763,6 +778,8 @@ class RayVpnService : VpnService() {
                     system = { network.getAllByName(it).toList() },
                     open = { url -> network.openConnection(url) as java.net.HttpURLConnection }
                 )
+                dnsPoisoned = resolved.viaDoh ||
+                    EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))
                 if (resolved.viaDoh) {
                     XrayLogManager.w("VPN", "[DIAGNOSTICS] The network's DNS gave a blocked answer for the server; " +
                         "resolved it over DNS-over-HTTPS instead")

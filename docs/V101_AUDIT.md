@@ -196,3 +196,11 @@ is bundled (Xray and the Kotlin tunnel are; Mihomo is listed, GPL-3.0, not bundl
 protocol matrix above in code; `EngineRegistryTest` checks it against what the engines accept and keeps
 "working" to the five protocols the simulator verified. `EngineCircuitBreaker` counts start failures per
 engine (three in a row: skipped for five minutes); with one engine per protocol today it only reports.
+
+## Step 6 progress: network environment detector
+
+`vpn/smart/NetworkEnvironment` rates the network outside the VPN at every connect as open, filtered,
+heavy or blackout, from Android's own check (validated, metered, roaming), whether the server's name met
+a blocked DNS answer, and which kinds of connection recently failed or worked on that carrier or Wi-Fi
+(NetworkMemory). It is logged with each connect and shown in the diagnostics report; in DAILY mode a
+heavy or blackout network logs a suggestion to use GOD MODE.
