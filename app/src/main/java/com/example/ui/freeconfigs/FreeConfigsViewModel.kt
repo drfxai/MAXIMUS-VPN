@@ -44,7 +44,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
             serverRepository.getProfilesBySubscription(FreeConfigList.URL).collect { profiles -> publish(profiles) }
         }
         viewModelScope.launch {
-            publish(withContext(Dispatchers.IO) { serverRepository.getProfilesBySubscription(FreeConfigList.URL).first() })
+            publish(withContext(Dispatchers.IO) { trimSurplus() })
             loadSubscription()
             val s = _state.value
             when {
@@ -54,6 +54,21 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                 else -> testAll()
             }
         }
+    }
+
+    /**
+     * Installs that took an earlier, longer list still hold hundreds of servers. Keep the best
+     * [FreeConfigList.MAX_CONFIGS] (never favourites or the server in use) so the screen, the test run
+     * and the database work on a small set. Returns what is left.
+     */
+    private suspend fun trimSurplus(): List<VlessProfile> {
+        val saved = serverRepository.getProfilesBySubscription(FreeConfigList.URL).first()
+        if (saved.size <= FreeConfigList.MAX_CONFIGS) return saved
+        val keep = runCatching { RayApplication.instance.settingsRepository.getSettings().selectedProfileId }.getOrNull()
+        val extra = FreeConfigList.surplus(saved, keep)
+        extra.forEach { runCatching { serverRepository.delete(it.id) } }
+        XrayLogManager.i("FREE", "Trimmed ${extra.size} servers beyond the ${FreeConfigList.MAX_CONFIGS} the free list keeps.")
+        return saved - extra.toSet()
     }
 
     private suspend fun loadSubscription() {

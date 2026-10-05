@@ -25,7 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MAX_BYTES = 5 * 1024 * 1024
 TIMEOUT_SEC = 30
 MAX_PER_SOURCE = 500
-MAX_TOTAL = 300
+MAX_TOTAL = 30
+# Candidates per source that get a real request; the rest of a large source is not tried.
+VERIFY_PER_SOURCE = 150
 ALIVE_TIMEOUT_SEC = 3
 ALIVE_WORKERS = 64
 SCHEMES = ("vless://", "vmess://", "trojan://", "ss://", "hysteria2://", "hy2://", "wireguard://", "wg://")
@@ -190,8 +192,20 @@ def interleave(per_source: list[list[str]], limit: int = MAX_TOTAL) -> list[str]
     return out
 
 
-def collect(sources: list[dict], fetcher=fetch, check=None) -> tuple[list[str], dict]:
+def keep_working(per_source: list[list[str]], verify, report: dict) -> list[list[str]]:
+    """Keeps the servers that carried a real request, each source's fastest first. [verify] maps a list
+    of links to {link: seconds} for the ones that worked."""
+    candidates = [links[:VERIFY_PER_SOURCE] for links in per_source]
+    speeds = verify([link for links in candidates for link in links])
+    tried = sum(len(links) for links in candidates)
+    works = [sorted((l for l in links if l in speeds), key=speeds.__getitem__) for links in candidates]
+    report["rejected"]["no traffic"] = tried - sum(len(w) for w in works)
+    return works
+
+
+def collect(sources: list[dict], fetcher=fetch, check=None, verify=None) -> tuple[list[str], dict]:
     per_source: list[list[str]] = []
+    names: list[str] = []
     seen: set[str] = set()
     report = {"sources": {}, "rejected": {}}
     for source in sources:
@@ -222,6 +236,11 @@ def collect(sources: list[dict], fetcher=fetch, check=None) -> tuple[list[str], 
             links = keep_alive(links, report, check)
         report["sources"][name] = f"{len(links)} kept"
         per_source.append(links)
+        names.append(name)
+    if verify is not None:
+        per_source = keep_working(per_source, verify, report)
+        for name, links in zip(names, per_source):
+            report["sources"][name] = f"{len(links)} carried traffic"
     return interleave(per_source), report
 
 
@@ -286,9 +305,10 @@ class Geo:
         return self.country_of_ip(ip)
 
 
-def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem: str | None = None, check=None, locate=None) -> dict:
+def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem: str | None = None, check=None, locate=None,
+          verify=None) -> dict:
     config = json.loads(sources_file.read_text())
-    links, report = collect(config.get("sources", []), fetcher, check)
+    links, report = collect(config.get("sources", []), fetcher, check, verify)
     links = [rename(link, display_name(link, i + 1, locate)) for i, link in enumerate(links)]
     output_dir.mkdir(parents=True, exist_ok=True)
     plain = ("\n".join(links) + "\n") if links else ""
@@ -320,8 +340,18 @@ def main() -> int:
     # AGGREGATOR_GEO names an IPv4 country CSV (start,end,CC); without it names carry no country.
     geo_path = os.environ.get("AGGREGATOR_GEO")
     locate = Geo(Path(geo_path)) if geo_path else None
+    # Every published server must have carried a real request through a local Xray core. AGGREGATOR_VERIFY=0
+    # skips that for a dry run, and then nothing may be published.
+    verify = None
+    if os.environ.get("AGGREGATOR_VERIFY", "1") != "0":
+        xray = os.environ.get("AGGREGATOR_XRAY", "")
+        if not xray or not os.access(xray, os.X_OK):
+            print("AGGREGATOR_XRAY must name the Xray core, which tests each server with a real request", file=sys.stderr)
+            return 2
+        import verify as probe
+        verify = lambda links: probe.latencies(links, xray)
     manifest = build(ROOT / "output", ROOT / "sources" / "sources.json",
-                     key_pem=os.environ.get("HUB_SIGNING_KEY") or None, check=check, locate=locate)
+                     key_pem=os.environ.get("HUB_SIGNING_KEY") or None, check=check, locate=locate, verify=verify)
     print(f"{manifest['count']} configs; manifest {'signed' if (ROOT / 'output' / 'manifest.sig').read_text() else 'UNSIGNED (no key)'}")
     for name, state in manifest["report"]["sources"].items():
         print(f"  {name}: {state}")

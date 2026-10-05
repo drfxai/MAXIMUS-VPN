@@ -97,23 +97,28 @@ fun FreeConfigsContent(
                     item { Segments(c, state.sort, actions.onSort) }
                     item { Chips(c, state, actions.onProtocol) }
                     state.message?.let { m -> item { Message(c, m, actions.onDismissMessage) } }
-                    item { SectionHead(c, "ONLINE · ${state.visible.size}", if (state.testing) null else "Test all", actions.onTestAll) }
                     val rows = state.visible
+                    item { SectionHead(c, "ONLINE · ${rows.size}", if (state.testing) null else "Test all", actions.onTestAll) }
                     if (rows.isEmpty()) item {
                         EmptyCard(c, if (state.testing || state.queued > 0) "Testing servers" else "Nothing online",
                             if (state.testing || state.queued > 0) "Servers appear here as they answer." else "None of these servers answered on your network. Try again later.",
                             busy = state.testing)
-                    } else item {
-                        Column(Modifier.labCard(c)) {
-                            rows.forEachIndexed { i, node ->
-                                NodeRow(c, node, best = node == best, last = i == rows.lastIndex) { actions.onConnect(node) }
+                    } else {
+                        // One lazy item per server: only the rows on screen are built, and a finished test
+                        // batch redraws just the rows that changed instead of the whole card.
+                        items(rows, key = { it.profile.id }) { node ->
+                            Box(Modifier.padding(bottom = 8.dp).labCard(c, radius = 16.dp)) {
+                                NodeRow(c, node, best = node == best, last = true) { actions.onConnect(node) }
                             }
                         }
                     }
                     item { Hidden(c, state, actions.onToggleHidden) }
-                    if (state.showHidden && state.offline.isNotEmpty()) item {
-                        Column(Modifier.padding(top = 8.dp).labCard(c)) {
-                            state.offline.forEachIndexed { i, node -> NodeRow(c, node, best = false, last = i == state.offline.lastIndex) { actions.onConnect(node) } }
+                    if (state.showHidden) {
+                        val offline = state.offline
+                        items(offline, key = { "off-" + it.profile.id }) { node ->
+                            Box(Modifier.padding(top = 8.dp).labCard(c, radius = 16.dp)) {
+                                NodeRow(c, node, best = false, last = true) { actions.onConnect(node) }
+                            }
                         }
                     }
                     item { Note(c) }

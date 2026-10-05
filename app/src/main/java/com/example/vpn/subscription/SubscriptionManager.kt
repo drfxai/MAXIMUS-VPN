@@ -311,7 +311,9 @@ class SubscriptionManager(
             it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
         }
         val keep = runCatching { com.example.RayApplication.instance.settingsRepository.getSettings().selectedProfileId }.getOrNull()
-        FreeConfigList.stale(saved, fresh, keep).forEach { serverRepository.delete(it.id) }
+        val stale = FreeConfigList.stale(saved, fresh, keep)
+        stale.forEach { serverRepository.delete(it.id) }
+        FreeConfigList.surplus(saved - stale.toSet(), keep).forEach { serverRepository.delete(it.id) }
     }
 
     private suspend fun nodeCountOf(subscription: SubscriptionInfo) = serverRepository.getAllProfilesOnce().count {

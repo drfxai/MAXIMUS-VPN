@@ -54,9 +54,16 @@ object FreeConfigList {
     /** The country code the aggregator puts in front of a name ("DE · VLESS 12"), or null. */
     fun countryOf(name: String): String? = COUNTRY_PREFIX.find(name)?.groupValues?.get(1)
 
-    /** A config from the list, ready to save: only usable ones, with their country recorded. */
+    /**
+     * The most servers the app takes from the list. The published list is already limited to 30 servers
+     * that carried a real request; this holds even when a list from elsewhere is longer, so hundreds of
+     * servers can never be saved, tested and drawn at once.
+     */
+    const val MAX_CONFIGS = 30
+
+    /** A config from the list, ready to save: the first [MAX_CONFIGS] usable ones, with their country recorded. */
     fun prepare(profiles: List<VlessProfile>): List<VlessProfile> =
-        profiles.filter(::usable).map { it.copy(countryCode = countryOf(it.name) ?: it.countryCode) }
+        profiles.filter(::usable).take(MAX_CONFIGS).map { it.copy(countryCode = countryOf(it.name) ?: it.countryCode) }
 
     /**
      * Saved servers from an earlier list that the new list no longer has. Favourites and the server
@@ -66,6 +73,16 @@ object FreeConfigList {
         val current = fresh.map { it.effectiveFingerprint }.toSet()
         return saved.filter { it.effectiveFingerprint !in current && !it.isFavorite && it.id != keepId }
     }
+
+    /**
+     * Saved servers beyond [MAX_CONFIGS], for installs that already hold more from an earlier, longer
+     * list. The fastest tested servers stay, then untested ones; favourites and the server in use are
+     * never in the result.
+     */
+    fun surplus(saved: List<VlessProfile>, keepId: String?): List<VlessProfile> =
+        saved.sortedWith(
+            compareBy<VlessProfile>({ !(it.isFavorite || it.id == keepId) }, { it.lastLatencyMs == null }, { it.lastLatencyMs ?: Long.MAX_VALUE })
+        ).drop(MAX_CONFIGS).filter { !it.isFavorite && it.id != keepId }
 
     /** A config from the list is kept only when it is encrypted, checks certificates and an engine here runs it. */
     fun usable(profile: VlessProfile): Boolean =

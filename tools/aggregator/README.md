@@ -9,10 +9,16 @@ so the app can tell the signed list apart from anything else served at that addr
     output/                free.txt, free-base64.txt, manifest.json, manifest.sig
 
 The workflow `.github/workflows/free-configs.yml` runs every six hours (and by hand): it tests the
-aggregator, builds the list, drops servers that do not accept a TCP connection from the runner, keeps at
-most 500 per source and 300 in all (sources take turns, so one large source cannot fill the list),
-replaces every display name, signs the manifest and force-pushes the four files as a single commit to
-the `free-configs` branch. Without `HUB_SIGNING_KEY` it builds the list but publishes nothing.
+aggregator, builds the list, drops servers that do not accept a TCP connection from the runner, then
+sends a real request (`generate_204`, twice) through every remaining candidate with a pinned Xray core
+(`scripts/verify.py`). Only servers that carried both requests are kept, the fastest of each source
+first, and the list holds **30 at most** (sources take turns, so one source cannot fill it). Formats Xray
+cannot run as a plain outbound (Hysteria2, WireGuard, Shadowsocks plugins, mKCP) are not published,
+because nothing here could show they work. The workflow then replaces every display name, signs the
+manifest and force-pushes the four files as a single commit to the `free-configs` branch. Without
+`HUB_SIGNING_KEY` it builds the list but publishes nothing, and fewer than 10 survivors leave the last
+published list in place. The runner tests from its own network: the app tests the list again on the
+phone and shows what answers there.
 
 The app adds the list once per install as the "MAXIMUS Free" subscription
 (`https://raw.githubusercontent.com/drfxai/MAXIMUS-VPN/free-configs/free.txt`; jsDelivr, Statically and

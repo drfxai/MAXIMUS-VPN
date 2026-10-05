@@ -18,13 +18,28 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install cryptography
+      - name: Xray core for testing servers
+        # Every published server has to carry a real request through this core. The release is pinned by
+        # version and SHA-256 (the digest Xray publishes beside it).
+        env:
+          XRAY_URL: https://github.com/XTLS/Xray-core/releases/download/v26.9.9/Xray-linux-64.zip
+          XRAY_SHA256: 1eb9175d0f0a8f8149c9230a7fc5ae66ce332ed20a53155ce61fe62e3f58b7df
+        run: |
+          set -euo pipefail
+          dir=$(mktemp -d)
+          curl -fsSL --max-time 180 -o "$dir/xray.zip" "$XRAY_URL"
+          echo "$XRAY_SHA256  $dir/xray.zip" | sha256sum --check
+          unzip -q "$dir/xray.zip" xray -d "$dir"
+          chmod +x "$dir/xray"
+          echo "AGGREGATOR_XRAY=$dir/xray" >> "$GITHUB_ENV"
+          echo "XRAY_BIN=$dir/xray" >> "$GITHUB_ENV"
       - name: Test the aggregator
         run: python3 -m unittest discover -s tools/aggregator/tests
       - name: Server countries
@@ -59,8 +74,10 @@ jobs:
             exit 0
           fi
           count=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["count"])' "$out/manifest.json")
-          if [ "$count" -lt 1 ]; then
-            echo "::warning::The list is empty; the published list is left as it is."
+          # A handful of survivors means the sources or this run went wrong, not that only a handful work:
+          # the last good list stays in place instead of being replaced by a thin one.
+          if [ "$count" -lt 10 ]; then
+            echo "::warning::Only $count servers carried traffic; the published list is left as it is."
             exit 0
           fi
           publish=$(mktemp -d)

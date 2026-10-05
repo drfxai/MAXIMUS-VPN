@@ -78,6 +78,27 @@ class FreeConfigListTest {
         assertEquals("NL", FreeConfigList.prepare(listOf(profile("NL \u00B7 VLESS 3", "203.0.113.3"))).single().countryCode)
     }
 
+    @Test fun neverMoreThanThirtyServersAreTakenFromAList() {
+        val long = (1..300).map { profile("Free VLESS $it", "203.0.113.${it % 250 + 1}").copy(id = "p$it") }
+        val taken = FreeConfigList.prepare(long)
+        assertEquals(30, taken.size)
+        assertEquals((1..30).map { "p$it" }, taken.map { it.id })
+    }
+
+    @Test fun anInstallHoldingHundredsKeepsTheFastestThirtyAndWhatTheUserChose() {
+        val saved = (1..300).map { profile("Free VLESS $it", "203.0.113.${it % 250 + 1}").copy(id = "p$it", lastLatencyMs = if (it % 2 == 0) it * 10L else null) }
+        val favourite = saved[298].copy(isFavorite = true)       // slow and untested, but the user's
+        val inUse = saved[299]
+        val all = saved.take(298) + favourite + inUse
+        val dropped = FreeConfigList.surplus(all, keepId = inUse.id)
+        assertEquals(300 - 30, dropped.size)
+        assertFalse(dropped.any { it.id == favourite.id || it.id == inUse.id })
+        val kept = all - dropped.toSet()
+        assertEquals(30, kept.size)
+        // The rest of the kept servers are the fastest tested ones.
+        assertTrue(kept.filter { it.id != favourite.id && it.id != inUse.id }.all { it.lastLatencyMs != null && it.lastLatencyMs!! <= 560 })
+    }
+
     @Test fun serversDroppedFromTheListGoExceptFavouritesAndTheOneInUse() {
         val kept = profile("a", "203.0.113.1")
         val gone = profile("b", "203.0.113.2")
