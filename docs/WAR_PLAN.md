@@ -1,0 +1,145 @@
+# MAXIMUS Anti-Censorship War Plan
+
+**Goal:** connect users under the harshest filtering (Iran-style), and beat every competing client.
+**Branch:** `feature/war-plan`. **Order:** 0 → 1+2 → 3 → 4 → first shippable milestone → 5 → 6 → 7.
+
+A phase is done only when it moves the KPIs below in the censorship simulator, with numbers in this file.
+
+---
+
+## Phase 0 — Battlefield and KPIs
+
+### Competitor matrix
+
+"Death point" is the situation under severe disruption where the app leaves its user offline.
+
+| App | Core / engines | What it does well | Death point under severe disruption |
+|---|---|---|---|
+| **WhiteVPN** (WhiteDNS) | Mihomo through FlClash's Android JNI path. GPL-3.0. | AmneziaWG, WireGuard, Hysteria2, connection chaining, a built-in encrypted subscription, Persian/RTL UI. | The built-in subscription lives on a single `*.workers.dev` endpoint. Once that endpoint and the public subscriptions are blocked, there is no other way to get configs, and the user is offline. |
+| **WhiteAesther** (WhiteDNS) | Aether engine: MASQUE over HTTP/3 and HTTP/2 to Cloudflare WARP endpoints. AGPL-3.0. | It needs no server of its own. It scans endpoints and only accepts a route after real traffic returns. It falls back from QUIC to HTTP/2 when UDP is blocked, and it has padding profiles. | Everything rides on Cloudflare WARP. If the WARP endpoint ranges, MASQUE or WARP registration are blocked, every route dies together. The plan also lists Psiphon and Tor, but the README does not mention them. |
+| **v2rayNG** | Xray (and v2fly). GPL-3.0. | The widest protocol support on Xray, plus a manual fragment setting. | One engine, and the user has to find, paste and pick working configs by hand. There is no automatic stealth fallback. Once the user's links are blocked, nothing else is tried. |
+| **Hiddify** | sing-box. | VLESS/VMess/REALITY/TUIC/Hysteria/WireGuard/SSH, delay-based auto-select, automatic subscription updates and TLS tricks (fragment, padding). | It depends on subscriptions. When the subscription domains die, it has no discovery. Its TLS tricks are switches the user must find and turn on. |
+| **MAXIMUS (main before this branch)** | Xray, a Kotlin tunnel, and a "Mihomo" adapter with **no native core**. | It sets up the user's own 3X-UI and BPB servers, has REALITY Quick Config, and runs Hysteria2 and WireGuard on Xray. | Clash/Mihomo YAML proxies and the Settings "Mihomo" engine sent traffic to the adapter, which carries nothing. VLESS Encryption links (what Quick Config creates for no-TLS inbounds) were refused at connect. A blocked handshake was only noticed after at least 36 s, and then the app switched to another node, never to another disguise. |
+
+Sources: [WhiteVPN](https://github.com/WhiteDNS/WhiteVPN), [WhiteAestherMobile](https://github.com/WhiteDNS/WhiteAestherMobile), [v2rayNG](https://github.com/2dust/v2rayNG), [Hiddify](https://github.com/hiddify/hiddify-app), plus this repository's code. The Hiddify fragment/padding claims and the v2rayNG fragment claim come from general knowledge of those apps and were not re-checked here. License note: none of these apps' code may be copied into MAXIMUS (it has no LICENSE file). Ideas only.
+
+### KPIs
+
+| # | KPI | Definition | Target |
+|---|---|---|---|
+| 1 | **Connection success under disruption** | Share of connect attempts that end with a real HTTP request through the tunnel, per censorship scenario | 100% for every scenario that has *any* working path |
+| 2 | **Time to connect** | From tapping connect to the first successful request through the chosen path (median / p90) | < 10 s, including under disruption |
+| 3 | **Connection survival** | Drops per hour on a held connection | Not measured yet. Phase 4 adds a soak run to the simulator. |
+
+### How it is measured: the censorship simulator (`tools/censorsim`)
+
+The simulator runs a real Xray 26.9.9 server (the same core as the app's libXray v26.9.9) with REALITY+Vision, VLESS+WS+TLS (CDN-style), VLESS Encryption, Hysteria2 and WireGuard on one host. A censor proxy sits in front of it. The app's own import, config builder and path-finder code runs on a JVM, with a real Xray client standing in for libXray's `pingBatch`. Scenarios:
+
+| Scenario | What the censor does |
+|---|---|
+| `none` | Nothing (baseline) |
+| `sni` | Resets any TCP connection whose first packet carries a blocked TLS server name. Like most national DPI, it inspects packets and does not reassemble the stream. |
+| `fe` | Resets "fully encrypted" first packets: high entropy with no TLS/HTTP look, using the GFW's 2023 exemption rules but blocking every time instead of 26% of the time. |
+| `udp-block` | Drops all UDP |
+| `udp-dpi` | Blocks any UDP flow whose first datagram is a QUIC long header or a WireGuard handshake initiation |
+| `throttle` | Delays every packet by 150 ms and drops 5% of UDP |
+| `sni,fe,udp-dpi` | All filters at once ("Iran-like") |
+
+**DNS kill** (system DNS dropped or answering with a block-page address) is covered by unit tests. With the network's DNS silent, `EndpointResolverTest`/`WarPlanEnginesAndStealthTest` show the server name resolving over DoH within the 1.5 s grace period. `main` waits for the OS resolver to give up first, then asks DoH resolvers one by one with 5 s each.
+
+Run it: `tools/censorsim/run.sh <xray binary> <work dir> <non-loopback host ip> [trials]`. It needs Python 3, OpenSSL, JDK 21 and Gradle. Build Xray from `github.com/xtls/xray-core` at the commit libXray v26.9.9 uses.
+
+**Limits:** a simulator is not Iran. Real DPI can reassemble, sample, throttle selectively and block by IP. ECH can't be exercised locally (it needs a Cloudflare site with ECH and reachable 1.1.1.1), and every result needs confirmation on a real phone on a real filtered network.
+
+---
+
+## Phase 1 — Multi-engine (this branch)
+
+What the plan assumed vs. what the code did:
+
+| Claim | Reality before this branch | Now |
+|---|---|---|
+| "Hysteria2 parsed but not executed" | Already ran on Xray since PR #11 (SECURITY.md was stale) | Unchanged; SECURITY.md corrected |
+| "Mihomo parsed but not executed" | True. YAML proxies were tagged `MIHOMO` and routed to an adapter with no native core, so they carried no traffic. The Settings "Mihomo" engine did the same to *every* profile. | All YAML proxies run on Xray. Engine choice is `EngineSelectionPolicy.select` (Xray or Kotlin tunnel only). The bundle profile that could never run is gone. |
+| (not in plan) | VLESS Encryption links, including Quick Config's own no-TLS configs, were refused at connect ("requires a native Xray core") | Run on Xray |
+| "TUIC parsed but not executed" | True | Refused **at import** with the reason (Xray has no TUIC client), instead of a dead entry in the list |
+| WireGuard / AmneziaWG | WireGuard links only. No `.conf` files, and YAML `wireguard` proxies were dropped. | `.conf` files and YAML proxies import. AmneziaWG junk packets (Jc/Jmin/Jmax) become an Xray UDP noise mask. AmneziaWG servers that change the packet format (S1/S2, H1–H4) are refused at import with the reason. |
+| (not in plan) | Add Server paste only understood VLESS/SS/Trojan/HY2/WG single links | Every link type, and several lines at once |
+
+**Not done, and why:** a true second native engine. Mihomo and sing-box are GPL-3.0, so bundling either would make the whole app GPL. The licence-compatible route to full AmneziaWG (custom headers) is amneziawg-go (MIT) as a second native library, built in CI with the Android NDK. That needs a decision (APK size, build time), so it is listed under next steps.
+
+## Phase 2 — Adaptive stealth (this branch)
+
+- **Stealth alternates per profile** (`vpn/stealth/StealthVariants.kt`). Every profile that runs on Xray gets at least two alternates. They only change what the client sends, so the user's server needs no change:
+  - TLS and REALITY: the ClientHello split into small TCP pieces, a Firefox/Chrome fingerprint swap, both together, and ECH fetched over DoH (TLS with a domain name only).
+  - Other TCP (VLESS Encryption, SS, VMess): the first packets split into random pieces.
+  - Hysteria2 and WireGuard: one junk datagram, or a burst of junk datagrams, before the handshake.
+- **Path finder before connect** (`vpn/stealth/StealthPathFinder.kt`), with real requests every time:
+  1. The saved profile, or the alternate that won last time. A working path costs one request.
+  2. Otherwise, in one parallel round: up to 3 alternates plus other kinds of connection to the same server (REALITY → CDN → TLS → QUIC → WireGuard). The user's own profile wins over a switch when both work. Two WireGuard paths with the same key are never probed together, because the server follows a key's newest address, so parallel probes knock each other out. The simulator caught this.
+  3. If nothing works, or the probe can't run, the app connects as before and the existing failover takes over.
+- **Resilient DNS:** once the network's DNS answers with a block page, fails, or stays silent for 1.5 s, six DoH resolvers from four operators (Cloudflare, Google, Quad9, AdGuard, all addressed by IP) are asked in parallel, and the first public answer wins.
+
+### Results (simulator, 5 trials per profile per scenario, 5 profiles)
+
+Measured 2026-10-05 against `main` at 965e23e. "main" connects with the saved profile only. Main's failover watchdog would switch to *another node* after at least 36 s (three failed 12 s checks); that time is not counted here. "branch" is this branch's path finder.
+
+**Summary across the six disrupted scenarios (150 connect attempts each way):**
+
+| KPI | main | this branch |
+|---|---|---|
+| 1. Connected | **45%** (68/150) | **100%** (150/150) |
+| 2. Connected in under 10 s | 45% | **97%** (146/150) |
+| 3. Drops per hour | not measured | not measured (Phase 4) |
+
+Per scenario (time is wall time to the first successful request, including Xray process start-up in the simulator):
+
+| Scenario | main: connected | branch: connected | branch: time to connect (median / p90) | under 10 s (branch) |
+|---|---|---|---|---|
+| none | 80% | 100% | 0.0 s / 0.1 s | 100% |
+| sni | 36% | 100% | 0.1 s / 8.2 s | 100% |
+| fe | 80% | 100% | 0.0 s / 0.2 s | 100% |
+| udp-block | 40% | 100% | 0.1 s / 9.1 s | 100% |
+| udp-dpi | 40% | 100% | 0.1 s / 9.1 s | 100% |
+| throttle | 76% | 100% | 0.9 s / 1.7 s | 100% |
+| sni,fe,udp-dpi | 0% | 100% | 9.1 s / 14.3 s | 84% |
+
+Per profile, main → branch, and the path that won most often:
+
+| Scenario | CDN (WS+TLS) | Hysteria2 | REALITY | VLESS Encryption | WireGuard |
+|---|---|---|---|---|---|
+| none | 100% → 100% (as saved) | 100% → 100% (as saved) | 100% → 100% (as saved) | 0% → 100% (as saved) | 100% → 100% (as saved) |
+| sni | 0% → 100% (TLS handshake split into small pieces) | 100% → 100% (as saved) | 0% → 100% (TLS handshake split into small pieces) | 0% → 100% (as saved) | 80% → 100% (as saved) |
+| fe | 100% → 100% (as saved) | 100% → 100% (as saved) | 100% → 100% (as saved) | 0% → 100% (REALITY on the same server (REALITY)) | 100% → 100% (as saved) |
+| udp-block | 100% → 100% (as saved) | 0% → 100% (REALITY on the same server (REALITY)) | 100% → 100% (as saved) | 0% → 100% (as saved) | 0% → 100% (REALITY on the same server (REALITY)) |
+| udp-dpi | 100% → 100% (as saved) | 0% → 100% (Junk packet before the handshake) | 100% → 100% (as saved) | 0% → 100% (as saved) | 0% → 100% (Junk packet before the handshake) |
+| throttle | 100% → 100% (as saved) | 100% → 100% (as saved) | 100% → 100% (as saved) | 0% → 100% (as saved) | 80% → 100% (as saved) |
+| sni,fe,udp-dpi | 0% → 100% (TLS handshake split into small pieces) | 0% → 100% (Junk packet before the handshake) | 0% → 100% (TLS handshake split into small pieces) | 0% → 100% (QUIC on the same server (Hysteria2), junk packet before the handshake) | 0% → 100% (Junk packet before the handshake) |
+
+What the numbers say:
+- **SNI filtering** kills REALITY and CDN configs on main. The split handshake gets them through, which is the same trick as Hiddify's fragment, but here it is found automatically.
+- **UDP blocked:** Hysteria2 and WireGuard die on main. The branch moves to REALITY on the same server within one round, in about 9 s.
+- **First-packet UDP DPI:** a junk datagram before the handshake gets QUIC and WireGuard through. This is the AmneziaWG idea, and it works against any server.
+- **"Fully encrypted" DPI** catches VLESS Encryption. Splitting the first packet does not fool an entropy test, so the branch switches to REALITY on the same server.
+- **All filters at once:** every profile still connects. VLESS Encryption needs the third round (another kind in disguise) and takes about 14 s in 4 of 5 attempts. These are the only attempts over the 10 s target.
+- WireGuard on main shows 80% in two scenarios that don't filter it. A WireGuard handshake sometimes took longer than the 4 s first probe there; the branch's next round caught those.
+- Rescued connections take about 9 s because a probe round waits for its slowest member (4 s first try + 5 s round). Phase 4 should return on the first success in a round, which would bring these close to 4–5 s.
+- The simulator also caught a bug before it shipped: two WireGuard probes with the same key, run in parallel, knock each other out. The path finder now never does that.
+
+Raw results: `tools/censorsim/results/2026-10-05.jsonl`. The `sni,fe,udp-dpi` rows come from a re-run after the third round was added; the code paths of the other scenarios never reached that round.
+
+Tests: `WarPlanEnginesAndStealthTest` (16 tests) plus the existing `AntiCensorshipProtocolsTest`, `EndpointResolverTest` and `XrayConfigBuilderTest` pass on a JVM. The full Android `testDebugUnitTest`, `lintRelease`, both APKs and the emulator install check run in CI (release workflow dry run on this branch).
+
+---
+
+## Phases 3–7: next steps
+
+| Phase | First concrete step | Needs from you |
+|---|---|---|
+| 3 Discovery & distribution | Multi-source subscriptions with offline cache and mirror/IP fallback; QR export/import of a working config phone-to-phone | Which official/public subscription sources to trust; a Telegram bot needs hosting and a bot token |
+| 4 Sub-10 s auto-connect | Persist the stealth winner per network/carrier; probe 5–8 saved nodes in parallel for Smart Connect; add the soak run for KPI 3 | Carrier thresholds need real logs from Irancell/Hamrah/TCI users |
+| 5 Emergency tiers | Wire the existing tiers into one "route N of 6" ladder | Psiphon needs official sponsor/propagation channel IDs from Psiphon Inc.; its library is GPL-3.0 (license decision) |
+| 6 Anti-censorship loop | Opt-in "protocol X failed on carrier Y" reports | A collection endpoint and a privacy policy |
+| 7 Combat verification | Every scenario above plus total blackout and sub-domain block, then `testDebugUnitTest`, `lintRelease`, both APKs and `check-apk.py` | — |
+
+Optional Phase 1 follow-up: amneziawg-go as a second native engine for AmneziaWG servers with custom headers.

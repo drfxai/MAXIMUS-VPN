@@ -225,6 +225,22 @@ class WarPlanEnginesAndStealthTest {
         assertEquals("h1", choice.owner.id)
     }
 
+    @Test fun underSeveralFiltersTheSameServersOtherKindIsTriedInDisguise() {
+        // VLESS Encryption is caught as "fully encrypted", REALITY's server name is filtered: only a
+        // split REALITY handshake gets through.
+        val enc = reality.copy(id = "e1", security = "none", flow = "", publicKey = "", port = 8443,
+            encryption = "mlkem768x25519plus.native.0rtt.K")
+        val choice = StealthPathFinder({ list, _ ->
+            list.map {
+                if (it.security == "reality" && it.finalMask.contains("tlshello")) RealDelayProbe.Outcome.Delay(200)
+                else RealDelayProbe.Outcome.Failed("reset")
+            }
+        }, log = {}).choose(enc, { it }, listOf(enc, reality))
+        assertEquals("r1", choice.owner.id)
+        assertTrue(choice.profile.finalMask.contains("tlshello"))
+        assertEquals(StealthVariants.FRAGMENT, StealthPathFinder.memory["r1"])
+    }
+
     @Test fun wireGuardAlternatesOfOneKeyAreNeverProbedTogether() {
         // The server follows a key's newest address, so parallel handshakes knock each other out.
         val wg = WireGuardConf.parse(conf.replace("Jc = 4", "Jc = 0"))
