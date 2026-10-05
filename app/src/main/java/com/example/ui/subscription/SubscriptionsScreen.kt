@@ -513,9 +513,9 @@ private object FreeConfigHubSources {
         FreeConfigSource(
             id = "vify_vless",
             name = "Vify Public VLESS",
-            description = "Vify's maintained public VLESS subscription source.",
+            description = "Vify's currently alive public VLESS subscription feed.",
             protocols = "VLESS",
-            url = "https://raw.githubusercontent.com/Mr-Meshky/vify/main/configs/vless.txt"
+            url = "https://raw.githubusercontent.com/Mr-Meshky/vify/main/configs/alive/vless.txt"
         )
     )
 }
