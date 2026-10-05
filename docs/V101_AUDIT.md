@@ -326,3 +326,18 @@ Under all three filters every profile still connected, each landing on REALITY, 
 case ever claimed a working path that carried nothing. Giving up takes 14 seconds with one dead server
 and 45 with five, because every server, disguise and alternate is tried before the app says nothing
 works; traffic stays blocked throughout, so this is slow rather than unsafe.
+
+## Steps 30 and 33: checks on every push
+
+Tests used to run only when a release was built by hand, so a change could sit on a branch untested.
+`.github/workflows/checks.yml` now runs on every push and pull request:
+
+- the Android unit tests and release lint, with the reports kept as artifacts;
+- the aggregator's tests;
+- `scripts/check-repo-hygiene.py`, which refuses a tree carrying a private key, a Telegram bot token, a
+  Cloudflare or GitHub token, a Google API key or an AWS key, or an assistant's name.
+
+Telemetry (step 30) is not built: it needs a collection endpoint and a privacy policy, neither of which
+exists, and nothing may be sent off the phone without the owner's decision. What a user can already give
+is the diagnostics report (now naming Android's lockdown state and how hostile the network looked), which
+is redacted and shared only when they choose to.
