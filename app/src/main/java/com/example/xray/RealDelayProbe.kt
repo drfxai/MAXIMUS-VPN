@@ -52,13 +52,18 @@ object RealDelayProbe {
 
     private fun measureBatch(profiles: List<VlessProfile>, timeoutSec: Int): List<Outcome> {
         // Only the proxy outbound is used, so the user's DNS and routing settings do not matter.
-        val configs = profiles.map { profile ->
-            runCatching { XrayConfigBuilder.buildJson(endpointResolver(profile), AppSettings()) }
+        // Profiles carried by a separate engine program (Mihomo, Psiphon...) cannot be measured by the
+        // Xray core alone; they are not failures, just not measured here.
+        val external = profiles.map { com.example.vpn.sidecar.Sidecars.forProfile(it) != null }
+        val configs = profiles.mapIndexed { index, profile ->
+            if (external[index]) null
+            else runCatching { XrayConfigBuilder.buildJson(endpointResolver(profile), AppSettings()) }
         }
-        val runnable = configs.mapIndexedNotNull { index, config -> config.getOrNull()?.let { index to it } }
+        val runnable = configs.mapIndexedNotNull { index, config -> config?.getOrNull()?.let { index to it } }
         val results = arrayOfNulls<Outcome>(profiles.size)
         configs.forEachIndexed { index, config ->
-            config.exceptionOrNull()?.let { results[index] = Outcome.Failed(it.message ?: "Invalid configuration") }
+            if (config == null) results[index] = Outcome.NotRun("carried by its own engine")
+            config?.exceptionOrNull()?.let { results[index] = Outcome.Failed(it.message ?: "Invalid configuration") }
         }
         if (runnable.isNotEmpty()) {
             val outcomes = try {

@@ -102,6 +102,8 @@ class RayVpnService : VpnService() {
     @Volatile private var privateServerLookup = false
     private var vpnInterface: ParcelFileDescriptor? = null
     private var tunnelManager: TunnelManager? = null
+    /** The separate engine program carrying traffic for the current profile, if any. */
+    @Volatile private var sidecar: com.example.vpn.sidecar.SidecarProcess? = null
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
     private var failoverManager: com.example.vpn.smart.FailoverManager? = null
     private val serviceTxBytes = java.util.concurrent.atomic.AtomicLong(0)
@@ -118,6 +120,7 @@ class RayVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
         val db = AppDatabase.getInstance(applicationContext)
         serverRepository = ServerRepository(db.serverProfileDao())
         settingsRepository = com.example.RayApplication.instance.settingsRepository
@@ -408,7 +411,8 @@ class RayVpnService : VpnService() {
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
             var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
             try {
-                if (profile.profileType != ProfileType.XRAY_JSON && !isLiteralIp(profile.address)) {
+                if (profile.profileType != ProfileType.XRAY_JSON && profile.profileType != ProfileType.MIHOMO_YAML &&
+                    !isLiteralIp(profile.address)) {
                     // Resolve outside the tunnel: once traffic is captured, DNS for the proxy itself
                     // would loop back into the VPN.
                     failure = com.example.vpn.safety.FailClosedPolicy.Failure.UNRESOLVABLE_SERVER
@@ -546,6 +550,12 @@ class RayVpnService : VpnService() {
                 // Always capture IPv6. Unsupported engines drop it inside the TUN.
                 .addAddress("fdfe:dcba:9876::1", 126)
                 .addRoute("::", 0)
+            val sidecarEngine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
+            if (sidecarEngine != null) {
+                // A separate engine program cannot ask Android to keep its own sockets out of the VPN,
+                // so the app's own traffic is left out; every other app still goes through the tunnel.
+                builder.addDisallowedApplication(packageName)
+            }
 
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 4. Builder.establish() invoked (MTU=$safeMtu, Address=172.19.0.1/30, DNS=$primaryDns).")
             val pfd = try {
@@ -609,6 +619,7 @@ class RayVpnService : VpnService() {
             if (settings.preferredEngine == EngineType.MIHOMO) {
                 XrayLogManager.w("VPN", "The Mihomo engine has no native core in this build; using Xray instead.")
             }
+            if (sidecarEngine != null) profile = startSidecar(sidecarEngine, profile, settings)
             val runtime = EngineSelectionPolicy.select(profile)
             val engineId = com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
             if (!engineBreaker.allows(engineId)) {
@@ -835,6 +846,46 @@ class RayVpnService : VpnService() {
         )
     }
 
+    /**
+     * Starts the engine program for [profile] and returns the profile Xray runs instead: a SOCKS5
+     * outbound to that program. If the program dies later, Xray's proxy stops answering and traffic
+     * stays blocked until failover picks another path.
+     */
+    private fun startSidecar(engine: com.example.vpn.sidecar.SidecarEngine, profile: VlessProfile, settings: AppSettings): VlessProfile {
+        sidecar?.stop()
+        sidecar = null
+        val executable = com.example.vpn.sidecar.Sidecars.executable(engine)
+            ?: error("The ${engine.id} engine is not included in this build for this phone")
+        val workDir = java.io.File(noBackupFilesDir, "engines/${engine.id}").apply { mkdirs() }
+        val context = com.example.vpn.sidecar.SidecarContext(
+            workDir = workDir,
+            executable = executable,
+            socksPort = com.example.vpn.sidecar.Sidecars.freeLoopbackPort(),
+            socksUser = com.example.vpn.sidecar.Sidecars.randomToken(9),
+            socksPass = com.example.vpn.sidecar.Sidecars.randomToken(),
+            mode = settings.operationalMode
+        )
+        val launch = engine.prepare(profile, settings, context)
+        showForegroundNotification("Starting the ${engine.id} engine...")
+        val process = com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort)
+        sidecar = process
+        if (!process.awaitReady(launch.readyTimeoutMs)) {
+            process.stop()
+            sidecar = null
+            error("The ${engine.id} engine did not start")
+        }
+        XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
+        val watched = process
+        serviceScope.launch(Dispatchers.IO) {
+            while (isActive && sidecar === watched && watched.isAlive) delay(1_000)
+            if (sidecar === watched) {
+                XrayLogManager.w("VPN", "Engine ${engine.id} stopped; traffic stays blocked until another path works")
+                failoverManager?.reportTunnelError("engine ${engine.id} stopped")
+            }
+        }
+        return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, context, launch)
+    }
+
     private fun ensureBlockingInterface() {
         if (vpnInterface == null) vpnInterface = createBlockingInterface()
     }
@@ -981,6 +1032,8 @@ class RayVpnService : VpnService() {
 
         // Stop Xray before closing the TUN descriptor it owns.
         activeEngine.stop()
+        sidecar?.stop()
+        sidecar = null
 
         if (previousInterface !== vpnInterface) {
             try { previousInterface?.close() } catch (_: Exception) {}
