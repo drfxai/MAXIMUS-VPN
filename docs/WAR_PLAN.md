@@ -213,7 +213,10 @@ The same number of outages (each run has one forced cut, when server names start
 
 Raw results: `tools/censorsim/results/2026-10-05-phase4.jsonl`, `2026-10-05-soak.jsonl`.
 
-## Phases 5–7: next steps
+## Phases 5–7: superseded
+
+The V1.0.1 dual-mode plan (2026-10-05) replaces Phases 5–7. Its step 1 audit is in [V101_AUDIT.md](V101_AUDIT.md).
+The table below is kept for reference.
 
 | Phase | First concrete step | Needs from you |
 |---|---|---|
