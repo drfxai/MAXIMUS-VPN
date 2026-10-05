@@ -107,6 +107,12 @@ class RayApplication : Application() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 subscriptionRepository.migrateSensitiveUrls()
+                val prefs = getSharedPreferences("official_subscriptions", MODE_PRIVATE)
+                com.example.vpn.subscription.OfficialSubscriptions.ensure(
+                    subscriptionRepository,
+                    seeded = prefs.getStringSet("seeded", emptySet()).orEmpty(),
+                    markSeeded = { prefs.edit().putStringSet("seeded", it).apply() }
+                )?.let { launch { subscriptionManager.syncSubscription(it) } }
                 serverRepository.migrateSensitiveSubscriptionSources()
                 serverRepository.delete("seed-vless-ws-1")
                 serverRepository.delete("seed-vless-reality-1")

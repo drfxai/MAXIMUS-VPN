@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.database.AppDatabase
 import com.example.data.repository.ServerRepository
 import com.example.data.repository.SubscriptionRepository
+import com.example.vpn.subscription.OfficialSubscriptions
 import com.example.vpn.subscription.SubscriptionManager
 import com.example.vpn.subscription.SubscriptionSnapshots
 import kotlinx.coroutines.runBlocking
@@ -92,5 +93,18 @@ class SubscriptionManagerResilienceTest {
         val all = subscriptions.getAllOnce()
         assertEquals(1, all.size)
         assertEquals(listOf(mirror), all.single().mirrors)
+    }
+
+    @Test
+    fun `the official subscription is added once and stays deleted when the user removes it`() = runBlocking {
+        val bot = listOf("https://maximus-bot.example.workers.dev/sub", "https://sub.example.org/sub")
+        var seeded = emptySet<String>()
+        val added = OfficialSubscriptions.ensure(subscriptions, seeded, { seeded = it }, bot)!!
+        assertEquals(bot[0], added.url)
+        assertEquals(listOf(bot[1]), subscriptions.getSubscriptionByUrl(bot[0])!!.mirrors)
+        assertEquals(null, OfficialSubscriptions.ensure(subscriptions, seeded, { seeded = it }, bot))
+        subscriptions.delete(added.id)
+        assertEquals(null, OfficialSubscriptions.ensure(subscriptions, seeded, { seeded = it }, bot))
+        assertTrue(subscriptions.getAllOnce().isEmpty())
     }
 }

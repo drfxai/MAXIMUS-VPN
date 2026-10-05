@@ -10,10 +10,12 @@
 //   APP_URL         optional download page for the app
 //   MAX_CONFIGS     optional, default 20
 //   ADMIN_ID        your numeric Telegram ID; lets you change the lists from Telegram:
-//                   /addsub, /delsub, /addconfig, /clearconfigs, /list
+//                   /addsub, /editsub, /delsub, /addconfig, /clearconfigs, /list
+//   SUB_MAX         optional, most configurations served at /sub, default 300
 // Binding (optional, needed for the admin commands): a KV namespace named STORE.
 //
-// Routes: POST /webhook (Telegram), GET /setup?secret=WEBHOOK_SECRET (registers the webhook).
+// Routes: POST /webhook (Telegram), GET /setup?secret=WEBHOOK_SECRET (registers the webhook),
+// GET /sub (the app's official subscription: every configuration from the admin's links, Base64).
 
 // Only what the app runs (TUIC is refused at import).
 const LINK = /^(vless|vmess|trojan|ss|hysteria2|hy2|wireguard):\/\/\S+$/i;
@@ -26,6 +28,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/setup") return setup(url, env);
+    if (request.method === "GET" && url.pathname === "/sub") return subscription(env);
     if (request.method === "POST" && url.pathname === "/webhook") {
       if (!env.WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.WEBHOOK_SECRET) {
         return new Response("forbidden", { status: 403 });
@@ -40,6 +43,24 @@ export default {
     return new Response("not found", { status: 404 });
   },
 };
+
+/** The app's subscription: everything the admin's links and extra configs hold, as standard Base64. */
+export async function subscription(env) {
+  const configs = await collectConfigs({ ...env, MAX_CONFIGS: env.SUB_MAX || 300 });
+  const bytes = new TextEncoder().encode(configs.join("\n"));
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  const body = btoa(binary);
+  return new Response(body, {
+    status: configs.length ? 200 : 503,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "public, max-age=300",
+      "profile-title": "MAXIMUS",
+      "profile-update-interval": "6",
+    },
+  });
+}
 
 async function setup(url, env) {
   if (!env.WEBHOOK_SECRET || url.searchParams.get("secret") !== env.WEBHOOK_SECRET) {
@@ -62,7 +83,7 @@ async function setup(url, env) {
   return new Response(JSON.stringify(res), { headers: { "content-type": "application/json" } });
 }
 
-const ADMIN_COMMANDS = ["/addsub", "/delsub", "/addconfig", "/clearconfigs", "/list"];
+const ADMIN_COMMANDS = ["/addsub", "/editsub", "/delsub", "/addconfig", "/clearconfigs", "/list"];
 
 export async function handle(chatId, text, env, now = Date.now()) {
   const command = text.split(/[\s@]/)[0].toLowerCase();
@@ -188,15 +209,34 @@ async function admin(chatId, command, text, env) {
   if (command === "/list") {
     const subs = await stored(env, "subs");
     const configs = await stored(env, "configs");
-    return send(env, chatId, `Subscriptions (${subs.length}):\n${subs.join("\n") || "none"}\n\nExtra configs: ${configs.length}`);
+    const numbered = subs.map((u, i) => `${i + 1}. ${u}`).join("\n") || "none";
+    return send(env, chatId, `Subscriptions (${subs.length}):\n${numbered}\n\nExtra configs: ${configs.length}\n\n` +
+      "/addsub URL · /editsub N URL · /delsub N");
   }
-  if (command === "/addsub" || command === "/delsub") {
+  if (command === "/addsub") {
     const urls = args.filter((a) => /^https:\/\/\S+$/i.test(a));
-    if (urls.length === 0) return send(env, chatId, `Usage: ${command} https://...`);
-    const current = await stored(env, "subs");
-    const next = command === "/addsub" ? [...new Set([...current, ...urls])] : current.filter((u) => !urls.includes(u));
+    if (urls.length === 0) return send(env, chatId, "Usage: /addsub https://...");
+    const next = [...new Set([...(await stored(env, "subs")), ...urls])];
     await env.STORE.put("subs", next.join("\n"));
-    return send(env, chatId, `Saved. ${next.length} subscription(s).`);
+    return send(env, chatId, `Saved. ${next.length} subscription(s). Apps pick it up on their next refresh.`);
+  }
+  if (command === "/editsub") {
+    const current = await stored(env, "subs");
+    const n = Number(args[0]);
+    if (!Number.isInteger(n) || n < 1 || n > current.length || !/^https:\/\/\S+$/i.test(args[1] || "")) {
+      return send(env, chatId, "Usage: /editsub N https://... (N from /list)");
+    }
+    current[n - 1] = args[1];
+    await env.STORE.put("subs", [...new Set(current)].join("\n"));
+    return send(env, chatId, `Subscription ${n} replaced.`);
+  }
+  if (command === "/delsub") {
+    const current = await stored(env, "subs");
+    const numbers = args.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= current.length);
+    const next = current.filter((u, i) => !numbers.includes(i + 1) && !args.includes(u));
+    if (next.length === current.length) return send(env, chatId, "Usage: /delsub N (from /list) or /delsub https://...");
+    await env.STORE.put("subs", next.join("\n"));
+    return send(env, chatId, `Deleted. ${next.length} subscription(s) left.`);
   }
   if (command === "/addconfig") {
     const found = extractLinks(text.split(/\s+/).slice(1).join("\n"));

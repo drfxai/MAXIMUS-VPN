@@ -84,12 +84,24 @@ assert.deepEqual(gitHubMirrors("https://panel.example.org/sub/x"), []);
   await handle(5, "/addsub https://evil.example/sub", env, 0);
   assert.equal(kv.size, 0);
   await handle(777, "/addsub https://a.example.org/sub https://b.example.net/sub", env, 0);
-  await handle(777, "/delsub https://b.example.net/sub", env, 0);
+  await handle(777, "/delsub 2", env, 0);
+  await handle(777, "/addsub https://c.example.net/sub", env, 0);
+  await handle(777, "/editsub 2 https://d.example.net/sub", env, 0);
+  assert.equal(kv.get("subs"), "https://a.example.org/sub\nhttps://d.example.net/sub");
+  await handle(777, "/delsub https://d.example.net/sub", env, 0);
   await handle(777, "/addconfig " + links[0], env, 0);
   assert.equal(kv.get("subs"), "https://a.example.org/sub");
   sent.length = 0;
   await handle(6, "/configs", env, 0);
   assert.match(sent[1].text, /vless:\/\/u@203/);
+}
+
+// The app's subscription endpoint serves everything as Base64.
+{
+  const { env } = fakeEnv(() => ({ body: links.join("\n") }));
+  const res = await worker.fetch(new Request("https://bot.example/sub"), env);
+  assert.equal(res.status, 200);
+  assert.deepEqual(atob(await res.text()).split("\n"), links.slice(0, 2));
 }
 
 console.log("telegram bot: all checks passed");
