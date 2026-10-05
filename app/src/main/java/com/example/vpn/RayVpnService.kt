@@ -88,6 +88,7 @@ class RayVpnService : VpnService() {
 
     private val supervisor = com.example.vpn.safety.MaximusVpnSupervisor { XrayLogManager.i("VPN", it) }
     private val protectionRequested: Boolean get() = supervisor.protectionRequested
+    private val engineBreaker = com.example.vpn.engine.registry.EngineCircuitBreaker()
     private var vpnInterface: ParcelFileDescriptor? = null
     private var tunnelManager: TunnelManager? = null
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
@@ -561,7 +562,14 @@ class RayVpnService : VpnService() {
             if (settings.preferredEngine == EngineType.MIHOMO) {
                 XrayLogManager.w("VPN", "The Mihomo engine has no native core in this build; using Xray instead.")
             }
-            activeEngine = when (EngineSelectionPolicy.select(profile)) {
+            val runtime = EngineSelectionPolicy.select(profile)
+            val engineId = com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
+            if (!engineBreaker.allows(engineId)) {
+                // Each profile has one engine today, so this only reports; with a second engine for
+                // the same protocol the selection will skip an open breaker.
+                XrayLogManager.w("VPN", "Engine $engineId failed to start several times in a row; trying it again.")
+            }
+            activeEngine = when (runtime) {
                 EngineSelectionPolicy.Runtime.KOTLIN_TUNNEL -> com.example.vpn.engine.KotlinTunnelEngine.instance
                 EngineSelectionPolicy.Runtime.XRAY -> XrayEngineImpl.instance
             }
@@ -582,7 +590,11 @@ class RayVpnService : VpnService() {
                 )
             }
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 7. Proxy engine start result: $startResult.")
-            if (startResult is com.example.core.AppResult.Error) throw startResult.exception
+            if (startResult is com.example.core.AppResult.Error) {
+                engineBreaker.recordFailure(engineId)
+                throw startResult.exception
+            }
+            engineBreaker.recordSuccess(engineId)
 
             if (!coroutineContext.isActive) {
                 disconnectResources()

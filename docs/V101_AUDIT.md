@@ -187,3 +187,12 @@ need a preview first).
 Switching mode while connected reconnects the same server under the new mode. The FakeDNS pool
 (198.18.0.0/15) is no longer in the direct lists. The mode subtitles, the landing tour and the home
 screen's failover line no longer name Psiphon or a P2P mesh, which do not run.
+
+## Step 5 progress: engine registry
+
+`vpn/engine/registry`: `EngineRegistry` lists each engine with its pinned version, license and whether it
+is bundled (Xray and the Kotlin tunnel are; Mihomo is listed, GPL-3.0, not bundled). `CapabilityState`
+(NONE, PARSE_SUPPORTED, ENGINE_SUPPORTED, VERIFIED_WORKING) and `EngineRegistry.CAPABILITIES` hold the
+protocol matrix above in code; `EngineRegistryTest` checks it against what the engines accept and keeps
+"working" to the five protocols the simulator verified. `EngineCircuitBreaker` counts start failures per
+engine (three in a row: skipped for five minutes); with one engine per protocol today it only reports.
