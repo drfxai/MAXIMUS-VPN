@@ -58,6 +58,7 @@ import com.example.ui.importing.ImportViewModel
 import com.example.ui.panels.PanelManagerScreen
 import com.example.ui.panels.PanelManagerViewModel
 import com.example.ui.protocols.ProtocolsScreen
+import com.example.ui.freeconfigs.FreeConfigsScreen
 import com.example.ui.servers.EditConfigScreen
 import com.example.ui.servers.ServersScreen
 import com.example.ui.settings.SettingsScreen
@@ -82,6 +83,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector,
     data object AiAgent : Screen("ai_agent", "AI Agent", Icons.Default.AutoAwesome, Icons.Default.AutoAwesome)
     data object Panels : Screen("panels", "Panels", Icons.Filled.Cloud, Icons.Outlined.Cloud)
     data object Protocols : Screen("protocols", "Protocols", Icons.Filled.Hub, Icons.Outlined.Hub)
+    data object FreeConfigs : Screen("free_configs", "Free Configs", Icons.Filled.Hub, Icons.Outlined.Hub)
     data object Settings : Screen("settings", "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
 
     // Additional sub-destinations
@@ -229,6 +231,7 @@ fun MainApp(
                     onNavigateToBenchmark = { navController.navigate(Screen.Benchmark.route) },
                     onNavigateToPanels = { navController.navigate(Screen.Panels.route) },
                     onNavigateToProtocols = { navController.navigate(Screen.Protocols.route) },
+                    onNavigateToFreeConfigs = { navController.navigate(Screen.FreeConfigs.route) },
                     onNavigateToEditServer = { navController.navigate(Screen.EditServer.route(it)) }
                 )
             }
@@ -299,6 +302,20 @@ fun MainApp(
                 ProtocolsScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToPanels = { navController.navigate(Screen.Panels.route) },
+                    onConnect = { profile ->
+                        vpnViewModel.selectServer(profile)
+                        vpnViewModel.startOrRequestPermission(context, profile) { onRequestVpnPermission() }
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.Home.route) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    }
+                )
+            }
+            composable(Screen.FreeConfigs.route) {
+                val context = LocalContext.current
+                FreeConfigsScreen(
+                    onNavigateBack = { navController.popBackStack() },
                     onConnect = { profile ->
                         vpnViewModel.selectServer(profile)
                         vpnViewModel.startOrRequestPermission(context, profile) { onRequestVpnPermission() }

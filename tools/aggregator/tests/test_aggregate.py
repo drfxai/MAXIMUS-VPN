@@ -76,6 +76,23 @@ class RealWorldTests(unittest.TestCase):
         self.assertEqual("Free VMESS 1", body["ps"])
         self.assertEqual("203.0.113.20", body["add"])
 
+    def test_names_carry_the_country_when_it_is_known(self):
+        self.assertEqual("DE · VLESS 3", aggregate.display_name(GOOD, 3, locate=lambda host: "DE"))
+        self.assertEqual("Free VLESS 3", aggregate.display_name(GOOD, 3, locate=lambda host: None))
+        self.assertEqual("Free VLESS 3", aggregate.display_name(GOOD, 3))
+
+    def test_countries_come_from_numeric_ranges(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            csv = Path(tmp) / "geo.csv"
+            # 203.0.113.0/24 = 3405803776..3405804031
+            csv.write_text("16777216,16777471,AU\n3405803776,3405804031,DE\n3405804032,3405804287,ZZ\n")
+            geo = aggregate.Geo(csv)
+            self.assertEqual("DE", geo("203.0.113.7"))
+            self.assertEqual("AU", geo("1.0.0.9"))
+            self.assertIsNone(geo("203.0.114.1"))  # ZZ: unknown
+            self.assertIsNone(geo("198.51.100.1"))  # between ranges
+            self.assertIsNone(geo.country_of_ip("not-an-ip"))
+
     def test_sources_take_turns_up_to_the_limit(self):
         self.assertEqual(["a1", "b1", "a2", "b2", "a3"], aggregate.interleave([["a1", "a2", "a3"], ["b1", "b2"]], limit=10))
         self.assertEqual(["a1", "b1", "a2"], aggregate.interleave([["a1", "a2", "a3"], ["b1", "b2"]], limit=3))

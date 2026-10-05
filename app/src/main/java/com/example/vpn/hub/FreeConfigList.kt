@@ -49,6 +49,24 @@ object FreeConfigList {
         return list
     }
 
+    private val COUNTRY_PREFIX = Regex("^([A-Z]{2}) \u00B7 ")
+
+    /** The country code the aggregator puts in front of a name ("DE · VLESS 12"), or null. */
+    fun countryOf(name: String): String? = COUNTRY_PREFIX.find(name)?.groupValues?.get(1)
+
+    /** A config from the list, ready to save: only usable ones, with their country recorded. */
+    fun prepare(profiles: List<VlessProfile>): List<VlessProfile> =
+        profiles.filter(::usable).map { it.copy(countryCode = countryOf(it.name) ?: it.countryCode) }
+
+    /**
+     * Saved servers from an earlier list that the new list no longer has. Favourites and the server
+     * in use stay, so a refresh never pulls the connection out from under the user.
+     */
+    fun stale(saved: List<VlessProfile>, fresh: List<VlessProfile>, keepId: String?): List<VlessProfile> {
+        val current = fresh.map { it.effectiveFingerprint }.toSet()
+        return saved.filter { it.effectiveFingerprint !in current && !it.isFavorite && it.id != keepId }
+    }
+
     /** A config from the list is kept only when it is encrypted, checks certificates and an engine here runs it. */
     fun usable(profile: VlessProfile): Boolean =
         ConfigValidationPipeline.securityProblem(profile) == null && RuntimeCapabilities.unsupportedReason(profile) == null
