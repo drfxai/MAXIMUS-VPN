@@ -24,8 +24,10 @@ object SecretRedactor {
         Pattern.CASE_INSENSITIVE
     )
 
+    // A profile's uuid field holds the WireGuard private key or the Trojan/Hysteria2 password on
+    // non-VLESS profiles, which the UUID pattern does not catch.
     private val REALITY_PBK_PATTERN = Pattern.compile(
-        "(pbk|publicKey|public_key|secretKey|private_key|privateKey)=([^&\\s,}{\"]+)"
+        "(pbk|publicKey|public_key|secretKey|private_key|privateKey|uuid)=([^&\\s,}{\"]+)"
     )
 
     private val REALITY_SID_PATTERN = Pattern.compile(
