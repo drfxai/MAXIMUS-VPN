@@ -11,7 +11,7 @@ so the app can tell the signed list apart from anything else served at that addr
 The workflow `.github/workflows/free-configs.yml` runs every six hours (and by hand): it tests the
 aggregator, authenticates recent end-to-end measurements from Iranian networks, drops servers that
 do not accept a TCP connection from the runner, considers at most 500 eligible entries per source,
-and keeps at most **29** in all, with at most two entries per hostname. It ranks qualified entries by
+and keeps at most **30** in all, with at most two entries per hostname. It ranks qualified entries by
 network coverage, worst-network success rate, worst-network p95 latency and worst-network throughput,
 replaces every display name, signs the manifest and force-pushes the four files as a single commit to
 the `free-configs` branch. Without `HUB_SIGNING_KEY` it builds the list but publishes nothing.
@@ -25,7 +25,7 @@ SHA-256. An unsigned, stale or changed copy is refused and the next address is t
 the curated free list is withdrawn instead of restoring an unverified/expired snapshot. Favorites and
 the selected profile are retained as personal profiles, outside the free list. Other subscriptions
 keep their existing offline fallback. Only configs that are encrypted, check certificates and run on
-an engine in the app are imported. The app enforces the 29-entry cap independently, rejects legacy
+an engine in the app are imported. The app enforces the 30-entry cap independently, rejects legacy
 TCP-only manifests, and checks the signed measurement expiry before import. A signed empty list
 revokes previously offered free entries.
 

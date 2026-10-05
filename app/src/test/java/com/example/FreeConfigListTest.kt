@@ -73,7 +73,7 @@ class FreeConfigListTest {
             FreeConfigList.download(FreeConfigList.URL, server(base), publicKey, nowSeconds = now + 7200)
         }
         for (replacement in listOf(
-            manifest.replace("\"count\":1", "\"count\":30"),
+            manifest.replace("\"count\":1", "\"count\":31"),
             manifest.replace("iran-proxy-v1", "tcp-only"),
             manifest.replace("\"minimum_networks\":2", "\"minimum_networks\":1")
         )) {
@@ -90,9 +90,9 @@ class FreeConfigListTest {
         }
     }
 
-    @Test fun theAppCapsLegacyAndImportedFreeProfilesAt29() {
+    @Test fun theAppCapsLegacyAndImportedFreeProfilesAt30() {
         val profiles = (1..100).map { profile("Free $it", "203.0.113.$it") }
-        assertEquals(29, FreeConfigList.prepare(profiles).size)
+        assertEquals(30, FreeConfigList.prepare(profiles).size)
         assertEquals(1, FreeConfigList.prepare(listOf(profiles.first(), profiles.first())).size)
     }
 

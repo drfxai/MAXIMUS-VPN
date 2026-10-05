@@ -15,7 +15,7 @@ import com.example.vpn.subscription.SubscriptionSources
  * or changed file is refused and the next one is tried.
  */
 object FreeConfigList {
-    const val MAX_CONFIGS = 29
+    const val MAX_CONFIGS = 30
     const val VERIFICATION_POLICY = "iran-proxy-v1"
     const val NAME = "MAXIMUS Free"
     const val OWNER = "drfxai"

@@ -83,12 +83,12 @@ class IranVerificationTests(unittest.TestCase):
         reports.append({"payload": failed, "signature": base64.b64encode(keys[0].sign(canonical(failed))).decode()})
         self.assertFalse(IranEvidence(reports, probes, NOW).accepts(GOOD))
 
-    def test_ranked_verified_list_never_exceeds29(self):
+    def test_ranked_verified_list_never_exceeds30(self):
         links = [GOOD.replace("203.0.113.7", f"203.0.113.{i}") for i in range(1, 101)]
         evidence = signed_evidence(links)[0]
         kept, _ = aggregate.collect([{"url": "https://source.example"}],
                                     fetcher=lambda _: "\n".join(links), evidence=evidence)
-        self.assertEqual(29, len(kept))
+        self.assertEqual(30, len(kept))
         self.assertTrue(all(evidence.accepts(link) for link in kept))
 
     def test_unverified_is_filtered_even_if_tcp_answers(self):

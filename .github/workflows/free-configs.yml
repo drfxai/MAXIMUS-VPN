@@ -66,7 +66,7 @@ jobs:
             exit 0
           fi
           count=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["count"])' "$out/manifest.json")
-          if [ "$count" -gt 29 ]; then
+          if [ "$count" -gt 30 ]; then
             echo "::error::Free configuration cap exceeded."
             exit 1
           fi
