@@ -303,14 +303,16 @@ class RayVpnService : VpnService() {
         exclude: Set<String>,
         network: String,
         timeoutSec: Int,
-        finder: com.example.vpn.stealth.StealthPathFinder
+        finder: com.example.vpn.stealth.StealthPathFinder,
+        /** Also try the [exclude]d servers in disguise (only their saved form was tested). */
+        retryDisguised: Boolean
     ): com.example.vpn.smart.ServerRace.Winner? {
         val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
         val candidates = com.example.vpn.smart.ServerRace.rank(
             all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude
         )
         // Servers left out because their saved form just failed are still tried in disguise.
-        val dead = all.filter { it.id in exclude }
+        val dead = if (retryDisguised) all.filter { it.id in exclude } else emptyList()
         if (candidates.isEmpty() && dead.isEmpty()) return null
         XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
         val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
@@ -437,7 +439,7 @@ class RayVpnService : VpnService() {
                     is com.example.xray.RealDelayProbe.Outcome.Failed -> {
                         firstFailed = true
                         networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(first.profile))
-                        raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder)?.let { adopt(it) }
+                        raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder, retryDisguised = true)?.let { adopt(it) }
                     }
                     is com.example.xray.RealDelayProbe.Outcome.NotRun -> Unit
                 }
@@ -474,7 +476,7 @@ class RayVpnService : VpnService() {
                 if (choice.nothingWorked) networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(requestedProfile))
                 if (choice.nothingWorked && !smart && settings.autoFailoverEnabled) {
                     showForegroundNotification("Server not answering, trying others...")
-                    raceServers(exclude + requestedProfile.id + userProfile.id, network, timeouts.alternateSec, finder)
+                    raceServers(exclude + requestedProfile.id + userProfile.id, network, timeouts.alternateSec, finder, retryDisguised = false)
                         ?.let { adopt(it) }
                 }
             }

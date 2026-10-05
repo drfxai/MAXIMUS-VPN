@@ -40,10 +40,10 @@ class Pipeline(private val probe: XrayProbe, private val profiles: List<VlessPro
         val timeouts = memory.timeouts(NET)
         val finder = StealthPathFinder(measure, log = {}, memory = memory.variants(NET),
             firstTimeoutSec = timeouts.firstSec, alternateTimeoutSec = timeouts.alternateSec)
-        fun race(ex: Set<String>): Path? {
+        fun race(ex: Set<String>, retryDisguised: Boolean): Path? {
             val candidates = ServerRace.rank(profiles, memory.workingKinds(NET), memory.recentFailures(NET), exclude = ex)
             val win = ServerRace(measure, log = {}).run(candidates, { it }, timeouts.alternateSec,
-                onFailure = { memory.recordFailure(NET, ConnectionKind.of(it)) }, disguiseOnly = profiles.filter { it.id in ex })
+                onFailure = { memory.recordFailure(NET, ConnectionKind.of(it)) }, disguiseOnly = if (retryDisguised) profiles.filter { it.id in ex } else emptyList())
                 ?: candidates.firstOrNull()?.let { best ->
                     finder.choose(best, { it }, profiles, firstFailed = true).takeIf { it.latencyMs != null }
                         ?.let { ServerRace.Winner(it.profile, it.owner, it.latencyMs!!) }
@@ -63,7 +63,7 @@ class Pipeline(private val probe: XrayProbe, private val profiles: List<VlessPro
                 is RealDelayProbe.Outcome.Failed -> {
                     firstFailed = true
                     memory.recordFailure(NET, ConnectionKind.of(first.profile))
-                    race(exclude + requested.id)?.let { return it }
+                    race(exclude + requested.id, retryDisguised = true)?.let { return it }
                 }
                 else -> Unit
             }
@@ -71,7 +71,7 @@ class Pipeline(private val probe: XrayProbe, private val profiles: List<VlessPro
         val c = finder.choose(requested, { it }, profiles, firstFailed)
         c.latencyMs?.let { memory.recordSuccess(NET, ConnectionKind.of(c.profile), it) }
         if (c.nothingWorked) memory.recordFailure(NET, ConnectionKind.of(requested))
-        if (c.nothingWorked && !smart) race(exclude + requested.id)?.let { return it }
+        if (c.nothingWorked && !smart) race(exclude + requested.id, retryDisguised = false)?.let { return it }
         return Path(c.profile, c.owner, c.latencyMs != null)
     }
 
