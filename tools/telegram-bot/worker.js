@@ -9,6 +9,9 @@
 //   CONFIGS         optional extra links (vless://, trojan://, hysteria2://, ...), one per line
 //   APP_URL         optional download page for the app
 //   MAX_CONFIGS     optional, default 20
+//   ADMIN_ID        your numeric Telegram ID; lets you change the lists from Telegram:
+//                   /addsub, /delsub, /addconfig, /clearconfigs, /list
+// Binding (optional, needed for the admin commands): a KV namespace named STORE.
 //
 // Routes: POST /webhook (Telegram), GET /setup?secret=WEBHOOK_SECRET (registers the webhook).
 
@@ -59,8 +62,11 @@ async function setup(url, env) {
   return new Response(JSON.stringify(res), { headers: { "content-type": "application/json" } });
 }
 
+const ADMIN_COMMANDS = ["/addsub", "/delsub", "/addconfig", "/clearconfigs", "/list"];
+
 export async function handle(chatId, text, env, now = Date.now()) {
   const command = text.split(/[\s@]/)[0].toLowerCase();
+  if (ADMIN_COMMANDS.includes(command)) return admin(chatId, command, text, env);
   if (!["/start", "/help", "/sub", "/configs", "/app"].includes(command)) {
     return send(env, chatId, helpText(env));
   }
@@ -68,7 +74,7 @@ export async function handle(chatId, text, env, now = Date.now()) {
     return send(env, chatId, "Too many requests, try again in a minute.\nدرخواست زیاد است، یک دقیقه دیگر دوباره امتحان کنید.");
   }
   if (command === "/sub") {
-    const subs = lines(env.SUB_URLS);
+    const subs = await subUrls(env);
     if (subs.length === 0) return send(env, chatId, "No subscription is published yet.\nهنوز اشتراکی منتشر نشده است.");
     const all = [...new Set(subs.flatMap((s) => [s, ...gitHubMirrors(s)]))];
     return sendChunks(env, chatId, "Add one of these in MAXIMUS → Subscriptions (paste them all: the rest become mirrors).\n" +
@@ -100,8 +106,8 @@ function helpText() {
 
 export async function collectConfigs(env, fetchImpl = env.fetchImpl || fetch) {
   const max = Number(env.MAX_CONFIGS || 20);
-  const out = [...lines(env.CONFIGS).filter((l) => LINK.test(l))];
-  for (const sub of lines(env.SUB_URLS)) {
+  const out = [...(await extraConfigs(env)).filter((l) => LINK.test(l))];
+  for (const sub of await subUrls(env)) {
     if (out.length >= max) break;
     for (const source of [sub, ...gitHubMirrors(sub)]) {
       try {
@@ -160,6 +166,49 @@ export function gitHubMirrors(url) {
     `https://cdn.statically.io/gh/${o}/${r}/${ref}/${path}`,
     `https://raw.githack.com/${o}/${r}/${ref}/${path}`,
   ].filter((m) => m !== url);
+}
+
+async function stored(env, key) {
+  if (!env.STORE) return [];
+  return lines(await env.STORE.get(key));
+}
+
+async function subUrls(env) {
+  return [...new Set([...lines(env.SUB_URLS), ...(await stored(env, "subs"))])];
+}
+
+async function extraConfigs(env) {
+  return [...new Set([...lines(env.CONFIGS), ...(await stored(env, "configs"))])];
+}
+
+async function admin(chatId, command, text, env) {
+  if (!env.ADMIN_ID || String(chatId) !== String(env.ADMIN_ID).trim()) return send(env, chatId, helpText());
+  if (!env.STORE) return send(env, chatId, "Add a KV namespace binding named STORE to the Worker first.");
+  const args = text.split(/\s+/).slice(1).filter(Boolean);
+  if (command === "/list") {
+    const subs = await stored(env, "subs");
+    const configs = await stored(env, "configs");
+    return send(env, chatId, `Subscriptions (${subs.length}):\n${subs.join("\n") || "none"}\n\nExtra configs: ${configs.length}`);
+  }
+  if (command === "/addsub" || command === "/delsub") {
+    const urls = args.filter((a) => /^https:\/\/\S+$/i.test(a));
+    if (urls.length === 0) return send(env, chatId, `Usage: ${command} https://...`);
+    const current = await stored(env, "subs");
+    const next = command === "/addsub" ? [...new Set([...current, ...urls])] : current.filter((u) => !urls.includes(u));
+    await env.STORE.put("subs", next.join("\n"));
+    return send(env, chatId, `Saved. ${next.length} subscription(s).`);
+  }
+  if (command === "/addconfig") {
+    const found = extractLinks(text.split(/\s+/).slice(1).join("\n"));
+    if (found.length === 0) return send(env, chatId, "Usage: /addconfig vless://... (one or more links)");
+    const next = [...new Set([...(await stored(env, "configs")), ...found])].slice(-200);
+    await env.STORE.put("configs", next.join("\n"));
+    return send(env, chatId, `Saved. ${next.length} extra config(s).`);
+  }
+  if (command === "/clearconfigs") {
+    await env.STORE.put("configs", "");
+    return send(env, chatId, "Extra configs cleared.");
+  }
 }
 
 function limited(chatId, now) {

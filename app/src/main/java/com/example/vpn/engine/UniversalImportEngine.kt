@@ -184,6 +184,11 @@ object UniversalImportEngine {
                     is AppResult.Error -> ParsedItem.Invalid(uriString.take(60), res.userFriendlyMessage)
                 }
             }
+            lower.startsWith(com.example.vpn.share.ShareCode.PREFIX) -> {
+                com.example.vpn.share.ShareCode.decode(uriString)
+                    ?.let { ParsedItem.Success(it.profile.copy(sourceFile = fileName, sourceSubscription = subUrl)) }
+                    ?: ParsedItem.Invalid(uriString.take(60), "Damaged MAXIMUS share code")
+            }
             lower.startsWith("vmess://") -> {
                 parseVmessUri(uriString, fileName, subUrl)
             }

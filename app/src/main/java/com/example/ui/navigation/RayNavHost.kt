@@ -89,6 +89,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector,
     data object Subscriptions : Screen("subscriptions", "Subscriptions", Icons.Filled.RssFeed, Icons.Outlined.RssFeed)
     data object Diagnostics : Screen("diagnostics", "Logs", Icons.Filled.Analytics, Icons.Outlined.Analytics)
     data object AddServer : Screen("add_server", "Add Node", Icons.Filled.Dns, Icons.Outlined.Dns)
+    data object ScanShare : Screen("scan_share", "Scan", Icons.Filled.Dns, Icons.Outlined.Dns)
     data object SecretChat : Screen("secret_chat", "Secret Chat", Icons.Filled.Shield, Icons.Outlined.Shield)
     data object EditServer : Screen("edit_server/{profileId}", "Edit Configuration", Icons.Filled.Dns, Icons.Outlined.Dns) {
         fun route(profileId: String) = "edit_server/${android.net.Uri.encode(profileId)}"
@@ -252,7 +253,18 @@ fun MainApp(
             composable(Screen.AddServer.route) {
                 AddServerScreen(
                     serverViewModel = serverViewModel,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    onScanFromPhone = { navController.navigate(Screen.ScanShare.route) }
+                )
+            }
+            composable(Screen.ScanShare.route) {
+                com.example.ui.share.ScanShareScreen(
+                    onBack = { navController.popBackStack() },
+                    onConnected = {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.Home.route) { inclusive = false }
+                        }
+                    }
                 )
             }
             composable(Screen.EditServer.route) { entry ->

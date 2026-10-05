@@ -142,7 +142,8 @@ What changed:
 - **DNS can't stop it.** Lookups use the network's DNS, then six DoH resolvers when it fails, stays silent or returns a block-page address. Every answer is still checked against private ranges (SSRF).
 - **Offline copy.** The last payload that held configurations is kept encrypted on the device. When every source fails, its servers stay, and they are restored if they were deleted. The subscription shows "Offline copy from <day> in use". (`SubscriptionSnapshots`)
 - **Refresh through the tunnel.** Once a connection is up, every due subscription (older than its interval, or failed last time) refreshes through it. One working server is enough to get a fresh list even when the subscription's address is blocked outside the tunnel.
-- **Telegram distribution.** `tools/telegram-bot` is a Cloudflare Worker bot with `/configs`, `/sub` and `/app` in English and Persian. It fetches from the same mirrors, checks Telegram's secret header and limits each chat to 6 requests a minute. It runs on Cloudflare's free tier and is not deployed yet: it needs a bot token from @BotFather.
+- **Telegram distribution.** `tools/telegram-bot` is a Cloudflare Worker bot with `/configs`, `/sub` and `/app` in English and Persian. It fetches from the same mirrors, checks Telegram's secret header and limits each chat to 6 requests a minute. The admin (`ADMIN_ID`) changes the lists from Telegram with `/addsub`, `/delsub`, `/addconfig` and `/list`. It runs on Cloudflare's free tier; the README has dashboard install steps.
+- **Phone to phone, no internet.** Any server's menu has "Share offline (QR)". "Share working servers" shows the servers that worked in the last day as codes that change every 1.5 s. On the other phone, Add Server → "Scan from another phone" reads them with the camera and adds each one, saying how many of the set have arrived. The code (`mx1:`, `ShareCode`) carries every protocol's settings, including WireGuard keys and Hysteria2 masks, which no share link format does. The scanner also reads other apps' QR links, and pasting a code works like a link. The design was approved from previews.
 
 | Scenario (checked by tests) | main | this branch |
 |---|---|---|
@@ -153,11 +154,11 @@ What changed:
 | Every source blocked, servers deleted | nothing | offline copy restores them |
 | Address blocked outside the tunnel, one server works | stays stale | refreshed through the tunnel after connect |
 
-Tests: `SubscriptionResilienceTest` (6, JVM) and `SubscriptionManagerResilienceTest` (2, Robolectric with Room) cover the rows above. The DNS row is covered by `EndpointResolverTest`, and its wiring into the subscription client is reviewed, not tested. The bot has `node tools/telegram-bot/test.mjs`.
+Tests: `ShareCodeTest` (4, JVM) covers the QR code for VLESS REALITY, AmneziaWG and Hysteria2. `SubscriptionResilienceTest` (6, JVM) and `SubscriptionManagerResilienceTest` (2, Robolectric with Room) cover the rows above. The DNS row is covered by `EndpointResolverTest`, and its wiring into the subscription client is reviewed, not tested. The bot has `node tools/telegram-bot/test.mjs`.
 
 Not done yet:
 - **Built-in sources** (official plus 2–3 public): these need addresses you trust.
-- **QR sharing phone to phone:** new UI, so previews come first.
+- **QR sharing on real phones:** the codec is tested and the build compiles; the camera path still needs a test between two phones.
 
 ## Phases 4–7: next steps
 

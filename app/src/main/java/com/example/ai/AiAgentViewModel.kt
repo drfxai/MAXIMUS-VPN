@@ -50,7 +50,7 @@ class AiAgentViewModel(
                 🎯 **Tap any preset below or tell me what you need:**
                 • 🎮 **Gaming** (Low ping, UDP direct, MTU 1400)
                 • 🎬 **Streaming** (4K buffer, Unblock video CDNs)
-                • 🤖 **AI Tasks** (OpenAI / Claude / Gemini direct TLS)
+                • 🤖 **AI Tasks** (direct TLS to AI services)
                 • 📺 **YouTube** (QUIC/UDP fast stream acceleration)
                 • ⚡ **Downloading** (High-throughput multi-stream)
                 • 🔍 **Diagnose My Connection** (Review a privacy-filtered health summary)

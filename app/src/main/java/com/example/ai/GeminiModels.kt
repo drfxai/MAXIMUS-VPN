@@ -148,7 +148,7 @@ enum class UsageMode(
 ) {
     GAMING("gaming", "Gaming Mode", "🎮", "Ultra-low latency (<60ms), UDP direct, 15s keepalive, MTU 1400, 1.1.1.1 Gaming DNS"),
     STREAMING("streaming", "Streaming Mode", "🎬", "High-bitrate buffer (16KB), unlocked Netflix/Twitch/YouTube 4K, Balanced DPI bypass"),
-    AI_TASKS("ai_tasks", "AI Tasks Mode", "🤖", "Direct zero-packet-loss routing for OpenAI, Gemini, Claude, and HuggingFace endpoints"),
+    AI_TASKS("ai_tasks", "AI Tasks Mode", "🤖", "Direct zero-packet-loss routing for AI service endpoints"),
     YOUTUBE("youtube", "YouTube Mode", "📺", "Google CDN acceleration, QUIC/UDP stream optimization, 4K fast video buffering"),
     DOWNLOADING("downloading", "Downloading Mode", "⚡", "Multi-connection TCP acceleration, max throughput MTU, high-speed edge proxy")
 }

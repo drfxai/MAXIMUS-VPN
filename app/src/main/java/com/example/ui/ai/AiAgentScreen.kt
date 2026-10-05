@@ -776,7 +776,7 @@ fun AiModesTabContent(
                                 ModeParamChip("4K Unblocked")
                             }
                             UsageMode.AI_TASKS -> {
-                                ModeParamChip("OpenAI / Claude")
+                                ModeParamChip("AI services")
                                 ModeParamChip("Zero Packet Loss")
                                 ModeParamChip("Direct TLS")
                                 ModeParamChip("MTU: 1480")

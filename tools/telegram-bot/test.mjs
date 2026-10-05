@@ -74,4 +74,22 @@ assert.deepEqual(gitHubMirrors("https://panel.example.org/sub/x"), []);
   assert.equal(good.status, 200);
 }
 
+// Admin commands: only ADMIN_ID, stored in KV, used by /sub and /configs.
+{
+  const { env, sent } = fakeEnv(() => ({ body: "" }));
+  const kv = new Map();
+  env.STORE = { get: async (k) => kv.get(k) ?? null, put: async (k, v) => void kv.set(k, v) };
+  env.ADMIN_ID = "777";
+  env.SUB_URLS = "";
+  await handle(5, "/addsub https://evil.example/sub", env, 0);
+  assert.equal(kv.size, 0);
+  await handle(777, "/addsub https://a.example.org/sub https://b.example.net/sub", env, 0);
+  await handle(777, "/delsub https://b.example.net/sub", env, 0);
+  await handle(777, "/addconfig " + links[0], env, 0);
+  assert.equal(kv.get("subs"), "https://a.example.org/sub");
+  sent.length = 0;
+  await handle(6, "/configs", env, 0);
+  assert.match(sent[1].text, /vless:\/\/u@203/);
+}
+
 console.log("telegram bot: all checks passed");
