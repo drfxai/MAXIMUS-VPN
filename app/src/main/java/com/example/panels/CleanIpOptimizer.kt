@@ -364,6 +364,10 @@ class CleanIpOptimizer {
 
         fun variant(p: VlessProfile, r: Result): VlessProfile = reviveProfile(p, r, asClone = true)
 
+        /**
+         * Three TCP pings per address, so the latency, jitter and loss are measured rather than
+         * assumed; the lowest median among the addresses that answered at least twice wins.
+         */
         suspend fun findBestCleanIpSync(region: String = "Iran"): Result? = withContext(Dispatchers.IO) {
             val candidates = generateCandidates(region, 24)
             val results = mutableListOf<Result>()
@@ -372,18 +376,19 @@ class CleanIpOptimizer {
                 val batchRes = coroutineScope {
                     batch.map { (ip, country, meta) ->
                         async(Dispatchers.IO) {
-                            val latency = optimizer.tcpPing(ip, 443, 1000)
-                            if (latency != null) {
-                                Result(
-                                    ip = ip,
-                                    medianMs = latency,
-                                    jitterMs = 8L,
-                                    successes = 3,
-                                    country = country,
-                                    flagEmoji = meta.first,
-                                    operatorTag = meta.second
-                                )
-                            } else null
+                            val tries = 3
+                            val latencies = (1..tries).mapNotNull { optimizer.tcpPing(ip, 443, 1000) }.sorted()
+                            if (latencies.size < 2) return@async null
+                            Result(
+                                ip = ip,
+                                medianMs = latencies[latencies.size / 2],
+                                jitterMs = latencies.last() - latencies.first(),
+                                successes = latencies.size,
+                                totalTries = tries,
+                                country = country,
+                                flagEmoji = meta.first,
+                                operatorTag = meta.second
+                            )
                         }
                     }.awaitAll().filterNotNull()
                 }

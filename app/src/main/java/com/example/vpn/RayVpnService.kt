@@ -44,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -64,6 +65,8 @@ class RayVpnService : VpnService() {
         const val EXTRA_PROFILE_ID = "com.drfxai.maximusvpn.EXTRA_PROFILE_ID"
         const val EXTRA_SMART = "com.drfxai.maximusvpn.EXTRA_SMART"
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
+        /** How long a clean-address scan may take before the connect goes on without one. */
+        private const val CLEAN_IP_SCAN_LIMIT_MS = 12_000L
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
         const val NOTIFICATION_ID = 1001
@@ -326,6 +329,27 @@ class RayVpnService : VpnService() {
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
     }
 
+    /**
+     * A Cloudflare-fronted server whose address is blocked usually still answers on another Cloudflare
+     * address: this scans for one and returns the same server reached through it, if it carries traffic.
+     */
+    private suspend fun cleanIpPath(profile: VlessProfile, timeoutSec: Int): com.example.vpn.smart.ServerRace.Winner? {
+        val fronted = profile.transport.lowercase() in setOf("ws", "xhttp", "splithttp", "httpupgrade", "grpc", "h2") &&
+            (profile.security.equals("tls", true) || profile.security.equals("reality", true))
+        if (!fronted) return null
+        showForegroundNotification("Looking for a clean address...")
+        val best = withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
+            runCatching { com.example.panels.CleanIpOptimizer.findBestCleanIpSync() }.getOrNull()
+        } ?: return null
+        val candidate = com.example.panels.CleanIpOptimizer.variant(profile, best)
+        if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(candidate) != null) return null
+        val outcome = com.example.xray.RealDelayProbe.measure(candidate, timeoutSec)
+        return (outcome as? com.example.xray.RealDelayProbe.Outcome.Delay)?.let {
+            XrayLogManager.i("SMART", "Reached ${com.example.core.SecretRedactor.redact(profile.name)} through a clean address (${it.latencyMs} ms).")
+            com.example.vpn.smart.ServerRace.Winner(candidate, profile, it.latencyMs)
+        }
+    }
+
     private suspend fun connectLocked(
         userProfile: VlessProfile,
         smart: Boolean = false,
@@ -501,6 +525,11 @@ class RayVpnService : VpnService() {
                     showForegroundNotification("Server not answering, trying others...")
                     raceServers(exclude + requestedProfile.id + userProfile.id, network, timeouts.alternateSec, finder, retryDisguised = false)
                         ?.let { adopt(it) }
+                }
+                // Nothing worked, and the server sits behind Cloudflare: its address may be blocked
+                // while other Cloudflare addresses are not. Scan for one and try the same server there.
+                if (choice.nothingWorked && !raced) {
+                    cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
                 }
             }
 

@@ -244,3 +244,13 @@ There was no hub before; `vpn/hub` is its backend, with no UI yet (a screen need
 - Node states: `SecurityState`, `HealthState`, `PerformanceState`; `ConfigHealthScorer`.
 - `ConfigSyncManager`: fetch, pipeline, then a real request through each accepted node; only nodes that
   carried traffic are approved.
+
+## Step 13 progress: Clean IP
+
+`CleanIpOptimizer.findBestCleanIpSync` now measures: three TCP pings per address, a real median, jitter
+and loss, and an address must answer at least twice (it used to report an invented jitter of 8 ms and
+three successes from a single ping). It had no callers; it is now the last resort in the connect path:
+when a Cloudflare-fronted server (WebSocket, XHTTP, gRPC or HTTP/2 with TLS or REALITY) carries no
+traffic on any path, the connect scans for a clean Cloudflare address, for at most 12 seconds, and uses
+the same server through it when a real request succeeds. The existing staged scan (TCP, TLS, WebSocket,
+download) and its scoring stay as they are, in the panel manager's Clean IP tab.
