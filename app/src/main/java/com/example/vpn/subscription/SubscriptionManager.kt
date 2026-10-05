@@ -227,7 +227,7 @@ class SubscriptionManager(
         sourceSubscriptionUrl = subscription.url
     ).let { result ->
         // Public configs are hostile input: from the free list only what is safe and runnable here is kept.
-        if (FreeConfigList.isList(subscription.url)) result.copy(validProfiles = result.validProfiles.filter(FreeConfigList::usable))
+        if (FreeConfigList.isList(subscription.url)) result.copy(validProfiles = FreeConfigList.prepare(result.validProfiles))
         else result
     }
 
@@ -261,6 +261,7 @@ class SubscriptionManager(
             when (val outcome = fetcher.fetch(candidates)) {
                 is SubscriptionFetcher.Outcome.Fetched -> {
                     val importResult = parse(outcome.payload, subscription)
+                    if (FreeConfigList.isList(subscription.url)) pruneFreeList(subscription, importResult.validProfiles)
                     val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
                     snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
                     val viaMirror = outcome.url.takeIf { it != subscription.url }
@@ -302,6 +303,15 @@ class SubscriptionManager(
             subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
             SyncResult(subscription.id, 0, 0, 0, false, errMsg)
         }
+    }
+
+    /** The free list is replaced on every update; servers it dropped are removed (see [FreeConfigList.stale]). */
+    private suspend fun pruneFreeList(subscription: SubscriptionInfo, fresh: List<com.example.data.model.VlessProfile>) {
+        val saved = serverRepository.getAllProfilesOnce().filter {
+            it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
+        }
+        val keep = runCatching { com.example.RayApplication.instance.settingsRepository.getSettings().selectedProfileId }.getOrNull()
+        FreeConfigList.stale(saved, fresh, keep).forEach { serverRepository.delete(it.id) }
     }
 
     private suspend fun nodeCountOf(subscription: SubscriptionInfo) = serverRepository.getAllProfilesOnce().count {

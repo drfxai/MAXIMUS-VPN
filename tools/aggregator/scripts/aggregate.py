@@ -215,10 +215,7 @@ def collect(sources: list[dict], fetcher=fetch, check=None) -> tuple[list[str], 
                 report["rejected"]["duplicate"] = report["rejected"].get("duplicate", 0) + 1
                 continue
             seen.add(key)
-            try:
-                links.append(rename(link, f"Free {endpoint(link)['scheme'].upper()} {len(seen)}"))
-            except Exception:
-                report["rejected"]["malformed"] = report["rejected"].get("malformed", 0) + 1
+            links.append(link)
             if len(links) >= MAX_PER_SOURCE:
                 break
         if check is not None:
@@ -238,9 +235,61 @@ def sign(payload: bytes, pem: str) -> str:
     return base64.b64encode(key.sign(payload, ec.ECDSA(hashes.SHA256()))).decode()
 
 
-def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem: str | None = None, check=None) -> dict:
+def display_name(link: str, index: int, locate=None) -> str:
+    """"DE · VLESS 12" when the server's country is known, else "Free VLESS 12"; the app reads the code."""
+    scheme = endpoint(link)["scheme"].upper()
+    country = None
+    if locate is not None:
+        try:
+            country = locate(endpoint(link)["host"])
+        except Exception:
+            country = None
+    return f"{country} · {scheme} {index}" if country else f"Free {scheme} {index}"
+
+
+class Geo:
+    """Country of an IPv4 address from a CSV of numeric ranges (start,end,CC), such as the CC0
+    geo-whois-asn-country list. Countries are where the address is registered, which is close to where
+    the server is for most hosting providers."""
+
+    def __init__(self, path: Path):
+        import bisect
+        self._bisect = bisect
+        self.starts: list[int] = []
+        self.rows: list[tuple[int, str]] = []
+        with open(path) as handle:
+            for line in handle:
+                parts = line.strip().split(",")
+                if len(parts) != 3 or not parts[0].isdigit():
+                    continue
+                self.starts.append(int(parts[0]))
+                self.rows.append((int(parts[1]), parts[2].upper()))
+
+    def country_of_ip(self, ip: str) -> str | None:
+        octets = ip.split(".")
+        if len(octets) != 4 or not all(o.isdigit() and int(o) < 256 for o in octets):
+            return None
+        number = int.from_bytes(bytes(int(o) for o in octets), "big")
+        i = self._bisect.bisect_right(self.starts, number) - 1
+        if i < 0 or number > self.rows[i][0]:
+            return None
+        code = self.rows[i][1]
+        return code if len(code) == 2 and code.isalpha() and code != "ZZ" else None
+
+    def __call__(self, host: str) -> str | None:
+        ip = host
+        if not all(part.isdigit() for part in host.split(".")):
+            try:
+                ip = socket.getaddrinfo(host, None, socket.AF_INET)[0][4][0]
+            except OSError:
+                return None
+        return self.country_of_ip(ip)
+
+
+def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem: str | None = None, check=None, locate=None) -> dict:
     config = json.loads(sources_file.read_text())
     links, report = collect(config.get("sources", []), fetcher, check)
+    links = [rename(link, display_name(link, i + 1, locate)) for i, link in enumerate(links)]
     output_dir.mkdir(parents=True, exist_ok=True)
     plain = ("\n".join(links) + "\n") if links else ""
     (output_dir / "free.txt").write_text(plain)
@@ -268,8 +317,11 @@ def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem
 def main() -> int:
     # AGGREGATOR_CHECK_ALIVE=0 skips the TCP check (for runs without outbound access).
     check = None if os.environ.get("AGGREGATOR_CHECK_ALIVE", "1") == "0" else alive
+    # AGGREGATOR_GEO names an IPv4 country CSV (start,end,CC); without it names carry no country.
+    geo_path = os.environ.get("AGGREGATOR_GEO")
+    locate = Geo(Path(geo_path)) if geo_path else None
     manifest = build(ROOT / "output", ROOT / "sources" / "sources.json",
-                     key_pem=os.environ.get("HUB_SIGNING_KEY") or None, check=check)
+                     key_pem=os.environ.get("HUB_SIGNING_KEY") or None, check=check, locate=locate)
     print(f"{manifest['count']} configs; manifest {'signed' if (ROOT / 'output' / 'manifest.sig').read_text() else 'UNSIGNED (no key)'}")
     for name, state in manifest["report"]["sources"].items():
         print(f"  {name}: {state}")

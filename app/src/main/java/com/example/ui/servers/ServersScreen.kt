@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Hub
@@ -85,6 +86,7 @@ fun ServersScreen(
     onNavigateToBenchmark: () -> Unit,
     onNavigateToPanels: () -> Unit = {},
     onNavigateToProtocols: () -> Unit = {},
+    onNavigateToFreeConfigs: () -> Unit = {},
     onNavigateToEditServer: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -162,6 +164,13 @@ fun ServersScreen(
                         icon = Icons.Default.Hub,
                         title = "Protocols",
                         onClick = onNavigateToProtocols
+                    )
+                }
+                item {
+                    HubChip(
+                        icon = Icons.Default.CloudDownload,
+                        title = "Free Configs",
+                        onClick = onNavigateToFreeConfigs
                     )
                 }
                 item {

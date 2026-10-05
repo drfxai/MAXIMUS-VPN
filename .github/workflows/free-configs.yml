@@ -27,6 +27,22 @@ jobs:
       - run: pip install cryptography
       - name: Test the aggregator
         run: python3 -m unittest discover -s tools/aggregator/tests
+      - name: Server countries
+        # geo-whois-asn-country (CC0-1.0, from the regional internet registries), pinned by version and
+        # sha512. Countries are where each address is registered; the list works without it.
+        env:
+          GEO_URL: https://registry.npmjs.org/@ip-location-db/geo-whois-asn-country/-/geo-whois-asn-country-2.3.2026061719.tgz
+          GEO_SHA512: 9MQ3r2q+GDLwW+Mye5duWnHe3n1qB1ZcNUcM9P58CpdW86Gt44AgfIrem6Pcy/tbCHhQ70RJCLngQQyYnaEjbw==
+        run: |
+          set -euo pipefail
+          geo=$(mktemp -d)
+          if curl -fsSL --max-time 120 -o "$geo/geo.tgz" "$GEO_URL" &&
+             [ "$(openssl dgst -sha512 -binary "$geo/geo.tgz" | base64 -w0)" = "$GEO_SHA512" ]; then
+            tar -xzf "$geo/geo.tgz" -C "$geo" package/geo-whois-asn-country-ipv4-num.csv
+            echo "AGGREGATOR_GEO=$geo/package/geo-whois-asn-country-ipv4-num.csv" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Country data not available; names carry no country this run."
+          fi
       - name: Build and sign the list
         env:
           HUB_SIGNING_KEY: ${{ secrets.HUB_SIGNING_KEY }}

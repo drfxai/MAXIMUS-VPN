@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.data.model.VlessProfile
 import com.example.vpn.hub.FreeConfigList
 import com.example.vpn.hub.HubManifest
 import com.example.vpn.subscription.SubscriptionSources
@@ -63,5 +64,26 @@ class FreeConfigListTest {
         assertThrows(HubManifest.Refused::class.java) { FreeConfigList.download(FreeConfigList.URL, server(base), "") }
         assertFalse(FreeConfigList.available(""))
         assertTrue(FreeConfigList.available(publicKey))
+    }
+
+    private fun profile(name: String, host: String, favorite: Boolean = false) = VlessProfile(
+        id = host, name = name, address = host, port = 443, uuid = "11111111-1111-1111-1111-111111111111",
+        security = "reality", sni = "www.example.com", publicKey = "abc", isFavorite = favorite
+    )
+
+    @Test fun theCountryComesFromTheNameTheListGave() {
+        assertEquals("DE", FreeConfigList.countryOf("DE \u00B7 VLESS 12"))
+        assertEquals(null, FreeConfigList.countryOf("Free VLESS 12"))
+        assertEquals(null, FreeConfigList.countryOf("de \u00B7 VLESS 12"))
+        assertEquals("NL", FreeConfigList.prepare(listOf(profile("NL \u00B7 VLESS 3", "203.0.113.3"))).single().countryCode)
+    }
+
+    @Test fun serversDroppedFromTheListGoExceptFavouritesAndTheOneInUse() {
+        val kept = profile("a", "203.0.113.1")
+        val gone = profile("b", "203.0.113.2")
+        val favourite = profile("c", "203.0.113.3", favorite = true)
+        val inUse = profile("d", "203.0.113.4")
+        val stale = FreeConfigList.stale(listOf(kept, gone, favourite, inUse), listOf(kept.copy(id = "new")), keepId = inUse.id)
+        assertEquals(listOf(gone), stale)
     }
 }
