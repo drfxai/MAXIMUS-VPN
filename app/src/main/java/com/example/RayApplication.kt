@@ -84,7 +84,15 @@ class RayApplication : Application() {
             serverRepository = ServerRepository(database.serverProfileDao())
             subscriptionRepository = SubscriptionRepository(database.subscriptionDao())
             benchmarkRepository = BenchmarkRepository(database.benchmarkDao())
-            subscriptionManager = SubscriptionManager(subscriptionRepository, serverRepository)
+            subscriptionManager = SubscriptionManager(
+                subscriptionRepository,
+                serverRepository,
+                snapshots = com.example.vpn.subscription.SubscriptionSnapshots(
+                    java.io.File(filesDir, "subscription-snapshots"),
+                    encrypt = { com.example.data.security.SecureStorage.encrypt(it, this) },
+                    decrypt = { com.example.data.security.SecureStorage.decrypt(it, this) }
+                )
+            )
             benchmarkEngine = BenchmarkEngine(serverRepository, benchmarkRepository)
             settingsRepository = SettingsRepository(this)
             XrayLogManager.i("APP", "Database, server repository, and settings repository initialized successfully.")

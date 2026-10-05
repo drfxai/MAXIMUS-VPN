@@ -19,7 +19,12 @@ import java.util.concurrent.TimeUnit
 
 class SubscriptionManager(
     private val subscriptionRepository: SubscriptionRepository,
-    private val serverRepository: ServerRepository
+    private val serverRepository: ServerRepository,
+    /** Last good copy of each subscription; null keeps none. */
+    private val snapshots: SubscriptionSnapshots? = null,
+    /** Replaces the HTTP download (tests and the censorship simulator). */
+    private val download: ((String) -> String)? = null,
+    private val staggerMs: Long = SubscriptionFetcher.STAGGER_MS
 ) {
     companion object {
         private const val MAX_SAFE_REDIRECTS = 5
@@ -42,16 +47,11 @@ class SubscriptionManager(
                 if (scheme != "https") return false
                 val host = uri.host ?: return false
                 if (isBlockedHost(host)) return false
-                // Pre-resolve host to mitigate DNS rebinding prior to request
-                try {
-                    val addresses = java.net.InetAddress.getAllByName(host)
-                    if (addresses.isEmpty()) return false
-                    for (addr in addresses) {
-                        if (isRestrictedIp(addr)) return false
-                    }
-                } catch (_: Exception) {
-                    return false
-                }
+                // Literal addresses are checked here; names are checked on every lookup by the client's
+                // DNS (see resilientDns), not resolved here: a censor's poisoned answer must not make
+                // a valid subscription look invalid.
+                val literal = RoutingEngine.parseIpv4(host) != null || host.contains(':')
+                if (literal && isRestrictedIp(java.net.InetAddress.getByName(host.trim('[', ']')))) return false
                 true
             } catch (_: Exception) {
                 false
@@ -108,18 +108,26 @@ class SubscriptionManager(
         }
     }
 
-    private val safeDns = object : okhttp3.Dns {
+    /**
+     * The network's DNS first; when it fails, is silent or answers with a block-page address, the
+     * DoH resolvers (EndpointResolver). Every answer is checked against restricted ranges.
+     */
+    private val resilientDns = object : okhttp3.Dns {
         override fun lookup(hostname: String): List<java.net.InetAddress> {
             if (isBlockedHost(hostname)) {
                 throw SecurityException("SSRF blocked: Hostname '$hostname' is in restricted host list.")
             }
-            val addresses = okhttp3.Dns.SYSTEM.lookup(hostname)
-            for (addr in addresses) {
-                if (isRestrictedIp(addr)) {
-                    throw SecurityException("SSRF DNS Rebinding blocked: Hostname '$hostname' resolved to restricted IP: $addr")
-                }
+            val result = com.example.vpn.EndpointResolver.resolve(
+                hostname,
+                system = { okhttp3.Dns.SYSTEM.lookup(it) },
+                open = { it.openConnection() as java.net.HttpURLConnection }
+            )
+            val address = java.net.InetAddress.getByName(result.address)
+            if (isRestrictedIp(address)) {
+                throw SecurityException("DNS for '$hostname' answered a restricted address ($address); blocked or rebinding")
             }
-            return addresses
+            if (result.viaDoh) XrayLogManager.i("SUBSCRIPTION", "Resolved $hostname through DoH (network DNS blocked).")
+            return listOf(address)
         }
     }
 
@@ -147,9 +155,10 @@ class SubscriptionManager(
     }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .dns(safeDns)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(25, TimeUnit.SECONDS)
+        .dns(resilientDns)
         // Validate redirect destinations before opening their sockets.
         .addInterceptor(safeRedirectInterceptor)
         .followRedirects(false)
@@ -162,11 +171,50 @@ class SubscriptionManager(
         val addedCount: Int,
         val duplicateCount: Int,
         val isSuccess: Boolean,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        /** The address that answered, when it was a mirror rather than the subscription's own. */
+        val viaMirror: String? = null,
+        /** True when every source failed and the servers came from the offline copy. */
+        val fromOfflineCopy: Boolean = false
+    )
+
+    /** Downloads one address through the SSRF-safe client, resolving through DoH when DNS is blocked. */
+    private fun httpDownload(url: String): String {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Maximus-VPN/1.0 (Android; Linux)")
+            .header("Accept", "*/*")
+            .build()
+        client.newCall(request).execute().use { res ->
+            if (!res.isSuccessful) throw java.io.IOException("HTTP ${res.code}")
+            val body = res.body ?: throw java.io.IOException("empty response")
+            // Protect mobile users with strict 5MB response limit
+            val maxBytes = 5 * 1024 * 1024
+            val inputStream = body.byteStream()
+            val buffer = ByteArray(8192)
+            val out = ByteArrayOutputStream()
+            var total = 0
+            while (true) {
+                val read = inputStream.read(buffer)
+                if (read == -1) break
+                total += read
+                if (total > maxBytes) throw java.io.IOException("Subscription payload exceeded safety limit (5MB).")
+                out.write(buffer, 0, read)
+            }
+            return out.toString(Charsets.UTF_8.name())
+        }
+    }
+
+    private fun parse(payload: String, subscription: SubscriptionInfo) = UniversalImportEngine.importText(
+        rawText = payload,
+        sourceFileName = subscription.name,
+        sourceSubscriptionUrl = subscription.url
     )
 
     /**
-     * Synchronizes a subscription URL securely with size limits and ETag support.
+     * Synchronizes a subscription from its address, its mirrors or the CDN copies of a GitHub file,
+     * whichever answers first with configurations. When all of them fail, the servers of the last good
+     * copy are kept (and restored if they were deleted).
      */
     suspend fun syncSubscription(subscription: SubscriptionInfo): SyncResult = withContext(Dispatchers.IO) {
         val sanitizedUrl = SecretRedactor.redact(subscription.url)
@@ -179,90 +227,49 @@ class SubscriptionManager(
             return@withContext SyncResult(subscription.id, 0, 0, 0, false, errMsg)
         }
 
-        val requestBuilder = Request.Builder()
-            .url(subscription.url)
-            .header("User-Agent", "Maximus-VPN/1.0 (Android; Linux)")
-            .header("Accept", "*/*")
-
+        val candidates = SubscriptionSources.candidates(subscription.url, subscription.mirrors)
+            .filter { isValidSubscriptionUrl(it) }
+        val fetcher = SubscriptionFetcher(
+            download = download ?: ::httpDownload,
+            count = { parse(it, subscription).validProfiles.size },
+            staggerMs = staggerMs
+        )
         try {
-            val response = client.newCall(requestBuilder.build()).execute()
-            response.use { res ->
-                if (!res.isSuccessful) {
-                    val errMsg = "HTTP ${res.code}: ${res.message}"
-                    XrayLogManager.e("SUBSCRIPTION", "Sync failed for '${subscription.name}': $errMsg")
-                    subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
-                    return@withContext SyncResult(
-                        subscriptionId = subscription.id,
-                        totalFound = 0,
-                        addedCount = 0,
-                        duplicateCount = 0,
-                        isSuccess = false,
-                        errorMessage = errMsg
+            when (val outcome = fetcher.fetch(candidates)) {
+                is SubscriptionFetcher.Outcome.Fetched -> {
+                    val importResult = parse(outcome.payload, subscription)
+                    val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
+                    snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
+                    val viaMirror = outcome.url.takeIf { it != subscription.url }
+                    outcome.failures.forEach { (url, why) ->
+                        XrayLogManager.w("SUBSCRIPTION", "Source ${SecretRedactor.redact(url)} failed: ${SecretRedactor.redact(why)}")
+                    }
+                    subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), error = null)
+                    XrayLogManager.i(
+                        "SUBSCRIPTION",
+                        "Subscription '${subscription.name}' sync complete${viaMirror?.let { " via ${SecretRedactor.redact(it)}" }.orEmpty()}: " +
+                            "${importResult.configurationsFound} found, ${inserted.size} added, ${duplicates.size} duplicates."
                     )
+                    SyncResult(subscription.id, importResult.configurationsFound, inserted.size, duplicates.size, true, viaMirror = viaMirror)
                 }
-
-                val etag = res.header("ETag")
-                val lastModified = res.header("Last-Modified")
-
-                val body = res.body ?: run {
-                    val errMsg = "Empty response body received from subscription server."
-                    subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
-                    return@withContext SyncResult(subscription.id, 0, 0, 0, false, errMsg)
-                }
-
-                // Protect mobile users with strict 5MB response limit
-                val maxBytes = 5 * 1024 * 1024 // 5 MB
-                val inputStream = body.byteStream()
-                val buffer = ByteArray(8192)
-                val out = ByteArrayOutputStream()
-                var totalBytesRead = 0
-
-                while (true) {
-                    val read = inputStream.read(buffer)
-                    if (read == -1) break
-                    totalBytesRead += read
-                    if (totalBytesRead > maxBytes) {
-                        val errMsg = "Subscription payload exceeded safety limit (5MB)."
+                is SubscriptionFetcher.Outcome.AllFailed -> {
+                    val reason = outcome.failures.firstOrNull()?.second ?: "no source to try"
+                    val tried = outcome.failures.count { it.first.startsWith("http") }
+                    val snapshot = snapshots?.load(subscription.id)
+                    if (snapshot == null) {
+                        val errMsg = if (tried > 1) "All $tried sources failed. First: $reason" else reason
+                        XrayLogManager.e("SUBSCRIPTION", "Sync failed for '${subscription.name}': ${SecretRedactor.redact(errMsg)}")
                         subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
                         return@withContext SyncResult(subscription.id, 0, 0, 0, false, errMsg)
                     }
-                    out.write(buffer, 0, read)
+                    val importResult = parse(snapshot.payload, subscription)
+                    val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
+                    val day = java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(java.util.Date(snapshot.savedAt))
+                    val errMsg = "Offline copy from $day in use. Every source failed ($reason)."
+                    XrayLogManager.w("SUBSCRIPTION", "'${subscription.name}': ${SecretRedactor.redact(errMsg)} ${inserted.size} servers restored.")
+                    subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), errMsg)
+                    SyncResult(subscription.id, importResult.configurationsFound, inserted.size, duplicates.size, false, errMsg, fromOfflineCopy = true)
                 }
-
-                val rawPayload = out.toString(Charsets.UTF_8.name())
-                val importResult = UniversalImportEngine.importText(
-                    rawText = rawPayload,
-                    sourceFileName = subscription.name,
-                    sourceSubscriptionUrl = subscription.url
-                )
-
-                // Deduplicate and insert into database
-                val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
-
-                val newNodeCount = serverRepository.getAllProfilesOnce().count {
-                    it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
-                }
-                subscriptionRepository.updateSyncStatus(
-                    id = subscription.id,
-                    nodeCount = newNodeCount,
-                    error = null,
-                    etag = etag,
-                    lastModified = lastModified
-                )
-
-                XrayLogManager.i(
-                    "SUBSCRIPTION",
-                    "Subscription '${subscription.name}' sync complete: ${importResult.configurationsFound} found, ${inserted.size} added, ${duplicates.size} duplicates."
-                )
-
-                SyncResult(
-                    subscriptionId = subscription.id,
-                    totalFound = importResult.configurationsFound,
-                    addedCount = inserted.size,
-                    duplicateCount = duplicates.size,
-                    isSuccess = true,
-                    errorMessage = null
-                )
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -274,20 +281,47 @@ class SubscriptionManager(
         }
     }
 
+    private suspend fun nodeCountOf(subscription: SubscriptionInfo) = serverRepository.getAllProfilesOnce().count {
+        it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
+    }
+
+    private val refreshing = java.util.concurrent.atomic.AtomicBoolean(false)
+
     /**
-     * Adds a new subscription and immediately triggers initial sync.
+     * Refreshes every auto-refresh subscription that is due (older than its interval, or failed last
+     * time). Called once a connection is up, so a user with one working server gets fresh servers
+     * through it even when the subscription's own address is blocked on their network.
+     */
+    suspend fun refreshDue(now: Long = System.currentTimeMillis()): List<SyncResult> {
+        if (!refreshing.compareAndSet(false, true)) return emptyList()
+        try {
+            val due = subscriptionRepository.getAllOnce().filter {
+                it.autoRefresh && it.url.isNotBlank() &&
+                    (it.lastError != null || now - it.lastUpdated >= it.refreshIntervalMinutes * 60_000L)
+            }
+            return due.map { syncSubscription(it) }
+        } finally {
+            refreshing.set(false)
+        }
+    }
+
+    /**
+     * Adds a new subscription and immediately triggers initial sync. [url] may hold several addresses
+     * (by line, space or comma): the first is the subscription, the rest are its mirrors.
      */
     suspend fun addAndSyncSubscription(name: String, url: String): SyncResult {
-        val trimmedUrl = url.trim()
-        if (!isValidSubscriptionUrl(trimmedUrl)) {
+        val (primary, mirrors) = SubscriptionSources.parseInput(url)
+        if (!isValidSubscriptionUrl(primary)) {
             return SyncResult("", 0, 0, 0, false, "Invalid subscription URL")
         }
-        val sub = SubscriptionInfo(
+        val existing = subscriptionRepository.getSubscriptionByUrl(primary)
+        val sub = existing?.copy(mirrors = (existing.mirrors + mirrors.filter { isValidSubscriptionUrl(it) }).distinct()) ?: SubscriptionInfo(
             name = name.ifBlank { "Subscription" },
-            url = trimmedUrl,
+            url = primary,
             autoRefresh = true,
             lastUpdated = 0L,
-            nodeCount = 0
+            nodeCount = 0,
+            mirrors = mirrors.filter { isValidSubscriptionUrl(it) }
         )
         subscriptionRepository.insertOrUpdate(sub)
         return syncSubscription(sub)
@@ -296,6 +330,7 @@ class SubscriptionManager(
     suspend fun deleteSubscriptionAndNodes(subscription: SubscriptionInfo) {
         serverRepository.deleteBySubscription(subscription.url)
         subscriptionRepository.delete(subscription.id)
+        snapshots?.delete(subscription.id)
         XrayLogManager.i("SUBSCRIPTION", "Deleted subscription '${subscription.name}' and its associated nodes.")
     }
 }

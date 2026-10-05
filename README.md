@@ -69,7 +69,8 @@ configuration with a single tap.
 - Hysteria2, WireGuard and AmneziaWG (junk packets) on the same core
 - Universal import: links, Base64 subscriptions, Xray JSON, Clash/Mihomo YAML and WireGuard `.conf` files
 - Finds a working route before connecting: split TLS handshake, another browser fingerprint, ECH, UDP junk packets, or another protocol on the same server
-- Subscriptions with automatic updates
+- Subscriptions that survive blocking: mirrors, CDN copies of GitHub-hosted files, DoH lookups, an offline copy, and a refresh through the tunnel after connecting
+- Telegram bot for distribution (`tools/telegram-bot`, a Cloudflare Worker)
 
 **Server & panel workspace**
 - 3X-UI installer with pinned HTTPS, generated credentials and firewall setup

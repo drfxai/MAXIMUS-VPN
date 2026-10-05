@@ -16,6 +16,8 @@ class SubscriptionRepository(private val dao: SubscriptionDao) {
         return dao.getSubscriptionById(id)?.toDomain()
     }
 
+    suspend fun getAllOnce(): List<SubscriptionInfo> = dao.getAllSubscriptionsOnce().map { it.toDomain() }
+
     suspend fun getSubscriptionByUrl(url: String): SubscriptionInfo? {
         return dao.getAllSubscriptionsOnce().asSequence().map { it.toDomain() }.firstOrNull { it.url == url }
     }

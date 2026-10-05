@@ -1,0 +1,10 @@
+name = "maximus-bot"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+# Subscription addresses, best first, one per line.
+SUB_URLS = ""
+APP_URL = "https://github.com/drfxai/MAXIMUS-VPN/releases/latest"
+MAX_CONFIGS = "20"
+# BOT_TOKEN and WEBHOOK_SECRET are secrets: wrangler secret put BOT_TOKEN / WEBHOOK_SECRET

@@ -16,7 +16,9 @@ data class SubscriptionEntity(
     val nodeCount: Int = 0,
     val lastError: String? = null,
     val etag: String? = null,
-    val lastModified: String? = null
+    val lastModified: String? = null,
+    /** Mirror addresses, one per line, encrypted like [url]. */
+    val mirrors: String = ""
 ) {
     fun toDomain(): SubscriptionInfo = SubscriptionInfo(
         id = id,
@@ -31,7 +33,9 @@ data class SubscriptionEntity(
         autoRefresh = autoRefresh,
         refreshIntervalMinutes = refreshIntervalMinutes,
         nodeCount = nodeCount,
-        lastError = lastError
+        lastError = lastError,
+        mirrors = SecureStorage.decryptOrPlaintext(mirrors).lines()
+            .filter { it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true) }
     )
 
     companion object {
@@ -46,7 +50,8 @@ data class SubscriptionEntity(
                 nodeCount = sub.nodeCount,
                 lastError = sub.lastError,
                 etag = etag,
-                lastModified = lastModified
+                lastModified = lastModified,
+                mirrors = sub.mirrors.joinToString("\n").let { if (it.isNotEmpty()) SecureStorage.encrypt(it) else "" }
             )
     }
 }

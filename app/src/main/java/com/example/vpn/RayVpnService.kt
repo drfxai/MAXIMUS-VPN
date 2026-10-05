@@ -63,6 +63,7 @@ class RayVpnService : VpnService() {
         const val ACTION_DISCONNECT = "com.drfxai.maximusvpn.ACTION_DISCONNECT"
         const val ACTION_RECONNECT = "com.drfxai.maximusvpn.ACTION_RECONNECT"
         const val EXTRA_PROFILE_ID = "com.drfxai.maximusvpn.EXTRA_PROFILE_ID"
+        private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
         const val NOTIFICATION_ID = 1001
@@ -550,6 +551,18 @@ class RayVpnService : VpnService() {
 
             showForegroundNotification("Connected to ${profile.name}")
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 10. Connection lifecycle complete. Final state: CONNECTED.")
+
+            // Refresh due subscriptions through the new tunnel: their addresses may be blocked outside it.
+            serviceScope.launch {
+                kotlinx.coroutines.delay(SUBSCRIPTION_REFRESH_DELAY_MS)
+                if (_vpnState.value.status != ConnectionStatus.CONNECTED) return@launch
+                runCatching { com.example.RayApplication.instance.subscriptionManager.refreshDue() }
+                    .onSuccess { results ->
+                        val restored = results.filter { it.isSuccess }.sumOf { it.addedCount }
+                        if (results.isNotEmpty()) XrayLogManager.i("SUBSCRIPTION", "Refreshed ${results.count { it.isSuccess }} of ${results.size} due subscriptions through the tunnel; $restored new servers.")
+                    }
+                    .onFailure { XrayLogManager.w("SUBSCRIPTION", "Refresh after connect failed: ${it.message}") }
+            }
 
             // Initialize Operational Mode features
             if (settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE) {

@@ -286,7 +286,9 @@ data class SubscriptionInfo(
     val autoRefresh: Boolean = true,
     val refreshIntervalMinutes: Int = 1440,
     val nodeCount: Int = 0,
-    val lastError: String? = null
+    val lastError: String? = null,
+    /** Other addresses that serve the same subscription, tried when [url] is blocked. */
+    val mirrors: List<String> = emptyList()
 )
 
 data class AppSettings(

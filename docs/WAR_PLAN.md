@@ -132,11 +132,37 @@ Tests: `WarPlanEnginesAndStealthTest` (16 tests) plus the existing `AntiCensorsh
 
 ---
 
-## Phases 3–7: next steps
+## Phase 3 — Discovery & distribution (where WhiteVPN dies)
+
+Before this phase a subscription was one address fetched once, by hand, through the network's own DNS. The `autoRefresh` flag existed but nothing ever ran it. A poisoned DNS answer even made a valid address fail validation before any request. A filter's block page (HTML, status 200) counted as a successful sync with no servers.
+
+What changed:
+- **Never one domain.** A subscription has mirrors: paste several addresses at once and the first is the subscription, the rest are mirrors. A file on GitHub is also fetched through the CDNs that serve GitHub content: jsDelivr on four networks (Cloudflare, Fastly, Gcore, its own), Statically and Githack. (`SubscriptionSources`)
+- **Fetched like the path finder connects.** Sources start 2.5 s apart, and a failed source starts the next one at once, so a working address costs one request. A source only counts when it holds configurations. A block page or an emptied file moves on to the next source. (`SubscriptionFetcher`)
+- **DNS can't stop it.** Lookups use the network's DNS, then six DoH resolvers when it fails, stays silent or returns a block-page address. Every answer is still checked against private ranges (SSRF).
+- **Offline copy.** The last payload that held configurations is kept encrypted on the device. When every source fails, its servers stay, and they are restored if they were deleted. The subscription shows "Offline copy from <day> in use". (`SubscriptionSnapshots`)
+- **Refresh through the tunnel.** Once a connection is up, every due subscription (older than its interval, or failed last time) refreshes through it. One working server is enough to get a fresh list even when the subscription's address is blocked outside the tunnel.
+- **Telegram distribution.** `tools/telegram-bot` is a Cloudflare Worker bot with `/configs`, `/sub` and `/app` in English and Persian. It fetches from the same mirrors, checks Telegram's secret header and limits each chat to 6 requests a minute. It runs on Cloudflare's free tier and is not deployed yet: it needs a bot token from @BotFather.
+
+| Scenario (checked by tests) | main | this branch |
+|---|---|---|
+| Subscription domain SNI-blocked or reset (GitHub file) | no servers | CDN mirror, one stagger later |
+| Block page with HTTP 200 instead of the file | "success", 0 servers | next source |
+| Address silent (dropped packets) | waits 15 s or more, then fails | next source after 2.5 s |
+| DNS poisoned to a block-page address | rejected as invalid | DoH answer used |
+| Every source blocked, servers deleted | nothing | offline copy restores them |
+| Address blocked outside the tunnel, one server works | stays stale | refreshed through the tunnel after connect |
+
+Tests: `SubscriptionResilienceTest` (6, JVM) and `SubscriptionManagerResilienceTest` (2, Robolectric with Room) cover the rows above. The DNS row is covered by `EndpointResolverTest`, and its wiring into the subscription client is reviewed, not tested. The bot has `node tools/telegram-bot/test.mjs`.
+
+Not done yet:
+- **Built-in sources** (official plus 2–3 public): these need addresses you trust.
+- **QR sharing phone to phone:** new UI, so previews come first.
+
+## Phases 4–7: next steps
 
 | Phase | First concrete step | Needs from you |
 |---|---|---|
-| 3 Discovery & distribution | Multi-source subscriptions with offline cache and mirror/IP fallback; QR export/import of a working config phone-to-phone | Which official/public subscription sources to trust; a Telegram bot needs hosting and a bot token |
 | 4 Sub-10 s auto-connect | Persist the stealth winner per network/carrier; probe 5–8 saved nodes in parallel for Smart Connect; add the soak run for KPI 3 | Carrier thresholds need real logs from Irancell/Hamrah/TCI users |
 | 5 Emergency tiers | Wire the existing tiers into one "route N of 6" ladder | Psiphon needs official sponsor/propagation channel IDs from Psiphon Inc.; its library is GPL-3.0 (license decision) |
 | 6 Anti-censorship loop | Opt-in "protocol X failed on carrier Y" reports | A collection endpoint and a privacy policy |
