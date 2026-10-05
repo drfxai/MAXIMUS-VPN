@@ -152,3 +152,20 @@ kill-switch flag (3), engine-death detection while reconnecting (4). Left for Op
 (step 4): user direct rules in raw JSON and broad bypass entries (5, 6), CGNAT direct in Global (8).
 Still open: silent secret loss when encryption fails, the unpinned BPB `worker.js`, the build-time Gemini
 key fallback.
+
+## Step 3 progress: MaximusVpnSupervisor
+
+`vpn/safety/MaximusVpnSupervisor` now owns the "traffic must stay in the VPN" flag. Every connect,
+reconnect, failover and Always-on start requests protection; it is released only for a named reason
+(user disconnect, revoked by Android, service destroyed, or an unusable profile the user picked in DAILY
+mode), and each release is logged.
+
+At each connect it reads whether Android's "Block connections without VPN" is on (Android 10+). GOD MODE
+logs a request to turn it on when it is not; the diagnostics report shows the state. This is the only
+protection against gap 2 (process death) while libXray runs inside the app process; moving the engine to
+its own process is a later, larger change.
+
+Gap 4 is not a leak: while reconnecting, the tunnel interface stays up, so a stopped engine leaves traffic
+captured and dropped, not direct. Gap 3: the in-app kill-switch flag has no effect because the blocking
+interface is always used; the setting is left as is until the mode screens are redesigned (UI changes
+need a preview first).

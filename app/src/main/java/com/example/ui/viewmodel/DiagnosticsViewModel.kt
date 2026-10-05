@@ -231,6 +231,7 @@ class DiagnosticsViewModel(
         sb.appendLine("Active Protocol: ${report.activeProtocol}")
         sb.appendLine("Native Engine: ${if (report.activeEngine.startsWith("Xray-core")) "XTLS/libXray; attached to Android TUN" else "Not active for this connection"}")
         sb.appendLine("Connection State: ${report.connectionState}")
+        sb.appendLine("Android lockdown (Block connections without VPN): ${com.example.vpn.RayVpnService.lockdown.value.name}")
         sb.appendLine("Active Server: ${report.activeServerSummary}")
         sb.appendLine("Configured Routing Mode: ${report.routingMode}")
         sb.appendLine("Configured DNS: ${report.dnsServer}")

@@ -75,6 +75,10 @@ class RayVpnService : VpnService() {
         fun updateState(state: ConnectionState) {
             _vpnState.value = state
         }
+
+        private val _lockdown = MutableStateFlow(com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.UNKNOWN)
+        /** Whether Android keeps traffic blocked if this app's process dies; read at each connect. */
+        val lockdown: StateFlow<com.example.vpn.safety.MaximusVpnSupervisor.Lockdown> = _lockdown.asStateFlow()
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -83,7 +87,8 @@ class RayVpnService : VpnService() {
     private var durationJob: Job? = null
     private var pingJob: Job? = null
 
-    private var protectionRequested = false
+    private val supervisor = com.example.vpn.safety.MaximusVpnSupervisor { XrayLogManager.i("VPN", it) }
+    private val protectionRequested: Boolean get() = supervisor.protectionRequested
     private var vpnInterface: ParcelFileDescriptor? = null
     private var tunnelManager: TunnelManager? = null
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
@@ -167,10 +172,23 @@ class RayVpnService : VpnService() {
         }
     }
 
+    /** Records whether Android blocks traffic if the app dies, and says what to change when it does not. */
+    private fun checkLockdown() {
+        val state = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            com.example.vpn.safety.MaximusVpnSupervisor.lockdownOf(Build.VERSION.SDK_INT, { isAlwaysOn }, { isLockdownEnabled })
+        } else {
+            com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.UNKNOWN
+        }
+        _lockdown.value = state
+        com.example.vpn.safety.MaximusVpnSupervisor.lockdownAdvice(state, settingsRepository.getSettings().operationalMode)
+            ?.let { XrayLogManager.w("VPN", it) }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         if (action == null || action == ACTION_CONNECT || action == ACTION_RECONNECT) {
-            protectionRequested = true
+            supervisor.requestProtection()
+            checkLockdown()
             if (!showForegroundNotification("Protecting traffic while connecting...")) return START_NOT_STICKY
             try { ensureBlockingInterface() } catch (e: Exception) {
                 updateState(ConnectionState(status = ConnectionStatus.FAILED, errorMessage = "Unable to establish traffic protection"))
@@ -340,7 +358,7 @@ class RayVpnService : VpnService() {
         // Engines receive [profile]; a hostname endpoint is replaced by its resolved IP below.
         var profile = requestedProfile
         try {
-            protectionRequested = true
+            supervisor.requestProtection()
             ensureBlockingInterface()
             disconnectResources()
             protectionFailureHandled.set(false)
@@ -397,7 +415,7 @@ class RayVpnService : VpnService() {
                 XrayLogManager.e("VPN", "Profile validation error: ${e.message}", e)
                 val release = com.example.vpn.safety.FailClosedPolicy.mayReleaseBlock(
                     failure, startedByUser, settingsRepository.getSettings().operationalMode)
-                if (release) protectionRequested = false
+                if (release) supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.INVALID_PROFILE_BY_USER)
                 disconnectResources()
                 updateState(ConnectionState(
                     status = ConnectionStatus.FAILED,
@@ -892,7 +910,7 @@ class RayVpnService : VpnService() {
         XrayLogManager.appendLog("Initiating clean VPN disconnection...", "VPN")
         updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING))
 
-        protectionRequested = false
+        supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.USER_DISCONNECT)
         disconnectResources()
 
         updateState(ConnectionState(
@@ -1066,7 +1084,7 @@ class RayVpnService : VpnService() {
 
     override fun onRevoke() {
         XrayLogManager.appendLog("VPN service revoked by system or another VPN application.", "VPN")
-        protectionRequested = false
+        supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.REVOKED)
         disconnectResources()
         updateState(ConnectionState(status = ConnectionStatus.DISCONNECTED))
         if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
@@ -1076,7 +1094,7 @@ class RayVpnService : VpnService() {
 
     override fun onDestroy() {
         com.example.xray.RealDelayProbe.socketProtector = null
-        protectionRequested = false
+        supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.SERVICE_DESTROYED)
         connectJob?.cancel()
         serviceScope.coroutineContext[Job]?.cancel()
         settingsObserverJob?.cancel()
