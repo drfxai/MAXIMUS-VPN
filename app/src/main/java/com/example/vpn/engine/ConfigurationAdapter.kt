@@ -26,6 +26,11 @@ object ConfigurationAdapter {
         UNKNOWN
     }
 
+    private val LINK_FORMATS = setOf(
+        DetectedFormat.VLESS_LINK, DetectedFormat.SHADOWSOCKS_LINK, DetectedFormat.TROJAN_LINK,
+        DetectedFormat.HYSTERIA2_LINK, DetectedFormat.WIREGUARD_LINK
+    )
+
     fun detectFormat(rawInput: String): DetectedFormat {
         val trimmed = rawInput.trim()
         if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
@@ -60,7 +65,17 @@ object ConfigurationAdapter {
      */
     fun importConfiguration(rawInput: String, sourceUrl: String? = null): List<VlessProfile> {
         val trimmed = rawInput.trim()
-        return when (detectFormat(trimmed)) {
+        if (WireGuardConf.looksLikeConf(trimmed)) {
+            return runCatching { listOf(WireGuardConf.parse(trimmed)) }.getOrDefault(emptyList())
+        }
+        // Several links, a Base64 subscription body or a link type without its own branch below
+        // (VMess, SOCKS, HTTP...): the full importer handles every format the app can run.
+        val singleLine = trimmed.lines().count { it.isNotBlank() } == 1
+        val format = detectFormat(trimmed)
+        if (format == DetectedFormat.UNKNOWN || (!singleLine && format in LINK_FORMATS)) {
+            return UniversalImportEngine.importText(trimmed, sourceSubscriptionUrl = sourceUrl).validProfiles
+        }
+        return when (format) {
             DetectedFormat.VLESS_LINK -> {
                 val res = VlessParser.parse(trimmed)
                 if (res is com.example.core.AppResult.Success) listOf(res.data) else emptyList()

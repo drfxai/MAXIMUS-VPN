@@ -131,7 +131,8 @@ object MihomoParser {
 
         val uuid = map["uuid"]?.toString() ?: map["password"]?.toString() ?: map["auth"]?.toString() ?: ""
         val password = map["password"]?.toString() ?: map["auth"]?.toString() ?: uuid
-        val cipher = map["cipher"]?.toString() ?: "none"
+        // Shadowsocks and VMess name it cipher; VLESS (VLESS Encryption) names it encryption.
+        val cipher = map["cipher"]?.toString() ?: map["encryption"]?.toString() ?: "none"
 
         val network = when (map["network"]?.toString()?.lowercase()) {
             "websocket" -> "ws"
@@ -289,52 +290,42 @@ object MihomoParser {
     }
 
     /**
-     * Converts a Mihomo/Clash YAML content into a list of individual VlessProfile objects
-     * and/or a bundle profile for direct execution.
+     * Converts Mihomo/Clash YAML into one profile per proxy, each run on the bundled Xray core.
+     *
+     * There is no native Mihomo core in the app, so a "whole config" bundle profile (proxy groups,
+     * rules) could never carry traffic and is no longer created. TUIC proxies are skipped: Xray has no
+     * TUIC client. WireGuard proxies (also AmneziaWG with a standard packet format) are kept.
      */
     fun toVlessProfiles(yamlContent: String, sourceUrl: String? = null): List<VlessProfile> {
         val config = parseYaml(yamlContent)
         val result = mutableListOf<VlessProfile>()
-
-        // 1. Bundle Profile representing the whole configuration
-        if (config.proxies.isNotEmpty() || config.proxyGroups.isNotEmpty()) {
-            val primaryNode = config.proxies.firstOrNull()
-            val bundleProfile = VlessProfile(
-                id = UUID.randomUUID().toString(),
-                name = if (sourceUrl != null) "Mihomo Bundle (${config.proxies.size} Nodes)" else "Mihomo Config (${config.proxies.size} Nodes)",
-                address = primaryNode?.server ?: "127.0.0.1",
-                port = primaryNode?.port ?: 443,
-                uuid = primaryNode?.uuid ?: "",
-                encryption = primaryNode?.cipher ?: "none",
-                transport = primaryNode?.network ?: "tcp",
-                security = if (primaryNode?.reality == true) "reality" else if (primaryNode?.tls == true) "tls" else "none",
-                sni = primaryNode?.sni ?: "",
-                host = primaryNode?.host ?: "",
-                path = primaryNode?.path ?: "",
-                serviceName = primaryNode?.serviceName ?: "",
-                flow = primaryNode?.flow ?: "",
-                fingerprint = primaryNode?.fingerprint ?: "",
-                publicKey = primaryNode?.publicKey ?: "",
-                shortId = primaryNode?.shortId ?: "",
-                spiderX = primaryNode?.spiderX ?: "",
-                alpn = primaryNode?.alpn?.joinToString(",") ?: "",
-                profileType = ProfileType.MIHOMO_YAML,
-                protocolType = primaryNode?.type ?: ProtocolType.VLESS,
-                engineType = EngineType.MIHOMO,
-                rawConfig = yamlContent,
-                subscriptionUrl = sourceUrl,
-                proxyGroupName = config.proxyGroups.firstOrNull()?.name,
-                nodeCount = config.proxies.size
-            )
-            result.add(bundleProfile)
-        }
-
-        // 2. Individual profiles for each proxy node
         for (node in config.proxies) {
+            if (node.type == ProtocolType.TUIC) continue
             result.add(proxyNodeToVlessProfile(node, sourceUrl))
         }
-
+        result.addAll(wireGuardProfiles(yamlContent, sourceUrl))
         return result
+    }
+
+    /** `type: wireguard` proxies; ones whose server needs the AmneziaWG core are skipped and logged. */
+    private fun wireGuardProfiles(yamlContent: String, sourceUrl: String?): List<VlessProfile> {
+        if (!yamlContent.contains("wireguard", ignoreCase = true) || yamlContent.length > MAX_YAML_CODE_POINTS) return emptyList()
+        val options = LoaderOptions().apply {
+            codePointLimit = MAX_YAML_CODE_POINTS
+            nestingDepthLimit = 50
+            maxAliasesForCollections = 50
+        }
+        val root = runCatching { Yaml(SafeConstructor(options)).load<Any>(yamlContent) as? Map<*, *> }.getOrNull() ?: return emptyList()
+        return (root["proxies"] as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
+            .filter { it["type"]?.toString()?.trim().equals("wireguard", ignoreCase = true) }
+            .mapNotNull { map ->
+                try {
+                    com.example.vpn.engine.WireGuardConf.fromMihomo(map).copy(subscriptionUrl = sourceUrl)
+                } catch (e: IllegalArgumentException) {
+                    XrayLogManager.appendLog("Skipped WireGuard proxy '${map["name"]}': ${e.message}", "MIHOMO")
+                    null
+                }
+            }
     }
 
     fun proxyNodeToVlessProfile(node: ProxyNode, sourceUrl: String? = null): VlessProfile {
@@ -382,7 +373,7 @@ object MihomoParser {
             headerType = "",
             profileType = ProfileType.VLESS,
             protocolType = node.type,
-            engineType = EngineType.MIHOMO,
+            engineType = EngineType.XRAY,
             rawConfig = "",
             subscriptionUrl = sourceUrl,
             nodeCount = 1

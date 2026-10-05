@@ -102,7 +102,7 @@ object UniversalImportEngine {
                     }
                     is ParsedItem.Unsupported -> {
                         unsupportedCount++
-                        invalidEntries.add("Unsupported protocol/format: ${parsedItem.rawSnippet}")
+                        invalidEntries.add("${parsedItem.reason}: ${parsedItem.rawSnippet}")
                     }
                 }
             }
@@ -132,7 +132,7 @@ object UniversalImportEngine {
     sealed class ParsedItem {
         data class Success(val profile: VlessProfile) : ParsedItem()
         data class Invalid(val rawSnippet: String, val reason: String) : ParsedItem()
-        data class Unsupported(val rawSnippet: String) : ParsedItem()
+        data class Unsupported(val rawSnippet: String, val reason: String = "Unsupported protocol/format") : ParsedItem()
     }
 
     private fun parseRawSource(rawContent: String, fileName: String?, subUrl: String?): List<ParsedItem> {
@@ -148,17 +148,22 @@ object UniversalImportEngine {
             }
         }
 
-        // 2. Check if JSON (Xray or Sing-box)
+        // 2. WireGuard / AmneziaWG .conf file
+        if (WireGuardConf.looksLikeConf(trimmed)) {
+            return listOf(parseWireGuardConf(trimmed, fileName, subUrl))
+        }
+
+        // 3. Check if JSON (Xray or Sing-box)
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             return parseJsonConfig(trimmed, fileName, subUrl)
         }
 
-        // 3. Check if YAML (Mihomo / Clash)
+        // 4. Check if YAML (Mihomo / Clash)
         if (trimmed.contains("proxies:") || trimmed.contains("proxy-groups:") || trimmed.contains("mixed-port:")) {
             return parseYamlConfig(trimmed, subUrl)
         }
 
-        // 4. Line-by-line URI parsing (VLESS, VMess, Trojan, SS, HY2, TUIC, SOCKS5, HTTP)
+        // 5. Line-by-line URI parsing (VLESS, VMess, Trojan, SS, HY2, TUIC, SOCKS5, HTTP)
         val lines = trimmed.lines()
             .map { it.trim() }
             .filter { it.isNotBlank() && !it.startsWith("//") && !it.startsWith("#") }
@@ -192,7 +197,8 @@ object UniversalImportEngine {
                 parseHysteria2Uri(uriString, fileName, subUrl)
             }
             lower.startsWith("tuic://") -> {
-                parseTuicUri(uriString, fileName, subUrl)
+                // Parsed profiles would sit in the list and fail at connect: Xray has no TUIC client.
+                ParsedItem.Unsupported(uriString.take(60), TUIC_UNSUPPORTED)
             }
             lower.startsWith("wireguard://") || lower.startsWith("wg://") -> {
                 parseWireGuardUri(uriString, fileName, subUrl)
@@ -488,6 +494,17 @@ object UniversalImportEngine {
         ParsedItem.Success(ProtocolLinks.parseWireGuard(uriString).copy(sourceFile = fileName, sourceSubscription = subUrl))
     } catch (e: Exception) {
         ParsedItem.Invalid(uriString.take(60), "Failed to parse WireGuard link: ${e.message}")
+    }
+
+    const val TUIC_UNSUPPORTED = "TUIC needs a sing-box or Mihomo core, which MAXIMUS does not bundle; use a Hysteria2 link (also QUIC)"
+
+    fun parseWireGuardConf(text: String, fileName: String? = null, subUrl: String? = null): ParsedItem = try {
+        val name = fileName?.substringAfterLast('/')?.removeSuffix(".conf")
+        ParsedItem.Success(WireGuardConf.parse(text, name).copy(sourceFile = fileName, sourceSubscription = subUrl))
+    } catch (e: WireGuardConf.Unsupported) {
+        ParsedItem.Unsupported(text.lineSequence().firstOrNull().orEmpty().take(60), e.message.orEmpty())
+    } catch (e: Exception) {
+        ParsedItem.Invalid(text.take(60), "Failed to parse WireGuard file: ${e.message}")
     }
 
     fun parseTuicUri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem {
