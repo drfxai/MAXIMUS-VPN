@@ -30,7 +30,9 @@ class FreeConfigHubTest {
         assertFalse(r.accepted.any { it.profile.allowInsecure })
         assertTrue(r.accepted.all { it.security == SecurityState.UNVERIFIED && it.profile.id.startsWith("hub-p-") })
         val reasons = r.quarantined.associate { it.profile.address to it.security }
-        assertEquals(mapOf("203.0.113.8" to SecurityState.INSECURE, "10.10.34.36" to SecurityState.INSECURE), reasons)
+        // TUIC needs the Mihomo engine program, which unit tests run without.
+        assertEquals(mapOf("203.0.113.8" to SecurityState.INSECURE, "10.10.34.36" to SecurityState.INSECURE,
+            "203.0.113.10" to SecurityState.UNSUPPORTED), reasons)
         assertFalse(r.accepted.any { it.approved })
         val trojan = r.accepted[1].profile
         assertEquals("Does not check the server's certificate",

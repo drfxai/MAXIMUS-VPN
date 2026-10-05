@@ -13,8 +13,8 @@ import org.json.JSONObject
  *
  * AmneziaWG's junk packets (Jc, Jmin, Jmax) are sent by the client only, before the handshake, so
  * the server never needs to match them: they become an Xray UDP `noise` mask. Its header changes
- * (S1–S4 padding, H1–H4 message types) must match the server and change the WireGuard wire format,
- * which Xray cannot speak, so such a file is refused at import instead of failing at connect.
+ * (S1–S4 padding, H1–H4 message types, I1–I5 packets) must match the server and change the WireGuard
+ * wire format, which Xray cannot speak, so such a server runs on the Mihomo engine instead.
  */
 object WireGuardConf {
     /** H1–H4 values of a server that keeps WireGuard's own message types. */
@@ -120,7 +120,9 @@ object WireGuardConf {
         require(privateKey.isNotBlank()) { "The WireGuard config has no PrivateKey" }
         require(publicKey.isNotBlank()) { "The WireGuard config has no peer PublicKey" }
         require(address.isNotBlank()) { "The WireGuard config has no interface Address" }
-        checkAmneziaCompatible(amnezia)
+        if (!isStandardFormat(amnezia)) {
+            return mihomoProfile(name, host, port, privateKey, publicKey, address, preSharedKey, mtu, keepAlive, reserved, amnezia)
+        }
 
         val extras = JSONObject().put(ProfileExtras.WG_ADDRESS, address.split(',').map { it.trim() }.filter { it.isNotEmpty() }.joinToString(","))
         if (reserved.isNotBlank()) extras.put(ProfileExtras.WG_RESERVED, reserved)
@@ -143,6 +145,27 @@ object WireGuardConf {
             protocolType = ProtocolType.WIREGUARD,
             engineType = EngineType.XRAY
         )
+    }
+
+    fun isStandardFormat(awg: Map<String, String>): Boolean = runCatching { checkAmneziaCompatible(awg) }.isSuccess
+
+    /** An AmneziaWG server with its own packet format, as a Mihomo `wireguard` proxy. */
+    private fun mihomoProfile(
+        name: String, host: String, port: Int, privateKey: String, publicKey: String, address: String,
+        preSharedKey: String, mtu: Int?, keepAlive: Int?, reserved: String, amnezia: Map<String, String>
+    ): VlessProfile {
+        val proxy = linkedMapOf<String, Any>("name" to name, "type" to "wireguard", "server" to host, "port" to port,
+            "private-key" to privateKey, "public-key" to publicKey, "udp" to true)
+        val addresses = address.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        addresses.firstOrNull { !it.contains(':') }?.let { proxy["ip"] = it.substringBefore('/') }
+        addresses.firstOrNull { it.contains(':') }?.let { proxy["ipv6"] = it.substringBefore('/') }
+        if (preSharedKey.isNotBlank()) proxy["pre-shared-key"] = preSharedKey
+        mtu?.let { proxy["mtu"] = it }
+        keepAlive?.takeIf { it > 0 }?.let { proxy["persistent-keepalive"] = it }
+        reserved.split(',').mapNotNull { it.trim().toIntOrNull() }.takeIf { it.size == 3 }?.let { proxy["reserved"] = it }
+        // Numbers stay numbers; I1–I5 are packet descriptions and stay text.
+        proxy["amnezia-wg-option"] = amnezia.mapValues { (k, v) -> if (k.startsWith("i")) v else v.toLongOrNull() ?: v }
+        return com.example.vpn.sidecar.MihomoSidecar.profile(proxy)
     }
 
     /** Throws [Unsupported] when the server expects AmneziaWG's changed packet format. */

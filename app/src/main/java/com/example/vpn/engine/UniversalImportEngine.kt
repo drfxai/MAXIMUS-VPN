@@ -202,8 +202,8 @@ object UniversalImportEngine {
                 parseHysteria2Uri(uriString, fileName, subUrl)
             }
             lower.startsWith("tuic://") -> {
-                // Parsed profiles would sit in the list and fail at connect: Xray has no TUIC client.
-                ParsedItem.Unsupported(uriString.take(60), TUIC_UNSUPPORTED)
+                // Xray has no TUIC client; these run on the Mihomo engine.
+                parseTuicUri(uriString, fileName, subUrl)
             }
             lower.startsWith("wireguard://") || lower.startsWith("wg://") -> {
                 parseWireGuardUri(uriString, fileName, subUrl)
@@ -501,7 +501,6 @@ object UniversalImportEngine {
         ParsedItem.Invalid(uriString.take(60), "Failed to parse WireGuard link: ${e.message}")
     }
 
-    const val TUIC_UNSUPPORTED = "TUIC needs a sing-box or Mihomo core, which MAXIMUS does not bundle; use a Hysteria2 link (also QUIC)"
 
     fun parseWireGuardConf(text: String, fileName: String? = null, subUrl: String? = null): ParsedItem = try {
         val name = fileName?.substringAfterLast('/')?.removeSuffix(".conf")
@@ -525,27 +524,9 @@ object UniversalImportEngine {
             } else "TUIC-${comp.host}"
 
             val params = parseQueryParams(comp.query)
-            val sni = params["sni"] ?: comp.host
-            val alpn = params["alpn"] ?: "h3"
-
-            val profile = VlessProfile(
-                id = UUID.randomUUID().toString(),
-                name = name,
-                address = comp.host,
-                port = if (comp.port in 1..65535) comp.port else 443,
-                uuid = auth,
-                encryption = "none",
-                transport = "quic",
-                security = "tls",
-                sni = sni,
-                alpn = alpn,
-                profileType = ProfileType.VLESS,
-                protocolType = ProtocolType.TUIC,
-                engineType = EngineType.MIHOMO,
-                sourceFile = fileName,
-                sourceSubscription = subUrl,
-                nodeCount = 1
-            )
+            val port = if (comp.port in 1..65535) comp.port else 443
+            val proxy = com.example.vpn.sidecar.MihomoSidecar.fromTuicLink(safeDecodeUrl(auth), comp.host, port, params, name)
+            val profile = com.example.vpn.sidecar.MihomoSidecar.profile(proxy, sourceUrl = subUrl, sourceFile = fileName)
             ParsedItem.Success(profile)
         } catch (e: Exception) {
             ParsedItem.Invalid(uriString.take(60), "Failed to parse TUIC link: ${e.message}")

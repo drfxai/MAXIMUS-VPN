@@ -8,7 +8,7 @@ import java.security.SecureRandom
 /** The sidecar engines the app knows, and where their programs are on this phone. */
 object Sidecars {
     /** Registered engines, strongest first. Each engine file adds itself here. */
-    val ENGINES: List<SidecarEngine> by lazy { listOf<SidecarEngine>() }
+    val ENGINES: List<SidecarEngine> by lazy { listOf<SidecarEngine>(MihomoSidecar) }
 
     /** Directory Android extracted the APK's native libraries to; set once by the app. */
     @Volatile var nativeLibraryDir: String? = null

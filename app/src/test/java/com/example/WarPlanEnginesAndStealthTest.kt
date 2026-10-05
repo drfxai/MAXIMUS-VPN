@@ -1,6 +1,7 @@
 package com.example
 
 import com.example.data.model.EngineType
+import com.example.data.model.ProfileType
 import com.example.data.model.ProtocolType
 import com.example.data.model.VlessProfile
 import com.example.mihomo.MihomoParser
@@ -65,11 +66,21 @@ class WarPlanEnginesAndStealthTest {
             EngineSelectionPolicy.select(tagged.copy(security = "none", flow = "", protocolType = ProtocolType.SOCKS5, uuid = "")))
     }
 
-    @Test fun tuicIsRefusedAtImportInsteadOfFailingAtConnect() {
-        val result = UniversalImportEngine.importText("tuic://uuid:pass@1.2.3.4:443?sni=x.com#T")
-        assertTrue(result.validProfiles.isEmpty())
-        assertEquals(1, result.unsupportedCount)
-        assertTrue(result.invalidEntries.single().contains("TUIC"))
+    @Test fun tuicLinksBecomeMihomoProfiles() {
+        val result = UniversalImportEngine.importText("tuic://uuid:p%40ss@1.2.3.4:443?sni=x.com&congestion_control=bbr#T")
+        val profile = result.validProfiles.single()
+        assertEquals(ProfileType.MIHOMO_YAML, profile.profileType)
+        assertEquals(ProtocolType.TUIC, profile.protocolType)
+        val proxy = com.example.vpn.sidecar.MihomoSidecar.proxyOf(profile)!!
+        assertEquals("tuic", proxy.getString("type"))
+        assertEquals("uuid", proxy.getString("uuid"))
+        assertEquals("p@ss", proxy.getString("password"))
+        assertEquals("x.com", proxy.getString("sni"))
+        assertEquals("bbr", proxy.getString("congestion-controller"))
+        assertEquals(com.example.vpn.sidecar.MihomoSidecar, com.example.vpn.sidecar.Sidecars.forProfile(profile))
+        // Without the engine program on the phone the profile is refused at connect, with the reason.
+        assertTrue(RuntimeCapabilities.unsupportedReason(profile)!!.contains("mihomo"))
+        // A VLESS-shaped profile merely tagged TUIC is still nothing Xray can run.
         assertNotNull(RuntimeCapabilities.unsupportedReason(reality.copy(protocolType = ProtocolType.TUIC)))
     }
 
@@ -111,12 +122,21 @@ class WarPlanEnginesAndStealthTest {
         assertEquals("40-70", noise.getJSONObject("settings").getJSONArray("noise").getJSONObject(0).getString("rand"))
     }
 
-    @Test fun amneziaWgWithChangedHeadersIsRefusedWithTheReason() {
+    @Test fun amneziaWgWithChangedHeadersRunsOnMihomo() {
         val changed = conf.replace("S1 = 0", "S1 = 86").replace("H1 = 1", "H1 = 1020325451")
         val item = UniversalImportEngine.parseWireGuardConf(changed)
-        assertTrue(item is UniversalImportEngine.ParsedItem.Unsupported)
-        assertTrue((item as UniversalImportEngine.ParsedItem.Unsupported).reason.contains("S1, H1"))
-        assertEquals(1, ConfigurationAdapter.importConfiguration(conf).size)
+        val profile = (item as UniversalImportEngine.ParsedItem.Success).profile
+        assertEquals(ProfileType.MIHOMO_YAML, profile.profileType)
+        val proxy = com.example.vpn.sidecar.MihomoSidecar.proxyOf(profile)!!
+        assertEquals("wireguard", proxy.getString("type"))
+        assertEquals("10.8.0.2", proxy.getString("ip"))
+        assertEquals("fd00::2", proxy.getString("ipv6"))
+        val awg = proxy.getJSONObject("amnezia-wg-option")
+        assertEquals(86, awg.getInt("s1"))
+        assertEquals(1020325451L, awg.getLong("h1"))
+        assertEquals(4, awg.getInt("jc"))
+        // The standard format still runs on Xray.
+        assertEquals(ProfileType.VLESS, ConfigurationAdapter.importConfiguration(conf).single().profileType)
     }
 
     @Test fun mihomoYamlWireGuardAndVlessRunOnXray() {
@@ -156,7 +176,10 @@ class WarPlanEnginesAndStealthTest {
                 uuid: 11111111-2222-3333-4444-555555555555
                 password: p
         """.trimIndent()
-        val profiles = MihomoParser.toVlessProfiles(yaml)
+        val all = MihomoParser.toVlessProfiles(yaml)
+        // TUIC and the changed-format AmneziaWG server go to the Mihomo engine.
+        assertEquals(listOf("awg-custom", "tuic"), all.filter { it.profileType == ProfileType.MIHOMO_YAML }.map { it.name })
+        val profiles = all.filter { it.profileType != ProfileType.MIHOMO_YAML }
         assertEquals(listOf("vless-enc", "wg"), profiles.map { it.name })
         assertTrue(profiles.all { it.engineType == EngineType.XRAY && RuntimeCapabilities.unsupportedReason(it) == null })
         assertEquals("1,2,3", JSONObject(profiles[1].extraSettings).getString("wgReserved"))
