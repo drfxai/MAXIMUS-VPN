@@ -179,7 +179,14 @@ export async function handle(chatId, text, env, now = Date.now(), meta = {}) {
   const command = text.split(/[\s@]/)[0].toLowerCase();
   if (ADMIN_COMMANDS.includes(command)) return admin(chatId, command, text, env, meta);
   // The admin can simply write; everyone else gets the fixed commands.
-  if (!command.startsWith("/") && isAdmin(env, chatId)) return aiChat(chatId, text, env);
+  if (!command.startsWith("/") && isAdmin(env, chatId)) {
+    // /setkey tapped from the menu arrives without the key: the next message is the key.
+    if (env.STORE && (await env.STORE.get("await_key"))) {
+      await env.STORE.delete("await_key");
+      return aiCommand(chatId, "/setkey", [text.trim()], env, meta);
+    }
+    return aiChat(chatId, text, env);
+  }
   if (!["/start", "/help", "/sub", "/configs", "/app"].includes(command)) {
     return send(env, chatId, helpText(env));
   }
@@ -507,9 +514,10 @@ const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
 const HISTORY_TURNS = 12;
 const MAX_TOOL_ROUNDS = 6;
 
+/** The key saved from Telegram wins, so /setkey always takes effect; the GEMINI_API_KEY secret is the fallback. */
 async function aiKey(env) {
-  if (env.GEMINI_API_KEY) return env.GEMINI_API_KEY;
-  return env.STORE ? (await env.STORE.get("gemini_key")) || "" : "";
+  const saved = env.STORE ? (await env.STORE.get("gemini_key")) || "" : "";
+  return saved || env.GEMINI_API_KEY || "";
 }
 
 async function aiModel(env) {
@@ -520,14 +528,18 @@ async function aiCommand(chatId, command, args, env, meta) {
   if (command === "/setkey") {
     // The key must not stay in the chat history: delete the admin's message first.
     if (meta.messageId) await telegram(env, "deleteMessage", { chat_id: chatId, message_id: meta.messageId });
-    const key = args[0] || "";
+    if (!args[0]) {
+      await env.STORE.put("await_key", "1", { expirationTtl: 300 });
+      return send(env, chatId, "Send the Gemini API key as your next message. I will delete it from the chat right away.");
+    }
+    const key = args[0];
     if (!/^[A-Za-z0-9_-]{20,200}$/.test(key)) return send(env, chatId, "That does not look like a Gemini API key. Send /setkey followed by the key from aistudio.google.com.");
     await env.STORE.put("gemini_key", key);
     return send(env, chatId, `Key saved (ends in ${key.slice(-4)}) and your message deleted. Now just write what you want, for example: show the VIP list.`);
   }
   if (command === "/delkey") {
     await env.STORE.delete("gemini_key");
-    return send(env, chatId, env.GEMINI_API_KEY ? "Stored key removed. A GEMINI_API_KEY secret is still set in Cloudflare and stays in use." : "Key removed. The AI assistant is off.");
+    return send(env, chatId, env.GEMINI_API_KEY ? "Saved key removed. The GEMINI_API_KEY secret in Cloudflare is used instead; delete it there to turn the assistant off." : "Key removed. The AI assistant is off.");
   }
   if (command === "/model") {
     if (args[0]) {

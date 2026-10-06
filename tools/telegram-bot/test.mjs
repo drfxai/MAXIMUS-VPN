@@ -89,7 +89,7 @@ assert.deepEqual(gitHubMirrors("https://panel.example.org/sub/x"), []);
 {
   const { env, sent } = fakeEnv(() => ({ body: "" }));
   const kv = new Map();
-  env.STORE = { get: async (k) => kv.get(k) ?? null, put: async (k, v) => void kv.set(k, v), delete: async (k) => void kv.delete(k) };
+  env.STORE = { get: async (k) => kv.get(k) ?? null, put: async (k, v, _opts) => void kv.set(k, v), delete: async (k) => void kv.delete(k) };
   env.ADMIN_ID = "777";
   env.SUB_URLS = "";
   await handle(5, "/addsub https://evil.example/sub", env, 0);
@@ -122,7 +122,7 @@ assert.deepEqual(gitHubMirrors("https://panel.example.org/sub/x"), []);
 {
   const { env, sent } = fakeEnv(() => ({ body: "" }));
   const kv = new Map();
-  env.STORE = { get: async (k) => kv.get(k) ?? null, put: async (k, v) => void kv.set(k, v), delete: async (k) => void kv.delete(k) };
+  env.STORE = { get: async (k) => kv.get(k) ?? null, put: async (k, v, _opts) => void kv.set(k, v), delete: async (k) => void kv.delete(k) };
   env.ADMIN_ID = "777";
   env.SUB_URLS = "";
   const vip = ["vless://v1@198.51.100.1:443?security=reality#VIP%20DE", "trojan://v2@198.51.100.2:443#VIP2", "ss://v3@198.51.100.3:8388#VIP3"];
@@ -193,7 +193,7 @@ assert.equal(describe("vmess://" + btoa(JSON.stringify({ ps: "Fast", add: "203.0
     return telegramFetch(url, init);
   };
   const kv = new Map();
-  env.STORE = { get: async (k) => kv.get(k) ?? null, put: async (k, v) => void kv.set(k, v), delete: async (k) => void kv.delete(k) };
+  env.STORE = { get: async (k) => kv.get(k) ?? null, put: async (k, v, _opts) => void kv.set(k, v), delete: async (k) => void kv.delete(k) };
   env.ADMIN_ID = "777";
   env.SUB_URLS = "";
 
@@ -203,6 +203,14 @@ assert.equal(describe("vmess://" + btoa(JSON.stringify({ ps: "Fast", add: "203.0
   await handle(5, "show me everything", env, 0);
   assert.equal(geminiBodies.length, 0);
 
+  // Tapped from the menu: no key yet, so the next message is taken as the key and deleted.
+  env.GEMINI_API_KEY = "OldSecretKey_from_cloudflare_0000";
+  await handle(777, "/setkey", env, 0, { messageId: 40 });
+  assert.match(sent.at(-1).text, /next message/);
+  await handle(777, "AIzaSyMenuKey_0123456789wxyz", env, 0, { messageId: 41 });
+  assert.equal(kv.get("gemini_key"), "AIzaSyMenuKey_0123456789wxyz");
+  assert.ok(sent.some((m) => m.message_id === 41));
+  assert.equal(kv.get("await_key"), undefined);
   await handle(777, "/setkey AIzaSyTestKey_0123456789abcd", env, 0, { messageId: 42 });
   assert.equal(kv.get("gemini_key"), "AIzaSyTestKey_0123456789abcd");
   assert.ok(sent.some((m) => m.message_id === 42 && m.chat_id === 777));
