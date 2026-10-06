@@ -90,7 +90,7 @@ class ProtocolsViewModel(app: Application) : AndroidViewModel(app) {
     fun runTest() {
         val s = _state.value
         if (s.phase is LabPhase.Running) return
-        if (VpnController.connectionState.value.let { it.isConnected || it.isBusy }) {
+        if (VpnController.connectionState.value.let { it.isTunnelUp || it.isBusy }) {
             _state.update { it.copy(error = "Disconnect the VPN first. The test needs your direct connection to see what your network blocks.") }
             return
         }

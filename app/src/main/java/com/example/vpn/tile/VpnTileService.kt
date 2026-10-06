@@ -115,11 +115,27 @@ class VpnTileService : TileService() {
                     tile.subtitle = profileName ?: "Connected"
                 }
             }
-            ConnectionStatus.CONNECTING, ConnectionStatus.RECONNECTING -> {
+            ConnectionStatus.DEGRADED -> {
+                tile.state = Tile.STATE_ACTIVE
+                tile.label = "Maximus VPN"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    tile.subtitle = "Checks failing"
+                }
+            }
+            ConnectionStatus.CONNECTING, ConnectionStatus.RECONNECTING, ConnectionStatus.PREPARING,
+            ConnectionStatus.VPN_INTERFACE_ESTABLISHED, ConnectionStatus.ENGINE_STARTED,
+            ConnectionStatus.PROXY_CONNECTING, ConnectionStatus.VERIFYING -> {
                 tile.state = Tile.STATE_UNAVAILABLE
                 tile.label = "Maximus VPN"
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     tile.subtitle = "Connecting..."
+                }
+            }
+            ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED -> {
+                tile.state = Tile.STATE_UNAVAILABLE
+                tile.label = "Maximus VPN"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    tile.subtitle = "No traffic yet"
                 }
             }
             else -> {

@@ -144,7 +144,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun test(profiles: List<VlessProfile>) {
         if (_state.value.testing || profiles.isEmpty()) return
-        if (VpnController.connectionState.value.let { it.isConnected || it.isBusy }) {
+        if (VpnController.connectionState.value.let { it.isTunnelUp || it.isBusy }) {
             _state.update { it.copy(message = "Disconnect first to test servers on your own network.") }
             return
         }

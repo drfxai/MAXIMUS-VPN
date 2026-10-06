@@ -5,15 +5,14 @@ milestone. Branch: `feature/maximus-upgrade-7ooxpw` (from `main` 2bdf976).
 
 ## Current phase
 
-Phases 0, 1 and 2 implemented; CI (checks.yml) is the build of record for them. Next: Phase 3.
+Phases 0 to 3 implemented. Next: Phase 4 (structured diagnostics).
 
 ## Exact next action
 
-Phase 3: add the intermediate connection states (ENGINE_STARTED, VERIFYING,
-TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED, DEGRADED) to `data/model/ConnectionState.kt`, verify real
-traffic through the tunnel in `RayVpnService.connectLocked` before CONNECTED, and from there record
-verified free sessions into the last-known-good pool and evidence store, and call
-`SubscriptionManager.releaseRetained()` after disconnect.
+Phase 4: add `vpn/diagnostics/events/` (DiagEvent with session/attempt/test ids, severity,
+failure stage; bounded EventLog persisted asynchronously; ErrorAggregator; observation vs
+assessment; TestRegistry with QUEUED/RUNNING/COMPLETED/FAILED/CANCELLED; ApplicationExitInfo and
+main-thread stall capture), then emit events from RayVpnService, the test runners and diagnostics.
 
 ## Phase 0: inspection (done)
 
@@ -93,6 +92,16 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   verified config or dead evidence), `FreeListSwap.plan` + `ServerProfileDao.replace` (one Room
   transaction), `RetainedFreeConfigs`, `SubscriptionManager.swapFreeList / deleteAllFree / deleteFree /
   releaseRetained`. The refresh never deletes protected or in-use configs and never empties the list.
+
+- Phase 3: `ConnectionStatus` gains ENGINE_STARTED, VERIFYING, TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED
+  and DEGRADED; `ConnectionState` carries sessionId, attemptId, selectedProfileId,
+  attemptedProfileId, verifiedAt, failureStage, probeFailures, networkGeneration and `passKey`.
+  `ConnectionVerification.afterCheck` (pure) decides every transition and ignores results of other
+  attempts. `RayVpnService` verifies real traffic (`LiveTunnelProbe`, 3 tries) before CONNECTED,
+  re-checks every 4 s while unverified and every 10 s when connected (2 failures → DEGRADED), bumps
+  the network generation on network changes, records verified free sessions in the evidence store
+  and last-known-good pool, and releases retained free configs after disconnect. Diagnostics drop a
+  PASS when the pass key changes. UI words for the new states (button, badge, tile, home pill).
 
 ## Pending tasks
 

@@ -49,19 +49,23 @@ class DiagnosticsViewModel(
     private val _dnsTestRunning = MutableStateFlow(false)
     val dnsTestRunning: StateFlow<Boolean> = _dnsTestRunning.asStateFlow()
 
-    private fun dnsSessionKey() = connectionState.value.let {
-        Triple(it.isConnected, it.lastConnectedTime, it.activeProfile?.id)
-    } to settingsRepository.getSettings()
+    /**
+     * A PASS holds only for the attempt, network, profile and settings it was measured on: a disconnect,
+     * profile change, network change, engine restart or new attempt changes this key.
+     */
+    private fun dnsSessionKey() = connectionState.value.passKey to settingsRepository.getSettings()
 
     private var lastDnsSessionKey: Any? = null
 
     init {
         viewModelScope.launch {
             kotlinx.coroutines.flow.combine(connectionState, settingsRepository.settingsFlow) { conn, settings ->
-                Triple(conn.isConnected, conn.lastConnectedTime, conn.activeProfile?.id) to settings
+                conn.passKey to settings
             }.collect { key ->
                 if (lastDnsSessionKey != key) {
+                    // Older results stay only as history (the event log); the live view drops them.
                     _dnsPath.value = null
+                    _tunnelConnectivity.value = null
                     lastDnsSessionKey = key
                 }
             }
@@ -96,10 +100,14 @@ class DiagnosticsViewModel(
             )
             return
         }
+        val session = dnsSessionKey()
         viewModelScope.launch {
             _isTunnelTestRunning.value = true
             try {
-                _tunnelConnectivity.value = com.example.vpn.diagnostics.NetworkDiagnostics.testTunnelConnectivity()
+                val result = com.example.vpn.diagnostics.NetworkDiagnostics.testTunnelConnectivity()
+                // A result for a session that has since changed is not shown as current.
+                _tunnelConnectivity.value = if (session == dnsSessionKey()) result else
+                    com.example.vpn.diagnostics.TunnelConnectivityResult(reachable = false, errorMessage = "Connection or network changed; result discarded.")
             } finally {
                 _isTunnelTestRunning.value = false
             }
