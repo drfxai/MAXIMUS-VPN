@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -48,6 +49,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -55,6 +57,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -121,8 +124,7 @@ internal fun CloudflareTab(
         CloudflareHero(
             panelCount = panels.size,
             tokenReady = token.isNotBlank(),
-            busy = isBusy,
-            onOpenDocs = onOpenDocs
+            busy = isBusy
         )
 
         SetupCard(
@@ -133,6 +135,7 @@ internal fun CloudflareTab(
             isBusy = isBusy,
             onSignUp = onSignUp,
             onCreateToken = onCreateToken,
+            onOpenDocs = onOpenDocs,
             onPasteToken = onPasteToken,
             onInstall = onInstall,
             initialLoginExpanded = initialLoginExpanded
@@ -169,88 +172,84 @@ internal fun CloudflareTab(
 }
 
 @Composable
-private fun CloudflareHero(panelCount: Int, tokenReady: Boolean, busy: Boolean, onOpenDocs: () -> Unit) {
-    Box(
-        modifier = Modifier
+private fun CfCard(modifier: Modifier = Modifier, borderColor: Color = Cf.CardBorder, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0xFF2A1405), Color(0xFF16100D), Color(0xFF0B1424))
-                )
-            )
-            .border(1.dp, Cf.Orange.copy(alpha = 0.35f), RoundedCornerShape(24.dp))
-            .padding(18.dp)
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Brush.linearGradient(listOf(Cf.Amber, Cf.Orange))),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.Cloud, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
-                }
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Cloudflare", color = Cf.Text, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
-                    Text(
-                        "Your own BPB panel on the free Workers plan",
-                        color = Cf.Muted,
-                        fontSize = 12.5.sp,
-                        lineHeight = 16.sp
-                    )
-                }
-                Row(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.06f))
-                        .clickable(onClick = onOpenDocs)
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Language, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Docs", color = Cf.Muted, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
+            .clip(RoundedCornerShape(18.dp))
+            .background(Cf.Card)
+            .border(1.dp, borderColor, RoundedCornerShape(18.dp)),
+        content = content
+    )
+}
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HeroStat(
-                    value = panelCount.toString(),
-                    label = if (panelCount == 1) "Panel" else "Panels",
-                    accent = if (panelCount > 0) Cf.Green else Cf.Text,
-                    modifier = Modifier.weight(1f)
-                )
-                HeroStat(
-                    value = if (tokenReady) "Ready" else "Needed",
-                    label = "API token",
-                    accent = if (tokenReady) Cf.Green else Cf.Amber,
-                    modifier = Modifier.weight(1f)
-                )
-                HeroStat(
-                    value = if (busy) "Running" else "Workers",
-                    label = if (busy) "Install" else "Runs on",
-                    accent = if (busy) Cf.Blue else Cf.Text,
-                    modifier = Modifier.weight(1f)
-                )
+@Composable
+private fun CloudflareHero(panelCount: Int, tokenReady: Boolean, busy: Boolean) {
+    CfCard {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Cf.Orange.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Cloud, contentDescription = null, tint = Cf.Orange, modifier = Modifier.size(24.dp))
             }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Cloudflare Workers", color = Cf.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text("Your own BPB panel, free", color = Cf.Muted, fontSize = 12.5.sp)
+            }
+            StatusChip(
+                text = when {
+                    busy -> "Installing"
+                    panelCount > 0 -> "Live"
+                    tokenReady -> "Token ready"
+                    else -> "Not set up"
+                },
+                color = when {
+                    busy -> Cf.Blue
+                    panelCount > 0 || tokenReady -> Cf.Green
+                    else -> Cf.Muted
+                }
+            )
+        }
+        HorizontalDivider(color = Cf.CardBorder)
+        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            Metric("Panels", panelCount.toString(), if (panelCount > 0) Cf.Text else Cf.Muted, Modifier.weight(1f))
+            VDivider()
+            Metric("API token", if (tokenReady) "Added" else "Missing", if (tokenReady) Cf.Green else Cf.Amber, Modifier.weight(1f))
+            VDivider()
+            Metric("Plan", "Free", Cf.Text, Modifier.weight(1f))
         }
     }
 }
 
 @Composable
-private fun HeroStat(value: String, label: String, accent: Color, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.05f))
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+private fun StatusChip(text: String, color: Color) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(color.copy(alpha = 0.12f))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(value, color = accent, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Text(label, color = Cf.Muted, fontSize = 11.sp)
+        Box(Modifier.size(6.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(6.dp))
+        Text(text, color = color, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun Metric(label: String, value: String, valueColor: Color, modifier: Modifier = Modifier) {
+    Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(label, color = Cf.Muted, fontSize = 11.5.sp)
+        Spacer(Modifier.height(2.dp))
+        Text(value, color = valueColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -263,6 +262,7 @@ private fun SetupCard(
     isBusy: Boolean,
     onSignUp: () -> Unit,
     onCreateToken: () -> Unit,
+    onOpenDocs: () -> Unit,
     onPasteToken: () -> String?,
     onInstall: (token: String, account: String, username: String, password: String) -> Unit,
     initialLoginExpanded: Boolean
@@ -273,277 +273,237 @@ private fun SetupCard(
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     val tokenReady = token.isNotBlank()
+    val currentStep = if (tokenReady) 3 else 1
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(Cf.Card)
-            .border(1.dp, Cf.CardBorder, RoundedCornerShape(24.dp))
-            .padding(18.dp)
-    ) {
-        Text("Deploy a BPB panel", color = Cf.Text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        Text("Three steps, about two minutes.", color = Cf.Muted, fontSize = 12.sp)
-        Spacer(Modifier.height(18.dp))
+    CfCard {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Deploy a BPB panel", color = Cf.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (tokenReady) "Step 3 of 3 · ready to install" else "Three steps · about two minutes",
+                    color = Cf.Muted,
+                    fontSize = 12.5.sp
+                )
+            }
+            TextButton(onClick = onOpenDocs) {
+                Text("Guide", color = Cf.Muted, fontSize = 13.sp)
+                Spacer(Modifier.width(4.dp))
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(14.dp))
+            }
+        }
 
-        TimelineStep(
+        // Progress across the three steps.
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf("Account", "Token", "Install").forEachIndexed { i, label ->
+                val reached = i + 1 <= currentStep || (tokenReady && i < 2)
+                Column(modifier = Modifier.weight(1f)) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(CircleShape)
+                            .background(if (reached) Cf.Orange else Cf.CardBorder)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(label, color = if (reached) Cf.Text else Cf.Dim, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        HorizontalDivider(color = Cf.CardBorder, modifier = Modifier.padding(top = 4.dp))
+
+        StepRow(
             number = 1,
             done = tokenReady,
-            active = !tokenReady,
             title = "Cloudflare account",
-            body = "Create a free account and confirm your email. Skip this if you already have one."
-        ) {
-            StepButton(text = "Open sign-up", icon = Icons.Default.PersonAdd, filled = false, onClick = onSignUp)
-        }
-
-        TimelineStep(
+            subtitle = "Free account with a verified email",
+            action = "Sign up",
+            onAction = onSignUp
+        )
+        HorizontalDivider(color = Cf.CardBorder, modifier = Modifier.padding(start = 60.dp))
+        StepRow(
             number = 2,
             done = tokenReady,
-            active = !tokenReady,
             title = "API token",
-            body = "Opens Cloudflare with the Workers Scripts and Workers KV permissions already chosen."
+            subtitle = "Workers Scripts and Workers KV are pre-selected",
+            action = "Create",
+            primary = !tokenReady,
+            onAction = onCreateToken
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Cf.Inset)
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    MiniStep("Scroll down and tap Continue to summary")
-                    MiniStep("Tap Create Token")
-                    MiniStep("Copy the token and come back here")
-                }
-                StepButton(text = "Create token", icon = Icons.Default.Key, filled = true, onClick = onCreateToken)
-            }
+            Text(
+                "On Cloudflare tap Continue to summary, then Create Token, and copy it.",
+                color = Cf.Dim,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(top = 6.dp)
+            )
         }
+        HorizontalDivider(color = Cf.CardBorder, modifier = Modifier.padding(start = 60.dp))
 
-        TimelineStep(
-            number = 3,
-            done = false,
-            active = tokenReady,
-            title = "Paste and install",
-            body = "The panel's login link, username and password appear here when it finishes.",
-            last = true
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                CfField(
-                    value = token,
-                    onValueChange = onTokenChange,
-                    placeholder = "Paste the Cloudflare API token",
-                    icon = Icons.Default.Key,
-                    secret = !tokenVisible,
-                    trailing = {
-                        IconButton(onClick = { tokenVisible = !tokenVisible }) {
-                            Icon(
-                                if (tokenVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = "Show token",
-                                tint = Cf.Muted,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        IconButton(onClick = { onPasteToken()?.let(onTokenChange) }) {
-                            Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = Cf.Orange, modifier = Modifier.size(18.dp))
-                        }
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                StepBadge(number = 3, done = false, active = tokenReady)
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text("Paste token and install", color = Cf.Text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Your login details appear here when done", color = Cf.Muted, fontSize = 12.5.sp)
+                }
+            }
+            CfField(
+                value = token,
+                onValueChange = onTokenChange,
+                placeholder = "Cloudflare API token",
+                icon = Icons.Default.Key,
+                secret = !tokenVisible,
+                trailing = {
+                    IconButton(onClick = { tokenVisible = !tokenVisible }) {
+                        Icon(
+                            if (tokenVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = "Show token",
+                            tint = Cf.Muted,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
+                    IconButton(onClick = { onPasteToken()?.let(onTokenChange) }) {
+                        Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = Cf.Muted, modifier = Modifier.size(18.dp))
+                    }
+                }
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { loginExpanded = !loginExpanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Advanced: custom login and account ID",
+                    color = Cf.Muted,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier.weight(1f)
                 )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { loginExpanded = !loginExpanded }
-                        .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Custom login and account (optional)",
-                        color = Cf.Muted,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        if (loginExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null,
-                        tint = Cf.Muted
-                    )
-                }
-
-                AnimatedVisibility(visible = loginExpanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            "Leave any of these empty and Maximus fills it in for you.",
-                            color = Cf.Dim,
-                            fontSize = 11.5.sp
-                        )
-                        CfField(
-                            value = username,
-                            onValueChange = { username = it },
-                            placeholder = "Username",
-                            icon = Icons.Default.Person
-                        )
-                        CfField(
-                            value = password,
-                            onValueChange = { password = it },
-                            placeholder = "Password",
-                            icon = Icons.Default.Lock,
-                            secret = !passVisible,
-                            trailing = {
-                                IconButton(onClick = { passVisible = !passVisible }) {
-                                    Icon(
-                                        if (passVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = "Show password",
-                                        tint = Cf.Muted,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        )
-                        CfField(
-                            value = account,
-                            onValueChange = onAccountChange,
-                            placeholder = "Account ID",
-                            icon = Icons.Default.Tag
-                        )
-                    }
-                }
-
-                InstallButton(
-                    enabled = tokenReady && !isBusy,
-                    busy = isBusy,
-                    onClick = { onInstall(token.trim(), account.trim(), username.trim(), password.trim()) }
+                Icon(
+                    if (loginExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = Cf.Muted,
+                    modifier = Modifier.size(20.dp)
                 )
             }
+
+            AnimatedVisibility(visible = loginExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Leave any field empty and Maximus fills it in for you.", color = Cf.Dim, fontSize = 11.5.sp)
+                    CfField(value = username, onValueChange = { username = it }, placeholder = "Username", icon = Icons.Default.Person)
+                    CfField(
+                        value = password,
+                        onValueChange = { password = it },
+                        placeholder = "Password",
+                        icon = Icons.Default.Lock,
+                        secret = !passVisible,
+                        trailing = {
+                            IconButton(onClick = { passVisible = !passVisible }) {
+                                Icon(
+                                    if (passVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = "Show password",
+                                    tint = Cf.Muted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    )
+                    CfField(value = account, onValueChange = onAccountChange, placeholder = "Account ID", icon = Icons.Default.Tag)
+                }
+            }
+
+            InstallButton(
+                enabled = tokenReady && !isBusy,
+                busy = isBusy,
+                onClick = { onInstall(token.trim(), account.trim(), username.trim(), password.trim()) }
+            )
         }
     }
 }
 
 @Composable
-private fun TimelineStep(
+private fun StepBadge(number: Int, done: Boolean, active: Boolean) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(
+                when {
+                    done -> Cf.Green.copy(alpha = 0.14f)
+                    active -> Cf.Orange.copy(alpha = 0.14f)
+                    else -> Cf.Inset
+                }
+            )
+            .border(1.dp, if (done) Cf.Green else if (active) Cf.Orange else Cf.CardBorder, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        if (done) {
+            Icon(Icons.Default.Check, contentDescription = "Done", tint = Cf.Green, modifier = Modifier.size(15.dp))
+        } else {
+            Text(number.toString(), color = if (active) Cf.Orange else Cf.Muted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun StepRow(
     number: Int,
     done: Boolean,
-    active: Boolean,
     title: String,
-    body: String,
-    last: Boolean = false,
-    content: @Composable () -> Unit
+    subtitle: String,
+    action: String,
+    onAction: () -> Unit,
+    primary: Boolean = false,
+    extra: (@Composable () -> Unit)? = null
 ) {
-    val ringColor = when {
-        done -> Cf.Green
-        active -> Cf.Orange
-        else -> Cf.CardBorder
-    }
-    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-        Column(
-            modifier = Modifier.width(34.dp).fillMaxHeight(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .clip(CircleShape)
-                    .background(
-                        when {
-                            done -> Cf.Green.copy(alpha = 0.15f)
-                            active -> Cf.Orange.copy(alpha = 0.15f)
-                            else -> Cf.Inset
-                        }
-                    )
-                    .border(1.5.dp, ringColor, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                if (done) {
-                    Icon(Icons.Default.Check, contentDescription = "Done", tint = Cf.Green, modifier = Modifier.size(16.dp))
-                } else {
-                    Text(
-                        number.toString(),
-                        color = if (active) Cf.Orange else Cf.Muted,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-            if (!last) {
-                Box(
-                    Modifier
-                        .padding(vertical = 4.dp)
-                        .width(2.dp)
-                        .weight(1f)
-                        .clip(RoundedCornerShape(1.dp))
-                        .background(if (done) Cf.Green.copy(alpha = 0.5f) else Cf.CardBorder)
-                )
-            }
+    Row(
+        modifier = Modifier.padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        StepBadge(number = number, done = done, active = !done)
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Cf.Text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = Cf.Muted, fontSize = 12.5.sp, lineHeight = 17.sp)
+            extra?.invoke()
         }
-        Spacer(Modifier.width(12.dp))
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(bottom = if (last) 0.dp else 22.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Column {
-                Text(
-                    title,
-                    color = Cf.Text,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(body, color = Cf.Muted, fontSize = 12.5.sp, lineHeight = 17.sp)
-            }
-            content()
-        }
-    }
-}
-
-@Composable
-private fun MiniStep(text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier
-                .size(7.dp)
-                .clip(CircleShape)
-                .background(Cf.Orange)
-        )
         Spacer(Modifier.width(10.dp))
-        Text(text, color = Cf.Text, fontSize = 12.5.sp, lineHeight = 17.sp)
-    }
-}
-
-@Composable
-private fun StepButton(text: String, icon: ImageVector, filled: Boolean, onClick: () -> Unit) {
-    if (filled) {
-        Button(
-            onClick = onClick,
-            modifier = Modifier.fillMaxWidth().height(46.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Cf.Orange, contentColor = Color.White)
-        ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(text, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            Spacer(Modifier.width(6.dp))
-            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
-        }
-    } else {
-        OutlinedButton(
-            onClick = onClick,
-            modifier = Modifier.fillMaxWidth().height(46.dp),
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, Cf.CardBorder),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Cf.Text)
-        ) {
-            Icon(icon, contentDescription = null, tint = Cf.Orange, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            Spacer(Modifier.width(6.dp))
-            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(14.dp))
+        if (primary) {
+            Button(
+                onClick = onAction,
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Cf.Orange, contentColor = Color.White),
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text(action, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(4.dp))
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+            }
+        } else {
+            OutlinedButton(
+                onClick = onAction,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Cf.CardBorder),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Cf.Text),
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text(action, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.width(4.dp))
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(14.dp))
+            }
         }
     }
 }
@@ -581,52 +541,32 @@ private fun CfField(
 }
 
 @Composable
+private fun VDivider() {
+    Box(Modifier.width(1.dp).fillMaxHeight().background(Cf.CardBorder))
+}
+
+@Composable
 private fun InstallButton(enabled: Boolean, busy: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth().height(52.dp),
-        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().height(50.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = Color.Transparent,
-            disabledContainerColor = Color.Transparent
-        ),
-        contentPadding = PaddingValues(0.dp)
+            containerColor = Cf.Orange,
+            contentColor = Color.White,
+            disabledContainerColor = Cf.Inset,
+            disabledContentColor = Cf.Dim
+        )
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    if (enabled) Brush.horizontalGradient(listOf(Cf.Amber, Cf.Orange))
-                    else Brush.horizontalGradient(listOf(Cf.Inset, Cf.Inset)),
-                    RoundedCornerShape(16.dp)
-                )
-                .border(1.dp, if (enabled) Color.Transparent else Cf.CardBorder, RoundedCornerShape(16.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (busy) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Cf.Muted)
-                } else {
-                    Icon(
-                        Icons.Default.RocketLaunch,
-                        contentDescription = null,
-                        tint = if (enabled) Color.White else Cf.Dim,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = when {
-                        busy -> "Installing…"
-                        enabled -> "Install BPB panel"
-                        else -> "Paste a token to install"
-                    },
-                    color = if (enabled) Color.White else Cf.Dim,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
-            }
+        if (busy) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Cf.Muted)
+            Spacer(Modifier.width(10.dp))
+            Text("Installing…", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        } else {
+            Icon(Icons.Default.RocketLaunch, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(if (enabled) "Install BPB panel" else "Paste a token to install", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         }
     }
 }
@@ -644,9 +584,9 @@ private fun DeployProgressCard(isBusy: Boolean, statusText: String, logs: List<S
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(18.dp))
             .background(Cf.Card)
-            .border(1.dp, if (failed) Cf.Red.copy(alpha = 0.5f) else Cf.Blue.copy(alpha = 0.4f), RoundedCornerShape(24.dp))
+            .border(1.dp, if (failed) Cf.Red.copy(alpha = 0.5f) else Cf.Blue.copy(alpha = 0.4f), RoundedCornerShape(18.dp))
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -742,9 +682,9 @@ private fun DeployedResultCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(18.dp))
             .background(Cf.Card)
-            .border(1.dp, Cf.Green.copy(alpha = 0.45f), RoundedCornerShape(24.dp))
+            .border(1.dp, Cf.Green.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -805,9 +745,9 @@ private fun DeployedPanelsCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(18.dp))
             .background(Cf.Card)
-            .border(1.dp, Cf.CardBorder, RoundedCornerShape(24.dp))
+            .border(1.dp, Cf.CardBorder, RoundedCornerShape(18.dp))
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {

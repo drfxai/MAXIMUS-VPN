@@ -99,6 +99,39 @@ class SubscriptionViewModel(
         }
     }
 
+    /** Updates every subscription one after another; failures are counted, not fatal. */
+    fun syncAll() {
+        if (_uiState.value.isSyncing) return
+        val all = subscriptionsList.value
+        if (all.isEmpty()) return
+        viewModelScope.launch {
+            var failed = 0
+            var added = 0
+            for (sub in all) {
+                _uiState.value = _uiState.value.copy(
+                    isSyncing = true,
+                    syncingSubscriptionId = sub.id,
+                    statusMessage = null,
+                    errorMessage = null
+                )
+                try {
+                    val result = subscriptionManager.syncSubscription(sub)
+                    if (result.isSuccess) added += result.addedCount else failed++
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed++
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                isSyncing = false,
+                syncingSubscriptionId = null,
+                statusMessage = if (failed == 0) "Updated ${all.size} subscriptions: $added new nodes." else null,
+                errorMessage = if (failed > 0) "$failed of ${all.size} subscriptions could not be updated." else null
+            )
+        }
+    }
+
     fun deleteSubscription(subscription: SubscriptionInfo) {
         viewModelScope.launch {
             try {

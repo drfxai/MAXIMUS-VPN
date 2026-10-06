@@ -118,31 +118,42 @@ object GeminiModelCatalog {
             id = GEMINI_3_8_FLASH,
             displayName = "Gemini 3.8 Flash",
             badge = "Newest",
-            description = "Latest Flash model: the sharpest live diagnostics and fastest answers for co-pilot actions."
+            description = "Latest Flash model: the sharpest live diagnostics and fastest answers for co-pilot actions.",
+            speed = 5,
+            reasoning = 4
         ),
         ModelInfo(
             id = GEMINI_3_7_FLASH,
             displayName = "Gemini 3.7 Flash",
             badge = "Fast",
-            description = "Quick, low-cost replies with strong reasoning for everyday tuning and troubleshooting."
-        ),
-        ModelInfo(
-            id = GEMINI_2_5_FLASH,
-            displayName = "Gemini 2.5 Flash",
-            badge = "Recommended",
-            description = "High speed, low latency, ideal for live diagnostics, settings modification, and real-time chat."
+            description = "Quick, low-cost replies with strong reasoning for everyday tuning and troubleshooting.",
+            speed = 5,
+            reasoning = 3
         ),
         ModelInfo(
             id = GEMINI_3_5_FLASH,
             displayName = "Gemini 3.5 Flash",
-            badge = "Next-Gen",
-            description = "State-of-the-art reasoning for complex network and multi-turn autonomous co-pilot operations."
+            badge = "Default",
+            description = "State-of-the-art reasoning for complex network and multi-turn autonomous co-pilot operations.",
+            speed = 4,
+            reasoning = 4
+        ),
+        ModelInfo(
+            id = GEMINI_2_5_FLASH,
+            displayName = "Gemini 2.5 Flash",
+            badge = "Stable",
+            description = "High speed, low latency, ideal for live diagnostics, settings modification, and real-time chat.",
+            speed = 4,
+            reasoning = 2
         ),
         ModelInfo(
             id = GEMINI_3_1_PRO,
             displayName = "Gemini 3.1 Pro",
             badge = "Deep Reasoning",
-            description = "Advanced network reasoning, complex censorship diagnosis, and DPI analysis."
+            description = "Advanced network reasoning, complex censorship diagnosis, and DPI analysis.",
+            speed = 2,
+            reasoning = 5,
+            isPro = true
         )
     )
 }
@@ -151,7 +162,11 @@ data class ModelInfo(
     val id: String,
     val displayName: String,
     val badge: String,
-    val description: String
+    val description: String,
+    /** Relative 1-5 scores shown in the model picker. */
+    val speed: Int = 3,
+    val reasoning: Int = 3,
+    val isPro: Boolean = false
 )
 
 enum class UsageMode(
