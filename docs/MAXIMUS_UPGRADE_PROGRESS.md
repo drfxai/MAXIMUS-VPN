@@ -29,7 +29,7 @@ exists: `SubscriptionManager.deleteAllFree / deleteFree` and the `SyncResult` co
 | Free config generation | `.github/workflows/free-configs.yml` every 6 h → `tools/aggregator/scripts/aggregate.py` + `verify.py` (pinned Xray, real requests) → signed list on branch `free-configs` |
 | Telegram bot / backend | `tools/telegram-bot/worker.js` (Cloudflare Worker, KV `STORE`, Gemini admin assistant from PR #22, merged) |
 | Gemini integration | App: `ai/AiAgentManager.kt`, `ai/GeminiModels.kt`, key stored on device by the AI Agent setup. Bot: `/setkey` stores the key in KV |
-| Version | `app/build.gradle.kts`: versionName `1.0.0`, versionCode `26`; `release-version.txt` = `V1.0.0` |
+| Version | was versionName `1.0.0`, versionCode `26` (now 1.0.1 / 27 after Phase 9); `release-version.txt` = `V1.0.0` |
 | Diagnostics / logging | `xray/XrayLogManager.kt` (500-line in-memory ring, redacted), `core/SecretRedactor.kt`, `ui/viewmodel/DiagnosticsViewModel.kt`, `ui/diagnostics/DiagnosticsScreen.kt`, `vpn/diagnostics/*` |
 | Config models | `data/model/VlessProfile.kt`, `ConnectionState.kt`, `CanonicalFingerprint.kt`, `AppModels.kt` |
 
@@ -180,9 +180,16 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   lifecycle label, the YT·TG·X tag as "global", the site filter says "(global)", and a ⋮ menu has
   Test / Connect / Delete (`deleteFree`).
 
+- Phase 9: verification on 31a920c, Checks run 37469780994 green (`:app:testDebugUnitTest` incl. the
+  Robolectric free-list swap scenarios A to D, `:app:lintRelease`, aggregator tests, secret and
+  assistant-name scan); bot tests and aggregator tests pass locally. Version changed in code only:
+  versionName **1.0.1**, versionCode **27** (`app/build.gradle.kts`). Nothing published.
+  `release-version.txt` stays `V1.0.0` on purpose: a change to it on `main` starts the release
+  workflow, which publishes. A dry-run release build (tag `dry-run-1.0.1`) checks the APKs.
+
 ## Pending tasks
 
-- Phases 6 to 11.
+- Phases 10 and 11.
 
 ## Files changed
 
