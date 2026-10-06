@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Lock
@@ -515,6 +516,28 @@ fun SettingsScreen(
                         singleLine = true
                     )
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // SECTION: FREE CONFIGS
+        SectionHeader("FREE CONFIGS")
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                SettingToggleItem(
+                    icon = Icons.Default.CloudDownload,
+                    title = "Free configs",
+                    subtitle = if (settings.freeConfigsEnabled) "Downloads the free public server list and shows it in Servers and Free Configs"
+                    else "Off: the free list is not downloaded, tested or shown. Its servers were removed.",
+                    checked = settings.freeConfigsEnabled,
+                    onCheckedChange = { viewModel.setFreeConfigs(it) }
+                )
             }
         }
 

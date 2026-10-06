@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * The signed free list (the "MAXIMUS Free" subscription): its servers, tested with a real request on
- * this network, and the fastest one to connect to.
+ * this network when the user asks, one server at a time, and the fastest one to connect to.
  */
 class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -29,7 +29,12 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
     private val subscriptionRepository = RayApplication.instance.subscriptionRepository
     private val subscriptionManager = RayApplication.instance.subscriptionManager
 
-    private val _state = MutableStateFlow(FreeConfigsUiState(available = FreeConfigList.available()))
+    private val _state = MutableStateFlow(
+        FreeConfigsUiState(
+            available = FreeConfigList.available(),
+            enabled = RayApplication.instance.settingsRepository.getSettings().freeConfigsEnabled
+        )
+    )
     val state: StateFlow<FreeConfigsUiState> = _state.asStateFlow()
 
     /** Test results on this network since the screen opened, by profile id. */
@@ -47,12 +52,8 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
             publish(withContext(Dispatchers.IO) { trimSurplus() })
             loadSubscription()
             val s = _state.value
-            when {
-                !s.available -> Unit
-                // First visit, the list has not arrived yet, or it is due: fetch it, then test it.
-                s.total == 0 || s.lastUpdated == 0L || System.currentTimeMillis() >= s.nextUpdate -> refresh()
-                else -> testAll()
-            }
+            // First visit, the list has not arrived yet, or it is due: fetch it. Nothing is tested until the user asks.
+            if (s.available && s.enabled && (s.total == 0 || s.lastUpdated == 0L || System.currentTimeMillis() >= s.nextUpdate)) refresh()
         }
     }
 
@@ -87,16 +88,18 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun publish(profiles: List<VlessProfile>) {
         val nodes = profiles.map { p ->
-            val ms = latency[p.id]
+            // Before a test here, the last saved result stands in (it may come from another network).
+            val ms = if (p.id in tested) latency[p.id] else p.lastLatencyMs
             FreeNode(
                 profile = p,
                 country = p.countryCode ?: FreeConfigList.countryOf(p.name),
                 latencyMs = ms,
                 health = when {
-                    p.id !in tested -> NodeHealth.QUEUED
+                    p.id !in tested -> if (ms != null) FreeNode.healthOf(ms) else NodeHealth.QUEUED
                     ms == null -> NodeHealth.OFFLINE
                     else -> FreeNode.healthOf(ms)
                 },
+                sites = FreeConfigList.sitesOf(p.name),
                 passes = passes[p.id] ?: 0,
                 runs = runs[p.id] ?: 0
             )
@@ -104,9 +107,9 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(nodes = nodes) }
     }
 
-    /** Fetches the list again (adding the subscription if this install never had it), then tests it. */
+    /** Fetches the list again (adding the subscription if this install never had it). */
     fun refresh() {
-        if (!_state.value.available || _state.value.syncing) return
+        if (!_state.value.available || !_state.value.enabled || _state.value.syncing) return
         _state.update { it.copy(syncing = true, message = null) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -122,26 +125,30 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(message = "Could not update the list. The last verified list stays in use.") }
             }
             _state.update { it.copy(syncing = false) }
-            testAll()
         }
     }
 
-    /** Sends a real request through every server, fastest-first results appear as they come in. */
-    fun testAll() {
-        if (_state.value.testing) return
+    /**
+     * Sends a real request through every server, one server at a time so the phone stays responsive;
+     * each row updates as its test finishes. [stopTest] ends the run.
+     */
+    fun testAll() = test(_state.value.nodes.map { it.profile })
+
+    /** Tests one server. */
+    fun testOne(node: FreeNode) = test(listOf(node.profile))
+
+    private fun test(profiles: List<VlessProfile>) {
+        if (_state.value.testing || profiles.isEmpty()) return
         if (VpnController.connectionState.value.let { it.isConnected || it.isBusy }) {
             _state.update { it.copy(message = "Disconnect first to test servers on your own network.") }
             return
         }
-        val profiles = _state.value.nodes.map { it.profile }
-        if (profiles.isEmpty()) return
-        _state.update { it.copy(testing = true, message = null) }
+        _state.update { it.copy(testing = true, testDone = 0, testTotal = profiles.size, message = null) }
         testJob = viewModelScope.launch {
             try {
-                for (batch in profiles.chunked(BATCH)) {
-                    val outcomes = withContext(Dispatchers.IO) { RealDelayProbe.measure(batch, TIMEOUT_SEC) }
-                    batch.zip(outcomes).forEach { (p, outcome) ->
-                        if (outcome is RealDelayProbe.Outcome.NotRun) return@forEach
+                for ((i, p) in profiles.withIndex()) {
+                    val outcome = withContext(Dispatchers.IO) { RealDelayProbe.measure(p, TIMEOUT_SEC) }
+                    if (outcome !is RealDelayProbe.Outcome.NotRun) {
                         val ms = (outcome as? RealDelayProbe.Outcome.Delay)?.latencyMs
                         latency[p.id] = ms
                         tested += p.id
@@ -149,6 +156,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                         if (ms != null) passes[p.id] = (passes[p.id] ?: 0) + 1
                         withContext(Dispatchers.IO) { runCatching { serverRepository.updateLatency(p.id, ms) } }
                     }
+                    _state.update { it.copy(testDone = i + 1) }
                     publish(_state.value.nodes.map { it.profile })
                 }
             } finally {
@@ -157,9 +165,16 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Stops a test run; servers already tested keep their result. */
+    fun stopTest() {
+        testJob?.cancel()
+    }
+
     fun setSort(sort: FreeSort) = _state.update { it.copy(sort = sort) }
 
     fun setProtocol(protocol: String?) = _state.update { it.copy(protocol = protocol) }
+
+    fun setSite(site: String?) = _state.update { it.copy(site = site) }
 
     fun toggleHidden() = _state.update { it.copy(showHidden = !it.showHidden) }
 
@@ -171,7 +186,6 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
-        private const val BATCH = 24
         private const val TIMEOUT_SEC = 6
     }
 }

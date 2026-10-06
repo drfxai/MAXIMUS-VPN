@@ -92,7 +92,8 @@ class SettingsRepository(context: Context) {
             defaultDesyncConfig = desyncConfig,
             godModeMeshEnabled = prefs.getBoolean("god_mode_mesh", true),
             godModePsiphonEnabled = prefs.getBoolean("god_mode_psiphon", true),
-            godModeConduitEnabled = prefs.getBoolean("god_mode_conduit", true)
+            godModeConduitEnabled = prefs.getBoolean("god_mode_conduit", true),
+            freeConfigsEnabled = prefs.getBoolean("free_configs_enabled", true)
         )
     }
 
@@ -128,6 +129,7 @@ class SettingsRepository(context: Context) {
             .putBoolean("god_mode_mesh", settings.godModeMeshEnabled)
             .putBoolean("god_mode_psiphon", settings.godModePsiphonEnabled)
             .putBoolean("god_mode_conduit", settings.godModeConduitEnabled)
+            .putBoolean("free_configs_enabled", settings.freeConfigsEnabled)
             .apply()
 
         _settingsFlow.value = settings

@@ -4,6 +4,9 @@ A TCP connection proves almost nothing: the large CDNs accept it for any config,
 their port open. Here each candidate becomes an outbound of a local Xray core and fetches a small page
 through it, twice. Only servers that answer both times are kept, fastest first.
 
+Each server that passes then opens YouTube, Telegram and X through the same core ([SITES]). The result
+says which of the three it reached, so the list can hold only servers that open at least one of them.
+
 Formats Xray cannot run as a plain outbound (Hysteria2, WireGuard, Shadowsocks plugins, mKCP...) are
 never published: nothing here could show that they work.
 """
@@ -25,6 +28,13 @@ BATCH = 100
 BASE_PORT = 21000
 REQUEST_TIMEOUT_SEC = 7
 START_WAIT_SEC = 8
+# The sites people most need a VPN for, by the short tag the published name carries. Any HTTP answer over
+# a TLS connection curl verified counts: a server that cannot reach the site gives no answer at all.
+SITES = {
+    "YT": "https://www.youtube.com/generate_204",
+    "TG": "https://api.telegram.org/",
+    "X": "https://x.com/",
+}
 NETWORKS = {"tcp", "ws", "grpc", "httpupgrade", "xhttp", "splithttp"}
 
 
@@ -177,8 +187,26 @@ def _fetch(port: int, url: str, timeout: int) -> float | None:
         return None
 
 
-def _run_batch(xray: str, outbounds: list[dict], url: str, timeout: int, first_port: int) -> list[float | None]:
-    """Latency in seconds per outbound (None = no traffic carried); raises RuntimeError if Xray rejects the batch."""
+def _answers(port: int, url: str, timeout: int) -> bool:
+    """True when [url] gave any HTTP answer through the socks port (curl checks its certificate)."""
+    try:
+        done = subprocess.run(
+            ["curl", "-s", "-o", os.devnull, "-w", "%{http_code}", "--socks5-hostname", f"127.0.0.1:{port}",
+             "--max-time", str(timeout), url],
+            capture_output=True, text=True, timeout=timeout + 5, env=_clean_env())
+        code = done.stdout.strip()
+        return code.isdigit() and 100 <= int(code) < 500
+    except Exception:
+        return False
+
+
+Result = tuple  # (seconds, frozenset of SITES tags)
+
+
+def _run_batch(xray: str, outbounds: list[dict], url: str, timeout: int, first_port: int,
+               sites: dict[str, str] | None = None) -> list[Result | None]:
+    """(latency in seconds, sites reached) per outbound, None = no traffic carried; raises RuntimeError
+    if Xray rejects the batch."""
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "verify.json"
         path.write_text(json.dumps(_config(outbounds, first_port)))
@@ -196,7 +224,14 @@ def _run_batch(xray: str, outbounds: list[dict], url: str, timeout: int, first_p
                 # A second request on the servers that passed: one lucky answer is not "working".
                 again = list(pool.map(lambda i: _fetch(first_port + i, url, timeout) if first[i] is not None else None,
                                       range(len(outbounds))))
-            return [(a + b) / 2 if a is not None and b is not None else None for a, b in zip(first, again)]
+                speeds = [(a + b) / 2 if a is not None and b is not None else None for a, b in zip(first, again)]
+                jobs = [(i, tag, site) for i, s in enumerate(speeds) if s is not None for tag, site in (sites or {}).items()]
+                reached = list(pool.map(lambda job: _answers(first_port + job[0], job[2], timeout), jobs))
+            found: dict[int, set[str]] = {}
+            for (i, tag, _), ok in zip(jobs, reached):
+                if ok:
+                    found.setdefault(i, set()).add(tag)
+            return [None if s is None else (s, frozenset(found.get(i, ()))) for i, s in enumerate(speeds)]
         finally:
             core.terminate()
             try:
@@ -205,29 +240,39 @@ def _run_batch(xray: str, outbounds: list[dict], url: str, timeout: int, first_p
                 core.kill()
 
 
-def _measure(xray: str, outbounds: list[dict], url: str, timeout: int, first_port: int) -> list[float | None]:
+def _measure(xray: str, outbounds: list[dict], url: str, timeout: int, first_port: int,
+             sites: dict[str, str] | None = None) -> list[Result | None]:
     try:
-        return _run_batch(xray, outbounds, url, timeout, first_port)
+        return _run_batch(xray, outbounds, url, timeout, first_port, sites)
     except RuntimeError:
         if len(outbounds) == 1:
             return [None]
         # One bad entry makes Xray refuse the whole batch: split it so only that entry is lost.
         half = len(outbounds) // 2
-        return _measure(xray, outbounds[:half], url, timeout, first_port) + \
-            _measure(xray, outbounds[half:], url, timeout, first_port + half)
+        return _measure(xray, outbounds[:half], url, timeout, first_port, sites) + \
+            _measure(xray, outbounds[half:], url, timeout, first_port + half, sites)
 
 
-def latencies(links: list[str], xray: str, url: str = PROBE_URL, timeout: int = REQUEST_TIMEOUT_SEC,
-              budget_sec: float = 600, first_port: int = BASE_PORT) -> dict[str, float]:
-    """Seconds to fetch [url] through each link that carried traffic both times. Others are absent."""
+def probe(links: list[str], xray: str, url: str = PROBE_URL, timeout: int = REQUEST_TIMEOUT_SEC,
+          budget_sec: float = 900, first_port: int = BASE_PORT, sites: dict[str, str] | None = None) -> dict[str, Result]:
+    """For each link that carried traffic both times: (seconds to fetch [url], the [sites] tags it reached).
+    Others are absent."""
+    sites = SITES if sites is None else sites
     runnable = [(link, ob) for link in links if (ob := outbound(link)) is not None]
-    result: dict[str, float] = {}
+    result: dict[str, Result] = {}
     started = time.time()
     for start in range(0, len(runnable), BATCH):
         if time.time() - started > budget_sec:
             break  # unverified candidates are dropped, never published
         chunk = runnable[start:start + BATCH]
-        for (link, _), seconds in zip(chunk, _measure(xray, [ob for _, ob in chunk], url, timeout, first_port)):
-            if seconds is not None:
-                result[link] = seconds
+        for (link, _), found in zip(chunk, _measure(xray, [ob for _, ob in chunk], url, timeout, first_port, sites)):
+            if found is not None:
+                result[link] = found
     return result
+
+
+def latencies(links: list[str], xray: str, url: str = PROBE_URL, timeout: int = REQUEST_TIMEOUT_SEC,
+              budget_sec: float = 600, first_port: int = BASE_PORT) -> dict[str, float]:
+    """Seconds to fetch [url] through each link that carried traffic both times. Others are absent."""
+    return {link: seconds for link, (seconds, _) in
+            probe(links, xray, url, timeout, budget_sec, first_port, sites={}).items()}

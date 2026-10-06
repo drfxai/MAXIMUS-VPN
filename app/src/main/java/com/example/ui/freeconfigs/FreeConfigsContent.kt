@@ -51,12 +51,16 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.protocols.LabColors
 import com.example.ui.protocols.LabText
 import com.example.ui.protocols.labCard
+import com.example.vpn.hub.FreeConfigList
 
 /** Everything the Free Configs screen can ask for; the screen itself holds no state. */
 class FreeConfigsActions(
     val onBack: () -> Unit = {},
     val onRefresh: () -> Unit = {},
     val onTestAll: () -> Unit = {},
+    val onStopTest: () -> Unit = {},
+    val onTestOne: (FreeNode) -> Unit = {},
+    val onSite: (String?) -> Unit = {},
     val onSort: (FreeSort) -> Unit = {},
     val onProtocol: (String?) -> Unit = {},
     val onToggleHidden: () -> Unit = {},
@@ -87,6 +91,9 @@ fun FreeConfigsContent(
             item { Header(c) }
             when {
                 !state.available -> item { EmptyCard(c, "Not in this build", "This build cannot check the list's signature, so the free list stays off.") }
+                !state.enabled -> item {
+                    EmptyCard(c, "Free configs are off", "The free list is not downloaded, tested or shown. Turn on Free configs in Settings to use it.")
+                }
                 state.total == 0 && (state.syncing || state.loading) -> item { EmptyCard(c, "Getting the list", "Downloading and checking the signed list…", busy = true) }
                 state.total == 0 -> item {
                     EmptyCard(c, "No list yet", state.syncError?.let { "The list could not be downloaded: $it" } ?: "Pull the list to see free servers.",
@@ -96,19 +103,23 @@ fun FreeConfigsContent(
                     item { Summary(c, state, ago, until) }
                     item { Segments(c, state.sort, actions.onSort) }
                     item { Chips(c, state, actions.onProtocol) }
+                    if (state.siteCounts.isNotEmpty()) item { SiteChips(c, state, actions.onSite) }
                     state.message?.let { m -> item { Message(c, m, actions.onDismissMessage) } }
                     val rows = state.visible
-                    item { SectionHead(c, "ONLINE · ${rows.size}", if (state.testing) null else "Test all", actions.onTestAll) }
+                    item {
+                        SectionHead(c, "SERVERS · ${rows.size}",
+                            if (state.testing) "Stop · ${state.testDone}/${state.testTotal}" else "Test all",
+                            busy = state.testing,
+                            onAction = if (state.testing) actions.onStopTest else actions.onTestAll)
+                    }
                     if (rows.isEmpty()) item {
-                        EmptyCard(c, if (state.testing || state.queued > 0) "Testing servers" else "Nothing online",
-                            if (state.testing || state.queued > 0) "Servers appear here as they answer." else "None of these servers answered on your network. Try again later.",
-                            busy = state.testing)
+                        EmptyCard(c, "Nothing to show", "No server matches, or none answered on your network. Try another filter or test again later.")
                     } else {
                         // One lazy item per server: only the rows on screen are built, and a finished test
                         // batch redraws just the rows that changed instead of the whole card.
                         items(rows, key = { it.profile.id }) { node ->
                             Box(Modifier.padding(bottom = 8.dp).labCard(c, radius = 16.dp)) {
-                                NodeRow(c, node, best = node == best, last = true) { actions.onConnect(node) }
+                                NodeRow(c, node, best = node == best, last = true, onTest = { actions.onTestOne(node) }) { actions.onConnect(node) }
                             }
                         }
                     }
@@ -117,7 +128,7 @@ fun FreeConfigsContent(
                         val offline = state.offline
                         items(offline, key = { "off-" + it.profile.id }) { node ->
                             Box(Modifier.padding(top = 8.dp).labCard(c, radius = 16.dp)) {
-                                NodeRow(c, node, best = false, last = true) { actions.onConnect(node) }
+                                NodeRow(c, node, best = false, last = true, onTest = { actions.onTestOne(node) }) { actions.onConnect(node) }
                             }
                         }
                     }
@@ -188,7 +199,7 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
             LabText("${s.online.size}", c.text, 44.sp, FontWeight.Bold, letterSpacing = (-1.5).sp, maxLines = 1)
             Spacer(Modifier.width(8.dp))
             LabText(
-                if (s.tested == 0) "of ${s.total} waiting for a test" else "online of ${s.tested} tested",
+                if (s.tested == 0) "of ${s.total} not tested yet" else "online of ${s.tested} tested",
                 c.text2, 14.sp, maxLines = 1, modifier = Modifier.padding(bottom = 7.dp)
             )
         }
@@ -199,7 +210,7 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
             Legend(c, c.good, "Fast", s.fast)
             Legend(c, c.okay, "Slow", s.slow)
             Legend(c, c.bad, "Offline", s.offline.size)
-            Legend(c, idle(c), "Queued", s.queued)
+            Legend(c, idle(c), "Not tested", s.queued)
         }
         Spacer(Modifier.height(16.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
@@ -255,7 +266,7 @@ private fun Segments(c: LabColors, sort: FreeSort, onSort: (FreeSort) -> Unit) {
 
 @Composable
 private fun Chips(c: LabColors, s: FreeConfigsUiState, onProtocol: (String?) -> Unit) {
-    val chips = listOf<Pair<String?, Int>>(null to s.online.size) + s.protocolCounts
+    val chips = listOf<Pair<String?, Int>>(null to s.shown.size) + s.protocolCounts
     LazyRow(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         items(chips) { (protocol, count) ->
             val on = protocol == s.protocol
@@ -273,17 +284,48 @@ private fun Chips(c: LabColors, s: FreeConfigsUiState, onProtocol: (String?) -> 
     }
 }
 
+/** The brand colour of each site tag, so the filter and the row badges read at a glance. */
+private fun siteColor(c: LabColors, tag: String): Color = when (tag) {
+    "YT" -> Color(0xFFE5484D)
+    "TG" -> Color(0xFF2AABEE)
+    else -> c.text
+}
+
 @Composable
-private fun SectionHead(c: LabColors, title: String, action: String?, onAction: () -> Unit) {
+private fun SiteChips(c: LabColors, s: FreeConfigsUiState, onSite: (String?) -> Unit) {
+    val names = FreeConfigsUiState.SITES.toMap()
+    LazyRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        items(s.siteCounts) { (tag, count) ->
+            val on = tag == s.site
+            val color = siteColor(c, tag)
+            Row(
+                Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(if (on) color.copy(alpha = 0.14f) else Color.Transparent)
+                    .border(1.dp, if (on) color.copy(alpha = 0.5f) else c.stroke, RoundedCornerShape(8.dp))
+                    .clickable { onSite(if (on) null else tag) }.padding(horizontal = 11.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(7.dp).clip(CircleShape).background(color))
+                Spacer(Modifier.width(6.dp))
+                LabText("Opens ${names[tag] ?: tag}", if (on) c.text else c.text2, 12.5.sp, if (on) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
+                Spacer(Modifier.width(4.dp))
+                LabText("$count", c.text3, 12.5.sp, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHead(c: LabColors, title: String, action: String, busy: Boolean, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         LabText(title, c.text3, 12.sp, FontWeight.SemiBold, letterSpacing = 0.2.sp, maxLines = 1, modifier = Modifier.weight(1f))
-        if (action != null) Row(Modifier.clickable(onClick = onAction), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.clickable(onClick = onAction), verticalAlignment = Alignment.CenterVertically) {
+            if (busy) {
+                CircularProgressIndicator(Modifier.size(12.dp), color = c.accent, strokeWidth = 1.5.dp)
+                Spacer(Modifier.width(6.dp))
+            }
             LabText(action, c.accent, 12.sp, FontWeight.SemiBold, maxLines = 1)
-            Icon(Icons.Rounded.ChevronRight, null, tint = c.accent, modifier = Modifier.size(15.dp))
-        } else Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(Modifier.size(12.dp), color = c.accent, strokeWidth = 1.5.dp)
-            Spacer(Modifier.width(6.dp))
-            LabText("Testing", c.accent, 12.sp, FontWeight.SemiBold, maxLines = 1)
+            if (!busy) Icon(Icons.Rounded.ChevronRight, null, tint = c.accent, modifier = Modifier.size(15.dp))
         }
     }
 }
@@ -301,7 +343,7 @@ private fun Flag(c: LabColors, country: String?) {
 }
 
 @Composable
-private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, onClick: () -> Unit) {
+private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, onTest: () -> Unit = {}, onClick: () -> Unit) {
     val healthColor = when (node.health) {
         NodeHealth.FAST -> c.good
         NodeHealth.SLOW -> c.okay
@@ -330,7 +372,14 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                 }
                 Spacer(Modifier.height(5.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    (listOf(node.protocol) + node.tags).take(4).forEach { tag ->
+                    // The sites it opened first, in their colours, then protocol and transport.
+                    FreeConfigList.SITE_TAGS.filter { it in node.sites }.forEach { tag ->
+                        val color = siteColor(c, tag)
+                        Box(Modifier.clip(RoundedCornerShape(5.dp)).background(color.copy(alpha = 0.13f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                            LabText(tag, color, 10.5.sp, FontWeight.Bold, letterSpacing = 0.2.sp, maxLines = 1)
+                        }
+                    }
+                    (listOf(node.protocol) + node.tags).take(if (node.sites.size >= 3) 2 else 3).forEach { tag ->
                         Box(Modifier.clip(RoundedCornerShape(5.dp)).background(c.cardAlt).padding(horizontal = 6.dp, vertical = 2.dp)) {
                             LabText(tag, c.text2, 10.5.sp, FontWeight.SemiBold, letterSpacing = 0.2.sp, maxLines = 1)
                         }
@@ -338,16 +387,17 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                 }
             }
             Spacer(Modifier.width(8.dp))
-            Column(horizontalAlignment = Alignment.End) {
+            // Tapping the result tests this one server again.
+            Column(Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onTest).padding(4.dp), horizontalAlignment = Alignment.End) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(7.dp).clip(CircleShape).background(healthColor))
                     Spacer(Modifier.width(6.dp))
-                    LabText(node.latencyMs?.let { "$it ms" } ?: "—", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
+                    LabText(node.latencyMs?.let { "$it ms" } ?: "Ping", if (node.latencyMs == null) c.accent else c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
                 }
                 Spacer(Modifier.height(3.dp))
                 LabText(
                     when (node.health) {
-                        NodeHealth.FAST -> "Fast"; NodeHealth.SLOW -> "Slow"; NodeHealth.OFFLINE -> "Offline"; NodeHealth.QUEUED -> "Queued"
+                        NodeHealth.FAST -> "Fast"; NodeHealth.SLOW -> "Slow"; NodeHealth.OFFLINE -> "Offline"; NodeHealth.QUEUED -> "Not tested"
                     }, c.text3, 11.5.sp, maxLines = 1
                 )
             }

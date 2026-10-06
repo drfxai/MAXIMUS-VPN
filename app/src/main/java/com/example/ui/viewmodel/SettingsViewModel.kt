@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 class SettingsViewModel(
     private val settingsRepository: SettingsRepository = RayApplication.instance.settingsRepository,
@@ -80,6 +81,21 @@ class SettingsViewModel(
         val current = settingsRepository.getSettings()
         XrayLogManager.i("SETTINGS", "Custom DNS updated: $dns")
         settingsRepository.updateSettings(current.copy(customDns = dns))
+    }
+
+    /**
+     * The "Free configs" switch. Off: the free list is never downloaded and its saved servers are removed
+     * (the one in use stays). On: the list is downloaded again.
+     */
+    fun setFreeConfigs(enabled: Boolean) {
+        val current = settingsRepository.getSettings()
+        if (current.freeConfigsEnabled == enabled) return
+        XrayLogManager.i("SETTINGS", "Free configs turned ${if (enabled) "on" else "off"}")
+        settingsRepository.updateSettings(current.copy(freeConfigsEnabled = enabled))
+        viewModelScope.launch {
+            runCatching { RayApplication.instance.subscriptionManager.setFreeList(enabled, current.selectedProfileId) }
+                .onFailure { XrayLogManager.w("SETTINGS", "Free configs switch: ${it.message}") }
+        }
     }
 
     fun setKillSwitch(enabled: Boolean) {

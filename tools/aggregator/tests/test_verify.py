@@ -57,9 +57,24 @@ class LinkTests(unittest.TestCase):
 class KeepWorkingTests(unittest.TestCase):
     def test_each_source_is_ordered_fastest_first_and_untested_servers_are_dropped(self):
         report = {"rejected": {}}
-        works = aggregate.keep_working([["a", "b", "c"], ["d", "e"]], lambda links: {"c": 0.2, "a": 0.9, "e": 0.4}, report)
+        yt = frozenset({"YT"})
+        works = aggregate.keep_working([["a", "b", "c"], ["d", "e"]], lambda links: {"c": (0.2, yt), "a": (0.9, yt), "e": (0.4, yt)}, report)
         self.assertEqual([["c", "a"], ["e"]], works)
         self.assertEqual(2, report["rejected"]["no traffic"])
+
+    def test_servers_reaching_none_of_the_sites_are_dropped_and_more_sites_rank_first(self):
+        report = {"rejected": {}}
+        reach = {}
+        found = {"a": (0.2, frozenset()), "b": (0.9, frozenset({"YT", "TG", "X"})), "c": (0.1, frozenset({"TG"}))}
+        works = aggregate.keep_working([["a", "b", "c"]], lambda links: found, report, reach)
+        self.assertEqual([["b", "c"]], works)
+        self.assertEqual(1, report["rejected"]["no YouTube, Telegram or X"])
+        self.assertEqual({"b", "c"}, set(reach))
+
+    def test_names_carry_the_sites_reached(self):
+        link = f"vless://{UUID}@203.0.113.7:443?security=tls&sni=a.example&type=tcp#n"
+        self.assertEqual("DE · VLESS 4 · YT TG X", aggregate.display_name(link, 4, lambda h: "DE", {"X", "YT", "TG"}))
+        self.assertEqual("Free VLESS 4 · TG", aggregate.display_name(link, 4, None, {"TG"}))
 
     def test_the_list_never_exceeds_thirty_and_holds_only_servers_that_worked(self):
         link = lambda n: f"vless://{UUID}@203.0.113.{n % 250 + 1}:{1000 + n}?security=tls&sni=a.example&type=tcp#n"
@@ -68,7 +83,7 @@ class KeepWorkingTests(unittest.TestCase):
             sources.append({"name": f"s{s}", "url": f"https://example.test/{s}"})
         texts = {f"https://example.test/{s}": "\n".join(link(s * 100 + n) for n in range(80)) for s in range(3)}
         works = set(l for t in texts.values() for l in t.split("\n")[::2])
-        links, report = aggregate.collect(sources, texts.__getitem__, None, lambda ls: {l: 1.0 for l in ls if l in works})
+        links, report = aggregate.collect(sources, texts.__getitem__, None, lambda ls: {l: (1.0, frozenset({"YT"})) for l in ls if l in works})
         self.assertEqual(30, len(links))
         self.assertTrue(set(links) <= works)
 
@@ -130,6 +145,14 @@ class RealCoreTests(unittest.TestCase):
         found = verify.latencies([refused, wrong_id, good, dead], XRAY, url=url, timeout=4, first_port=random.randint(24000, 40000))
         self.assertEqual([good], list(found))
         self.assertGreater(found[good], 0)
+
+    def test_the_sites_a_server_opens_are_reported(self):
+        good = f"vless://{UUID}@127.0.0.1:{self.server_port}?type=tcp&security=none&encryption=none#good"
+        page = f"http://127.0.0.1:{self.web.server_address[1]}/generate_204"
+        closed = f"http://127.0.0.1:{free_port()}/"
+        found = verify.probe([good], XRAY, url=page, timeout=4, first_port=random.randint(24000, 40000),
+                             sites={"YT": page, "X": closed})
+        self.assertEqual(frozenset({"YT"}), found[good][1])
 
 
 if __name__ == "__main__":

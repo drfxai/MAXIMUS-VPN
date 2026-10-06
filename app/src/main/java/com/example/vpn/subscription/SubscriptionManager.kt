@@ -9,6 +9,7 @@ import com.example.vpn.hub.FreeConfigList
 import com.example.vpn.routing.RoutingEngine
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.HttpUrl
@@ -25,10 +26,17 @@ class SubscriptionManager(
     private val snapshots: SubscriptionSnapshots? = null,
     /** Replaces the HTTP download (tests and the censorship simulator). */
     private val download: ((String) -> String)? = null,
-    private val staggerMs: Long = SubscriptionFetcher.STAGGER_MS
+    private val staggerMs: Long = SubscriptionFetcher.STAGGER_MS,
+    /** The user's "Free configs" setting: while it is off the free list is never downloaded. */
+    private val freeListEnabled: () -> Boolean = {
+        runCatching { com.example.RayApplication.instance.settingsRepository.getSettings().freeConfigsEnabled }.getOrDefault(true)
+    }
 ) {
     companion object {
         private const val MAX_SAFE_REDIRECTS = 5
+
+        /** The sync result while the user has the free list turned off. */
+        const val FREE_OFF = "Free configs are off in Settings"
 
         internal fun validateRedirectTarget(base: HttpUrl, location: String): HttpUrl {
             val target = base.resolve(location)
@@ -247,6 +255,11 @@ class SubscriptionManager(
             return@withContext SyncResult(subscription.id, 0, 0, 0, false, errMsg)
         }
 
+        if (FreeConfigList.isList(subscription.url) && !freeListEnabled()) {
+            XrayLogManager.i("SUBSCRIPTION", "Free configs are off in Settings; '${subscription.name}' was not downloaded.")
+            return@withContext SyncResult(subscription.id, 0, 0, 0, false, FREE_OFF)
+        }
+
         val candidates = SubscriptionSources.candidates(subscription.url, subscription.mirrors)
             .filter { isValidSubscriptionUrl(it) }
         val fetcher = SubscriptionFetcher(
@@ -331,7 +344,7 @@ class SubscriptionManager(
         if (!refreshing.compareAndSet(false, true)) return emptyList()
         try {
             val due = subscriptionRepository.getAllOnce().filter {
-                it.autoRefresh && it.url.isNotBlank() &&
+                it.autoRefresh && it.url.isNotBlank() && !(FreeConfigList.isList(it.url) && !freeListEnabled()) &&
                     (it.lastError != null || now - it.lastUpdated >= it.refreshIntervalMinutes * 60_000L)
             }
             return due.map { syncSubscription(it) }
@@ -360,6 +373,21 @@ class SubscriptionManager(
         )
         subscriptionRepository.insertOrUpdate(sub)
         return syncSubscription(sub)
+    }
+
+    /**
+     * Turns the free list on or off. Off removes its saved servers (except [keepId], the server in use, so
+     * the connection is never pulled away) and stops every download; on downloads it again.
+     */
+    suspend fun setFreeList(enabled: Boolean, keepId: String?): SyncResult? = withContext(Dispatchers.IO) {
+        if (!enabled) {
+            val saved = serverRepository.getProfilesBySubscription(FreeConfigList.URL).first()
+            saved.filter { it.id != keepId }.forEach { serverRepository.delete(it.id) }
+            XrayLogManager.i("SUBSCRIPTION", "Free configs turned off: ${saved.count { it.id != keepId }} free servers removed.")
+            return@withContext null
+        }
+        val sub = subscriptionRepository.getSubscriptionByUrl(FreeConfigList.URL)
+        if (sub != null) syncSubscription(sub) else addAndSyncSubscription(FreeConfigList.NAME, FreeConfigList.URL)
     }
 
     suspend fun deleteSubscriptionAndNodes(subscription: SubscriptionInfo) {

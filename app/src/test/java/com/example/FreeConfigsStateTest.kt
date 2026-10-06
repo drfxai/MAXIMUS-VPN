@@ -15,10 +15,10 @@ class FreeConfigsStateTest {
     private fun node(
         id: String, country: String?, ms: Long?, health: NodeHealth = FreeNode.healthOf(ms),
         type: ProtocolType = ProtocolType.VLESS, passes: Int = 0, runs: Int = 0,
-        security: String = "reality", transport: String = "tcp"
+        security: String = "reality", transport: String = "tcp", sites: Set<String> = emptySet()
     ) = FreeNode(
         VlessProfile(id = id, name = id, address = "203.0.113.1", port = 443, uuid = "u", security = security, transport = transport, protocolType = type),
-        country, ms, health, passes, runs
+        country, ms, health, passes, runs, sites
     )
 
     private val de = node("de", "DE", 142, passes = 2, runs = 3)
@@ -36,14 +36,27 @@ class FreeConfigsStateTest {
         assertEquals(listOf(down), state.offline)
         assertEquals(1, state.queued)
         assertEquals(4, state.tested)
-        assertEquals(listOf("VLESS" to 2, "Trojan" to 1), state.protocolCounts)
+        // Untested servers count too: tests run only when the user asks.
+        assertEquals(listOf("VLESS" to 3, "Trojan" to 1), state.protocolCounts)
     }
 
     @Test fun theListIsSortedAndFilteredAsChosen() {
-        assertEquals(listOf(de, us, nl), state.visible)
-        assertEquals(listOf(nl, de, us), state.copy(sort = FreeSort.STABLE).visible)
-        assertEquals(listOf(de, nl, us), state.copy(sort = FreeSort.COUNTRY).visible)
+        // Untested servers are listed last; servers that failed here are hidden.
+        assertEquals(listOf(de, us, nl, waiting), state.visible)
+        assertEquals(listOf(nl, de, us, waiting), state.copy(sort = FreeSort.STABLE).visible)
+        assertEquals(listOf(de, nl, us, waiting), state.copy(sort = FreeSort.COUNTRY).visible)
         assertEquals(listOf(us), state.copy(protocol = "Trojan").visible)
+    }
+
+    @Test fun theSiteFilterKeepsServersThatOpenedTheSite() {
+        val yt = node("yt", "DE", 200, sites = setOf("YT", "TG"))
+        val tg = node("tg", "NL", null, sites = setOf("TG"))
+        val gone = node("gone", "FR", null, NodeHealth.OFFLINE, sites = setOf("X"))
+        val s = FreeConfigsUiState(nodes = listOf(yt, tg, gone))
+        assertEquals(listOf("YT" to 1, "TG" to 2), s.siteCounts)
+        assertEquals(listOf(yt), s.copy(site = "YT").visible)
+        assertEquals(listOf(yt, tg), s.copy(site = "TG").visible)
+        assertEquals(emptyList<FreeNode>(), s.copy(site = "X").visible)
     }
 
     @Test fun theFastestServerIgnoresTheFilter() {
