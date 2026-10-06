@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FilterList
@@ -119,6 +120,7 @@ fun ServersScreen(
     val freeConfigsEnabled = appSettings.freeConfigsEnabled
 
     var showSortMenu by remember { mutableStateOf(false) }
+    var confirmDeleteFree by remember { mutableStateOf(false) }
 
     Box(modifier = modifier.fillMaxSize().testTag("servers_screen")) {
         Column(
@@ -238,6 +240,30 @@ fun ServersScreen(
                     letterSpacing = 1.sp
                 )
 
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Only while downloaded free configs are in the list; VIP and imported ones are never touched.
+                val freeCount = serverList.count { serverViewModel.isFreeConfig(it) }
+                if (freeCount > 0) {
+                    TextButton(
+                        onClick = { confirmDeleteFree = true },
+                        enabled = !isTestingAll,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        modifier = Modifier
+                            .height(32.dp)
+                            .testTag("delete_free_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteSweep,
+                            contentDescription = "Delete Free",
+                            tint = AppTheme.colors.statusError,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Delete Free", color = AppTheme.colors.statusError, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
                 TextButton(
                     // While a run is going the button stops it.
                     onClick = { if (isTestingAll) serverViewModel.stopTestAll() else serverViewModel.testAllServers() },
@@ -267,6 +293,38 @@ fun ServersScreen(
                         Text("Ping All", color = AppTheme.colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+                }
+            }
+
+            if (confirmDeleteFree) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { confirmDeleteFree = false },
+                    containerColor = AppTheme.colors.surfaceElevated,
+                    icon = { Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = AppTheme.colors.statusError) },
+                    title = { Text("Delete all free configurations?", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Text(
+                            "This will remove all downloaded free configurations. VIP and manually imported configurations will not be affected.",
+                            color = AppTheme.colors.textSecondary
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                confirmDeleteFree = false
+                                serverViewModel.deleteAllFree { n ->
+                                    android.widget.Toast.makeText(context, "Deleted $n free configurations", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.statusError),
+                            modifier = Modifier.testTag("delete_free_confirm")
+                        ) { Text("Delete All", color = Color.Black, fontWeight = FontWeight.Bold) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmDeleteFree = false }) { Text("Cancel", color = AppTheme.colors.primary) }
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(6.dp))

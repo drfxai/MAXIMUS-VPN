@@ -1367,6 +1367,16 @@ class RayVpnService : VpnService() {
         try {
             networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
         } catch (_: Exception) {}
+        // The service is gone, so is any tunnel: a state left "up" would be stale (screens, tile and
+        // the session's background tests would keep acting on a connection that no longer exists).
+        val last = _vpnState.value
+        if (last.isTunnelUp || last.isBusy) {
+            updateState(ConnectionState(
+                status = ConnectionStatus.DISCONNECTED,
+                errorMessage = "The VPN service was stopped by the system.",
+                networkGeneration = last.networkGeneration
+            ))
+        }
         super.onDestroy()
     }
 }

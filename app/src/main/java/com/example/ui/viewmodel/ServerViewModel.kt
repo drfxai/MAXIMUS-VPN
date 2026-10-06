@@ -275,14 +275,30 @@ class ServerViewModel(
         }
     }
 
+    /** A downloaded free config (from the signed free list). */
+    fun isFreeConfig(profile: VlessProfile): Boolean =
+        com.example.vpn.hub.FreeConfigList.isList(profile.sourceSubscription.orEmpty()) ||
+            com.example.vpn.hub.FreeConfigList.isList(profile.subscriptionUrl.orEmpty())
+
+    /**
+     * Deletes every free config and nothing else. A connected session keeps running on its own copy,
+     * and diagnostic history stays; [onDone] gets how many were deleted.
+     */
+    fun deleteAllFree(onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            val n = runCatching { RayApplication.instance.subscriptionManager.deleteAllFree() }
+                .onFailure { XrayLogManager.e("UI", "Delete Free failed: ${it.message}", it) }
+                .getOrDefault(0)
+            onDone(n)
+        }
+    }
+
     fun deleteServer(profileId: String) {
         viewModelScope.launch {
             val profile = repository.getProfileById(profileId)
             XrayLogManager.i("UI", "Deleted server profile: '${profile?.name ?: profileId}'")
             // A free config also leaves the last-known-good bookkeeping and its test metadata.
-            val free = profile != null && (com.example.vpn.hub.FreeConfigList.isList(profile.sourceSubscription.orEmpty()) ||
-                com.example.vpn.hub.FreeConfigList.isList(profile.subscriptionUrl.orEmpty()))
-            if (free) RayApplication.instance.subscriptionManager.deleteFree(profile!!) else repository.delete(profileId)
+            if (profile != null && isFreeConfig(profile)) RayApplication.instance.subscriptionManager.deleteFree(profile) else repository.delete(profileId)
         }
     }
 

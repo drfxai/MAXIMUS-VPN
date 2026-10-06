@@ -156,10 +156,20 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   the real-delay probe guard use "tunnel up" instead of "verified"; a mutex serializes free list
   refresh, Delete Free, single delete and the post-disconnect release; deleting one free config from
   the Servers list goes through `deleteFree` (leaves the last-known-good pool and its test
-  metadata); the stall watchdog runs only while a screen is visible (no background wake-ups).
+  metadata); the stall watchdog runs only while a screen is visible (no background wake-ups); when
+  Android destroys the VPN service without a disconnect the state goes to DISCONNECTED instead of
+  staying "up" (stale screens, tile and session tests). Reviewed and already bounded: Ping All
+  (sequential), clean-IP scans (batches of 8/16), UDP DNS (32 slots), logs (500 lines), events (1000).
 - CI fix: `app/build.gradle.kts` imports `java.time` (inside `android {}` `java` is the Gradle
   extension); the report test assembles its fake bot token and API key at run time so the secret
   scan passes.
+
+- Phase 6 (DrFX marked the place on a screenshot, 13:11Z): "Delete Free" text button next to Ping
+  All on the Servers screen (red, same style; shown only while free configs are listed, disabled
+  during Ping All), the confirmation dialog with DrFX's exact wording and Cancel / Delete All,
+  `ServerViewModel.deleteAllFree` → `SubscriptionManager.deleteAllFree` (free only; the running
+  session keeps its in-memory copy; LKG pool, retained ids and test evidence cleared; event history
+  kept). Single delete from a node's ⋮ menu uses `deleteFree` for free configs.
 
 ## Pending tasks
 
@@ -184,6 +194,25 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   (GIT_COMMIT, BUILD_TIME), `ui/viewmodel/DiagnosticsViewModel.kt`, `ui/diagnostics/DiagnosticsScreen.kt`
 - Tests: `DiagnosticReportTest`, `DiagnosticEventsTest`, `RuntimeHealthTest`, `ConnectionVerificationTest`, `FreeConfigEvidenceTest`, `LastKnownGoodTest`, `FreeListSwapIntegrationTest` (Robolectric,
   scenarios A to D)
+
+## Phase 10 findings (read-only so far)
+
+Gemini key storage in `tools/telegram-bot/worker.js`, causes found:
+
+1. Bare `/setkey` from the bot's command menu (Telegram sends menu commands at once, with no
+   argument) is refused as "not a key"; the admin then pastes the key alone, which is not a command,
+   so it goes to the AI chat path, is never stored, and stays visible in the chat. Most likely the
+   reported "key does not save".
+2. `aiKey()` prefers the `GEMINI_API_KEY` Worker secret over the stored key, so a stale secret
+   silently overrides a newly saved key while `/setkey` still says "Key saved".
+3. The key is stored in KV in plain text (`gemini_key`).
+4. KV reads are cached at the edge, so a status check right after saving can still read the old value.
+
+Plan: encrypt with AES-GCM under a Worker secret (`KEY_ENCRYPTION_SECRET`) before writing KV; never
+return it to the browser (only Configured / Not configured / ••••ABCD); handle bare `/setkey` by
+waiting for the next message and deleting it; stored key wins over the env secret, or the status says
+which one is used; Save, Replace, Delete, Validate (a models.get call); model stored separately and
+checked against the API's model list, with no silent substitution.
 
 ## Known issues
 
