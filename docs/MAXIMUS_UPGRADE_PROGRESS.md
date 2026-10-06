@@ -5,6 +5,9 @@ milestone. Branch: `feature/maximus-upgrade-7ooxpw` (from `main` 2bdf976).
 
 ## Current phase
 
+2026-10-06 14:09Z DrFX: "Update the program to version V1.0.0." The app is published again as V1.0.0
+with versionName 1.0.0 and versionCode 27 (kept above 26 so it installs over earlier V1.0.0 builds).
+
 All phases 0 to 11 implemented on the branch. Not merged to `main`, nothing published. Waiting on
 DrFX: merge decision, a phone test of the app and a deploy of the new `worker.js`.
 
