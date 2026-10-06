@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Sync
@@ -547,27 +548,49 @@ private fun FreeSourcesSection(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionLabel("Free sources")
         SurfaceCard {
+            // A larger frame than the subscription cards (about 1.4×) so the free sources stand out.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onToggle)
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .padding(horizontal = 20.dp, vertical = 22.dp)
                     .testTag("free_config_hub_toggle"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Healthy.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Hub, contentDescription = null, tint = Healthy, modifier = Modifier.size(28.dp))
+                }
+                Spacer(Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Free Config Hub", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Free Config Hub", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         text = "${sources.size} public sources, checked before import",
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
+                        lineHeight = 19.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "Collapse" else "Expand",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             AnimatedVisibility(visible = expanded) {
@@ -577,13 +600,13 @@ private fun FreeSourcesSection(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp)
+                                .padding(start = 20.dp, end = 18.dp, top = 17.dp, bottom = 17.dp)
                                 .testTag("free_config_source_${source.id}"),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(source.name, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+                                    Text(source.name, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
                                     if (source.id == "maximus_free") {
                                         Spacer(Modifier.width(8.dp))
                                         Text(
@@ -600,27 +623,32 @@ private fun FreeSourcesSection(
                                 }
                                 Text(
                                     text = if (source.id == "maximus_free") source.description else "${source.description} ${source.protocols}.",
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp,
+                                    fontSize = 13.5.sp,
+                                    lineHeight = 19.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            Spacer(Modifier.width(8.dp))
                             IconButton(
                                 onClick = { onAdd(source.name, source.url) },
                                 enabled = !busy,
-                                modifier = Modifier.testTag("add_free_config_${source.id}")
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                    .testTag("add_free_config_${source.id}")
                             ) {
-                                Icon(Icons.Default.Add, contentDescription = "Add ${source.name}", tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.Add, contentDescription = "Add ${source.name}", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
                             }
                         }
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                     Text(
                         text = "Public relays are not trusted infrastructure. Avoid sensitive traffic until a node has passed Maximus health and security checks.",
-                        fontSize = 11.5.sp,
-                        lineHeight = 15.sp,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp)
+                        modifier = Modifier.padding(20.dp)
                     )
                 }
             }
