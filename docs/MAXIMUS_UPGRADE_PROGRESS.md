@@ -5,14 +5,16 @@ milestone. Branch: `feature/maximus-upgrade-7ooxpw` (from `main` 2bdf976).
 
 ## Current phase
 
-Phases 0 to 3 implemented. Next: Phase 4 (structured diagnostics).
+Phases 0 to 4 implemented. Next: Phase 5 (diagnostic reports).
 
 ## Exact next action
 
-Phase 4: add `vpn/diagnostics/events/` (DiagEvent with session/attempt/test ids, severity,
-failure stage; bounded EventLog persisted asynchronously; ErrorAggregator; observation vs
-assessment; TestRegistry with QUEUED/RUNNING/COMPLETED/FAILED/CANCELLED; ApplicationExitInfo and
-main-thread stall capture), then emit events from RayVpnService, the test runners and diagnostics.
+Phase 5: add `vpn/diagnostics/report/` with a short readable summary and a detailed JSON report
+built from `EventLog.snapshot()`, `ErrorAggregator.aggregate`, `Tests.registry.tests`,
+`RuntimeHealth.summary` and the connection state; add BuildConfig `GIT_COMMIT` / `BUILD_TIME`
+(from the CI environment, "unknown" locally) and a report schema version; run a second redaction
+pass on export; write the export off the main thread; hook it into the Diagnostics screen's
+existing export/share action (no new UI layout, so no preview needed).
 
 ## Phase 0: inspection (done)
 
@@ -60,7 +62,15 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
 | Aggregator tests (local, with the pinned Xray core) | 45 passed |
 | Pure Kotlin tests on the JVM rig (FreeConfigEvidenceTest, LastKnownGoodTest) | 18 passed |
 | Hygiene scan | 0 problems |
-| CI checks.yml | see the run for this commit |
+| CI checks.yml | run 37466933586 on dd58a8e (Phases 1-3): green |
+
+### Results after Phase 4
+
+| Check | Result |
+|---|---|
+| JVM rig (adds DiagnosticEventsTest, 12 tests) | 36 passed |
+| Hygiene scan | 335 files, 0 problems |
+| CI checks.yml | see the run for this commit (adds RuntimeHealthTest, CI only) |
 
 ### Findings that shape the plan
 
@@ -103,11 +113,25 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   and last-known-good pool, and releases retained free configs after disconnect. Diagnostics drop a
   PASS when the pass key changes. UI words for the new states (button, badge, tile, home pill).
 
+- Phase 4: `vpn/diagnostics/events/`: `DiagEvent` (OTel-shaped record: time, severity, name,
+  session/attempt/test ids, hashed profile ref, engine, network bucket, attributes, duration,
+  result, failure stage, exception, OBSERVATION/ASSESSMENT); `EventLog` (1000 in memory, JSON lines
+  on disk rotated at 512 KB × 2, written by one background thread, restored at start, `truncated`
+  flag, flushed on crash); `ErrorAggregator` (count, first/last, profiles, networks, sessions);
+  `TestRegistry` (QUEUED/RUNNING/COMPLETED/FAILED/CANCELLED, cancel reasons, disconnect or a new
+  session cancels the old session's tests and refuses their late results); `ConnectionEvents`
+  (session/attempt start and end, every state change as an assessment, selected/attempted/active
+  profiles apart, network changes); `RuntimeHealth` (ApplicationExitInfo with the ANR main-thread
+  trace on Android 11+, main-thread stall watchdog at 2 s, memory pressure, sidecar and Xray
+  engine termination). Verifiable PASS events from the tunnel verification and re-checks. Error and
+  fatal log lines become events. Network signals (observation) and the filtering level
+  (assessment, citing its signals) are separate events. Free Configs tests go through the registry.
+
 ## Pending tasks
 
 - Phase 1 UI wording: the Free Configs screen must call the YT/TG/X badges a global check (outside
   Iran) and show the lifecycle label; goes with the Phase 6/7 previews.
-- Phases 3 to 11.
+- Phases 5 to 11.
 
 ## Files changed
 
@@ -118,10 +142,16 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   `vpn/hub/FreeConfigEvidence.kt`, `vpn/hub/LastKnownGood.kt`, `vpn/subscription/SubscriptionManager.kt`,
   `data/database/ServerProfileDao.kt`, `data/repository/ServerRepository.kt`, `RayApplication.kt`,
   `ui/freeconfigs/FreeConfigs{State,ViewModel}.kt`
-- Tests: `FreeConfigEvidenceTest`, `LastKnownGoodTest`, `FreeListSwapIntegrationTest` (Robolectric,
+- Phase 4: `vpn/diagnostics/events/{DiagEvent,EventLog,ErrorAggregator,TestRegistry,ConnectionEvents,RuntimeHealth}.kt`,
+  `RayApplication.kt` (`startDiagnostics`), `RayVpnService.kt`, `xray/XrayLogManager.kt`,
+  `vpn/sidecar/SidecarProcess.kt`, `ui/freeconfigs/FreeConfigsViewModel.kt`
+- Tests: `DiagnosticEventsTest`, `RuntimeHealthTest`, `ConnectionVerificationTest`, `FreeConfigEvidenceTest`, `LastKnownGoodTest`, `FreeListSwapIntegrationTest` (Robolectric,
   scenarios A to D)
 
 ## Known issues
+
+- Connection events come from a StateFlow collector, so two state changes within one frame can
+  merge into one event (the final state is always recorded).
 
 - No on-device test is possible from the cloud sandbox; device scenarios are covered by JVM tests of
   the pure logic and must be confirmed on a phone.
@@ -129,7 +159,8 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
 ## Migration notes
 
 - No database schema change (still version 8). New SharedPreferences files:
-  `free_config_evidence`, `free_last_known_good`, `free_retained`.
+  `free_config_evidence`, `free_last_known_good`, `free_retained`, `runtime_health`.
+- New files: `files/diagnostics/events/events.jsonl` and `events.1.jsonl` (at most about 1 MB).
 - The free-configs branch gains `configs.json` and `history.json` (listed and hashed in the signed
   manifest). Older app builds ignore them.
 - A server must now pass 2 of 3 rounds instead of 2 of 2.

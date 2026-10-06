@@ -149,15 +149,22 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         _state.update { it.copy(testing = true, testDone = 0, testTotal = profiles.size, message = null) }
+        // Each server test is visible in diagnostics: queued, running, done, failed or cancelled.
+        val registry = com.example.vpn.diagnostics.events.Tests.registry
+        val testIds = profiles.map { registry.queue("free.real_delay", sessionId = null, profileRef = com.example.vpn.diagnostics.events.DiagEvent.profileRef(it.id)) }
         testJob = viewModelScope.launch {
             try {
                 // What this network allows, so each result is filed under an anonymous network bucket.
                 val network = NetworkCapabilityDetector.last?.takeIf { System.currentTimeMillis() - it.measuredAt < NETWORK_PROFILE_MAX_AGE_MS }
                     ?: runCatching { NetworkCapabilityDetector.detect(getApplication()) }.getOrNull()
                 for ((i, p) in profiles.withIndex()) {
+                    registry.start(testIds[i])
                     val outcome = withContext(Dispatchers.IO) { RealDelayProbe.measure(p, TIMEOUT_SEC) }
+                    if (outcome is RealDelayProbe.Outcome.NotRun) registry.cancel(testIds[i], "not run")
                     if (outcome !is RealDelayProbe.Outcome.NotRun) {
                         val ms = (outcome as? RealDelayProbe.Outcome.Delay)?.latencyMs
+                        registry.finish(testIds[i], ms != null, ms?.let { "$it ms" },
+                            (outcome as? RealDelayProbe.Outcome.Failed)?.let { FailureStage.fromText(it.reason) })
                         withContext(Dispatchers.IO) {
                             runCatching {
                                 evidence.record(p.effectiveFingerprint, ConnectivityMeasurement(
@@ -180,6 +187,8 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                     publish(_state.value.nodes.map { it.profile })
                 }
             } finally {
+                // Tests not reached are cancelled (Stop, leaving the screen); finished ones are kept as they are.
+                testIds.forEach { registry.cancel(it, "stopped") }
                 _state.update { it.copy(testing = false) }
             }
         }

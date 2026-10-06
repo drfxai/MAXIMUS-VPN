@@ -64,6 +64,38 @@ class RayApplication : Application() {
         )
     }
 
+    /**
+     * Structured diagnostics: the persisted event log, crash/ANR/stall/memory evidence, and one event
+     * per connection state change, carrying the session and attempt ids. Disconnect cancels the
+     * session's background tests.
+     */
+    private fun startDiagnostics() {
+        val events = com.example.vpn.diagnostics.events.EventLog
+        val tests = com.example.vpn.diagnostics.events.Tests.registry
+        val scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+        events.context = {
+            val s = com.example.vpn.RayVpnService.vpnState.value
+            com.example.vpn.diagnostics.events.EventLog.Context(
+                sessionId = s.sessionId, attemptId = s.attemptId, engine = s.activeEngineName,
+                network = com.example.vpn.smart.NetworkCapabilityDetector.last?.key()
+            )
+        }
+        events.init(java.io.File(filesDir, "diagnostics/events"))
+        com.example.vpn.diagnostics.events.RuntimeHealth.install(this) { work -> scope.launch(Dispatchers.IO) { work() } }
+        scope.launch {
+            var previous = com.example.vpn.RayVpnService.vpnState.value
+            com.example.vpn.RayVpnService.vpnState.collect { state ->
+                if (state.sessionId != previous.sessionId) {
+                    if (state.sessionId == null) tests.endSession() else tests.beginSession(state.sessionId)
+                }
+                com.example.vpn.diagnostics.events.ConnectionEvents.between(previous, state, System.currentTimeMillis()) {
+                    com.example.vpn.diagnostics.events.DiagEvent.profileRef(it)
+                }.forEach { events.record(it) }
+                previous = state
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -78,10 +110,13 @@ class RayApplication : Application() {
                     throwable = throwable
                 )
             } catch (_: Exception) {}
+            // The crash event reaches disk before the process dies.
+            try { com.example.vpn.diagnostics.events.EventLog.flush(1000) } catch (_: Exception) {}
             defaultHandler?.uncaughtException(thread, throwable)
         }
 
         XrayLogManager.i("APP", "Maximus Application starting. Initializing database and subsystems...")
+        startDiagnostics()
 
         // Real-delay probes (server ping, FIX BPB) dial the server themselves; resolve its name without
         // trusting a filtering network's DNS answer. While the VPN runs the probe does not run at all.

@@ -505,8 +505,15 @@ class RayVpnService : VpnService() {
                 .onSuccess { report ->
                     _environment.value = report
                     XrayLogManager.i("SMART", "Network: ${report.describe()}")
+                    // What was measured and what the app concludes from it are separate events.
+                    val signals = report.signals.joinToString(",") { it.name }
+                    com.example.vpn.diagnostics.events.EventLog.event("network.signals", attributes = mapOf("signals" to signals.ifEmpty { "none" }))
+                    com.example.vpn.diagnostics.events.EventLog.event("network.assessment", attributes = mapOf(
+                        "level" to report.level.name, "based.on" to signals.ifEmpty { "no failure signals" }
+                    ), kind = com.example.vpn.diagnostics.events.DiagEvent.Kind.ASSESSMENT)
                     if (policy.mode == com.example.data.model.OperationalMode.DAILY && com.example.vpn.smart.NetworkEnvironment.suggestsGodMode(report)) {
-                        XrayLogManager.w("SMART", "Filtering on this network is heavy; GOD MODE proxies everything and tests every server.")
+                        XrayLogManager.w("SMART", "Assessment: filtering looks ${report.level.name.lowercase()} " +
+                            "(based on: ${report.signals.joinToString { it.name.lowercase().replace('_', ' ') }}); GOD MODE proxies everything and tests every server.")
                     }
                 }
             var raced = false
@@ -1017,6 +1024,8 @@ class RayVpnService : VpnService() {
                 delay(1000)
                 val durationSec = (System.currentTimeMillis() - startTime) / 1000
                 if (!activeEngine.isRunning()) {
+                    com.example.vpn.diagnostics.events.RuntimeHealth.engineTerminated(
+                        _vpnState.value.activeEngineName ?: "engine", exitCode = null, expected = false)
                     connectionMutex.withLock {
                         updateState(_vpnState.value.copy(status = ConnectionStatus.FAILED,
                             errorMessage = "Proxy engine stopped. Traffic remains blocked; reconnect to resume."))
@@ -1056,6 +1065,7 @@ class RayVpnService : VpnService() {
                 try {
                     val sample = com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService)
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    if (_vpnState.value.attemptId == attemptId) passEvent("tunnel.recheck", sample.latencyMs)
                     mutateState {
                         com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, true, sample.latencyMs, System.currentTimeMillis())
                             .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = sample.country) else s }
@@ -1092,7 +1102,9 @@ class RayVpnService : VpnService() {
         var stage: com.example.vpn.diagnostics.FailureStage? = null
         repeat(VERIFY_ATTEMPTS) { i ->
             try {
-                return com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) to null
+                val ms = com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService)
+                passEvent("tunnel.verify", ms)
+                return ms to null
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1102,6 +1114,18 @@ class RayVpnService : VpnService() {
             }
         }
         return null to stage
+    }
+
+    /** A request that went through the tunnel, recorded so the PASS can be checked later. */
+    private fun passEvent(testType: String, elapsedMs: Long) {
+        val s = _vpnState.value
+        com.example.vpn.diagnostics.events.EventLog.pass(
+            testType = testType,
+            destination = java.net.URI(com.example.xray.RealDelayProbe.PROBE_URL).host,
+            profileRef = com.example.vpn.diagnostics.events.DiagEvent.profileRef(s.activeProfile?.id ?: s.attemptedProfileId),
+            elapsedMs = elapsedMs,
+            interfaceName = "tun (VPN network)"
+        )
     }
 
     /** Traffic went through [profile]: its evidence and, for a free config, the last-known-good pool. */
