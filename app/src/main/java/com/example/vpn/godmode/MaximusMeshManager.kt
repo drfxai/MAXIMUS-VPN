@@ -6,8 +6,6 @@ import com.example.data.model.ProtocolType
 import com.example.data.model.ServerCategory
 import com.example.data.model.VlessProfile
 import com.example.xray.XrayLogManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,7 +44,7 @@ object MaximusMeshManager {
     )
 
     private val isMeshRunning = AtomicBoolean(false)
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = com.example.core.managerScope("MESH")
     private var meshJob: Job? = null
 
     private val localPeerId = "PEER-" + UUID.randomUUID().toString().substring(0, 8).uppercase()

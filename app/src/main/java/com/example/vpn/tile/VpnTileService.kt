@@ -18,11 +18,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class VpnTileService : TileService() {
 
-    private val serviceScope = CoroutineScope(Dispatchers.Main)
+    private val serviceScope = CoroutineScope(Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
     private var stateJob: Job? = null
 
     override fun onStartListening() {
@@ -35,6 +36,11 @@ class VpnTileService : TileService() {
         }
     }
 
+    override fun onDestroy() {
+        serviceScope.cancel()
+        super.onDestroy()
+    }
+
     override fun onStopListening() {
         stateJob?.cancel()
         stateJob = null
@@ -45,7 +51,8 @@ class VpnTileService : TileService() {
         super.onClick()
         val currentState = RayVpnService.vpnState.value
 
-        if (currentState.isConnected) {
+        // Any tunnel, verified or not, is stopped by a tap (same rule as the in-app button).
+        if (currentState.isTunnelUp) {
             VpnController.stopVpn(applicationContext)
         } else if (currentState.isBusy) {
             // Do not start a second service operation while the existing connect,

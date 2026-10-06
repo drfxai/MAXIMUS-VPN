@@ -10,6 +10,7 @@ import com.example.vpn.routing.RoutingEngine
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.HttpUrl
@@ -353,7 +354,7 @@ class SubscriptionManager(
         subscription: SubscriptionInfo,
         importResult: com.example.data.model.UniversalImportResult,
         outcome: SubscriptionFetcher.Outcome.Fetched
-    ): SyncResult {
+    ): SyncResult = freeListLock.withLock {
         val saved = serverRepository.getAllProfilesOnce().filter {
             it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
         }
@@ -383,7 +384,7 @@ class SubscriptionManager(
                 "${importResult.configurationsFound} candidates, ${plan.insert.size} added, ${plan.delete.size} removed, " +
                 "${plan.kept.size} kept, ${plan.retained.size} retained (last-known-good or in use); ${saved.size} before."
         )
-        return SyncResult(
+        SyncResult(
             subscription.id, importResult.configurationsFound, plan.insert.size,
             importResult.validProfiles.size - plan.insert.size, true, viaMirror = viaMirror,
             poolBefore = saved.size, removedCount = plan.delete.size, retainedCount = plan.retained.size, keptCount = plan.kept.size
@@ -395,7 +396,7 @@ class SubscriptionManager(
      * one the VPN is using leaves the list too, but the running session keeps its own copy in memory and
      * is not interrupted. Test metadata for the deleted configs goes; diagnostic history stays.
      */
-    suspend fun deleteAllFree(): Int = withContext(Dispatchers.IO) {
+    suspend fun deleteAllFree(): Int = withContext(Dispatchers.IO) { freeListLock.withLock {
         val saved = serverRepository.getProfilesBySubscription(FreeConfigList.URL).first()
         val ids = saved.map { it.id }
         serverRepository.replaceAtomically(ids, emptyList())
@@ -407,21 +408,23 @@ class SubscriptionManager(
         XrayLogManager.i("SUBSCRIPTION", "Deleted ${ids.size} free configs" +
             if (activeFree) "; the connected one keeps running until disconnect." else ".")
         ids.size
-    }
+    } }
 
     /** Deletes one free config (the running session, if it uses it, is not interrupted). */
-    suspend fun deleteFree(profile: com.example.data.model.VlessProfile) = withContext(Dispatchers.IO) {
+    suspend fun deleteFree(profile: com.example.data.model.VlessProfile) = withContext(Dispatchers.IO) { freeListLock.withLock {
         serverRepository.replaceAtomically(listOf(profile.id), emptyList())
+        // The user removed it on purpose: it leaves the last-known-good pool too.
+        lastKnownGood()?.dropDead({ it == profile.effectiveFingerprint }, activeFingerprint = null)
         runCatching { com.example.RayApplication.instance.freeConfigEvidence.forget(listOf(profile.effectiveFingerprint)) }
         retainedStore?.update(retained = emptyList(), gone = listOf(profile.id))
-    }
+    } }
 
     /**
      * After the VPN disconnects: free configs kept only because they were in use when a refresh dropped
      * them are removed now, unless the last-known-good pool or a favourite still holds them.
      */
-    suspend fun releaseRetained(): Int = withContext(Dispatchers.IO) {
-        val store = retainedStore ?: return@withContext 0
+    suspend fun releaseRetained(): Int = withContext(Dispatchers.IO) { freeListLock.withLock {
+        val store = retainedStore ?: return@withLock 0
         val keep = lastKnownGood()?.protectedIds().orEmpty() + inUseIds()
         val ids = store.ids().filter { it !in keep }
         val favourites = ids.mapNotNull { serverRepository.getProfileById(it) }.filter { it.isFavorite }.map { it.id }.toSet()
@@ -430,7 +433,10 @@ class SubscriptionManager(
         store.update(retained = emptyList(), gone = ids)
         if (gone.isNotEmpty()) XrayLogManager.i("SUBSCRIPTION", "Removed ${gone.size} retained free configs after disconnect.")
         gone.size
-    }
+    } }
+
+    /** One change to the free list at a time: a refresh can never re-add what a delete just removed mid-way. */
+    private val freeListLock = kotlinx.coroutines.sync.Mutex()
 
     private suspend fun nodeCountOf(subscription: SubscriptionInfo) = serverRepository.getAllProfilesOnce().count {
         it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url

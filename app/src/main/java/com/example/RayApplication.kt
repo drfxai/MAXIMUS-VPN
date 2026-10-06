@@ -124,7 +124,7 @@ class RayApplication : Application() {
             val host = profile.address.trim().removePrefix("[").removeSuffix("]")
             if (profile.profileType == com.example.data.model.ProfileType.XRAY_JSON ||
                 com.example.vpn.tunnel.ProxyDnsTransport.isLiteralAddress(host) ||
-                com.example.vpn.VpnController.connectionState.value.isConnected
+                com.example.vpn.VpnController.connectionState.value.isTunnelUp
             ) profile
             else runCatching {
                 val resolved = com.example.vpn.EndpointResolver.resolve(

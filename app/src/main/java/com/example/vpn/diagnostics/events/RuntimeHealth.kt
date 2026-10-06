@@ -65,6 +65,16 @@ object RuntimeHealth {
     fun install(context: Context, background: (() -> Unit) -> Unit) {
         val app = context.applicationContext
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) background { runCatching { collectExits(app) } }
+        // The watchdog runs only while a screen is visible: no wake-ups while the VPN runs in the background.
+        (app as? android.app.Application)?.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityStarted(a: android.app.Activity) = visible(+1)
+            override fun onActivityStopped(a: android.app.Activity) = visible(-1)
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) = Unit
+            override fun onActivityResumed(a: android.app.Activity) = Unit
+            override fun onActivityPaused(a: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) = Unit
+            override fun onActivityDestroyed(a: android.app.Activity) = Unit
+        })
         startWatchdog()
         app.registerComponentCallbacks(object : ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
@@ -134,6 +144,14 @@ object RuntimeHealth {
 
     @Volatile private var lastTick = 0L
     private var watchdog: Thread? = null
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+    private val visibility = java.lang.Object()
+    private var visibleScreens = 0
+
+    private fun visible(delta: Int) = synchronized(visibility) {
+        visibleScreens = (visibleScreens + delta).coerceAtLeast(0)
+        visibility.notifyAll()
+    }
 
     /**
      * Posts a tick to the main thread every second; when the main thread has not run it for
@@ -147,6 +165,14 @@ object RuntimeHealth {
         watchdog = Thread({
             var reported = false
             while (!Thread.currentThread().isInterrupted) {
+                try {
+                    synchronized(visibility) {
+                        if (visibleScreens == 0) {
+                            while (visibleScreens == 0) visibility.wait()
+                            lastTick = System.nanoTime() // time spent in the background is not a stall
+                        }
+                    }
+                } catch (_: InterruptedException) { return@Thread }
                 main.post { lastTick = System.nanoTime() }
                 try { Thread.sleep(1000) } catch (_: InterruptedException) { return@Thread }
                 val stalledMs = (System.nanoTime() - lastTick) / 1_000_000

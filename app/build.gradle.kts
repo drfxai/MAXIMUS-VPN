@@ -1,3 +1,5 @@
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.Base64
 
 // import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
@@ -33,7 +35,7 @@ android {
 
     // Which build made a diagnostic report. CI sets GITHUB_SHA; local builds say "unknown".
     val gitCommit = System.getenv("GITHUB_SHA").orEmpty().take(12).filter { it.isLetterOrDigit() }.ifEmpty { "unknown" }
-    val buildTime = if (gitCommit == "unknown") "unknown" else java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MINUTES).toString()
+    val buildTime = if (gitCommit == "unknown") "unknown" else Instant.now().truncatedTo(ChronoUnit.MINUTES).toString()
     buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
     buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
   }

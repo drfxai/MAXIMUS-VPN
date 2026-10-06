@@ -70,7 +70,7 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
 |---|---|
 | JVM rig (adds DiagnosticReportTest, 5 tests) | 41 passed |
 | Hygiene scan | 0 problems |
-| CI checks.yml | see the run for this commit |
+| CI checks.yml | run 37468322849 on 1fa29eb failed: build script `java.time` reference and the secret scan on fake test tokens; both fixed in the next commit |
 
 ### Results after Phase 4
 
@@ -147,6 +147,19 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   `BUILD_TIME` come from CI (`GITHUB_SHA`), "unknown" locally. The existing Export Report button still
   copies the readable report and now also shares the two files; that report shows a hashed profile
   reference instead of the server address and gets the second redaction pass.
+
+- Phase 8 (in progress): manager scopes (`core/AppScopes.kt` `managerScope`) with a SupervisorJob and a
+  logging exception handler for FailoverManager, PsiphonConduitBridge, MaximusMeshManager and
+  SecretChatManager (one failed task no longer silently kills the scope); the Quick Settings tile
+  cancels its scope in `onDestroy` and stops any tunnel that is up (it used to try to connect again
+  when the tunnel was up but unverified); server switch, node edit, panel message, AI diagnostics and
+  the real-delay probe guard use "tunnel up" instead of "verified"; a mutex serializes free list
+  refresh, Delete Free, single delete and the post-disconnect release; deleting one free config from
+  the Servers list goes through `deleteFree` (leaves the last-known-good pool and its test
+  metadata); the stall watchdog runs only while a screen is visible (no background wake-ups).
+- CI fix: `app/build.gradle.kts` imports `java.time` (inside `android {}` `java` is the Gradle
+  extension); the report test assembles its fake bot token and API key at run time so the secret
+  scan passes.
 
 ## Pending tasks
 

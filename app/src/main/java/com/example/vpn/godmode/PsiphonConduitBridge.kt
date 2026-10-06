@@ -6,7 +6,6 @@ import com.example.data.model.ProtocolType
 import com.example.data.model.ServerCategory
 import com.example.data.model.VlessProfile
 import com.example.xray.XrayLogManager
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -43,7 +42,7 @@ object PsiphonConduitBridge {
 
     private val isBridgeActive = AtomicBoolean(false)
     private val discoveredBridges = ConcurrentHashMap<String, BridgeNode>()
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = com.example.core.managerScope("PSIPHON")
     private var watchdogJob: Job? = null
 
     // No unauthenticated hardcoded relays are eligible for automatic failover.
