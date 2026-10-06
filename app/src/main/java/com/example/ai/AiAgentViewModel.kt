@@ -224,9 +224,12 @@ class AiAgentViewModel(
                 )
 
                 if (response.error == null) {
+                    // A key that passed the test is saved at once, so the screen behind the
+                    // dialog stops showing "NO KEY" even if the dialog is closed without Save.
+                    preferences.setApiKey(apiKey.trim())
                     _uiState.value = _uiState.value.copy(
                         isTestingKey = false,
-                        testKeyStatus = "✅ API Key is Valid & Ready!"
+                        testKeyStatus = "✅ API key is valid and saved"
                     )
                 } else {
                     _uiState.value = _uiState.value.copy(

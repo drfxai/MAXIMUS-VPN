@@ -53,6 +53,7 @@ fun AiAgentSetupDialog(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
                 .fillMaxHeight(0.88f)
+                .wrapContentHeight()
                 .padding(vertical = 12.dp),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
@@ -60,7 +61,7 @@ fun AiAgentSetupDialog(
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 // Header Row
@@ -121,7 +122,7 @@ fun AiAgentSetupDialog(
                 // Scrollable Body
                 Column(
                     modifier = Modifier
-                        .weight(1f)
+                        .weight(1f, fill = false)
                         .fillMaxWidth()
                         .verticalScroll(rememberScrollState())
                 ) {

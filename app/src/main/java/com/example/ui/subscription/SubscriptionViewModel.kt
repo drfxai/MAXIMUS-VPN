@@ -76,6 +76,7 @@ class SubscriptionViewModel(
             _uiState.value = _uiState.value.copy(
                 isSyncing = true,
                 syncingSubscriptionId = subscription.id,
+                statusMessage = null,
                 errorMessage = null
             )
             try {
@@ -102,7 +103,10 @@ class SubscriptionViewModel(
         viewModelScope.launch {
             try {
                 subscriptionManager.deleteSubscriptionAndNodes(subscription)
-                _uiState.value = _uiState.value.copy(statusMessage = "Deleted subscription '${subscription.name}' and nodes.")
+                _uiState.value = _uiState.value.copy(
+                    statusMessage = "Deleted subscription '${subscription.name}' and nodes.",
+                    errorMessage = null
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

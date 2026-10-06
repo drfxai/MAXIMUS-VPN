@@ -107,11 +107,25 @@ data class GeminiApiError(
 // Supported models conforming to gemini-api guidelines
 object GeminiModelCatalog {
     const val GEMINI_2_5_FLASH = "gemini-2.5-flash"
+    const val GEMINI_3_8_FLASH = "gemini-3.8-flash"
+    const val GEMINI_3_7_FLASH = "gemini-3.7-flash"
     const val GEMINI_3_5_FLASH = "gemini-3.5-flash"
     const val GEMINI_3_1_PRO = "gemini-3.1-pro-preview"
     const val GEMINI_2_5_FLASH_IMAGE = "gemini-2.5-flash-image"
 
     val AVAILABLE_MODELS = listOf(
+        ModelInfo(
+            id = GEMINI_3_8_FLASH,
+            displayName = "Gemini 3.8 Flash",
+            badge = "Newest",
+            description = "Latest Flash model: the sharpest live diagnostics and fastest answers for co-pilot actions."
+        ),
+        ModelInfo(
+            id = GEMINI_3_7_FLASH,
+            displayName = "Gemini 3.7 Flash",
+            badge = "Fast",
+            description = "Quick, low-cost replies with strong reasoning for everyday tuning and troubleshooting."
+        ),
         ModelInfo(
             id = GEMINI_2_5_FLASH,
             displayName = "Gemini 2.5 Flash",
