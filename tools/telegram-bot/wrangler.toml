@@ -9,6 +9,8 @@ APP_URL = "https://github.com/drfxai/MAXIMUS-VPN/releases/latest"
 MAX_CONFIGS = "20"
 # BOT_TOKEN, WEBHOOK_SECRET and ADMIN_ID (your numeric Telegram ID) are secrets, never written here:
 # wrangler secret put BOT_TOKEN / WEBHOOK_SECRET / ADMIN_ID
+# Optional secrets: KEY_ENCRYPTION_SECRET (encrypts the saved Gemini key), GH_TOKEN (lets /refreshfree
+# and the admin panel start the free list build), GEMINI_API_KEY (fallback when no key was saved).
 
 # Storage for the admin commands. Create it with: npx wrangler kv namespace create STORE
 # then paste the id it prints here and remove the leading #.

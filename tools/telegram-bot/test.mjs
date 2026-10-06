@@ -1,6 +1,13 @@
 // node tools/telegram-bot/test.mjs
 import assert from "node:assert/strict";
-import worker, { handle, collectConfigs, extractLinks, gitHubMirrors, describe, pickNumbers, redact } from "./worker.js";
+import worker, { handle, collectConfigs, extractLinks, gitHubMirrors, describe, pickNumbers, redact, unseal, keyStatus, normalizeModel, verifyInitData, nextBuild, scrub } from "./worker.js";
+import { createHmac } from "node:crypto";
+
+const MODELS = { models: [
+  { name: "models/gemini-3.8-flash", displayName: "Gemini 3.8 Flash", supportedGenerationMethods: ["generateContent"] },
+  { name: "models/gemini-3.7-flash", displayName: "Gemini 3.7 Flash", supportedGenerationMethods: ["generateContent"] },
+  { name: "models/text-embedding-9", displayName: "Embedding", supportedGenerationMethods: ["embedContent"] },
+] };
 
 /** Presses the Yes (or No) button of the last confirmation the bot sent. */
 async function press(env, sent, answer = "ok", from = 777) {
@@ -184,8 +191,12 @@ assert.equal(describe("vmess://" + btoa(JSON.stringify({ ps: "Fast", add: "203.0
   const { env, sent } = fakeEnv(() => ({ body: "" }));
   const telegramFetch = env.fetchImpl;
   env.fetchImpl = async (url, init) => {
+    if (url.startsWith("https://generativelanguage.googleapis.com/v1beta/models?")) {
+      return new Response(JSON.stringify(MODELS));
+    }
     if (url.startsWith("https://generativelanguage.googleapis.com/")) {
       geminiBodies.push(init.body);
+      assert.equal(init.headers["x-goog-api-key"], "AIzaSyTestKey_0123456789abcd");
       assert.match(url, /gemini-3\.8-flash:generateContent$/);
       const next = script.shift();
       return new Response(JSON.stringify(next.body), { status: next.status ?? 200 });
@@ -208,14 +219,20 @@ assert.equal(describe("vmess://" + btoa(JSON.stringify({ ps: "Fast", add: "203.0
   await handle(777, "/setkey", env, 0, { messageId: 40 });
   assert.match(sent.at(-1).text, /next message/);
   await handle(777, "AIzaSyMenuKey_0123456789wxyz", env, 0, { messageId: 41 });
-  assert.equal(kv.get("gemini_key"), "AIzaSyMenuKey_0123456789wxyz");
+  // Stored only encrypted: no plain copy in storage, and the sealed value decrypts back to the key.
+  assert.equal(kv.get("gemini_key"), undefined);
+  assert.ok(!kv.get("gemini_key_enc").includes("AIzaSyMenuKey"));
+  assert.equal(await unseal(env, kv.get("gemini_key_enc")), "AIzaSyMenuKey_0123456789wxyz");
   assert.ok(sent.some((m) => m.message_id === 41));
   assert.equal(kv.get("await_key"), undefined);
   await handle(777, "/setkey AIzaSyTestKey_0123456789abcd", env, 0, { messageId: 42 });
-  assert.equal(kv.get("gemini_key"), "AIzaSyTestKey_0123456789abcd");
+  assert.equal(await unseal(env, kv.get("gemini_key_enc")), "AIzaSyTestKey_0123456789abcd");
   assert.ok(sent.some((m) => m.message_id === 42 && m.chat_id === 777));
-  assert.match(sent.at(-1).text, /ends in abcd/);
+  assert.match(sent.at(-1).text, /saved encrypted \(••••abcd\).*Google accepted it; model gemini-3\.8-flash is available/);
   assert.ok(!sent.at(-1).text.includes("AIzaSyTestKey"));
+  assert.ok(![...kv.values()].some((v) => String(v).includes("AIzaSyTestKey")));
+  // With another encryption secret the sealed key cannot be read.
+  await assert.rejects(unseal({ ...env, KEY_ENCRYPTION_SECRET: "other" }, kv.get("gemini_key_enc")));
 
   const link = "vless://11111111-2222-3333-4444-555555555555@198.51.100.9:443?security=reality#Berlin";
   script.push(
@@ -247,5 +264,248 @@ assert.equal(describe("vmess://" + btoa(JSON.stringify({ ps: "Fast", add: "203.0
 }
 
 assert.deepEqual(redact("add vless://a@b:1#x and https://s.example/sub").text, "add [LINK1] and [URL1]");
+
+
+// ---------------------------------------------------------------- Phase 10: panel, key, model, free list
+
+/** Init data the way Telegram signs it for a Mini App. */
+function initData(botToken, user, authDate) {
+  const fields = { auth_date: String(authDate), query_id: "AAH", user: JSON.stringify(user) };
+  const check = Object.keys(fields).sort().map((k) => `${k}=${fields[k]}`).join("\n");
+  const secret = createHmac("sha256", "WebAppData").update(botToken).digest();
+  const hash = createHmac("sha256", secret).update(check).digest("hex");
+  return new URLSearchParams({ ...fields, hash }).toString();
+}
+
+const manifest = {
+  version: 1, created: "2026-10-06T08:17:00Z", count: 3,
+  report: {
+    rejected: { "not answering": 40, "certificate checks disabled": 12 },
+    sources: { "barry-far": "2 carried traffic", "dead-source": "not fetched: URLError" },
+    source_meta: [
+      { source_name: "barry-far", fetch_status: "ok", candidate_count: 30, valid_count: 2, source_url: "https://raw.githubusercontent.com/x/y/main/z" },
+      { source_name: "dead-source", fetch_status: "failed: URLError", candidate_count: 0, valid_count: 0 },
+    ],
+    diversity: { kinds: { reality: 2, ws: 1 }, cdn: { cdn: 1, direct: 2 }, failure_domains: 3, largest_failure_domain: 1 },
+  },
+  evidence: { global: "tested from a GitHub Actions runner", iran: "UNKNOWN_IRAN_STATUS" },
+};
+const configsJson = { configs: [1, 2, 3].map((i) => ({ name: `DE ${i}`, iran_status: "UNKNOWN_IRAN_STATUS", lifecycle: "GLOBAL_VERIFIED" })) };
+
+function panelEnv() {
+  const kv = new Map();
+  const calls = [];
+  const sent = [];
+  const env = {
+    BOT_TOKEN: "123456:TEST_TOKEN_for_the_panel_checks_0000000",
+    WEBHOOK_SECRET: "s3cret",
+    ADMIN_ID: "777",
+    STORE: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => void kv.set(k, v), delete: async (k) => void kv.delete(k) },
+    fetchImpl: async (url, init = {}) => {
+      calls.push({ url, init });
+      if (url.startsWith("https://api.telegram.org/")) {
+        sent.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      }
+      // raw.githubusercontent.com is "blocked": the mirrors answer.
+      if (url.startsWith("https://raw.githubusercontent.com/")) throw new Error("reset");
+      if (url.includes("free-configs/manifest.json")) return new Response(JSON.stringify(manifest));
+      if (url.includes("free-configs/configs.json")) return new Response(JSON.stringify(configsJson));
+      if (url.includes("free-configs/manifest.sig")) return new Response("c2lnbmF0dXJl");
+      if (url.startsWith("https://generativelanguage.googleapis.com/v1beta/models?")) {
+        return init.headers["x-goog-api-key"].endsWith("bad0")
+          ? new Response(JSON.stringify({ error: { message: "API key not valid" } }), { status: 400 })
+          : new Response(JSON.stringify(MODELS));
+      }
+      if (url.startsWith("https://api.github.com/")) return new Response(null, { status: 204 });
+      return new Response("", { status: 404 });
+    },
+  };
+  return { env, kv, calls, sent };
+}
+
+const NOW = Date.UTC(2026, 9, 6, 13, 0, 0);
+async function call(env, path, { body, data, now = NOW } = {}) {
+  const req = new Request(`https://bot.example/api/${path}`, {
+    method: body ? "POST" : "GET",
+    headers: { authorization: `tma ${data ?? initData(env.BOT_TOKEN, { id: 777, first_name: "A" }, Math.floor(now / 1000))}`, "content-type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const { api } = await import("./worker.js");
+  const res = await api(req, env, now);
+  return { status: res.status, body: await res.json() };
+}
+
+// Telegram init data: valid admin passes; another user, a forged hash and old data are refused.
+{
+  const { env } = panelEnv();
+  const t = Math.floor(NOW / 1000);
+  assert.equal((await verifyInitData(env, initData(env.BOT_TOKEN, { id: 777 }, t), NOW)).ok, true);
+  assert.equal((await verifyInitData(env, initData(env.BOT_TOKEN, { id: 778 }, t), NOW)).status, 403);
+  assert.equal((await verifyInitData(env, initData("999:other_bot_token_xxxxxxxxxxxxxxxxxxxxxx", { id: 777 }, t), NOW)).status, 401);
+  const forged = initData(env.BOT_TOKEN, { id: 778 }, t).replace(encodeURIComponent('"id":778'), encodeURIComponent('"id":777'));
+  assert.equal((await verifyInitData(env, forged, NOW)).status, 401);
+  assert.equal((await verifyInitData(env, initData(env.BOT_TOKEN, { id: 777 }, t - 2 * 3600), NOW)).status, 401);
+  assert.equal((await verifyInitData(env, "", NOW)).status, 401);
+  assert.equal((await call(env, "overview", { data: "" })).status, 401);
+  assert.equal((await call(env, "overview", { data: initData(env.BOT_TOKEN, { id: 778 }, t) })).status, 403);
+}
+
+// The panel page holds no secret and locks down what it may load.
+{
+  const { env } = panelEnv();
+  env.GEMINI_API_KEY = "AIzaSyCloudSecret_0000wxyz";
+  const res = await worker.fetch(new Request("https://bot.example/admin"), env);
+  const html = await res.text();
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-security-policy"), /connect-src 'self'/);
+  assert.ok(html.includes("telegram-web-app.js") && html.includes("Iran Health") && html.includes("Gemini AI"));
+  for (const secret of [env.BOT_TOKEN, env.GEMINI_API_KEY, env.WEBHOOK_SECRET, "777"]) assert.ok(!html.includes(secret), secret);
+}
+
+// Gemini key from the panel: saved encrypted, validated, shown only as a mask; model checked against Google's list.
+{
+  const { env, kv } = panelEnv();
+  let r = await call(env, "gemini");
+  assert.equal(r.body.configured, false);
+  r = await call(env, "gemini/key", { body: { key: "short" } });
+  assert.equal(r.status, 400);
+  r = await call(env, "gemini/key", { body: { key: "AIzaSyPanelKey_0123456789ABCD" } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.valid, true);
+  assert.equal(r.body.status.mask, "••••ABCD");
+  assert.equal(r.body.status.source, "saved");
+  assert.equal(r.body.status.modelChecked, "available");
+  const all = JSON.stringify((await call(env, "gemini")).body) + JSON.stringify((await call(env, "overview")).body);
+  assert.ok(!all.includes("AIzaSyPanelKey"));
+  assert.ok(![...kv.values()].some((v) => String(v).includes("AIzaSyPanelKey")));
+  assert.deepEqual((await call(env, "gemini")).body.models.map((m) => m.id), ["gemini-3.8-flash", "gemini-3.7-flash"]);
+
+  // An unknown model is refused and the model stays; no substitution.
+  r = await call(env, "gemini/model", { body: { model: "gemini-9-ultra" } });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /does not offer gemini-9-ultra.*not changed/);
+  assert.equal((await keyStatus(env)).model, "gemini-3.8-flash");
+  r = await call(env, "gemini/model", { body: { model: "Gemini 3.7 Flash" } });
+  assert.equal(r.body.model, "gemini-3.7-flash");
+  assert.equal(kv.get("gemini_model"), "gemini-3.7-flash");
+  assert.equal(normalizeModel("models/gemini-3.8-flash"), "gemini-3.8-flash");
+
+  // A key Google rejects is stored but marked invalid with the reason.
+  r = await call(env, "gemini/key", { body: { key: "AIzaSyRejectedKey_000000bad0" } });
+  assert.equal(r.body.valid, false);
+  assert.match(r.body.message, /rejected the key/);
+  assert.equal((await keyStatus(env)).valid, false);
+
+  // Delete needs confirmation.
+  assert.equal((await call(env, "gemini/delete", { body: {} })).status, 400);
+  r = await call(env, "gemini/delete", { body: { confirm: true } });
+  assert.equal(r.body.status.configured, false);
+  assert.equal(kv.get("gemini_key_enc"), undefined);
+}
+
+// A plain-text key left by an older version is encrypted on first use and the plain copy removed.
+{
+  const { env, kv } = panelEnv();
+  kv.set("gemini_key", "AIzaSyLegacyPlainKey_00000000LGCY");
+  const s = await keyStatus(env);
+  assert.equal(s.mask, "••••LGCY");
+  assert.equal(kv.get("gemini_key"), undefined);
+  assert.equal(await unseal(env, kv.get("gemini_key_enc")), "AIzaSyLegacyPlainKey_00000000LGCY");
+  // A changed BOT_TOKEN without KEY_ENCRYPTION_SECRET makes the saved key unreadable, and says so.
+  assert.equal((await keyStatus({ ...env, BOT_TOKEN: "999:changed" })).unreadable, true);
+}
+
+// Configs in the panel: no addresses; delete by id with confirmation; the link only on an explicit request.
+{
+  const { env, kv } = panelEnv();
+  const a = "vless://11111111-2222-3333-4444-555555555555@198.51.100.9:443?type=ws&security=tls#Frankfurt";
+  const b = "trojan://secretpass@198.51.100.10:443?security=tls#Amsterdam";
+  let r = await call(env, "configs/add", { body: { tier: "vip", text: `${a}\n${b}\nnot a link` } });
+  assert.deepEqual(r.body, { added: 2, total: 2 });
+  r = await call(env, "configs?tier=vip");
+  const text = JSON.stringify(r.body);
+  assert.ok(!text.includes("198.51.100") && !text.includes("secretpass") && !text.includes("11111111"));
+  assert.deepEqual(r.body.items.map((i) => [i.name, i.protocol, i.transport, i.security]), [["Frankfurt", "VLESS", "ws", "tls"], ["Amsterdam", "TROJAN", "", "tls"]]);
+  const id = r.body.items[0].id;
+  assert.equal((await call(env, "configs/delete", { body: { tier: "vip", ids: [id] } })).status, 400);
+  assert.equal(kv.get("vip_configs"), `${a}\n${b}`);
+  assert.equal((await call(env, "configs/link", { body: { tier: "vip", id: r.body.items[1].id } })).body.link, b);
+  r = await call(env, "configs/delete", { body: { tier: "vip", ids: [id], confirm: true } });
+  assert.deepEqual(r.body, { deleted: 1, total: 1 });
+  assert.equal(kv.get("vip_configs"), b);
+  assert.equal((await call(env, "configs/clear", { body: { tier: "vip" } })).status, 400);
+  await call(env, "configs/clear", { body: { tier: "vip", confirm: true } });
+  assert.equal(kv.get("vip_configs"), "");
+  const log = JSON.parse(kv.get("activity"));
+  assert.ok(log.some((e) => e.text.includes("VIP: 1 deleted")));
+}
+
+// Free list status through the CDN mirrors; Iran stays unknown; refresh needs confirmation and a token.
+{
+  const { env, calls, sent, kv } = panelEnv();
+  let r = await call(env, "validation");
+  assert.equal(r.body.count, 3);
+  assert.equal(r.body.signed, true);
+  assert.equal(r.body.rejectedTotal, 52);
+  assert.equal(r.body.candidates, 30);
+  assert.equal(r.body.ageHours, 4.7);
+  assert.deepEqual(r.body.iran, { UNKNOWN_IRAN_STATUS: 3 });
+  assert.equal(r.body.nextBuild, "2026-10-06T18:17:00.000Z");
+  assert.equal(new Date(nextBuild(Date.UTC(2026, 9, 6, 12, 10))).toISOString(), "2026-10-06T12:17:00.000Z");
+  assert.ok(calls.some((c) => c.url.startsWith("https://cdn.jsdelivr.net/gh/drfxai/MAXIMUS-VPN@free-configs/manifest.json")));
+
+  assert.equal((await call(env, "refresh", { body: {} })).status, 400);
+  r = await call(env, "refresh", { body: { confirm: true } });
+  assert.match(r.body.message, /GH_TOKEN/);
+  env.GH_TOKEN = "ghp_test";
+  r = await call(env, "refresh", { body: { confirm: true } });
+  assert.equal(r.body.ok, true);
+  const dispatch = calls.find((c) => c.url.includes("/actions/workflows/free-configs.yml/dispatches"));
+  assert.equal(JSON.parse(dispatch.init.body).ref, "main");
+
+  // The same from Telegram: /statusfree, /iranstatus, /sources, and /refreshfree only after Yes.
+  await handle(777, "/statusfree", env, 0);
+  assert.match(sent.at(-1).text, /Free list: 3 configs, built 2026-10-06 08:17 UTC .* signed\.\n30 candidates from 2 sources\.\nRejected 52: not answering 40, certificate checks disabled 12\./);
+  await handle(777, "/iranstatus", env, 0);
+  assert.match(sent.at(-1).text, /3 of 3 unknown\. The list is built on GitHub's servers outside Iran/);
+  await handle(777, "/sources", env, 0);
+  assert.match(sent.at(-1).text, /barry-far: 2 carried traffic · 30 candidates, 2 kept\ndead-source: not fetched/);
+  const before = calls.filter((c) => c.url.includes("dispatches")).length;
+  await handle(777, "/refreshfree", env, 0);
+  assert.match(sent.at(-1).text, /Rebuild the free list now\?/);
+  assert.equal(sent.at(-1).reply_markup.inline_keyboard[0][0].text, "Yes, rebuild");
+  assert.equal(calls.filter((c) => c.url.includes("dispatches")).length, before);
+  await press(env, sent);
+  assert.equal(calls.filter((c) => c.url.includes("dispatches")).length, before + 1);
+  assert.match(sent.at(-1).text, /Build started/);
+
+  // Strangers cannot use the new commands.
+  await handle(5, "/statusfree", env, 0);
+  assert.match(sent.at(-1).text, /^MAXIMUS VPN/);
+
+  // /health and /diagnostics; problems are logged without secrets.
+  await handle(777, "/health", env, 0);
+  assert.match(sent.at(-1).text, /Webhook: .*\nStorage: bound · Gemini: not configured\nFree list: 3 configs/);
+  const { logError } = await import("./worker.js");
+  await logError(env, "test", new Error(`failed for vless://u@198.51.100.1:443 with ${env.BOT_TOKEN} and AIzaSyLeaked_0123456789abcdefghij`));
+  await handle(777, "/diagnostics", env, 0);
+  const diag = sent.at(-1).text;
+  assert.match(diag, /test: failed for \[LINK1\] with \[BOT_TOKEN\] and \[API_KEY\]/);
+  assert.ok(!kv.get("errors").includes("198.51.100.1") && !kv.get("errors").includes("TEST_TOKEN"));
+  assert.equal(scrub("x".repeat(40)), "[TOKEN]");
+}
+
+// /setup also gives the admin the panel button and remembers the Worker's address for /panel.
+{
+  const { env, sent, kv } = panelEnv();
+  await worker.fetch(new Request("https://bot.example/setup?secret=s3cret"), env);
+  const menu = sent.find((m) => m.menu_button);
+  assert.equal(menu.menu_button.web_app.url, "https://bot.example/admin");
+  assert.equal(menu.chat_id, 777);
+  assert.equal(kv.get("origin"), "https://bot.example");
+  await handle(777, "/panel", env, 0);
+  assert.equal(sent.at(-1).reply_markup.inline_keyboard[0][0].web_app.url, "https://bot.example/admin");
+}
 
 console.log("telegram bot: all checks passed");

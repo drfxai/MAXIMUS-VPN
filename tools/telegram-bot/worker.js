@@ -12,14 +12,19 @@
 //   MAX_CONFIGS     optional, default 20
 //   ADMIN_ID        your numeric Telegram ID; lets you change the lists from Telegram (send /admin)
 //   SUB_MAX         optional, most configurations served at /sub, default 300
-//   GEMINI_API_KEY  optional secret; or send /setkey to the bot. Lets the admin manage everything by
-//                   writing normally (Persian or English). Config links never reach Gemini.
+//   GEMINI_API_KEY  optional secret; or send /setkey to the bot (or use the panel). Lets the admin manage
+//                   everything by writing normally (Persian or English). Config links never reach Gemini.
+//   KEY_ENCRYPTION_SECRET  optional, recommended: encrypts the saved Gemini key (otherwise derived from BOT_TOKEN)
+//   GH_TOKEN        optional secret: a GitHub token allowed to run Actions, for /refreshfree and the panel
+//   FREE_REPO       optional, default drfxai/MAXIMUS-VPN (where the free-configs branch lives)
 // Binding (optional, needed for the admin commands): a KV namespace named STORE.
 //
 // Routes: POST /webhook (Telegram), GET /setup?secret=WEBHOOK_SECRET (registers the webhook),
 // GET /sub (the app's free subscription: the admin's subscription links plus free configs, Base64),
 // GET /vip (the app's VIP subscription: the admin's VIP configs, Base64),
 // GET /status?secret=WEBHOOK_SECRET (what is set up and Telegram's last delivery error; no secrets).
+// GET /admin (the admin panel, a Telegram Mini App; holds no data), /api/* (the panel's data; every call
+// needs init data signed by Telegram for the ADMIN_ID account).
 
 // Only what the app runs (TUIC is refused at import).
 const LINK = /^(vless|vmess|trojan|ss|hysteria2|hy2|wireguard):\/\/\S+$/i;
@@ -35,13 +40,15 @@ export default {
     if (request.method === "GET" && url.pathname === "/status") return status(url, env);
     if (request.method === "GET" && url.pathname === "/sub") return subscription(env);
     if (request.method === "GET" && url.pathname === "/vip") return subscription(env, "vip");
+    if (request.method === "GET" && url.pathname === "/admin") return adminPage();
+    if (url.pathname.startsWith("/api/")) return api(request, env);
     if (request.method === "POST" && url.pathname === "/webhook") {
       if (!env.WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.WEBHOOK_SECRET) {
         return new Response("forbidden", { status: 403 });
       }
       const update = await request.json().catch(() => null);
       // Answer Telegram at once; AI replies can take a few seconds and Telegram retries slow webhooks.
-      const work = processUpdate(update, env).catch((e) => console.log("update failed", e?.message));
+      const work = processUpdate(update, env).catch((e) => logError(env, "update", e));
       if (ctx?.waitUntil) ctx.waitUntil(work);
       else await work;
       return new Response("ok");
@@ -113,12 +120,15 @@ async function setup(url, env) {
     ],
   });
   if (env.ADMIN_ID) {
-    // The admin's own chat also lists the management commands.
+    // The admin's own chat also lists the management commands and opens the panel from the menu button.
+    const chatId = Number(String(env.ADMIN_ID).trim());
     await telegram(env, "setMyCommands", {
-      scope: { type: "chat", chat_id: Number(String(env.ADMIN_ID).trim()) },
+      scope: { type: "chat", chat_id: chatId },
       commands: ADMIN_MENU.map(([command, description]) => ({ command: command.slice(1), description })),
     });
+    await telegram(env, "setChatMenuButton", { chat_id: chatId, menu_button: { type: "web_app", text: "Admin", web_app: { url: `${url.origin}/admin` } } });
   }
+  if (env.STORE) await env.STORE.put("origin", url.origin);
   return new Response(JSON.stringify(res), { headers: { "content-type": "application/json" } });
 }
 
@@ -164,6 +174,13 @@ const ADMIN_MENU = [
   ["/delkey", "Remove the Gemini API key"],
   ["/model", "Show or change the Gemini model"],
   ["/reset", "Forget the AI conversation"],
+  ["/panel", "Open the admin panel"],
+  ["/statusfree", "Published free list status"],
+  ["/refreshfree", "Rebuild the free list now"],
+  ["/sources", "Free list sources"],
+  ["/health", "Bot and free list health"],
+  ["/iranstatus", "What is known about Iran"],
+  ["/diagnostics", "Recent problems"],
 ];
 // /addconfig and /clearconfigs are the older names of /addfree and /clearfree.
 const ALIASES = { "/addconfig": "/addfree", "/clearconfigs": "/clearfree" };
@@ -372,6 +389,7 @@ async function tierCommand(chatId, action, tier, text, args, env) {
 
 /** One line per item an operation would remove, for the confirmation message. */
 async function describeOp(env, op) {
+  if (op.kind === "refresh") return ["The free list is rebuilt on GitHub now. The current list stays until the new one is published."];
   if (op.kind === "delsub") {
     const subs = await stored(env, "subs");
     return op.numbers.filter((n) => n <= subs.length).map((n) => `${n}. ${hostOf(subs[n - 1])}`);
@@ -383,6 +401,7 @@ async function describeOp(env, op) {
 }
 
 function opTitle(op) {
+  if (op.kind === "refresh") return "Rebuild the free list now?";
   if (op.kind === "delsub") return "Delete these subscription links?";
   const label = TIERS[op.tier].label;
   return op.kind === "clear" ? `Delete ALL ${label} configs?` : `Delete these ${label} configs?`;
@@ -397,12 +416,13 @@ async function confirm(env, chatId, op) {
   const shown = items.length > 30 ? [...items.slice(0, 30), `… and ${items.length - 30} more`] : items;
   await send(env, chatId, {
     text: `${opTitle(op)}\n\n${shown.join("\n")}`,
-    reply_markup: { inline_keyboard: [[{ text: "Yes, delete", callback_data: `ok:${id}` }, { text: "No", callback_data: `no:${id}` }]] },
+    reply_markup: { inline_keyboard: [[{ text: op.kind === "refresh" ? "Yes, rebuild" : "Yes, delete", callback_data: `ok:${id}` }, { text: "No", callback_data: `no:${id}` }]] },
   });
   return items;
 }
 
 async function runOp(env, op) {
+  if (op.kind === "refresh") return (await dispatchRefresh(env)).message;
   if (op.kind === "delsub") {
     const subs = await stored(env, "subs");
     const next = subs.filter((_, i) => !op.numbers.includes(i + 1));
@@ -417,7 +437,7 @@ async function runOp(env, op) {
     (next.length ? ` Numbers have shifted, check /list${op.tier}.` : "");
 }
 
-const BUTTON_COMMANDS = ["/list", "/listfree", "/listvip", "/ai", "/admin"];
+const BUTTON_COMMANDS = ["/list", "/listfree", "/listvip", "/ai", "/admin", "/statusfree", "/health"];
 
 async function onButton(query, env) {
   const chatId = query.message?.chat?.id;
@@ -432,7 +452,7 @@ async function onButton(query, env) {
   await telegram(env, "editMessageReplyMarkup", { chat_id: chatId, message_id: query.message.message_id, reply_markup: { inline_keyboard: [] } });
   if (!fresh) return send(env, chatId, "That question has expired. Ask again.");
   await env.STORE.delete("pending");
-  if (m[1] === "no") return send(env, chatId, "Cancelled. Nothing was deleted.");
+  if (m[1] === "no") return send(env, chatId, pending.op.kind === "refresh" ? "Cancelled. Nothing was started." : "Cancelled. Nothing was deleted.");
   return send(env, chatId, await runOp(env, pending.op));
 }
 
@@ -453,6 +473,8 @@ function adminHelp() {
     "Free subscription links:",
     "/addsub URL · /editsub N URL · /delsub N", "",
     "/list shows everything. N can be several numbers or a range: /delvip 2 5-7", "",
+    "Published free list: /statusfree · /sources · /iranstatus · /refreshfree",
+    "Bot: /health · /diagnostics · /panel (admin panel)", "",
     "AI assistant (Gemini): /setkey KEY · /delkey · /model · /ai · /reset",
     "With a key saved, just write what you want, for example: add these to VIP, or delete the German free servers."].join("\n");
 }
@@ -461,6 +483,7 @@ const ADMIN_BUTTONS = {
   inline_keyboard: [
     [{ text: "Overview", callback_data: "cmd:/list" }, { text: "Free list", callback_data: "cmd:/listfree" }],
     [{ text: "VIP list", callback_data: "cmd:/listvip" }, { text: "AI status", callback_data: "cmd:/ai" }],
+    [{ text: "Free list status", callback_data: "cmd:/statusfree" }, { text: "Health", callback_data: "cmd:/health" }],
   ],
 };
 
@@ -471,6 +494,13 @@ async function admin(chatId, command, text, env, meta = {}) {
   const args = text.split(/\s+/).slice(1).filter(Boolean);
   if (command === "/admin") return send(env, chatId, { text: adminHelp(), reply_markup: ADMIN_BUTTONS });
   if (["/ai", "/setkey", "/delkey", "/model", "/reset"].includes(command)) return aiCommand(chatId, command, args, env, meta);
+  if (["/statusfree", "/sources", "/iranstatus", "/health", "/diagnostics"].includes(command)) return opsCommand(chatId, command, env);
+  if (command === "/refreshfree") return confirm(env, chatId, { kind: "refresh" });
+  if (command === "/panel") {
+    const origin = await env.STORE.get("origin");
+    if (!origin) return send(env, chatId, "Open /setup once in the browser first, so the bot knows its own address.");
+    return send(env, chatId, { text: "MAXIMUS admin panel. Only your Telegram account can use it.", reply_markup: { inline_keyboard: [[{ text: "Open admin panel", web_app: { url: `${origin}/admin` } }]] } });
+  }
   const tiered = command.match(/^\/(add|list|del|clear)(free|vip)$/);
   if (tiered) return tierCommand(chatId, tiered[1], tiered[2], text, args, env);
   if (command === "/list") {
@@ -514,14 +544,179 @@ const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
 const HISTORY_TURNS = 12;
 const MAX_TOOL_ROUNDS = 6;
 
-/** The key saved from Telegram wins, so /setkey always takes effect; the GEMINI_API_KEY secret is the fallback. */
+// ---- The Gemini key: stored only encrypted (AES-GCM) in KV, never shown, logged or sent to a page.
+// The encryption key comes from the KEY_ENCRYPTION_SECRET secret (or, without it, from BOT_TOKEN),
+// so a copy of the KV data alone does not reveal the Gemini key.
+const KEY_ENC = "gemini_key_enc";
+const KEY_META = "gemini_key_meta";
+const LEGACY_KEY = "gemini_key";
+const KEY_FORMAT = /^[A-Za-z0-9_-]{20,200}$/;
+const utf8 = new TextEncoder();
+
+function b64(bytes) {
+  let s = "";
+  for (const b of new Uint8Array(bytes)) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
+function unb64(s) {
+  return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+}
+
+async function sealingKey(env) {
+  const secret = env.KEY_ENCRYPTION_SECRET || env.BOT_TOKEN;
+  if (!secret) throw new Error("no encryption secret");
+  const base = await crypto.subtle.importKey("raw", utf8.encode(secret), "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: utf8.encode("maximus-gemini-key"), info: utf8.encode("v1") },
+    base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+
+export async function seal(env, text) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: utf8.encode(KEY_ENC) }, await sealingKey(env), utf8.encode(text));
+  return `v1.${b64(iv)}.${b64(ct)}`;
+}
+
+export async function unseal(env, sealed) {
+  const [v, iv, ct] = String(sealed).split(".");
+  if (v !== "v1" || !iv || !ct) throw new Error("unknown format");
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(iv), additionalData: utf8.encode(KEY_ENC) }, await sealingKey(env), unb64(ct));
+  return new TextDecoder().decode(pt);
+}
+
+async function readMeta(env) {
+  return JSON.parse((env.STORE && (await env.STORE.get(KEY_META))) || "{}");
+}
+
+async function saveKey(env, key) {
+  await env.STORE.put(KEY_ENC, await seal(env, key));
+  await env.STORE.put(KEY_META, JSON.stringify({ last4: key.slice(-4), savedAt: Date.now() }));
+  await env.STORE.delete(LEGACY_KEY);
+}
+
+async function deleteKey(env) {
+  await env.STORE.delete(KEY_ENC);
+  await env.STORE.delete(KEY_META);
+  await env.STORE.delete(LEGACY_KEY);
+}
+
+/** The saved key: "" when none, null when it can no longer be decrypted (the secret changed). */
+async function savedKey(env) {
+  if (!env.STORE) return "";
+  // Older versions stored the key as plain text: encrypt it and remove the plain copy.
+  const legacy = await env.STORE.get(LEGACY_KEY);
+  if (legacy) {
+    await saveKey(env, legacy);
+    return legacy;
+  }
+  const sealed = await env.STORE.get(KEY_ENC);
+  if (!sealed) return "";
+  try { return await unseal(env, sealed); } catch (_) { return null; }
+}
+
+/** The key saved from Telegram or the panel wins, so saving always takes effect; the GEMINI_API_KEY secret is the fallback. */
 async function aiKey(env) {
-  const saved = env.STORE ? (await env.STORE.get("gemini_key")) || "" : "";
-  return saved || env.GEMINI_API_KEY || "";
+  return (await savedKey(env)) || env.GEMINI_API_KEY || "";
+}
+
+/** What anyone may see about the key: whether it is set, where from, and its last four characters. */
+export async function keyStatus(env) {
+  const saved = await savedKey(env);
+  const meta = await readMeta(env);
+  const key = saved || env.GEMINI_API_KEY || "";
+  return {
+    configured: Boolean(key),
+    source: saved ? "saved" : key ? "cloudflare-secret" : null,
+    mask: key ? `••••${saved ? meta.last4 || key.slice(-4) : key.slice(-4)}` : null,
+    unreadable: saved === null,
+    encryption: env.KEY_ENCRYPTION_SECRET ? "KEY_ENCRYPTION_SECRET" : "derived from BOT_TOKEN",
+    validatedAt: meta.validatedAt || null,
+    valid: meta.valid ?? null,
+    message: meta.message || null,
+    model: await aiModel(env),
+    modelChecked: meta.modelChecked || null,
+  };
 }
 
 async function aiModel(env) {
   return (env.STORE && (await env.STORE.get("gemini_model"))) || env.GEMINI_MODEL || DEFAULT_MODEL;
+}
+
+/** "Gemini 3.8 Flash" or "models/gemini-3.8-flash" → "gemini-3.8-flash". */
+export function normalizeModel(name) {
+  return String(name || "").trim().toLowerCase().replace(/^models\//, "").replace(/\s+/g, "-");
+}
+
+/** Google's model list for a key: proves the key works and says which models it may use. */
+async function listModels(env, key) {
+  const fetchImpl = env.fetchImpl || fetch;
+  const models = [];
+  let page = "";
+  for (let i = 0; i < 5; i++) {
+    let res;
+    try {
+      res = await fetchImpl(`${GEMINI}?pageSize=1000${page ? `&pageToken=${encodeURIComponent(page)}` : ""}`, { headers: { "x-goog-api-key": key } });
+    } catch (_) {
+      return { ok: false, message: "Could not reach Google. Try again in a moment." };
+    }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, status: res.status, message: geminiError(res.status, body) };
+    for (const m of body.models || []) {
+      if (!(m.supportedGenerationMethods || []).includes("generateContent")) continue;
+      models.push({ id: normalizeModel(m.name), name: String(m.displayName || m.name).slice(0, 60) });
+    }
+    page = body.nextPageToken || "";
+    if (!page) break;
+  }
+  return { ok: true, models };
+}
+
+/** Checks the key with Google and records the result (time, yes/no, message) next to it. */
+export async function validateKey(env) {
+  const key = await aiKey(env);
+  if (!key) return { ok: false, message: "No key is configured." };
+  const r = await listModels(env, key);
+  const model = await aiModel(env);
+  const meta = await readMeta(env);
+  meta.validatedAt = Date.now();
+  meta.valid = r.ok;
+  meta.message = r.ok ? "Google accepted the key." : r.message;
+  if (r.ok) meta.modelChecked = r.models.some((m) => m.id === model) ? "available" : "unavailable";
+  await env.STORE.put(KEY_META, JSON.stringify(meta));
+  if (r.ok) await env.STORE.put("gemini_models", JSON.stringify(r.models.slice(0, 200)));
+  return { ...r, model, modelAvailable: r.ok ? meta.modelChecked === "available" : null };
+}
+
+/** Changes the model only when Google lists it for this key. Never substitutes another one. */
+export async function setModel(env, raw) {
+  const id = normalizeModel(raw);
+  if (!/^gemini-[a-z0-9.-]{2,60}$/.test(id)) return { ok: false, message: "Model names look like gemini-3.8-flash." };
+  const key = await aiKey(env);
+  if (!key) return { ok: false, message: "Save a key first: the model is checked against Google's list for that key." };
+  const r = await listModels(env, key);
+  if (!r.ok) return { ok: false, message: r.message };
+  if (!r.models.some((m) => m.id === id)) {
+    const flash = r.models.map((m) => m.id).filter((m) => m.includes("flash")).slice(0, 6);
+    return { ok: false, message: `Google does not offer ${id} for this key. The model was not changed.${flash.length ? ` Available, for example: ${flash.join(", ")}` : ""}` };
+  }
+  await env.STORE.put("gemini_model", id);
+  await env.STORE.put("gemini_models", JSON.stringify(r.models.slice(0, 200)));
+  const meta = await readMeta(env);
+  meta.modelChecked = "available";
+  await env.STORE.put(KEY_META, JSON.stringify(meta));
+  await activity(env, `Gemini model set to ${id}`);
+  return { ok: true, model: id };
+}
+
+/** Saves a new key encrypted and checks it with Google straight away. */
+export async function storeKey(env, key) {
+  key = String(key || "").trim();
+  if (!KEY_FORMAT.test(key)) return { ok: false, message: "That does not look like a Gemini API key (from aistudio.google.com)." };
+  await saveKey(env, key);
+  await activity(env, "Gemini key saved");
+  const v = await validateKey(env);
+  return { ok: true, valid: v.ok, message: v.message || (v.ok ? "Google accepted the key." : ""), modelAvailable: v.modelAvailable, model: v.model };
 }
 
 async function aiCommand(chatId, command, args, env, meta) {
@@ -532,29 +727,35 @@ async function aiCommand(chatId, command, args, env, meta) {
       await env.STORE.put("await_key", "1", { expirationTtl: 300 });
       return send(env, chatId, "Send the Gemini API key as your next message. I will delete it from the chat right away.");
     }
-    const key = args[0];
-    if (!/^[A-Za-z0-9_-]{20,200}$/.test(key)) return send(env, chatId, "That does not look like a Gemini API key. Send /setkey followed by the key from aistudio.google.com.");
-    await env.STORE.put("gemini_key", key);
-    return send(env, chatId, `Key saved (ends in ${key.slice(-4)}) and your message deleted. Now just write what you want, for example: show the VIP list.`);
+    const r = await storeKey(env, args[0]);
+    if (!r.ok) return send(env, chatId, `${r.message} Send /setkey followed by the key.`);
+    const mask = (await keyStatus(env)).mask;
+    return send(env, chatId, `Key saved encrypted (${mask}) and your message deleted. ` +
+      (r.valid ? `Google accepted it${r.modelAvailable === false ? `, but model ${r.model} is not available for it: pick another with /model` : `; model ${r.model} is available`}. Now just write what you want, for example: show the VIP list.`
+        : `Google did not accept it yet: ${r.message}`));
   }
   if (command === "/delkey") {
-    await env.STORE.delete("gemini_key");
+    await deleteKey(env);
+    await activity(env, "Gemini key deleted");
     return send(env, chatId, env.GEMINI_API_KEY ? "Saved key removed. The GEMINI_API_KEY secret in Cloudflare is used instead; delete it there to turn the assistant off." : "Key removed. The AI assistant is off.");
   }
   if (command === "/model") {
     if (args[0]) {
-      if (!/^gemini-[a-z0-9.-]{2,60}$/i.test(args[0])) return send(env, chatId, "Usage: /model gemini-3.8-flash");
-      await env.STORE.put("gemini_model", args[0].toLowerCase());
+      const r = await setModel(env, args.join(" "));
+      if (!r.ok) return send(env, chatId, r.message);
     }
-    return send(env, chatId, `Model: ${await aiModel(env)}${args[0] ? "" : `\nChange it with /model NAME (default ${DEFAULT_MODEL}).`}`);
+    return send(env, chatId, `Model: ${await aiModel(env)}${args[0] ? " (checked with Google)" : `\nChange it with /model NAME (default ${DEFAULT_MODEL}).`}`);
   }
   if (command === "/reset") {
     await env.STORE.delete("ai_history");
     return send(env, chatId, "Conversation forgotten.");
   }
-  const key = await aiKey(env);
-  return send(env, chatId, key
-    ? `AI assistant: on (key ends in ${key.slice(-4)}), model ${await aiModel(env)}.\nWrite normally to manage configs. Config links are hidden from Gemini.`
+  const s = await keyStatus(env);
+  if (s.unreadable) return send(env, chatId, "The saved key can no longer be decrypted (BOT_TOKEN or KEY_ENCRYPTION_SECRET changed). Save it again with /setkey.");
+  return send(env, chatId, s.configured
+    ? `AI assistant: on (key ${s.mask}${s.source === "cloudflare-secret" ? ", from the Cloudflare secret" : ", stored encrypted"}), model ${s.model}.` +
+      (s.validatedAt ? `\nLast check: ${s.valid ? "accepted" : "rejected"} ${new Date(s.validatedAt).toISOString().slice(0, 16).replace("T", " ")} UTC.` : "") +
+      "\nWrite normally to manage configs. Config links are hidden from Gemini. Gemini only suggests; deleting always needs your Yes."
     : "AI assistant: off. Send /setkey followed by your Gemini API key to turn it on.");
 }
 
@@ -692,7 +893,10 @@ export async function aiChat(chatId, text, env) {
       return send(env, chatId, "Could not reach Gemini. Try again in a moment.");
     }
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) return send(env, chatId, geminiError(res.status, body));
+    if (!res.ok) {
+      await logError(env, "gemini", `HTTP ${res.status}`);
+      return send(env, chatId, geminiError(res.status, body));
+    }
     const content = body?.candidates?.[0]?.content;
     if (!content?.parts?.length) return send(env, chatId, "Gemini sent an empty answer. Try rephrasing.");
     // Sent back unchanged: newer models need their own parts (with thought signatures) returned as is.
@@ -761,3 +965,571 @@ async function telegram(env, method, payload) {
   });
   return res.json().catch(() => ({ ok: false }));
 }
+
+// ---------------------------------------------------------------- free list status, logs, refresh
+
+const FREE_REPO = "drfxai/MAXIMUS-VPN";
+const FREE_FILE_TTL_MS = 5 * 60_000;
+const freeCache = new Map();
+const LOG_MAX = 50;
+
+/** A file of the published free list (free-configs branch), through the same CDN mirrors the app uses. */
+async function freeFile(env, name, now = Date.now()) {
+  const raw = `https://raw.githubusercontent.com/${env.FREE_REPO || FREE_REPO}/free-configs/${name}`;
+  const hit = freeCache.get(raw);
+  if (hit && now - hit.at < FREE_FILE_TTL_MS && !env.fetchImpl) return hit.text;
+  let missing = false;
+  for (const url of [raw, ...gitHubMirrors(raw)]) {
+    try {
+      const res = await (env.fetchImpl || fetch)(url, { headers: { "User-Agent": "Maximus-VPN-Bot/1.0" }, cf: { cacheTtl: 300 } });
+      if (res.status === 404) missing = true;
+      if (!res.ok) continue;
+      const text = await res.text();
+      freeCache.set(raw, { at: now, text });
+      return text;
+    } catch (_) {
+      // next mirror
+    }
+  }
+  // Every copy that answered says the file does not exist (an older build without it, or nothing published yet).
+  if (missing) return null;
+  throw new Error(`could not download ${name}`);
+}
+
+async function freeJson(env, name) {
+  const text = await freeFile(env, name);
+  return text ? JSON.parse(text) : null;
+}
+
+/** The free list builder runs at minute 17 of every sixth hour (free-configs.yml). */
+export function nextBuild(now = Date.now()) {
+  const d = new Date(now);
+  d.setUTCMinutes(17, 0, 0);
+  while (d.getTime() <= now || d.getUTCHours() % 6 !== 0) d.setUTCHours(d.getUTCHours() + 1);
+  return d.getTime();
+}
+
+/** Everything the admin may know about the published free list. No server address or credential. */
+export async function freeStatus(env, now = Date.now()) {
+  const manifest = await freeJson(env, "manifest.json");
+  if (!manifest) return { published: false };
+  const configs = await freeJson(env, "configs.json").catch(() => null);
+  const sig = ((await freeFile(env, "manifest.sig").catch(() => "")) || "").trim();
+  const report = manifest.report || {};
+  const meta = report.source_meta || [];
+  const rejected = report.rejected || {};
+  const records = configs?.configs || [];
+  const count = (key) => records.reduce((m, r) => ({ ...m, [r[key]]: (m[r[key]] || 0) + 1 }), {});
+  const created = Date.parse(manifest.created);
+  return {
+    published: true,
+    count: manifest.count ?? 0,
+    created: manifest.created,
+    ageHours: Number.isFinite(created) ? Math.round((now - created) / 360_000) / 10 : null,
+    nextBuild: new Date(nextBuild(now)).toISOString(),
+    signed: sig.length > 0,
+    candidates: meta.reduce((n, m) => n + (m.candidate_count || 0), 0) || null,
+    rejectedTotal: Object.values(rejected).reduce((a, b) => a + b, 0),
+    rejected,
+    sources: Object.entries(report.sources || {}).map(([name, state]) => {
+      const m = meta.find((x) => x.source_name === name) || {};
+      return { name, state, fetch: m.fetch_status || null, candidates: m.candidate_count ?? null, valid: m.valid_count ?? null };
+    }),
+    diversity: report.diversity || null,
+    detailed: Boolean(configs),
+    iran: records.length ? count("iran_status") : { UNKNOWN_IRAN_STATUS: manifest.count ?? 0 },
+    lifecycle: records.length ? count("lifecycle") : null,
+    evidence: manifest.evidence || { global: "tested from a GitHub Actions runner", iran: "UNKNOWN_IRAN_STATUS" },
+  };
+}
+
+/** Bot tokens, API keys, links and long tokens never reach a log. */
+export function scrub(text) {
+  return redact(String(text || "")).text
+    .replace(/\b\d{6,12}:[A-Za-z0-9_-]{30,}/g, "[BOT_TOKEN]")
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[API_KEY]")
+    .replace(/\b[A-Za-z0-9_+/-]{32,}={0,2}/g, "[TOKEN]")
+    .slice(0, 300);
+}
+
+async function pushLog(env, key, entry) {
+  if (!env.STORE) return;
+  try {
+    const list = JSON.parse((await env.STORE.get(key)) || "[]");
+    list.push(entry);
+    await env.STORE.put(key, JSON.stringify(list.slice(-LOG_MAX)));
+  } catch (_) {
+    // a log must never break the request
+  }
+}
+
+export function logError(env, where, error) {
+  return pushLog(env, "errors", { at: Date.now(), where, message: scrub(error?.message || error) });
+}
+
+function activity(env, text) {
+  return pushLog(env, "activity", { at: Date.now(), text: scrub(text) });
+}
+
+async function readLog(env, key) {
+  return env.STORE ? JSON.parse((await env.STORE.get(key)) || "[]") : [];
+}
+
+/** Starts the free list builder on GitHub. Needs a GH_TOKEN secret allowed to run Actions. */
+async function dispatchRefresh(env) {
+  if (!env.GH_TOKEN) return { ok: false, message: "Add a GH_TOKEN secret (a GitHub token allowed to run Actions on the repository) to start builds from here." };
+  const repo = env.FREE_REPO || FREE_REPO;
+  let res;
+  try {
+    res = await (env.fetchImpl || fetch)(`https://api.github.com/repos/${repo}/actions/workflows/free-configs.yml/dispatches`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: "application/vnd.github+json", "user-agent": "Maximus-VPN-Bot/1.0", "content-type": "application/json" },
+      body: JSON.stringify({ ref: "main" }),
+    });
+  } catch (e) {
+    await logError(env, "refresh", e);
+    return { ok: false, message: "Could not reach GitHub. Try again in a moment." };
+  }
+  if (res.status !== 204) {
+    await logError(env, "refresh", `GitHub answered ${res.status}`);
+    return { ok: false, message: `GitHub refused the build (${res.status}). Check that GH_TOKEN may run Actions.` };
+  }
+  freeCache.clear();
+  await activity(env, "Free list rebuild started by the admin");
+  return { ok: true, message: "Build started on GitHub. The new list is published in a few minutes; the current one stays until then." };
+}
+
+/** The bot's own parts: what is set up and Telegram's view of the webhook. */
+async function health(env, origin) {
+  const info = env.BOT_TOKEN ? await telegram(env, "getWebhookInfo", {}) : null;
+  const hook = info?.result || {};
+  return {
+    botToken: Boolean(env.BOT_TOKEN),
+    botTokenAccepted: info ? info.ok === true : false,
+    webhookSecretValid: SECRET_OK.test(env.WEBHOOK_SECRET || ""),
+    webhookRegistered: origin ? hook.url === `${origin}/webhook` : Boolean(hook.url),
+    pendingUpdates: hook.pending_update_count ?? null,
+    lastError: hook.last_error_message ? scrub(hook.last_error_message) : null,
+    lastErrorAt: hook.last_error_date ? new Date(hook.last_error_date * 1000).toISOString() : null,
+    adminId: Boolean(env.ADMIN_ID),
+    storage: Boolean(env.STORE),
+    keyEncryptionSecret: Boolean(env.KEY_ENCRYPTION_SECRET),
+    refreshToken: Boolean(env.GH_TOKEN),
+  };
+}
+
+function utc(iso) {
+  return iso ? String(iso).slice(0, 16).replace("T", " ") + " UTC" : "unknown";
+}
+
+function iranLine(iran, total) {
+  const unknown = iran.UNKNOWN_IRAN_STATUS || 0;
+  const known = Object.entries(iran).filter(([k]) => k !== "UNKNOWN_IRAN_STATUS");
+  return `${unknown} of ${total} unknown` + (known.length ? `, ${known.map(([k, v]) => `${v} ${k}`).join(", ")}` : "") +
+    ". The list is built on GitHub's servers outside Iran, so it cannot say what works inside Iran; phones keep their own results private.";
+}
+
+/** /statusfree, /sources, /iranstatus, /health, /diagnostics */
+async function opsCommand(chatId, command, env) {
+  if (command === "/health" || command === "/diagnostics") {
+    const h = await health(env, await env.STORE.get("origin"));
+    const k = await keyStatus(env);
+    if (command === "/health") {
+      let free = "unknown";
+      try {
+        const f = await freeStatus(env);
+        free = f.published ? `${f.count} configs, built ${f.ageHours} h ago${f.ageHours > 12 ? " (late: the builder may be failing)" : ""}` : "not published";
+      } catch (e) { free = "could not download the status"; }
+      return send(env, chatId, [
+        `Webhook: ${h.webhookRegistered ? "registered" : "NOT registered (open /setup)"}, ${h.pendingUpdates ?? "?"} waiting` + (h.lastError ? `, last error: ${h.lastError} (${utc(h.lastErrorAt)})` : ""),
+        `Storage: ${h.storage ? "bound" : "missing"} · Gemini: ${k.configured ? `configured ${k.mask}` : "not configured"}${k.unreadable ? " (saved key unreadable)" : ""}`,
+        `Free list: ${free}`,
+        `Rebuild from Telegram: ${h.refreshToken ? "ready" : "add a GH_TOKEN secret"}`,
+      ].join("\n"));
+    }
+    const errors = (await readLog(env, "errors")).slice(-10).reverse();
+    return send(env, chatId, errors.length
+      ? `Last ${errors.length} problems (newest first):\n` + errors.map((e) => `${utc(new Date(e.at).toISOString())} · ${e.where}: ${e.message}`).join("\n")
+      : "No problems recorded.");
+  }
+  let f;
+  try {
+    f = await freeStatus(env);
+  } catch (e) {
+    await logError(env, command, e);
+    return send(env, chatId, "Could not download the free list's status from GitHub or its mirrors. Try again in a moment.");
+  }
+  if (!f.published) return send(env, chatId, "No free list has been published yet.");
+  if (command === "/statusfree") {
+    const top = Object.entries(f.rejected).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => `${k} ${v}`).join(", ");
+    return send(env, chatId, [
+      `Free list: ${f.count} configs, built ${utc(f.created)} (${f.ageHours} h ago), ${f.signed ? "signed" : "NOT signed"}.`,
+      f.candidates ? `${f.candidates} candidates from ${f.sources.length} sources.` : `${f.sources.length} sources.`,
+      `Rejected ${f.rejectedTotal}${top ? `: ${top}` : ""}.`,
+      f.lifecycle ? `Lifecycle: ${Object.entries(f.lifecycle).map(([k, v]) => `${v} ${k}`).join(", ")}.` : "",
+      `Next scheduled build: ${utc(f.nextBuild)}. Rebuild now: /refreshfree`,
+    ].filter(Boolean).join("\n"));
+  }
+  if (command === "/sources") {
+    return sendChunks(env, chatId, `Sources of the free list (build ${utc(f.created)}):`,
+      f.sources.map((s) => `${s.name}: ${s.state}${s.candidates != null ? ` · ${s.candidates} candidates, ${s.valid ?? 0} kept` : ""}`));
+  }
+  if (command === "/iranstatus") return send(env, chatId, `Iran status: ${iranLine(f.iran, f.count)}`);
+}
+
+// ---------------------------------------------------------------- admin mini app (Telegram Web App)
+
+const INIT_MAX_AGE_S = 3600;
+
+async function hmac(key, data) {
+  const k = await crypto.subtle.importKey("raw", typeof key === "string" ? utf8.encode(key) : key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, utf8.encode(data)));
+}
+
+function hex(bytes) {
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Telegram's Web App check: the hash is HMAC-SHA256 of the sorted fields under a key derived from the
+ * bot token, so only Telegram can produce it. Then the data must be fresh and the user the admin.
+ */
+export async function verifyInitData(env, initData, now = Date.now()) {
+  if (!env.BOT_TOKEN || !initData) return { ok: false, status: 401, error: "Open this page from the bot's Admin button in Telegram." };
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash") || "";
+  params.delete("hash");
+  const check = [...params.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => `${k}=${v}`).join("\n");
+  const expected = hex(await hmac(await hmac("WebAppData", env.BOT_TOKEN), check));
+  let diff = expected.length ^ hash.length;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ (hash.charCodeAt(i) || 0);
+  if (diff !== 0) return { ok: false, status: 401, error: "This request was not signed by Telegram." };
+  const authDate = Number(params.get("auth_date"));
+  if (!Number.isFinite(authDate) || now / 1000 - authDate > INIT_MAX_AGE_S || authDate - now / 1000 > 60) {
+    return { ok: false, status: 401, error: "The session expired. Close the panel and open it again from the bot." };
+  }
+  let user = null;
+  try { user = JSON.parse(params.get("user") || "null"); } catch (_) {}
+  if (!user?.id || !isAdmin(env, user.id)) return { ok: false, status: 403, error: "Only the bot's admin can use this panel." };
+  return { ok: true, userId: user.id };
+}
+
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+}
+
+/** A stable id per link, so deleting works by identity and never hits a shifted number. */
+async function linkId(link) {
+  return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(link)))).slice(0, 12);
+}
+
+/** Protocol, name, transport and security of a link; never its address or credentials. */
+async function linkView(link, n) {
+  const protocol = link.slice(0, link.indexOf("://")).toUpperCase();
+  let name = "";
+  let transport = "";
+  let security = "";
+  const q = link.indexOf("?");
+  const hash = link.indexOf("#");
+  if (protocol === "VMESS") {
+    try {
+      const j = JSON.parse(atob(link.slice(8).split("#")[0]));
+      name = j.ps || "";
+      transport = j.net || "";
+      security = j.tls || "";
+    } catch (_) {}
+  } else if (hash >= 0) {
+    try { name = decodeURIComponent(link.slice(hash + 1)); } catch (_) { name = link.slice(hash + 1); }
+  }
+  if (protocol !== "VMESS" && q > 0) {
+    const p = new URLSearchParams(link.slice(q + 1).split("#")[0]);
+    transport = p.get("type") || "";
+    security = p.get("security") || "";
+  }
+  // A name that is itself an address (host:port) is not shown.
+  name = name.slice(0, 60);
+  if (/^[\w.-]+:\d+$/.test(name) || /^\d{1,3}(\.\d{1,3}){3}$/.test(name)) name = "";
+  return { id: await linkId(link), n, protocol, name, transport, security };
+}
+
+async function apiOverview(env, origin, now) {
+  const [free, vip, subs] = await Promise.all([stored(env, TIERS.free.key), stored(env, TIERS.vip.key), stored(env, "subs")]);
+  let list = null;
+  let listError = null;
+  try { list = await freeStatus(env, now); } catch (e) { listError = "Could not download the free list's status."; }
+  const h = await health(env, origin);
+  return {
+    list, listError,
+    vip: vip.length, botFree: free.length, subs: subs.length,
+    gemini: await keyStatus(env),
+    webhook: { ok: h.webhookRegistered && !h.lastError, registered: h.webhookRegistered, pending: h.pendingUpdates, lastError: h.lastError, lastErrorAt: h.lastErrorAt },
+    activity: (await readLog(env, "activity")).slice(-8).reverse(),
+  };
+}
+
+/** /api/*: every call needs Telegram-signed init data from the admin's account. */
+export async function api(request, env, now = Date.now()) {
+  const url = new URL(request.url);
+  const auth = request.headers.get("authorization") || "";
+  const v = await verifyInitData(env, auth.startsWith("tma ") ? auth.slice(4) : "", now);
+  if (!v.ok) return json({ error: v.error }, v.status);
+  if (!env.STORE) return json({ error: "Add a KV namespace binding named STORE to the Worker first." }, 500);
+  const route = url.pathname.slice(5);
+  const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+  const confirmed = body.confirm === true;
+  try {
+    if (request.method === "GET") {
+      if (route === "overview") return json(await apiOverview(env, url.origin, now));
+      if (route === "configs") {
+        const tier = tierOf(url.searchParams.get("tier"));
+        const links = await stored(env, TIERS[tier].key);
+        return json({ tier, items: await Promise.all(links.map((l, i) => linkView(l, i + 1))) });
+      }
+      if (route === "sources") {
+        const subs = await stored(env, "subs");
+        let list = null;
+        try { list = await freeStatus(env, now); } catch (_) {}
+        return json({ list: list && { sources: list.sources, created: list.created }, subscriptions: subs.map((u, i) => ({ n: i + 1, host: hostOf(u) })) });
+      }
+      if (route === "validation" || route === "iran") return json(await freeStatus(env, now));
+      if (route === "diagnostics") return json({ health: await health(env, url.origin), errors: (await readLog(env, "errors")).slice(-30).reverse() });
+      if (route === "gemini") return json({ ...(await keyStatus(env)), models: JSON.parse((await env.STORE.get("gemini_models")) || "[]") });
+    }
+    if (request.method === "POST") {
+      if (route === "configs/add") {
+        const tier = tierOf(body.tier);
+        const t = TIERS[tier];
+        const current = await stored(env, t.key);
+        const found = extractLinks(String(body.text || ""));
+        if (!found.length) return json({ error: "No vless://, vmess://, trojan://, ss://, hysteria2:// or wireguard:// links found." }, 400);
+        const next = [...new Set([...current, ...found])].slice(-MAX_STORED);
+        await env.STORE.put(t.key, next.join("\n"));
+        await activity(env, `${t.label}: ${next.length - current.length} added from the panel`);
+        return json({ added: next.length - current.length, total: next.length });
+      }
+      if (route === "configs/delete" || route === "configs/clear") {
+        if (!confirmed) return json({ error: "Deleting needs confirmation." }, 400);
+        const tier = tierOf(body.tier);
+        const t = TIERS[tier];
+        const current = await stored(env, t.key);
+        const ids = new Set(Array.isArray(body.ids) ? body.ids.map(String) : []);
+        const keep = [];
+        for (const l of current) if (route === "configs/delete" && !ids.has(await linkId(l))) keep.push(l);
+        await env.STORE.put(t.key, keep.join("\n"));
+        await activity(env, `${t.label}: ${current.length - keep.length} deleted from the panel`);
+        return json({ deleted: current.length - keep.length, total: keep.length });
+      }
+      if (route === "configs/link") {
+        // Only on an explicit tap: the full link holds the server's credentials.
+        const links = await stored(env, TIERS[tierOf(body.tier)].key);
+        for (const l of links) if ((await linkId(l)) === String(body.id)) return json({ link: l });
+        return json({ error: "That config no longer exists." }, 404);
+      }
+      if (route === "refresh") {
+        if (!confirmed) return json({ error: "Starting a build needs confirmation." }, 400);
+        const r = await dispatchRefresh(env);
+        return json(r, r.ok ? 200 : 400);
+      }
+      if (route === "gemini/key") {
+        const r = await storeKey(env, body.key);
+        return r.ok ? json({ ...r, status: await keyStatus(env) }) : json({ error: r.message }, 400);
+      }
+      if (route === "gemini/validate") {
+        const r = await validateKey(env);
+        return json({ ok: r.ok, message: r.message || "Google accepted the key.", modelAvailable: r.modelAvailable, status: await keyStatus(env) });
+      }
+      if (route === "gemini/delete") {
+        if (!confirmed) return json({ error: "Deleting needs confirmation." }, 400);
+        await deleteKey(env);
+        await activity(env, "Gemini key deleted from the panel");
+        return json({ status: await keyStatus(env) });
+      }
+      if (route === "gemini/model") {
+        const r = await setModel(env, body.model);
+        return r.ok ? json({ ...r, status: await keyStatus(env) }) : json({ error: r.message }, 400);
+      }
+    }
+  } catch (e) {
+    await logError(env, `api ${route}`, e);
+    return json({ error: "Something went wrong on the server. It was recorded under Diagnostics." }, 500);
+  }
+  return json({ error: "Unknown request." }, 404);
+}
+
+/** The panel page. It holds no secret: every piece of data comes from /api with Telegram-signed init data. */
+function adminPage() {
+  return new Response(ADMIN_HTML, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'none'; script-src 'unsafe-inline' https://telegram.org; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
+const ADMIN_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MAXIMUS Admin</title><script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,Roboto,system-ui,sans-serif;color:#F3F4F8;background:#090A0F;min-height:100vh}
+.app{min-height:100vh;padding-bottom:24px;background:radial-gradient(120% 35% at 20% 0%,#2a2150 0%,#090A0F 60%)}
+.top{text-align:center;padding:12px 16px 2px;font-size:15px;font-weight:700}.top small{display:block;font-weight:500;color:#989AA8;font-size:12px}
+.wrap{padding:14px 16px;max-width:640px;margin:0 auto}
+.card{background:#161720;border:1px solid #262837;border-radius:16px;padding:14px;margin-bottom:10px}
+.row{display:flex;align-items:center;gap:8px}.sp{justify-content:space-between}
+.h{font-size:11px;font-weight:700;letter-spacing:1px;color:#686A7A;margin:14px 2px 8px}
+.k{font-size:24px;font-weight:800}.k2{font-size:17px;font-weight:800;margin:5px 0}.s{font-size:11.5px;color:#989AA8;line-height:1.45}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}.grid .card{margin:0}
+.pill{font-size:10.5px;font-weight:700;padding:3px 7px;border-radius:7px;white-space:nowrap;background:#282A38;color:#989AA8}
+.pill.ok{background:#1d2a22;color:#4ADE80}.pill.err{background:#3a1f24;color:#F87171}.pill.warn{background:#2a2410;color:#FBBF24}
+.ok{color:#4ADE80}.warn{color:#FBBF24}.err{color:#F87171}.pri{color:#D0BCFF}
+button{font:inherit;border:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:13px;font-weight:700;padding:10px 14px;border-radius:12px;background:#1E202B;color:#D0BCFF}
+button.main{background:#4F378B;color:#E8DEF8}button.danger{background:#2a1b1e;color:#F87171;border:1px solid #5b2a2f}button:disabled{opacity:.5}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 16px 0;scrollbar-width:none}
+.tab{font-size:12px;padding:7px 11px;border-radius:10px;background:#161720;border:1px solid #262837;color:#989AA8;white-space:nowrap}
+.tab.on{background:#4F378B;color:#E8DEF8;border-color:#4F378B}.tab.gold.on{background:#2a2410;color:#FBBF24;border-color:#4a3f17}
+textarea,input,select{width:100%;font:inherit;font-size:14px;color:#F3F4F8;background:#14151D;border:1px solid #383B4E;border-radius:12px;padding:11px 12px}
+textarea{min-height:70px;resize:vertical}
+.li{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid #262837}.li:first-child{border:0}
+.bar{height:6px;border-radius:3px;background:#262837;margin-top:4px}.bar i{display:block;height:6px;border-radius:3px;background:#D0BCFF}
+</style></head><body><div class="app">
+<div class="top">MAXIMUS Admin<small id="who">checking access…</small></div>
+<div class="tabs" id="tabs"></div><div class="wrap" id="main"></div></div>
+<script>
+var tg = window.Telegram && Telegram.WebApp; if (tg) { tg.ready(); tg.expand(); }
+var TABS = [["dash","Dashboard"],["configs","Configs"],["sources","Sources"],["validation","Validation"],["iran","Iran Health"],["gemini","Gemini AI"],["diag","Diagnostics"],["settings","Settings"]];
+var tab = "dash", tier = "vip";
+function $(id) { return document.getElementById(id); }
+function h(tag, props) {
+  var e = document.createElement(tag), kids = [].slice.call(arguments, 2);
+  Object.keys(props || {}).forEach(function (k) { var v = props[k]; if (k === "on") e.onclick = v; else if (k === "cls") e.className = v; else if (k === "style") e.style.cssText = v; else e.setAttribute(k, v); });
+  (function add(list) { list.forEach(function (c) { if (Array.isArray(c)) add(c); else if (c != null && c !== false) e.append(c.nodeType ? c : String(c)); }); })(kids);
+  return e;
+}
+function api(path, body) {
+  return fetch("/api/" + path, { method: body ? "POST" : "GET", headers: { authorization: "tma " + (tg ? tg.initData : ""), "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
+    .then(function (r) { return r.json().catch(function () { return { error: "Bad answer from the server." }; }).then(function (j) { if (!r.ok) throw new Error(j.error || ("Error " + r.status)); $("who").textContent = "mini app · verified admin"; return j; }); });
+}
+function ask(text) { return new Promise(function (res) { if (tg && tg.showConfirm) tg.showConfirm(text, res); else res(confirm(text)); }); }
+function note(text) { if (tg && tg.showAlert) tg.showAlert(text); else alert(text); }
+function ago(t) { if (!t) return "never"; var m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " d ago"; }
+function card() { return h("div", { cls: "card" }, [].slice.call(arguments)); }
+function pill(text, kind) { return h("span", { cls: "pill " + (kind || "") }, text); }
+function stat(v, label, cls) { return h("div", null, h("div", { cls: "k " + (cls || "") }, v), h("div", { cls: "s" }, label)); }
+function act(btn, fn) { return function () { btn.disabled = true; Promise.resolve().then(fn).catch(function (e) { note(e.message); }).then(function () { btn.disabled = false; }); }; }
+function button(text, cls, fn) { var b = h("button", { cls: cls || "" }, text); b.onclick = act(b, fn); return b; }
+function renderTabs() { $("tabs").replaceChildren.apply($("tabs"), TABS.map(function (t) { return h("span", { cls: "tab" + (t[0] === tab ? " on" : ""), on: function () { show(t[0]); } }, t[1]); })); }
+function show(name) {
+  tab = name; renderTabs(); var main = $("main"); main.replaceChildren(h("div", { cls: "s" }, "Loading…"));
+  return Promise.resolve().then(VIEWS[name]).then(function (els) { main.replaceChildren.apply(main, [].concat(els).flat(Infinity).filter(Boolean)); })
+    .catch(function (e) { main.replaceChildren(card(h("b", { cls: "err" }, "Could not load"), h("div", { cls: "s", style: "margin-top:6px" }, e.message))); });
+}
+function iranUnknown(i) { return i ? (i.UNKNOWN_IRAN_STATUS || 0) : 0; }
+var VIEWS = {
+  dash: function () { return api("overview").then(function (o) {
+    var l = o.list, g = o.gemini, w = o.webhook;
+    return [
+      card(h("div", { cls: "row sp" }, h("b", null, "Free list"), l && l.published ? pill((l.signed ? "✓ Signed " : "Unsigned ") + ago(l.created), l.signed ? "ok" : "err") : pill(o.listError ? "Unreachable" : "Not published", "warn")),
+        l && l.published ? [h("div", { cls: "row", style: "gap:18px;margin-top:10px" }, stat(l.count, "published"), l.candidates != null ? stat(l.candidates, "candidates") : null, stat(l.rejectedTotal, "rejected", "err")),
+          h("div", { cls: "s", style: "margin-top:10px" }, "Next build " + new Date(l.nextBuild).toUTCString().slice(17, 22) + " UTC · " + l.sources.length + " sources")] : h("div", { cls: "s", style: "margin-top:8px" }, o.listError || "")),
+      h("div", { cls: "grid" },
+        card(h("div", { cls: "s" }, "VIP configs"), h("div", { cls: "k" }, o.vip), h("div", { cls: "s" }, "served at /vip")),
+        card(h("div", { cls: "s" }, "Iran status"), h("div", { cls: "k warn" }, l && l.published ? iranUnknown(l.iran) : "–"), h("div", { cls: "s" }, "unknown · built outside Iran; phones keep their results private")),
+        card(h("div", { cls: "s" }, "Gemini AI"), h("div", { cls: "k2" }, g.configured ? "Configured" : "Not configured"), h("div", { cls: "s" }, g.configured ? "key " + g.mask + " · " + g.model + (g.modelChecked === "available" ? " ✓" : "") : "advisory only")),
+        card(h("div", { cls: "s" }, "Bot webhook"), h("div", { cls: "k2 " + (w.ok ? "ok" : "err") }, w.ok ? "Healthy" : w.registered ? "Errors" : "Not set"), h("div", { cls: "s" }, w.lastError ? "last error " + ago(w.lastErrorAt) : (w.pending || 0) + " waiting"))),
+      h("div", { cls: "h" }, "RECENT ACTIVITY"),
+      card(o.activity.length ? o.activity.map(function (a) { return h("div", { cls: "li" }, h("span", { cls: "pri" }, "●"), h("div", { style: "flex:1;font-size:13px" }, a.text, h("div", { cls: "s" }, ago(a.at)))); }) : h("div", { cls: "s" }, "Nothing yet.")),
+      h("div", { cls: "row", style: "margin-top:6px" },
+        button("↻ Refresh free list", "main", function () { return ask("Start a free list rebuild on GitHub now? The current list stays until the new one is published.").then(function (y) { if (y) return api("refresh", { confirm: true }).then(function (r) { note(r.message); }); }); }),
+        button("Diagnostics", "", function () { return show("diag"); }))
+    ];
+  }); },
+  configs: function () { return api("configs?tier=" + tier).then(function (c) {
+    var label = tier === "vip" ? "VIP" : "Free (bot)";
+    var input = h("textarea", { placeholder: "Paste vless:// trojan:// ss:// links to add" });
+    return [
+      h("div", { cls: "row", style: "margin-bottom:10px" },
+        h("span", { cls: "tab gold" + (tier === "vip" ? " on" : ""), on: function () { tier = "vip"; show("configs"); } }, "VIP"),
+        h("span", { cls: "tab" + (tier === "free" ? " on" : ""), on: function () { tier = "free"; show("configs"); } }, "Free (bot)")),
+      input,
+      h("div", { style: "margin:8px 0 12px" }, button("Add to " + label, "main", function () { return api("configs/add", { tier: tier, text: input.value }).then(function (r) { note(r.added + " added, " + r.total + " in total."); return show("configs"); }); })),
+      card(c.items.length ? c.items.map(function (it) {
+        var del = button("🗑", "danger", function () { return ask("Delete " + (it.name || it.protocol) + "? Phones lose it at their next refresh.").then(function (y) { if (y) return api("configs/delete", { tier: tier, ids: [it.id], confirm: true }).then(function () { return show("configs"); }); }); });
+        del.onclick = (function (f) { return function (e) { e.stopPropagation(); f(); }; })(del.onclick);
+        return h("div", { cls: "li", on: function () { ask("Copy this config's link? It contains the server's credentials.").then(function (y) { if (y) api("configs/link", { tier: tier, id: it.id }).then(function (r) { return navigator.clipboard.writeText(r.link); }).then(function () { note("Copied."); }).catch(function (e) { note(e.message); }); }); } },
+          h("div", { style: "flex:1;min-width:0" }, h("div", { style: "font-size:13.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, it.n + ". " + (it.name || it.protocol)),
+            h("div", { cls: "s" }, [it.protocol, it.transport, it.security].filter(Boolean).join(" · "))), del);
+      }) : h("div", { cls: "s" }, "No " + label + " configs.")),
+      h("div", { cls: "s", style: "margin:4px 2px 12px" }, "Server addresses and credentials are never shown here; tap a row to copy its link."),
+      c.items.length ? button("Clear " + label + " list…", "danger", function () { return ask("Clear all " + c.items.length + " " + label + " configs? Phones lose them at their next refresh. This cannot be undone.").then(function (y) { if (y) return api("configs/clear", { tier: tier, confirm: true }).then(function () { return show("configs"); }); }); }) : null
+    ];
+  }); },
+  sources: function () { return api("sources").then(function (s) {
+    return [h("div", { cls: "h" }, "FREE LIST SOURCES" + (s.list ? " · BUILD " + ago(s.list.created).toUpperCase() : "")),
+      card(s.list && s.list.sources.length ? s.list.sources.map(function (x) { return h("div", { cls: "li" }, h("div", { style: "flex:1" }, h("div", { style: "font-size:13.5px;font-weight:700" }, x.name), h("div", { cls: "s" }, x.state + (x.candidates != null ? " · " + x.candidates + " candidates, " + (x.valid || 0) + " kept" : ""))), pill(x.fetch && x.fetch.indexOf("failed") === 0 ? "Failed" : "OK", x.fetch && x.fetch.indexOf("failed") === 0 ? "err" : "ok")); }) : h("div", { cls: "s" }, "No build report yet.")),
+      h("div", { cls: "h" }, "BOT SUBSCRIPTION LINKS"),
+      card(s.subscriptions.length ? s.subscriptions.map(function (x) { return h("div", { cls: "li" }, h("div", { cls: "s" }, x.n + ". " + x.host)); }) : h("div", { cls: "s" }, "None. Add them with /addsub in the bot."))];
+  }); },
+  validation: function () { return api("validation").then(function (v) {
+    if (!v.published) return card(h("div", { cls: "s" }, "No free list has been published yet."));
+    var max = Math.max.apply(null, [1].concat(Object.values(v.rejected)));
+    var rows = Object.entries(v.rejected).sort(function (a, b) { return b[1] - a[1]; });
+    var div = v.diversity;
+    return [card(h("div", { cls: "row sp" }, h("b", null, "Last build"), pill(v.signed ? "✓ Signed" : "Unsigned", v.signed ? "ok" : "err")), h("div", { cls: "row", style: "gap:18px;margin-top:10px" }, stat(v.count, "kept"), stat(v.rejectedTotal, "rejected", "err")), h("div", { cls: "s", style: "margin-top:8px" }, "Built " + ago(v.created) + ". Every config was tested from a GitHub Actions runner, outside Iran.")),
+      h("div", { cls: "h" }, "WHY CONFIGS WERE REJECTED"),
+      card(rows.map(function (r) { return h("div", { style: "margin:6px 0" }, h("div", { cls: "row sp s" }, h("span", null, r[0]), h("span", null, r[1])), h("div", { cls: "bar" }, h("i", { style: "width:" + Math.round(r[1] / max * 100) + "%" }))); })),
+      div ? [h("div", { cls: "h" }, "DIVERSITY"), card(h("div", { cls: "s" }, "Kinds: " + Object.entries(div.kinds || {}).map(function (e) { return e[0] + " " + e[1]; }).join(", ")), h("div", { cls: "s" }, "CDN: " + Object.entries(div.cdn || {}).map(function (e) { return e[0] + " " + e[1]; }).join(", ")), h("div", { cls: "s" }, div.failure_domains + " failure domains, the largest holds " + div.largest_failure_domain))] : null];
+  }); },
+  iran: function () { return api("iran").then(function (v) {
+    if (!v.published) return card(h("div", { cls: "s" }, "No free list has been published yet."));
+    return [card(h("div", { cls: "s" }, "Iran status"), h("div", { cls: "k warn" }, iranUnknown(v.iran) + " of " + v.count + " unknown"),
+        h("div", { cls: "s", style: "margin-top:8px" }, "The list is built and tested on GitHub's servers outside Iran, so it cannot say what works inside Iran. Phones test configs themselves and keep those results private; nothing is reported back.")),
+      v.lifecycle ? card(h("b", null, "Lifecycle"), h("div", { cls: "s", style: "margin-top:6px" }, Object.entries(v.lifecycle).map(function (e) { return e[1] + " " + e[0]; }).join(" · "))) : null];
+  }); },
+  gemini: function () { return api("gemini").then(function (g) {
+    var keyInput = h("input", { type: "password", autocomplete: "off", placeholder: "Paste your key from aistudio.google.com" });
+    var save = button(g.configured ? "Save new key" : "Save and validate", "main", function () { var k = keyInput.value.trim(); keyInput.value = ""; return api("gemini/key", { key: k }).then(function (r) { note(r.valid ? "Saved encrypted. Google accepted the key." : "Saved encrypted, but Google did not accept it: " + r.message); return show("gemini"); }); });
+    var box = h("div", { style: "margin-top:12px;display:" + (g.configured ? "none" : "block") }, keyInput, h("div", { style: "margin-top:10px" }, save));
+    var select = h("select", null, (g.models.length ? g.models : [{ id: g.model, name: g.model }]).map(function (m) { var o = h("option", { value: m.id }, m.name + " (" + m.id + ")"); if (m.id === g.model) o.setAttribute("selected", ""); return o; }));
+    return [
+      card(h("div", { cls: "row sp" }, h("b", null, "API key"), pill(g.configured ? "✓ Configured" : "Not configured", g.configured ? "ok" : "")),
+        g.configured ? h("div", { style: "margin-top:12px;letter-spacing:2px", cls: "card" }, "••••••••" + g.mask) : null,
+        g.unreadable ? h("div", { cls: "s err", style: "margin-top:8px" }, "The saved key can no longer be decrypted. Save it again.") : null,
+        h("div", { cls: "s", style: "margin-top:8px" }, g.source === "cloudflare-secret" ? "From the GEMINI_API_KEY secret in Cloudflare. A key saved here takes its place." : "Stored encrypted on the server. It is never sent to this page, the app or the bot chat."),
+        g.configured ? h("div", { cls: "row", style: "margin-top:12px" },
+          button("Validate", "", function () { return api("gemini/validate", {}).then(function (r) { note(r.ok ? "Google accepted the key." + (r.modelAvailable === false ? " The selected model is not available for it." : "") : r.message); return show("gemini"); }); }),
+          button("Replace", "", function () { box.style.display = "block"; keyInput.focus(); }),
+          g.source === "saved" ? button("Delete", "danger", function () { return ask("Delete the saved Gemini key? The AI assistant stops until a new key is saved.").then(function (y) { if (y) return api("gemini/delete", { confirm: true }).then(function () { return show("gemini"); }); }); }) : null) : null,
+        g.validatedAt ? h("div", { cls: "s", style: "margin-top:10px" }, h("span", { cls: g.valid ? "ok" : "err" }, g.valid ? "✓ " : "✕ "), "Validated " + ago(g.validatedAt) + " · " + (g.message || "")) : null,
+        box),
+      card(h("b", null, "Model"), h("div", { style: "margin-top:12px" }, select),
+        h("div", { cls: "s", style: "margin-top:8px" }, g.modelChecked === "available" ? h("span", { cls: "ok" }, "✓ Available for this key (checked against Google's model list)") : g.modelChecked === "unavailable" ? h("span", { cls: "err" }, "✕ Not available for this key: pick another") : "Not checked yet: validate the key."),
+        h("div", { cls: "s", style: "margin-top:6px" }, "If a model is not available you get an error, never a different model."),
+        h("div", { style: "margin-top:10px" }, button("Use this model", "", function () { return api("gemini/model", { model: select.value }).then(function (r) { note("Model set to " + r.model + "."); return show("gemini"); }); }))),
+      h("div", { cls: "card", style: "border-color:#4a3f17;background:#1a1710" }, h("b", { cls: "warn" }, "Advisory only"), h("div", { cls: "s", style: "margin-top:6px" }, "Gemini explains and suggests. It never decides which configs are published or deleted; the scoring rules and you do."))
+    ];
+  }); },
+  diag: function () { return api("diagnostics").then(function (d) {
+    var w = d.health;
+    return [card(h("b", null, "Webhook"), h("div", { cls: "s", style: "margin-top:6px" }, (w.webhookRegistered ? "Registered" : "Not registered: open /setup") + " · " + (w.pendingUpdates == null ? "?" : w.pendingUpdates) + " updates waiting"),
+        w.lastError ? h("div", { cls: "s err" }, "Telegram's last delivery error " + ago(w.lastErrorAt) + ": " + w.lastError) : null),
+      h("div", { cls: "h" }, "RECENT PROBLEMS"),
+      card(d.errors.length ? d.errors.map(function (e) { return h("div", { cls: "li" }, h("span", { cls: "err" }, "●"), h("div", { style: "flex:1;font-size:13px" }, e.where + ": " + e.message, h("div", { cls: "s" }, ago(e.at)))); }) : h("div", { cls: "s" }, "No problems recorded."))];
+  }); },
+  settings: function () { return api("diagnostics").then(function (d) {
+    var w = d.health;
+    function item(ok, text, hint) { return h("div", { cls: "li" }, h("span", { cls: ok ? "ok" : "warn" }, ok ? "✓" : "!"), h("div", { style: "flex:1;font-size:13px" }, text, ok ? null : h("div", { cls: "s" }, hint))); }
+    return [card(
+      item(w.botToken && w.botTokenAccepted, "BOT_TOKEN accepted by Telegram", "Set BOT_TOKEN in the Worker's Variables and Secrets."),
+      item(w.webhookSecretValid, "WEBHOOK_SECRET uses only allowed characters", "Letters, digits, _ and - only."),
+      item(w.adminId, "ADMIN_ID set", "Your numeric Telegram ID, as a secret."),
+      item(w.storage, "STORE storage bound", "Add a KV namespace binding named STORE."),
+      item(w.keyEncryptionSecret, "KEY_ENCRYPTION_SECRET set", "Optional but recommended: without it the Gemini key is encrypted with a key derived from BOT_TOKEN, and changing the token means saving the Gemini key again."),
+      item(w.refreshToken, "GH_TOKEN set (refresh from the panel)", "A GitHub token allowed to run Actions on the repository.")),
+      h("div", { cls: "s", style: "margin:4px 2px" }, "Secrets are changed in Cloudflare, never here. Storage changes can take up to a minute to reach every Cloudflare location.")];
+  }); }
+};
+show("dash");
+</script></body></html>`;
