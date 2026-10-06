@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -113,4 +114,17 @@ interface ServerProfileDao {
 
     @Query("DELETE FROM server_profiles")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM server_profiles WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
+
+    /**
+     * Deletes [deleteIds] and inserts [inserts] in one transaction: readers see the old list or the new
+     * one, never an empty or half-replaced list.
+     */
+    @Transaction
+    suspend fun replace(deleteIds: List<String>, inserts: List<ServerProfileEntity>) {
+        deleteIds.chunked(500).forEach { deleteByIds(it) }
+        if (inserts.isNotEmpty()) insertAll(inserts)
+    }
 }

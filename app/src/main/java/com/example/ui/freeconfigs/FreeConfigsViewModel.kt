@@ -6,7 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.RayApplication
 import com.example.data.model.VlessProfile
 import com.example.vpn.VpnController
+import com.example.vpn.diagnostics.FailureStage
+import com.example.vpn.hub.ConnectivityMeasurement
 import com.example.vpn.hub.FreeConfigList
+import com.example.vpn.smart.NetworkCapabilityDetector
 import com.example.xray.RealDelayProbe
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +31,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
     private val serverRepository = RayApplication.instance.serverRepository
     private val subscriptionRepository = RayApplication.instance.subscriptionRepository
     private val subscriptionManager = RayApplication.instance.subscriptionManager
+    private val evidence = RayApplication.instance.freeConfigEvidence
 
     private val _state = MutableStateFlow(
         FreeConfigsUiState(
@@ -100,6 +104,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                     else -> FreeNode.healthOf(ms)
                 },
                 sites = FreeConfigList.sitesOf(p.name),
+                lifecycle = evidence.lifecycle(p.effectiveFingerprint),
                 passes = passes[p.id] ?: 0,
                 runs = runs[p.id] ?: 0
             )
@@ -146,10 +151,25 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(testing = true, testDone = 0, testTotal = profiles.size, message = null) }
         testJob = viewModelScope.launch {
             try {
+                // What this network allows, so each result is filed under an anonymous network bucket.
+                val network = NetworkCapabilityDetector.last?.takeIf { System.currentTimeMillis() - it.measuredAt < NETWORK_PROFILE_MAX_AGE_MS }
+                    ?: runCatching { NetworkCapabilityDetector.detect(getApplication()) }.getOrNull()
                 for ((i, p) in profiles.withIndex()) {
                     val outcome = withContext(Dispatchers.IO) { RealDelayProbe.measure(p, TIMEOUT_SEC) }
                     if (outcome !is RealDelayProbe.Outcome.NotRun) {
                         val ms = (outcome as? RealDelayProbe.Outcome.Delay)?.latencyMs
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                evidence.record(p.effectiveFingerprint, ConnectivityMeasurement(
+                                    timestamp = System.currentTimeMillis(),
+                                    kind = ConnectivityMeasurement.Kind.TEST,
+                                    success = ms != null,
+                                    networkKey = network?.key(),
+                                    rttMs = ms,
+                                    failureStage = (outcome as? RealDelayProbe.Outcome.Failed)?.let { FailureStage.fromText(it.reason) }
+                                ))
+                            }
+                        }
                         latency[p.id] = ms
                         tested += p.id
                         runs[p.id] = (runs[p.id] ?: 0) + 1
@@ -187,5 +207,6 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TIMEOUT_SEC = 6
+        private const val NETWORK_PROFILE_MAX_AGE_MS = 5 * 60_000L
     }
 }

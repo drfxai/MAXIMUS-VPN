@@ -30,7 +30,24 @@ class SubscriptionManager(
     /** The user's "Free configs" setting: while it is off the free list is never downloaded. */
     private val freeListEnabled: () -> Boolean = {
         runCatching { com.example.RayApplication.instance.settingsRepository.getSettings().freeConfigsEnabled }.getOrDefault(true)
-    }
+    },
+    /** The free configs that carried traffic here (never deleted by a refresh); null keeps none. */
+    private val lastKnownGood: () -> com.example.vpn.hub.LastKnownGoodPool? = {
+        runCatching { com.example.RayApplication.instance.lastKnownGood }.getOrNull()
+    },
+    /** The profiles a refresh must not take away: the one the VPN uses and the selected one. */
+    private val inUseIds: () -> Set<String> = {
+        setOfNotNull(
+            com.example.vpn.VpnController.connectionState.value.activeProfile?.id,
+            runCatching { com.example.RayApplication.instance.settingsRepository.getSettings().selectedProfileId }.getOrNull()
+        )
+    },
+    /** The key the free list's signature is checked against (tests pass their own). */
+    private val freeListKey: String = com.example.vpn.hub.HubManifest.PUBLIC_KEY_DER_BASE64,
+    /** Free configs kept only because they were in use when the list dropped them, by id. */
+    private val retainedStore: com.example.vpn.hub.RetainedFreeConfigs? = runCatching {
+        com.example.RayApplication.instance.retainedFreeConfigs
+    }.getOrNull()
 ) {
     companion object {
         private const val MAX_SAFE_REDIRECTS = 5
@@ -199,7 +216,13 @@ class SubscriptionManager(
         /** The address that answered, when it was a mirror rather than the subscription's own. */
         val viaMirror: String? = null,
         /** True when every source failed and the servers came from the offline copy. */
-        val fromOfflineCopy: Boolean = false
+        val fromOfflineCopy: Boolean = false,
+        /** Free list only: configs before the refresh, removed, retained (protected or in use) and kept. */
+        val poolBefore: Int = 0,
+        val removedCount: Int = 0,
+        val retainedCount: Int = 0,
+        val keptCount: Int = 0,
+        val finishedAt: Long = System.currentTimeMillis()
     )
 
     /** Downloads one address through the SSRF-safe client, resolving through DoH when DNS is blocked. */
@@ -265,7 +288,7 @@ class SubscriptionManager(
         val fetcher = SubscriptionFetcher(
             download = (download ?: ::httpDownload).let { get ->
                 // The free list is taken from any address only with a valid signature beside it.
-                if (FreeConfigList.isList(subscription.url)) { url: String -> FreeConfigList.download(url, get) } else get
+                if (FreeConfigList.isList(subscription.url)) { url: String -> FreeConfigList.download(url, get, freeListKey) } else get
             },
             count = { parse(it, subscription).validProfiles.size },
             staggerMs = staggerMs
@@ -274,7 +297,9 @@ class SubscriptionManager(
             when (val outcome = fetcher.fetch(candidates)) {
                 is SubscriptionFetcher.Outcome.Fetched -> {
                     val importResult = parse(outcome.payload, subscription)
-                    if (FreeConfigList.isList(subscription.url)) pruneFreeList(subscription, importResult.validProfiles)
+                    if (FreeConfigList.isList(subscription.url)) {
+                        return@withContext swapFreeList(subscription, importResult, outcome)
+                    }
                     val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
                     snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
                     val viaMirror = outcome.url.takeIf { it != subscription.url }
@@ -318,15 +343,93 @@ class SubscriptionManager(
         }
     }
 
-    /** The free list is replaced on every update; servers it dropped are removed (see [FreeConfigList.stale]). */
-    private suspend fun pruneFreeList(subscription: SubscriptionInfo, fresh: List<com.example.data.model.VlessProfile>) {
+    /**
+     * Replaces the free list with the verified new one in one database transaction (see
+     * [com.example.vpn.hub.FreeListSwap]): configs the new list dropped are removed, except the
+     * last-known-good pool's, favourites and the one in use, which stay as "retained". The list is
+     * never cleared first, so the screen never shows zero servers and the VPN never loses its config.
+     */
+    private suspend fun swapFreeList(
+        subscription: SubscriptionInfo,
+        importResult: com.example.data.model.UniversalImportResult,
+        outcome: SubscriptionFetcher.Outcome.Fetched
+    ): SyncResult {
         val saved = serverRepository.getAllProfilesOnce().filter {
             it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
         }
-        val keep = runCatching { com.example.RayApplication.instance.settingsRepository.getSettings().selectedProfileId }.getOrNull()
-        val stale = FreeConfigList.stale(saved, fresh, keep)
-        stale.forEach { serverRepository.delete(it.id) }
-        FreeConfigList.surplus(saved - stale.toSet(), keep).forEach { serverRepository.delete(it.id) }
+        // The pool's configs and the ones in use (the VPN's and the selected one) are all protected.
+        val plan = com.example.vpn.hub.FreeListSwap.plan(
+            saved = saved,
+            fresh = importResult.validProfiles,
+            protectedIds = lastKnownGood()?.protectedIds().orEmpty() + inUseIds(),
+            activeId = null,
+            limit = FreeConfigList.MAX_CONFIGS
+        )
+        serverRepository.replaceAtomically(plan.delete.map { it.id }, plan.insert)
+        retainedStore?.update(retained = plan.retained.map { it.id }, gone = plan.delete.map { it.id })
+        runCatching {
+            com.example.RayApplication.instance.freeConfigEvidence.forget(
+                plan.delete.map { it.effectiveFingerprint }.filter { fp -> plan.kept.none { it.effectiveFingerprint == fp } })
+        }
+        snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
+        val viaMirror = outcome.url.takeIf { it != subscription.url }
+        outcome.failures.forEach { (url, why) ->
+            XrayLogManager.w("SUBSCRIPTION", "Source ${SecretRedactor.redact(url)} failed: ${SecretRedactor.redact(why)}")
+        }
+        subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), error = null)
+        XrayLogManager.i(
+            "SUBSCRIPTION",
+            "Free list '${subscription.name}' replaced${viaMirror?.let { " via ${SecretRedactor.redact(it)}" }.orEmpty()}: " +
+                "${importResult.configurationsFound} candidates, ${plan.insert.size} added, ${plan.delete.size} removed, " +
+                "${plan.kept.size} kept, ${plan.retained.size} retained (last-known-good or in use); ${saved.size} before."
+        )
+        return SyncResult(
+            subscription.id, importResult.configurationsFound, plan.insert.size,
+            importResult.validProfiles.size - plan.insert.size, true, viaMirror = viaMirror,
+            poolBefore = saved.size, removedCount = plan.delete.size, retainedCount = plan.retained.size, keptCount = plan.kept.size
+        )
+    }
+
+    /**
+     * Deletes every free config and nothing else (VIP, imported, panel and private configs stay). The
+     * one the VPN is using leaves the list too, but the running session keeps its own copy in memory and
+     * is not interrupted. Test metadata for the deleted configs goes; diagnostic history stays.
+     */
+    suspend fun deleteAllFree(): Int = withContext(Dispatchers.IO) {
+        val saved = serverRepository.getProfilesBySubscription(FreeConfigList.URL).first()
+        val ids = saved.map { it.id }
+        serverRepository.replaceAtomically(ids, emptyList())
+        val active = com.example.vpn.VpnController.connectionState.value.activeProfile
+        lastKnownGood()?.clear(keepFingerprint = null)
+        retainedStore?.update(retained = emptyList(), gone = ids)
+        runCatching { com.example.RayApplication.instance.freeConfigEvidence.forget(saved.map { it.effectiveFingerprint }) }
+        val activeFree = active != null && saved.any { it.id == active.id }
+        XrayLogManager.i("SUBSCRIPTION", "Deleted ${ids.size} free configs" +
+            if (activeFree) "; the connected one keeps running until disconnect." else ".")
+        ids.size
+    }
+
+    /** Deletes one free config (the running session, if it uses it, is not interrupted). */
+    suspend fun deleteFree(profile: com.example.data.model.VlessProfile) = withContext(Dispatchers.IO) {
+        serverRepository.replaceAtomically(listOf(profile.id), emptyList())
+        runCatching { com.example.RayApplication.instance.freeConfigEvidence.forget(listOf(profile.effectiveFingerprint)) }
+        retainedStore?.update(retained = emptyList(), gone = listOf(profile.id))
+    }
+
+    /**
+     * After the VPN disconnects: free configs kept only because they were in use when a refresh dropped
+     * them are removed now, unless the last-known-good pool or a favourite still holds them.
+     */
+    suspend fun releaseRetained(): Int = withContext(Dispatchers.IO) {
+        val store = retainedStore ?: return@withContext 0
+        val keep = lastKnownGood()?.protectedIds().orEmpty() + inUseIds()
+        val ids = store.ids().filter { it !in keep }
+        val favourites = ids.mapNotNull { serverRepository.getProfileById(it) }.filter { it.isFavorite }.map { it.id }.toSet()
+        val gone = ids.filter { it !in favourites }
+        if (gone.isNotEmpty()) serverRepository.replaceAtomically(gone, emptyList())
+        store.update(retained = emptyList(), gone = ids)
+        if (gone.isNotEmpty()) XrayLogManager.i("SUBSCRIPTION", "Removed ${gone.size} retained free configs after disconnect.")
+        gone.size
     }
 
     private suspend fun nodeCountOf(subscription: SubscriptionInfo) = serverRepository.getAllProfilesOnce().count {

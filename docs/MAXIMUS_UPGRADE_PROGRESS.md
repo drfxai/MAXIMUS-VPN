@@ -5,12 +5,15 @@ milestone. Branch: `feature/maximus-upgrade-7ooxpw` (from `main` 2bdf976).
 
 ## Current phase
 
-Phase 0 complete. Next: Phase 1 (Iran-optimized free config pipeline).
+Phases 0, 1 and 2 implemented; CI (checks.yml) is the build of record for them. Next: Phase 3.
 
 ## Exact next action
 
-Start Phase 1.1: add source metadata (source_id, last_fetch_time, fetch_status, candidate_count,
-valid_count) and the normalized candidate format to `tools/aggregator/scripts/aggregate.py`.
+Phase 3: add the intermediate connection states (ENGINE_STARTED, VERIFYING,
+TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED, DEGRADED) to `data/model/ConnectionState.kt`, verify real
+traffic through the tunnel in `RayVpnService.connectLocked` before CONNECTED, and from there record
+verified free sessions into the last-known-good pool and evidence store, and call
+`SubscriptionManager.releaseRetained()` after disconnect.
 
 ## Phase 0: inspection (done)
 
@@ -51,6 +54,15 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
 | Telegram bot tests (local) | all passed |
 | Hygiene scan (local) | 323 files, 0 problems |
 
+### Results after Phases 1-2
+
+| Check | Result |
+|---|---|
+| Aggregator tests (local, with the pinned Xray core) | 45 passed |
+| Pure Kotlin tests on the JVM rig (FreeConfigEvidenceTest, LastKnownGoodTest) | 18 passed |
+| Hygiene scan | 0 problems |
+| CI checks.yml | see the run for this commit |
+
 ### Findings that shape the plan
 
 - `connectLocked` sets `CONNECTED` right after the TUN loop starts; no traffic is verified (Phase 3).
@@ -63,14 +75,42 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
 ## Completed tasks
 
 - Phase 0 inspection and baseline.
+- Phase 1 (aggregator): source metadata (`source_meta` in the manifest report, ids in
+  `sources.json`); normalized `Candidate` (`scripts/pipeline.py`); extra security checks (VMess
+  credentials and encryption, unsupported transports, `fp=unsafe`, `verify=0`, non-AEAD Shadowsocks,
+  obfuscated or private IPv6/IPv4 addresses); quarantine records with reasons and no credentials;
+  DNS and TCP stage measurement; three real-request rounds per server (`verify.py`); statuses
+  GLOBAL_VERIFIED / GLOBAL_FAILED and UNKNOWN_IRAN_STATUS; deterministic score with reasons;
+  diverse selection of at most 30 (failure domain, kind, source, CDN share, address family);
+  `configs.json` and `history.json` published and signed with the list; `quarantine.json` kept as a
+  workflow artifact.
+- Phase 1 (app): `FailureStage`; `NetworkCapabilityProfile` + `NetworkCapabilityDetector`
+  (measured on the physical network, unmeasured fields stay null); `FreeConfigLifecycle`
+  (NEW → GLOBAL_VERIFIED → IRAN_PROBATION → IRAN_VERIFIED / DEGRADED / DEAD / QUARANTINED),
+  `FreeConfigLifecycleRules`, `FreeConfigEvidenceStore` (per fingerprint, bounded 300, persisted),
+  `FreeConfigScore`. Free Configs tests now file each result as evidence.
+- Phase 2: `LastKnownGoodPool` (3 entries: active + two best recent; eviction only by a newer
+  verified config or dead evidence), `FreeListSwap.plan` + `ServerProfileDao.replace` (one Room
+  transaction), `RetainedFreeConfigs`, `SubscriptionManager.swapFreeList / deleteAllFree / deleteFree /
+  releaseRetained`. The refresh never deletes protected or in-use configs and never empties the list.
 
 ## Pending tasks
 
-Phases 1 to 11 as written in the plan (thread "Maximus upgrade").
+- Phase 1 UI wording: the Free Configs screen must call the YT/TG/X badges a global check (outside
+  Iran) and show the lifecycle label; goes with the Phase 6/7 previews.
+- Phases 3 to 11.
 
 ## Files changed
 
 - `docs/MAXIMUS_UPGRADE_PROGRESS.md` (this file)
+- Aggregator: `tools/aggregator/scripts/{aggregate,verify,pipeline}.py`, `tests/test_pipeline.py`,
+  `sources/sources.json`, `README.md`; `.github/workflows/free-configs.yml`
+- App: `vpn/diagnostics/FailureStage.kt`, `vpn/smart/NetworkCapability{Profile,Detector}.kt`,
+  `vpn/hub/FreeConfigEvidence.kt`, `vpn/hub/LastKnownGood.kt`, `vpn/subscription/SubscriptionManager.kt`,
+  `data/database/ServerProfileDao.kt`, `data/repository/ServerRepository.kt`, `RayApplication.kt`,
+  `ui/freeconfigs/FreeConfigs{State,ViewModel}.kt`
+- Tests: `FreeConfigEvidenceTest`, `LastKnownGoodTest`, `FreeListSwapIntegrationTest` (Robolectric,
+  scenarios A to D)
 
 ## Known issues
 
@@ -79,4 +119,8 @@ Phases 1 to 11 as written in the plan (thread "Maximus upgrade").
 
 ## Migration notes
 
-None yet.
+- No database schema change (still version 8). New SharedPreferences files:
+  `free_config_evidence`, `free_last_known_good`, `free_retained`.
+- The free-configs branch gains `configs.json` and `history.json` (listed and hashed in the signed
+  manifest). Older app builds ignore them.
+- A server must now pass 2 of 3 rounds instead of 2 of 2.

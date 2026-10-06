@@ -96,6 +96,14 @@ class ServerRepository(private val dao: ServerProfileDao) {
         return Pair(uniqueToInsert, duplicates)
     }
 
+    /** Deletes [deleteIds] and inserts [inserts] atomically (one database transaction). */
+    suspend fun replaceAtomically(deleteIds: List<String>, inserts: List<VlessProfile>) {
+        dao.replace(deleteIds, inserts.map { p ->
+            val fp = p.canonicalFingerprint.ifBlank { CanonicalFingerprint.computeFromProfile(p) }
+            ServerProfileEntity.fromDomain(p.copy(canonicalFingerprint = fp))
+        })
+    }
+
     suspend fun update(profile: VlessProfile) {
         dao.update(ServerProfileEntity.fromDomain(profile))
     }

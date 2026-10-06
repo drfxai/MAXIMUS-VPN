@@ -37,6 +37,33 @@ class RayApplication : Application() {
     lateinit var settingsRepository: SettingsRepository
         private set
 
+    /** Up to three free configs that carried verified traffic here; a refresh never deletes them. */
+    val lastKnownGood: com.example.vpn.hub.LastKnownGoodPool by lazy {
+        val prefs = getSharedPreferences("free_last_known_good", MODE_PRIVATE)
+        com.example.vpn.hub.LastKnownGoodPool(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /** Free configs a refresh dropped while they were in use; removed after disconnect. */
+    val retainedFreeConfigs: com.example.vpn.hub.RetainedFreeConfigs by lazy {
+        val prefs = getSharedPreferences("free_retained", MODE_PRIVATE)
+        com.example.vpn.hub.RetainedFreeConfigs(
+            load = { prefs.getStringSet("ids", emptySet()).orEmpty().toSet() },
+            save = { prefs.edit().putStringSet("ids", it).apply() }
+        )
+    }
+
+    /** This phone's measurements of free configs, kept apart from the list builder's global checks. */
+    val freeConfigEvidence: com.example.vpn.hub.FreeConfigEvidenceStore by lazy {
+        val prefs = getSharedPreferences("free_config_evidence", MODE_PRIVATE)
+        com.example.vpn.hub.FreeConfigEvidenceStore(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -105,6 +132,9 @@ class RayApplication : Application() {
 
         // Clean up legacy non-functional seed nodes and initialize profile state
         CoroutineScope(Dispatchers.IO).launch {
+            // Loaded here, off the main thread, so screens read it from memory.
+            runCatching { freeConfigEvidence.all() }
+            runCatching { lastKnownGood.entries() }
             try {
                 subscriptionRepository.migrateSensitiveUrls()
                 val prefs = getSharedPreferences("official_subscriptions", MODE_PRIVATE)

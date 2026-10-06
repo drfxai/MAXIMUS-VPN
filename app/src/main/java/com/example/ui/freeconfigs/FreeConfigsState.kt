@@ -19,8 +19,13 @@ data class FreeNode(
     /** Successful tests out of all tests run on this network since the screen opened. */
     val passes: Int = 0,
     val runs: Int = 0,
-    /** Which of YouTube, Telegram and X ("YT", "TG", "X") the server opened when the list was built. */
-    val sites: Set<String> = emptySet()
+    /**
+     * Which of YouTube, Telegram and X ("YT", "TG", "X") the server's exit opened when the list was built.
+     * The builder runs outside Iran: this is global reachability, not proof the server works here.
+     */
+    val sites: Set<String> = emptySet(),
+    /** What this phone's own measurements say about the server (see FreeConfigLifecycle). */
+    val lifecycle: com.example.vpn.hub.FreeConfigLifecycle = com.example.vpn.hub.FreeConfigLifecycle.GLOBAL_VERIFIED
 ) {
     val online: Boolean get() = health == NodeHealth.FAST || health == NodeHealth.SLOW
     val protocol: String get() = profile.protocolType.displayName
