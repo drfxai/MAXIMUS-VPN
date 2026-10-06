@@ -397,6 +397,12 @@ async function call(env, path, { body, data, now = NOW } = {}) {
   assert.match(r.body.message, /rejected the key/);
   assert.equal((await keyStatus(env)).valid, false);
 
+  // Scenario G: a new Worker instance (restart, another Cloudflare location) with the same storage and
+  // secrets reads the key back; nothing is kept only in memory.
+  const restarted = { ...panelEnv().env, STORE: env.STORE };
+  assert.equal((await keyStatus(restarted)).mask, "••••bad0");
+  assert.equal((await keyStatus(restarted)).unreadable, false);
+
   // Delete needs confirmation.
   assert.equal((await call(env, "gemini/delete", { body: {} })).status, 400);
   r = await call(env, "gemini/delete", { body: { confirm: true } });
