@@ -5,16 +5,20 @@ milestone. Branch: `feature/maximus-upgrade-7ooxpw` (from `main` 2bdf976).
 
 ## Current phase
 
-Phases 0 to 5 implemented. Next: Phases 6 and 7 (Free configs UI; previews for DrFX first).
+2026-10-06 14:09Z DrFX: "Update the program to version V1.0.0." The app is published again as V1.0.0
+with versionName 1.0.0 and versionCode 27 (kept above 26 so it installs over earlier V1.0.0 builds).
+
+All phases 0 to 11 implemented on the branch. Not merged to `main`, nothing published. Waiting on
+DrFX: merge decision, a phone test of the app and a deploy of the new `worker.js`.
 
 ## Exact next action
 
-Phases 6 and 7: draw previews (Delete Free button next to "ALL NODES · n / Ping All" with the
-confirmation dialog; per-config delete; refresh progress with pool/candidates/validated/retained/
-removed/added/last update; "Refresh failed — existing verified configurations retained."; YT/TG/X
-relabelled as a global check; lifecycle label) into `/mnt/project-files/previews/maximus-upgrade/`
-and ask DrFX to approve. While waiting, do Phase 8 (quality hardening). The logic for 6/7 already
-exists: `SubscriptionManager.deleteAllFree / deleteFree` and the `SyncResult` counts.
+1. When DrFX agrees, merge `feature/maximus-upgrade-7ooxpw` into `main` (do not touch
+   `release-version.txt`; publishing V1.0.1 is a separate decision).
+2. DrFX deploys `tools/telegram-bot/worker.js` (paste into Cloudflare), adds `KEY_ENCRYPTION_SECRET`
+   (and optionally `GH_TOKEN`), opens `/setup?secret=...` once, then opens the panel from the bot's
+   Admin menu button and saves the Gemini key there.
+3. On a phone: scenarios A to F (see "Phase 11"), then the Telegram scenarios G and H for real.
 
 ## Phase 0: inspection (done)
 
@@ -187,9 +191,71 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   `release-version.txt` stays `V1.0.0` on purpose: a change to it on `main` starts the release
   workflow, which publishes. A dry-run release build (tag `dry-run-1.0.1`) checks the APKs.
 
-## Pending tasks
+- Phase 10 (admin designs approved by DrFX 13:25Z; built on PR #24's /setkey fix, merged into this
+  branch): in `tools/telegram-bot/worker.js`
+  - Gemini key: AES-GCM (WebCrypto) with a key derived by HKDF from `KEY_ENCRYPTION_SECRET` (or
+    `BOT_TOKEN` when that is not set) and stored only as `gemini_key_enc`; the old plain `gemini_key`
+    is encrypted and removed on first use; `keyStatus` returns configured / source / ••••ABCD /
+    validated / model check, never the key; Save (validates at once), Replace, Delete (confirmation),
+    Validate (Google's model list); a key that cannot be decrypted any more is reported as such.
+  - Model: stored separately (`gemini_model`), normalised ("Gemini 3.8 Flash" → `gemini-3.8-flash`),
+    accepted only when Google's list for that key has it; otherwise an error and the model stays.
+  - Bot commands: `/statusfree`, `/sources`, `/iranstatus`, `/health`, `/diagnostics`, `/refreshfree`
+    (Yes/No, then a `free-configs.yml` dispatch with `GH_TOKEN`), `/panel`; `/setup` sets the admin's
+    menu button to the panel. Free list status is read from the `free-configs` branch through the
+    same CDN mirrors as the app (raw GitHub is often blocked); Iran stays "unknown" with the reason.
+  - Mini App: `GET /admin` (no data, strict CSP) and `/api/*`; every call needs Telegram-signed init
+    data (HMAC-SHA256 with the "WebAppData" key, constant-time compare, at most 1 hour old, user id
+    = `ADMIN_ID`). Tabs: Dashboard, Configs (VIP/Free add, delete by id, clear, copy link only on a
+    tap), Sources, Validation, Iran Health, Gemini AI, Diagnostics, Settings. Deletes, clear and
+    refresh are refused without `confirm: true`.
+  - Logs: bounded `errors` and `activity` lists in KV, scrubbed of links, bot tokens, API keys and
+    long tokens. Gemini stays advisory: no links reach it and deletes still need the admin's Yes.
+  - CI: `checks.yml` now also runs the bot tests (job "Telegram bot tests").
+- Phase 11: see the section below.
 
-- Phases 10 and 11.
+## Phase 11: end-to-end validation
+
+| Scenario | Where it is checked | Result |
+|---|---|---|
+| A. 30 free configs, refresh, active one stays, new list tested, atomic swap, 3 last-known-good kept | `FreeListSwapIntegrationTest` "A - …", `LastKnownGoodTest`, aggregator `test_pipeline.py` (cap 30) | pass (CI) |
+| B. Refresh fails, list intact | `FreeListSwapIntegrationTest` "B - …"; UI banner in `FreeConfigsContent` | pass (CI); banner seen in preview only |
+| C. Delete All Free with confirmation, VIP/manual stay | `FreeListSwapIntegrationTest` "C and D - …"; dialog in `ServersScreen` | pass (CI); dialog seen in preview only |
+| D. Connected on a free config, Delete All Free, session not cut, runtime copy gone after disconnect | same test (saved row removed, running copy kept); `releaseRetained` after disconnect | pass (CI) |
+| E. Tunnel up but no traffic: never CONNECTED, stage shown | `ConnectionVerificationTest.E_…`, `DiagnosticEventsTest` (connection.state WARN with stage) | pass (CI) |
+| F. Crash/ANR evidence on next launch | `RuntimeHealthTest` (ApplicationExitInfo reasons, ANR main thread only), report `runtime` section | pass (CI); needs a real crash on a phone |
+| G. Gemini key saved securely, survives restart, never in page/logs/repo | `test.mjs`: sealed value only, decrypts with the right secret only, new instance reads it, page/API/KV never contain it; hygiene scan | pass (local + CI) |
+| H. Admin can manage configs, others cannot | `test.mjs`: signed init data accepted for `ADMIN_ID`, refused for another user, a forged hash, other bot token, old or missing data; browser run of the real page against the Worker | pass |
+
+Not possible from the cloud sandbox: a phone, a real Telegram client, Cloudflare and Google. Each of
+A to H must be repeated once for real before V1.0.1 is published.
+
+## Final engineering report
+
+- Completed phases: 0 to 11.
+- Architecture changes: aggregator scoring with explicit Iran evidence (`UNKNOWN_IRAN_STATUS`) and a
+  30-config cap; last-known-good pool and atomic, mutex-guarded free list swap; connection states that
+  separate "tunnel up" from "verified"; OTel-shaped event log, error grouping and a test registry tied
+  to sessions; short and JSON reports with schema/build/engine data; Delete Free and refresh progress
+  UI; manager scopes with SupervisorJob; Telegram admin Mini App with a signed API.
+- Security changes: report redaction pass (tokens, keys, e-mail, phone, addresses); profile ids
+  hashed in events; Gemini key encrypted at rest, masked everywhere, never sent to the page; Telegram
+  init data verification with admin check and freshness; CSP on the panel; confirmations enforced on
+  the server; scrubbed bot logs; no secrets in the repository (scan in CI).
+- Tests: Android unit tests (incl. Robolectric swap scenarios), `lintRelease`, aggregator tests,
+  bot tests (now in CI), secret/assistant-name scan; panel rendered in Chromium against the Worker.
+- Build output: version 1.0.1 (27) in code; Checks green on 8242cad (run 37471272536) and on 15202f7 with the bot tests (run 37472691875); dry-run
+  release build (tag `dry-run-1.0.1`, run 37471282809): build, unit tests, packaging, signature and checksum checks and the Android 15 emulator install-and-launch check all passed (publishing is skipped for dry-run tags). Nothing published; `release-version.txt` still `V1.0.0`.
+- Remaining risks: nothing tested on a phone or real Telegram/Cloudflare/Google; Iran status is
+  unknown for every config until phones can share results (they do not, by design); without
+  `KEY_ENCRYPTION_SECRET` a BOT_TOKEN change makes the saved Gemini key unreadable (reported, save
+  again); KV is eventually consistent (up to a minute across locations).
+- Known limitations: connection events can merge two changes within one frame; the bot cannot verify
+  the free list signature itself (it reports whether one is present); `/refreshfree` needs `GH_TOKEN`.
+- Open related work: draft PR #20 (curated Iran free list) overlaps Phase 1 and was left alone;
+  PR #24 (/setkey fix) is merged into this branch.
+- Next recommended improvements: opt-in, anonymous Iran reachability reports from phones; verify the
+  manifest signature in the bot; an instrumented UI test for Delete Free and the refresh banner.
 
 ## Files changed
 
@@ -206,10 +272,15 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
 - Phase 5: `vpn/diagnostics/report/{DiagnosticReportBuilder,ReportExporter}.kt`,
   `res/xml/diagnostic_paths.xml`, `AndroidManifest.xml` (FileProvider), `app/build.gradle.kts`
   (GIT_COMMIT, BUILD_TIME), `ui/viewmodel/DiagnosticsViewModel.kt`, `ui/diagnostics/DiagnosticsScreen.kt`
+- Phase 6/7: `ui/servers/ServersScreen.kt`, `ui/viewmodel/ServerViewModel.kt`,
+  `vpn/subscription/FreeRefreshProgress.kt`, `ui/freeconfigs/FreeConfigs{Content,Screen,State,ViewModel}.kt`
+- Phase 8: `core/AppScopes.kt`, `vpn/tile/VpnTileService.kt`, failover/Psiphon/mesh/secret-chat managers
+- Phase 9: `app/build.gradle.kts` (1.0.1 / 27)
+- Phase 10: `tools/telegram-bot/{worker.js,test.mjs,README.md,wrangler.toml}`, `.github/workflows/checks.yml`
 - Tests: `DiagnosticReportTest`, `DiagnosticEventsTest`, `RuntimeHealthTest`, `ConnectionVerificationTest`, `FreeConfigEvidenceTest`, `LastKnownGoodTest`, `FreeListSwapIntegrationTest` (Robolectric,
   scenarios A to D)
 
-## Phase 10 findings (read-only so far)
+## Phase 10 findings (fixed in Phase 10)
 
 Gemini key storage in `tools/telegram-bot/worker.js`, causes found:
 
