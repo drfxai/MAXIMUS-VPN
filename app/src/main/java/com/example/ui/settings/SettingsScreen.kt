@@ -533,8 +533,7 @@ fun SettingsScreen(
                 SettingToggleItem(
                     icon = Icons.Default.CloudDownload,
                     title = "Free configs",
-                    subtitle = if (settings.freeConfigsEnabled) "Downloads the free public server list and shows it in Servers and Free Configs"
-                    else "Off: the free list is not downloaded, tested or shown. Its servers were removed.",
+                    subtitle = "On: downloads the free public server list and shows it in Servers and Free Configs. Off: nothing is downloaded, tested or shown.",
                     checked = settings.freeConfigsEnabled,
                     onCheckedChange = { viewModel.setFreeConfigs(it) }
                 )
