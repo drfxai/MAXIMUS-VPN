@@ -11,8 +11,11 @@ so the app can tell the signed list apart from anything else served at that addr
 The workflow `.github/workflows/free-configs.yml` runs every six hours (and by hand): it tests the
 aggregator, builds the list, drops servers that do not accept a TCP connection from the runner, then
 sends a real request (`generate_204`, twice) through every remaining candidate with a pinned Xray core
-(`scripts/verify.py`). Only servers that carried both requests are kept, the fastest of each source
-first, and the list holds **30 at most** (sources take turns, so one source cannot fill it). Formats Xray
+(`scripts/verify.py`). Each server that carried both requests then opens YouTube
+(`www.youtube.com/generate_204`), Telegram (`api.telegram.org`) and X (`x.com`) through the same core;
+any HTTP answer over a verified TLS connection counts. A server that opens none of the three is dropped.
+The rest are kept with the most of those sites first, then the fastest, and their names end with the
+sites they opened (`DE · VLESS 12 · YT TG X`), which the app shows as badges and filters. The list holds **30 at most** (sources take turns, so one source cannot fill it). Formats Xray
 cannot run as a plain outbound (Hysteria2, WireGuard, Shadowsocks plugins, mKCP) are not published,
 because nothing here could show they work. The workflow then replaces every display name, signs the
 manifest and force-pushes the four files as a single commit to the `free-configs` branch. Without

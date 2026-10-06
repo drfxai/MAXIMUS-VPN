@@ -107,4 +107,12 @@ class FreeConfigListTest {
         val stale = FreeConfigList.stale(listOf(kept, gone, favourite, inUse), listOf(kept.copy(id = "new")), keepId = inUse.id)
         assertEquals(listOf(gone), stale)
     }
+
+    @Test fun sitesAreReadFromTheName() {
+        assertEquals(setOf("YT", "TG", "X"), FreeConfigList.sitesOf("DE · VLESS 12 · YT TG X"))
+        assertEquals(setOf("TG"), FreeConfigList.sitesOf("Free TROJAN 3 · TG"))
+        assertEquals(emptySet<String>(), FreeConfigList.sitesOf("DE · VLESS 12"))
+        assertEquals(emptySet<String>(), FreeConfigList.sitesOf("My server · home"))
+        assertEquals("DE", FreeConfigList.countryOf("DE · VLESS 12 · YT TG X"))
+    }
 }

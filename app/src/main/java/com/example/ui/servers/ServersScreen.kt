@@ -97,6 +97,7 @@ fun ServersScreen(
     val onlyFavorites by serverViewModel.onlyFavorites.collectAsStateWithLifecycle()
     val sortOption by serverViewModel.sortOption.collectAsStateWithLifecycle()
     val isTestingAll by serverViewModel.isTestingAll.collectAsStateWithLifecycle()
+    val testAllProgress by serverViewModel.testAllProgress.collectAsStateWithLifecycle()
     val testingStates by serverViewModel.serverTestingStates.collectAsStateWithLifecycle()
 
     val selectedProfileId by serverViewModel.selectedProfileId.collectAsStateWithLifecycle()
@@ -114,6 +115,8 @@ fun ServersScreen(
     LaunchedEffect(Unit) {
         serverViewModel.refreshPanels()
     }
+    val appSettings by com.example.RayApplication.instance.settingsRepository.settingsFlow.collectAsStateWithLifecycle()
+    val freeConfigsEnabled = appSettings.freeConfigsEnabled
 
     var showSortMenu by remember { mutableStateOf(false) }
 
@@ -169,7 +172,8 @@ fun ServersScreen(
                         onClick = onNavigateToProtocols
                     )
                 }
-                item {
+                // Hidden while the user has free configs turned off in Settings.
+                if (freeConfigsEnabled) item {
                     HubChip(
                         icon = Icons.Default.CloudDownload,
                         title = "Free Configs",
@@ -235,8 +239,9 @@ fun ServersScreen(
                 )
 
                 TextButton(
-                    onClick = { serverViewModel.testAllServers() },
-                    enabled = !isTestingAll && serverList.isNotEmpty(),
+                    // While a run is going the button stops it.
+                    onClick = { if (isTestingAll) serverViewModel.stopTestAll() else serverViewModel.testAllServers() },
+                    enabled = isTestingAll || serverList.isNotEmpty(),
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     modifier = Modifier
@@ -250,7 +255,7 @@ fun ServersScreen(
                             color = AppTheme.colors.primary
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Pinging…", color = AppTheme.colors.primary, fontSize = 12.sp)
+                        Text("Stop · ${testAllProgress.first}/${testAllProgress.second}", color = AppTheme.colors.primary, fontSize = 12.sp)
                     } else {
                         Icon(
                             imageVector = Icons.Default.NetworkPing,

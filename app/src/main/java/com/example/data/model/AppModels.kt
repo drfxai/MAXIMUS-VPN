@@ -315,7 +315,9 @@ data class AppSettings(
     val defaultDesyncConfig: DesyncConfig = DesyncConfig(),
     val godModeMeshEnabled: Boolean = true,
     val godModePsiphonEnabled: Boolean = true,
-    val godModeConduitEnabled: Boolean = true
+    val godModeConduitEnabled: Boolean = true,
+    /** The signed free config list: downloaded, saved and shown only while this is on. */
+    val freeConfigsEnabled: Boolean = true
 )
 
 data class DiagnosticReport(

@@ -53,7 +53,8 @@ class VipViewModel(app: Application) : AndroidViewModel(app) {
             publish(withContext(Dispatchers.IO) { serverRepository.getProfilesBySubscription(VipSubscription.URL).first() })
             loadSubscription()
             val s = _state.value
-            if (!s.subscribed || s.total == 0 || System.currentTimeMillis() >= s.nextUpdate) refresh() else testAll()
+            // Fetch the list when it is missing or due; nothing is tested until the user asks.
+            if (!s.subscribed || s.total == 0 || System.currentTimeMillis() >= s.nextUpdate) refresh()
         }
     }
 
@@ -87,7 +88,7 @@ class VipViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(nodes = nodes) }
     }
 
-    /** Fetches the VIP list again (adding the subscription if this install never had it), then tests it. */
+    /** Fetches the VIP list again (adding the subscription if this install never had it). */
     fun refresh() {
         if (_state.value.syncing) return
         _state.update { it.copy(syncing = true, message = null) }
@@ -106,11 +107,10 @@ class VipViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(message = "Could not update the VIP list. The last one stays in use.") }
             }
             _state.update { it.copy(syncing = false) }
-            testAll()
         }
     }
 
-    /** Sends a real request through every VIP server; results appear as they come in. */
+    /** Sends a real request through every VIP server, one at a time; each row updates as it finishes. */
     fun testAll() {
         if (_state.value.testing) return
         if (VpnController.connectionState.value.let { it.isConnected || it.isBusy }) {
@@ -122,21 +122,24 @@ class VipViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(testing = true, message = null) }
         testJob = viewModelScope.launch {
             try {
-                for (batch in profiles.chunked(BATCH)) {
-                    val outcomes = withContext(Dispatchers.IO) { RealDelayProbe.measure(batch, TIMEOUT_SEC) }
-                    batch.zip(outcomes).forEach { (p, outcome) ->
-                        if (outcome is RealDelayProbe.Outcome.NotRun) return@forEach
-                        val ms = (outcome as? RealDelayProbe.Outcome.Delay)?.latencyMs
-                        latency[p.id] = ms
-                        tested += p.id
-                        withContext(Dispatchers.IO) { runCatching { serverRepository.updateLatency(p.id, ms) } }
-                    }
+                for (p in profiles) {
+                    val outcome = withContext(Dispatchers.IO) { RealDelayProbe.measure(p, TIMEOUT_SEC) }
+                    if (outcome is RealDelayProbe.Outcome.NotRun) continue
+                    val ms = (outcome as? RealDelayProbe.Outcome.Delay)?.latencyMs
+                    latency[p.id] = ms
+                    tested += p.id
+                    withContext(Dispatchers.IO) { runCatching { serverRepository.updateLatency(p.id, ms) } }
                     publish(_state.value.nodes.map { it.profile })
                 }
             } finally {
                 _state.update { it.copy(testing = false) }
             }
         }
+    }
+
+    /** Stops a test run; servers already tested keep their result. */
+    fun stopTest() {
+        testJob?.cancel()
     }
 
     fun dismissMessage() = _state.update { it.copy(message = null) }
@@ -147,7 +150,6 @@ class VipViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
-        private const val BATCH = 24
         private const val TIMEOUT_SEC = 6
     }
 }

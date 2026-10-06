@@ -415,31 +415,47 @@ class ServerViewModel(
         }
     }
 
+    private var testAllJob: kotlinx.coroutines.Job? = null
+
+    /** Servers finished and in total in the current "Ping all" run. */
+    private val _testAllProgress = MutableStateFlow(0 to 0)
+    val testAllProgress: StateFlow<Pair<Int, Int>> = _testAllProgress.asStateFlow()
+
+    /**
+     * Pings every server one at a time, so only one test core runs and the phone stays responsive; each
+     * row updates as its test finishes. [stopTestAll] ends the run.
+     */
     fun testAllServers() {
         if (_isTestingAll.value) return
-        viewModelScope.launch {
-            _isTestingAll.value = true
+        val currentProfiles = serverList.value
+        if (currentProfiles.isEmpty()) return
+        _isTestingAll.value = true
+        _testAllProgress.value = 0 to currentProfiles.size
+        testAllJob = viewModelScope.launch {
             try {
-                val currentProfiles = serverList.value
-                // Real-delay probes run five configs at a time.
-                for (batch in currentProfiles.chunked(com.example.xray.RealDelayProbe.MAX_BATCH)) {
-                    _serverTestingStates.value = _serverTestingStates.value + batch.map { it.id to ServerTestStatus.Testing }
-                    val results = ServerTester.testServers(batch, timeoutMs = 2500)
-                    for ((profile, result) in batch.zip(results)) {
-                        _serverTestingStates.value = _serverTestingStates.value + (profile.id to result.status)
-
-                        val latency = when (result.status) {
-                            is ServerTestStatus.Available -> result.status.latencyMs
-                            is ServerTestStatus.Slow -> result.status.latencyMs
-                            else -> null
-                        }
-                        repository.updateLatency(profile.id, latency)
+                for ((i, profile) in currentProfiles.withIndex()) {
+                    _serverTestingStates.value = _serverTestingStates.value + (profile.id to ServerTestStatus.Testing)
+                    val result = ServerTester.testServer(profile, timeoutMs = 2500)
+                    _serverTestingStates.value = _serverTestingStates.value + (profile.id to result.status)
+                    val latency = when (result.status) {
+                        is ServerTestStatus.Available -> result.status.latencyMs
+                        is ServerTestStatus.Slow -> result.status.latencyMs
+                        else -> null
                     }
+                    repository.updateLatency(profile.id, latency)
+                    _testAllProgress.value = (i + 1) to currentProfiles.size
                 }
             } finally {
+                // A stopped run leaves no row spinning.
+                _serverTestingStates.value = _serverTestingStates.value.filterValues { it !is ServerTestStatus.Testing }
                 _isTestingAll.value = false
             }
         }
+    }
+
+    /** Stops "Ping all"; servers already tested keep their result. */
+    fun stopTestAll() {
+        testAllJob?.cancel()
     }
 
     fun exportUri(profile: VlessProfile): String {

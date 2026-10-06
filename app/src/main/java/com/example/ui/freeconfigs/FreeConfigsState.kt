@@ -18,7 +18,9 @@ data class FreeNode(
     val health: NodeHealth,
     /** Successful tests out of all tests run on this network since the screen opened. */
     val passes: Int = 0,
-    val runs: Int = 0
+    val runs: Int = 0,
+    /** Which of YouTube, Telegram and X ("YT", "TG", "X") the server opened when the list was built. */
+    val sites: Set<String> = emptySet()
 ) {
     val online: Boolean get() = health == NodeHealth.FAST || health == NodeHealth.SLOW
     val protocol: String get() = profile.protocolType.displayName
@@ -66,11 +68,16 @@ data class FreeNode(
 data class FreeConfigsUiState(
     /** False when this build has no key to check the list, so the list is never fetched. */
     val available: Boolean = true,
+    /** The user's "Free configs" setting; off means the list is never fetched or shown. */
+    val enabled: Boolean = true,
     /** The MAXIMUS Free subscription exists on this install. */
     val subscribed: Boolean = false,
     val loading: Boolean = true,
     val syncing: Boolean = false,
     val testing: Boolean = false,
+    /** Servers finished and in total in the current test run. */
+    val testDone: Int = 0,
+    val testTotal: Int = 0,
     /** The last sync accepted a signed list. */
     val verified: Boolean = false,
     val syncError: String? = null,
@@ -80,6 +87,8 @@ data class FreeConfigsUiState(
     val sort: FreeSort = FreeSort.FASTEST,
     /** Protocol display name to show only, or null for all. */
     val protocol: String? = null,
+    /** Show only servers that opened this site ("YT", "TG", "X"), or null for all. */
+    val site: String? = null,
     val showHidden: Boolean = false,
     val message: String? = null
 ) {
@@ -92,16 +101,28 @@ data class FreeConfigsUiState(
     val tested: Int get() = total - queued
     val nextUpdate: Long get() = if (lastUpdated == 0L) 0L else lastUpdated + refreshIntervalMinutes * 60_000L
 
-    /** Online servers per protocol, most common first. */
+    /** Servers that have not failed a test here: online ones and untested ones. */
+    val shown: List<FreeNode> get() = nodes.filter { it.health != NodeHealth.OFFLINE }
+
+    /** Shown servers per protocol, most common first. */
     val protocolCounts: List<Pair<String, Int>>
-        get() = online.groupingBy { it.protocol }.eachCount().entries
+        get() = shown.groupingBy { it.protocol }.eachCount().entries
             .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
             .map { it.key to it.value }
 
-    /** The servers listed under "Online", filtered and in the chosen order. */
+    /** Servers per site tag, in the order YouTube, Telegram, X; sites no server opened are left out. */
+    val siteCounts: List<Pair<String, Int>>
+        get() = SITES.map { (tag, _) -> tag to shown.count { tag in it.sites } }.filter { it.second > 0 }
+
+    /**
+     * The servers listed on the screen: every server that has not failed a test here (untested ones too,
+     * since tests run only when the user asks), filtered and in the chosen order, untested last.
+     */
     val visible: List<FreeNode>
         get() {
-            val list = online.filter { protocol == null || it.protocol == protocol }
+            val list = nodes.filter {
+                it.health != NodeHealth.OFFLINE && (protocol == null || it.protocol == protocol) && (site == null || site in it.sites)
+            }
             val byLatency = compareBy<FreeNode> { it.latencyMs ?: Long.MAX_VALUE }
             return when (sort) {
                 FreeSort.FASTEST -> list.sortedWith(byLatency)
@@ -118,6 +139,9 @@ data class FreeConfigsUiState(
     val best: FreeNode? get() = online.minByOrNull { it.latencyMs ?: Long.MAX_VALUE }
 
     companion object {
+        /** The site tags the list's names carry, with the name the screen shows. */
+        val SITES = listOf("YT" to "YouTube", "TG" to "Telegram", "X" to "X")
+
         /** English name of [code], or null for an unknown code. */
         fun countryName(code: String?): String? {
             if (code == null || code.length != 2) return null

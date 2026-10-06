@@ -54,6 +54,16 @@ object FreeConfigList {
     /** The country code the aggregator puts in front of a name ("DE · VLESS 12"), or null. */
     fun countryOf(name: String): String? = COUNTRY_PREFIX.find(name)?.groupValues?.get(1)
 
+    /** The sites a server opened when the list was built, by the tag after its name ("DE · VLESS 12 · YT TG X"). */
+    val SITE_TAGS = listOf("YT", "TG", "X")
+
+    /** Which of [SITE_TAGS] the aggregator found the server reaching, from its name; empty when none is named. */
+    fun sitesOf(name: String): Set<String> {
+        val last = name.substringAfterLast(" \u00B7 ", "").trim()
+        val words = last.split(' ').filter { it.isNotEmpty() }
+        return if (words.isNotEmpty() && words.all { it in SITE_TAGS }) words.toSet() else emptySet()
+    }
+
     /**
      * The most servers the app takes from the list. The published list is already limited to 30 servers
      * that carried a real request; this holds even when a list from elsewhere is longer, so hundreds of

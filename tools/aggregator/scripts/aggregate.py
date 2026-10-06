@@ -192,18 +192,27 @@ def interleave(per_source: list[list[str]], limit: int = MAX_TOTAL) -> list[str]
     return out
 
 
-def keep_working(per_source: list[list[str]], verify, report: dict) -> list[list[str]]:
-    """Keeps the servers that carried a real request, each source's fastest first. [verify] maps a list
-    of links to {link: seconds} for the ones that worked."""
+def keep_working(per_source: list[list[str]], verify, report: dict, reach: dict | None = None) -> list[list[str]]:
+    """Keeps the servers that carried a real request and opened at least one of YouTube, Telegram or X,
+    each source's best first: most of those sites reached, then fastest. [verify] maps a list of links to
+    {link: (seconds, sites reached)} for the ones that worked; [reach] receives the sites of every kept link."""
     candidates = [links[:VERIFY_PER_SOURCE] for links in per_source]
-    speeds = verify([link for links in candidates for link in links])
+    found = verify([link for links in candidates for link in links])
     tried = sum(len(links) for links in candidates)
-    works = [sorted((l for l in links if l in speeds), key=speeds.__getitem__) for links in candidates]
-    report["rejected"]["no traffic"] = tried - sum(len(w) for w in works)
+    carried = [[l for l in links if l in found] for links in candidates]
+    works = [sorted((l for l in links if found[l][1]), key=lambda l: (-len(found[l][1]), found[l][0])) for links in carried]
+    report["rejected"]["no traffic"] = tried - sum(len(c) for c in carried)
+    blocked = sum(len(c) for c in carried) - sum(len(w) for w in works)
+    if blocked:
+        report["rejected"]["no YouTube, Telegram or X"] = blocked
+    if reach is not None:
+        for links in works:
+            for link in links:
+                reach[link] = found[link]
     return works
 
 
-def collect(sources: list[dict], fetcher=fetch, check=None, verify=None) -> tuple[list[str], dict]:
+def collect(sources: list[dict], fetcher=fetch, check=None, verify=None, reach: dict | None = None) -> tuple[list[str], dict]:
     per_source: list[list[str]] = []
     names: list[str] = []
     seen: set[str] = set()
@@ -238,9 +247,12 @@ def collect(sources: list[dict], fetcher=fetch, check=None, verify=None) -> tupl
         per_source.append(links)
         names.append(name)
     if verify is not None:
-        per_source = keep_working(per_source, verify, report)
+        reach = {} if reach is None else reach
+        per_source = keep_working(per_source, verify, report, reach)
         for name, links in zip(names, per_source):
             report["sources"][name] = f"{len(links)} carried traffic"
+        # The best servers first: most of YouTube, Telegram and X reached, then fastest.
+        return sorted(interleave(per_source), key=lambda l: (-len(reach[l][1]), reach[l][0])), report
     return interleave(per_source), report
 
 
@@ -254,8 +266,12 @@ def sign(payload: bytes, pem: str) -> str:
     return base64.b64encode(key.sign(payload, ec.ECDSA(hashes.SHA256()))).decode()
 
 
-def display_name(link: str, index: int, locate=None) -> str:
-    """"DE · VLESS 12" when the server's country is known, else "Free VLESS 12"; the app reads the code."""
+SITE_ORDER = ("YT", "TG", "X")
+
+
+def display_name(link: str, index: int, locate=None, sites=()) -> str:
+    """"DE · VLESS 12" when the server's country is known, else "Free VLESS 12", followed by the sites it
+    opened ("DE · VLESS 12 · YT TG X"); the app reads the code and the tags."""
     scheme = endpoint(link)["scheme"].upper()
     country = None
     if locate is not None:
@@ -263,7 +279,9 @@ def display_name(link: str, index: int, locate=None) -> str:
             country = locate(endpoint(link)["host"])
         except Exception:
             country = None
-    return f"{country} · {scheme} {index}" if country else f"Free {scheme} {index}"
+    name = f"{country} · {scheme} {index}" if country else f"Free {scheme} {index}"
+    tags = [tag for tag in SITE_ORDER if tag in set(sites or ())]
+    return f"{name} · {' '.join(tags)}" if tags else name
 
 
 class Geo:
@@ -308,8 +326,9 @@ class Geo:
 def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem: str | None = None, check=None, locate=None,
           verify=None) -> dict:
     config = json.loads(sources_file.read_text())
-    links, report = collect(config.get("sources", []), fetcher, check, verify)
-    links = [rename(link, display_name(link, i + 1, locate)) for i, link in enumerate(links)]
+    reach: dict = {}
+    links, report = collect(config.get("sources", []), fetcher, check, verify, reach)
+    links = [rename(link, display_name(link, i + 1, locate, reach.get(link, (0, ()))[1])) for i, link in enumerate(links)]
     output_dir.mkdir(parents=True, exist_ok=True)
     plain = ("\n".join(links) + "\n") if links else ""
     (output_dir / "free.txt").write_text(plain)
@@ -340,7 +359,8 @@ def main() -> int:
     # AGGREGATOR_GEO names an IPv4 country CSV (start,end,CC); without it names carry no country.
     geo_path = os.environ.get("AGGREGATOR_GEO")
     locate = Geo(Path(geo_path)) if geo_path else None
-    # Every published server must have carried a real request through a local Xray core. AGGREGATOR_VERIFY=0
+    # Every published server must have carried a real request through a local Xray core and opened YouTube,
+    # Telegram or X through it. AGGREGATOR_VERIFY=0
     # skips that for a dry run, and then nothing may be published.
     verify = None
     if os.environ.get("AGGREGATOR_VERIFY", "1") != "0":
@@ -349,7 +369,7 @@ def main() -> int:
             print("AGGREGATOR_XRAY must name the Xray core, which tests each server with a real request", file=sys.stderr)
             return 2
         import verify as probe
-        verify = lambda links: probe.latencies(links, xray)
+        verify = lambda links: probe.probe(links, xray)
     manifest = build(ROOT / "output", ROOT / "sources" / "sources.json",
                      key_pem=os.environ.get("HUB_SIGNING_KEY") or None, check=check, locate=locate, verify=verify)
     print(f"{manifest['count']} configs; manifest {'signed' if (ROOT / 'output' / 'manifest.sig').read_text() else 'UNSIGNED (no key)'}")
