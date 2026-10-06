@@ -27,7 +27,8 @@ storage, deletes your message so the key does not stay in the chat, and from the
 normally, in Persian or English: "show the VIP list", "add these to VIP" followed by links, "move 3 to
 free", "delete the German free servers". `/ai` shows the status, `/model` shows or changes the model
 (default `gemini-3.8-flash`), `/reset` forgets the conversation, `/delkey` removes the key. A
-`GEMINI_API_KEY` secret on the Worker works too.
+`GEMINI_API_KEY` secret on the Worker is used only when no key was saved with `/setkey`. Tapping `/setkey` in the
+command menu sends it without the key: the bot then takes your next message as the key and deletes it.
 
 Config links and web addresses are replaced by placeholders before anything is sent to Gemini, and
 the lists it reads show only protocol and name, so no server address or UUID leaves the Worker. Only
