@@ -3,8 +3,6 @@ package com.example.chat
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.data.security.SecureStorage
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 class SecretChatManager(private val context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences("maximus_secret_chat_enc", Context.MODE_PRIVATE)
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = com.example.core.managerScope("CHAT")
     private var reaperJob: Job? = null
 
     private val _myAtomicId = MutableStateFlow(getOrCreateAtomicId())

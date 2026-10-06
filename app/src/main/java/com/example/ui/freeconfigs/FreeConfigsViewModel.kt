@@ -6,7 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.example.RayApplication
 import com.example.data.model.VlessProfile
 import com.example.vpn.VpnController
+import com.example.vpn.diagnostics.FailureStage
+import com.example.vpn.hub.ConnectivityMeasurement
 import com.example.vpn.hub.FreeConfigList
+import com.example.vpn.smart.NetworkCapabilityDetector
+import com.example.vpn.subscription.SubscriptionManager
 import com.example.xray.RealDelayProbe
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +32,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
     private val serverRepository = RayApplication.instance.serverRepository
     private val subscriptionRepository = RayApplication.instance.subscriptionRepository
     private val subscriptionManager = RayApplication.instance.subscriptionManager
+    private val evidence = RayApplication.instance.freeConfigEvidence
 
     private val _state = MutableStateFlow(
         FreeConfigsUiState(
@@ -47,6 +52,9 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             serverRepository.getProfilesBySubscription(FreeConfigList.URL).collect { profiles -> publish(profiles) }
+        }
+        viewModelScope.launch {
+            subscriptionManager.freeProgress.collect { p -> _state.update { it.copy(refreshProgress = p) } }
         }
         viewModelScope.launch {
             publish(withContext(Dispatchers.IO) { trimSurplus() })
@@ -100,6 +108,7 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                     else -> FreeNode.healthOf(ms)
                 },
                 sites = FreeConfigList.sitesOf(p.name),
+                lifecycle = evidence.lifecycle(p.effectiveFingerprint),
                 passes = passes[p.id] ?: 0,
                 runs = runs[p.id] ?: 0
             )
@@ -120,9 +129,20 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             loadSubscription()
-            result.exceptionOrNull()?.let { e ->
-                XrayLogManager.w("FREE", "Free list refresh failed: ${e.message}")
-                _state.update { it.copy(message = "Could not update the list. The last verified list stays in use.") }
+            val sync = result.getOrNull()
+            // A failed refresh never touches the saved list; the screen says so and keeps it.
+            val failure = result.exceptionOrNull()?.message
+                ?: sync?.takeIf { !it.isSuccess && it.errorMessage != SubscriptionManager.FREE_OFF }?.let { it.errorMessage ?: "unknown error" }
+            if (failure != null) {
+                XrayLogManager.w("FREE", "Free list refresh failed: $failure")
+                _state.update { it.copy(refreshFailedAt = System.currentTimeMillis(), refreshFailure = failure) }
+            } else if (sync != null && sync.isSuccess) {
+                _state.update {
+                    it.copy(refreshFailedAt = 0L, refreshFailure = null, lastRefresh = RefreshSummary(
+                        candidates = sync.totalFound, added = sync.addedCount, kept = sync.keptCount,
+                        retained = sync.retainedCount, removed = sync.removedCount, at = sync.finishedAt
+                    ))
+                }
             }
             _state.update { it.copy(syncing = false) }
         }
@@ -139,17 +159,39 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun test(profiles: List<VlessProfile>) {
         if (_state.value.testing || profiles.isEmpty()) return
-        if (VpnController.connectionState.value.let { it.isConnected || it.isBusy }) {
+        if (VpnController.connectionState.value.let { it.isTunnelUp || it.isBusy }) {
             _state.update { it.copy(message = "Disconnect first to test servers on your own network.") }
             return
         }
         _state.update { it.copy(testing = true, testDone = 0, testTotal = profiles.size, message = null) }
+        // Each server test is visible in diagnostics: queued, running, done, failed or cancelled.
+        val registry = com.example.vpn.diagnostics.events.Tests.registry
+        val testIds = profiles.map { registry.queue("free.real_delay", sessionId = null, profileRef = com.example.vpn.diagnostics.events.DiagEvent.profileRef(it.id)) }
         testJob = viewModelScope.launch {
             try {
+                // What this network allows, so each result is filed under an anonymous network bucket.
+                val network = NetworkCapabilityDetector.last?.takeIf { System.currentTimeMillis() - it.measuredAt < NETWORK_PROFILE_MAX_AGE_MS }
+                    ?: runCatching { NetworkCapabilityDetector.detect(getApplication()) }.getOrNull()
                 for ((i, p) in profiles.withIndex()) {
+                    registry.start(testIds[i])
                     val outcome = withContext(Dispatchers.IO) { RealDelayProbe.measure(p, TIMEOUT_SEC) }
+                    if (outcome is RealDelayProbe.Outcome.NotRun) registry.cancel(testIds[i], "not run")
                     if (outcome !is RealDelayProbe.Outcome.NotRun) {
                         val ms = (outcome as? RealDelayProbe.Outcome.Delay)?.latencyMs
+                        registry.finish(testIds[i], ms != null, ms?.let { "$it ms" },
+                            (outcome as? RealDelayProbe.Outcome.Failed)?.let { FailureStage.fromText(it.reason) })
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                evidence.record(p.effectiveFingerprint, ConnectivityMeasurement(
+                                    timestamp = System.currentTimeMillis(),
+                                    kind = ConnectivityMeasurement.Kind.TEST,
+                                    success = ms != null,
+                                    networkKey = network?.key(),
+                                    rttMs = ms,
+                                    failureStage = (outcome as? RealDelayProbe.Outcome.Failed)?.let { FailureStage.fromText(it.reason) }
+                                ))
+                            }
+                        }
                         latency[p.id] = ms
                         tested += p.id
                         runs[p.id] = (runs[p.id] ?: 0) + 1
@@ -160,8 +202,18 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                     publish(_state.value.nodes.map { it.profile })
                 }
             } finally {
+                // Tests not reached are cancelled (Stop, leaving the screen); finished ones are kept as they are.
+                testIds.forEach { registry.cancel(it, "stopped") }
                 _state.update { it.copy(testing = false) }
             }
+        }
+    }
+
+    /** Deletes one free config; a session using it keeps running until disconnect. */
+    fun delete(node: FreeNode) {
+        viewModelScope.launch {
+            runCatching { subscriptionManager.deleteFree(node.profile) }
+                .onFailure { XrayLogManager.w("FREE", "Could not delete the free config: ${it.message}") }
         }
     }
 
@@ -187,5 +239,6 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TIMEOUT_SEC = 6
+        private const val NETWORK_PROFILE_MAX_AGE_MS = 5 * 60_000L
     }
 }

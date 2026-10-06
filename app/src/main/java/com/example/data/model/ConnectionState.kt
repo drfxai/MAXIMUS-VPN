@@ -1,12 +1,30 @@
 package com.example.data.model
 
+import com.example.vpn.diagnostics.FailureStage
+
+/**
+ * Each step of a connection, in order. CONNECTED is reported only after real traffic went through the
+ * tunnel; a tunnel that exists but carries nothing is TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED.
+ *
+ * Plan names: STARTING = PREPARING/CONNECTING, TUN_ESTABLISHED = VPN_INTERFACE_ESTABLISHED.
+ */
 enum class ConnectionStatus {
     DISCONNECTED,
     PREPARING,
     CONNECTING,
+    /** The Android TUN interface exists; nothing runs on it yet. */
     VPN_INTERFACE_ESTABLISHED,
+    /** The proxy engine reported a successful start. */
+    ENGINE_STARTED,
     PROXY_CONNECTING,
+    /** The packet loop runs; a real request through the tunnel is being made. */
+    VERIFYING,
+    /** The tunnel is up but no request has gone through it. Never shown as connected. */
+    TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED,
+    /** A request went through the tunnel; [ConnectionState.verifiedAt] says when. */
     CONNECTED,
+    /** It was verified, but the latest checks through the tunnel failed. */
+    DEGRADED,
     RECONNECTING,
     DISCONNECTING,
     FAILED
@@ -14,6 +32,7 @@ enum class ConnectionStatus {
 
 data class ConnectionState(
     val status: ConnectionStatus = ConnectionStatus.DISCONNECTED,
+    /** The profile the session belongs to (what the screen shows as the server in use). */
     val activeProfile: VlessProfile? = null,
     val activeEngineName: String? = null,
     val connectedDurationSeconds: Long = 0,
@@ -26,17 +45,107 @@ data class ConnectionState(
     val pingCheckedAt: Long? = null,
     val vpnIp: String? = null,
     val errorMessage: String? = null,
-    val lastConnectedTime: Long? = null
+    val lastConnectedTime: Long? = null,
+    /** From the user's Connect until Disconnect; failover and reconnects keep it. */
+    val sessionId: String? = null,
+    /** One per connection attempt (each failover or reconnect starts a new one). */
+    val attemptId: String? = null,
+    /** The profile the user chose for this session. */
+    val selectedProfileId: String? = null,
+    /** The profile this attempt actually tried (failover or Smart Connect can pick another). */
+    val attemptedProfileId: String? = null,
+    /** When traffic last went through the tunnel in this attempt; null while unverified. */
+    val verifiedAt: Long? = null,
+    /** Where the last failure happened, when the status is FAILED, unverified or degraded. */
+    val failureStage: FailureStage? = null,
+    /** Checks through the tunnel that failed in a row (two in a row turn CONNECTED into DEGRADED). */
+    val probeFailures: Int = 0,
+    /** Bumped when the phone's own network changes: results measured before it no longer hold. */
+    val networkGeneration: Int = 0
 ) {
     val isConnected: Boolean get() = status == ConnectionStatus.CONNECTED
-    val isVpnInterfaceActive: Boolean get() = status == ConnectionStatus.VPN_INTERFACE_ESTABLISHED ||
-            status == ConnectionStatus.PROXY_CONNECTING ||
-            status == ConnectionStatus.CONNECTED ||
-            status == ConnectionStatus.RECONNECTING
-    val isBusy: Boolean get() = status == ConnectionStatus.CONNECTING ||
-            status == ConnectionStatus.PREPARING ||
-            status == ConnectionStatus.VPN_INTERFACE_ESTABLISHED ||
-            status == ConnectionStatus.PROXY_CONNECTING ||
-            status == ConnectionStatus.RECONNECTING ||
-            status == ConnectionStatus.DISCONNECTING
+
+    /** A tunnel exists (verified or not); the user is protected and can disconnect. */
+    val isTunnelUp: Boolean get() = status in TUNNEL_UP
+
+    val isVpnInterfaceActive: Boolean get() = isTunnelUp
+
+    val isBusy: Boolean get() = status in BUSY
+
+    /** The key a measured PASS belongs to: it stops counting when any part changes. */
+    val passKey: String get() = "$attemptId|$networkGeneration|${activeProfile?.id}|${status == ConnectionStatus.CONNECTED || status == ConnectionStatus.DEGRADED}"
+
+    /** Short words for the status, never "connected" before traffic was verified. */
+    val statusLabel: String get() = when (status) {
+        ConnectionStatus.CONNECTED -> "VPN CONNECTED"
+        ConnectionStatus.DEGRADED -> "CONNECTED · CHECKS FAILING"
+        ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED -> "TUNNEL UP · NO TRAFFIC YET"
+        ConnectionStatus.VERIFYING -> "VERIFYING TRAFFIC"
+        ConnectionStatus.ENGINE_STARTED, ConnectionStatus.PROXY_CONNECTING -> "STARTING PROXY"
+        ConnectionStatus.VPN_INTERFACE_ESTABLISHED -> "TUNNEL CREATED"
+        ConnectionStatus.PREPARING, ConnectionStatus.CONNECTING -> "CONNECTING"
+        ConnectionStatus.RECONNECTING -> "RECONNECTING"
+        ConnectionStatus.DISCONNECTING -> "DISCONNECTING"
+        ConnectionStatus.FAILED -> "FAILED"
+        ConnectionStatus.DISCONNECTED -> "DISCONNECTED"
+    }
+
+    companion object {
+        val TUNNEL_UP = setOf(
+            ConnectionStatus.VPN_INTERFACE_ESTABLISHED, ConnectionStatus.ENGINE_STARTED, ConnectionStatus.PROXY_CONNECTING,
+            ConnectionStatus.VERIFYING, ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED, ConnectionStatus.CONNECTED,
+            ConnectionStatus.DEGRADED, ConnectionStatus.RECONNECTING
+        )
+        val BUSY = setOf(
+            ConnectionStatus.CONNECTING, ConnectionStatus.PREPARING, ConnectionStatus.VPN_INTERFACE_ESTABLISHED,
+            ConnectionStatus.ENGINE_STARTED, ConnectionStatus.PROXY_CONNECTING, ConnectionStatus.VERIFYING,
+            ConnectionStatus.RECONNECTING, ConnectionStatus.DISCONNECTING
+        )
+    }
+}
+
+/**
+ * How a check through the tunnel changes the state. Pure, so the rules are tested without a phone.
+ * A result for another attempt is ignored: a stale background check never overwrites a new session.
+ */
+object ConnectionVerification {
+    const val DEGRADE_AFTER = 2
+
+    fun afterCheck(
+        state: ConnectionState,
+        attemptId: String?,
+        success: Boolean,
+        latencyMs: Long?,
+        now: Long,
+        stage: FailureStage? = null
+    ): ConnectionState {
+        if (attemptId == null || attemptId != state.attemptId) return state
+        val live = state.status == ConnectionStatus.VERIFYING || state.status == ConnectionStatus.CONNECTED ||
+            state.status == ConnectionStatus.DEGRADED || state.status == ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED
+        if (!live) return state
+        if (success) {
+            return state.copy(
+                status = ConnectionStatus.CONNECTED,
+                verifiedAt = now,
+                lastConnectedTime = state.lastConnectedTime ?: now,
+                pingMs = latencyMs ?: state.pingMs,
+                pingCheckedAt = now,
+                probeFailures = 0,
+                failureStage = null,
+                errorMessage = null
+            )
+        }
+        val failures = state.probeFailures + 1
+        return when (state.status) {
+            ConnectionStatus.VERIFYING -> state.copy(
+                status = ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED,
+                probeFailures = failures, failureStage = stage ?: FailureStage.UNKNOWN,
+                errorMessage = "The tunnel is up but no request went through it (${(stage ?: FailureStage.UNKNOWN).name})."
+            )
+            ConnectionStatus.CONNECTED -> if (failures >= DEGRADE_AFTER) state.copy(
+                status = ConnectionStatus.DEGRADED, probeFailures = failures, failureStage = stage, pingMs = null, pingCheckedAt = now
+            ) else state.copy(probeFailures = failures, pingCheckedAt = now)
+            else -> state.copy(probeFailures = failures, failureStage = stage ?: state.failureStage, pingMs = null, pingCheckedAt = now)
+        }
+    }
 }

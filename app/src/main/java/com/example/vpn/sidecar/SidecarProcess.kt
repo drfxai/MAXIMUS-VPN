@@ -14,6 +14,7 @@ class SidecarProcess(
     private val readyLine: Regex? = null
 ) : RunningEngine {
     @Volatile private var sawReadyLine = readyLine == null
+    @Volatile private var stopping = false
 
     private val logThread = Thread({
         try {
@@ -26,6 +27,9 @@ class SidecarProcess(
             }
         } catch (_: Exception) {
         }
+        // Output ends when the program exits: record whether that was asked for.
+        val code = runCatching { process.waitFor() }.getOrNull()
+        com.example.vpn.diagnostics.events.RuntimeHealth.engineTerminated(name, code, expected = stopping)
     }, "sidecar-$name-log").apply { isDaemon = true; start() }
 
     // Process.isAlive, waitFor(timeout) and destroyForcibly need API 26; the app supports 24.
@@ -49,6 +53,7 @@ class SidecarProcess(
 
     override fun stop() {
         // destroy() sends SIGTERM, which lets the engines close their connections; nothing else is needed.
+        stopping = true
         process.destroy()
         val deadline = System.currentTimeMillis() + 2_000
         while (isAlive && System.currentTimeMillis() < deadline) Thread.sleep(50)

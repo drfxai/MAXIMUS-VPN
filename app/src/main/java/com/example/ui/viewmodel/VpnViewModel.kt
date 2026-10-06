@@ -136,7 +136,7 @@ class VpnViewModel(
         val currentState = connectionState.value
         // FAILED keeps the protective block in place, so the button must release it rather than
         // retry the same failing profile forever.
-        if (currentState.isConnected || currentState.isBusy || currentState.status == ConnectionStatus.FAILED) {
+        if (currentState.isTunnelUp || currentState.isBusy || currentState.status == ConnectionStatus.FAILED) {
             VpnController.stopVpn(context)
         } else {
             val targetProfile = selectedProfile.value ?: smartRecommendation.value?.profile

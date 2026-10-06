@@ -66,10 +66,15 @@ fun ConnectionButton(
     modifier: Modifier = Modifier
 ) {
     val isConnected = status == ConnectionStatus.CONNECTED
+    // A tunnel that carries no traffic (or no longer does) is shown as busy, never as connected.
     val isBusy = status == ConnectionStatus.CONNECTING ||
             status == ConnectionStatus.PREPARING ||
             status == ConnectionStatus.PROXY_CONNECTING ||
             status == ConnectionStatus.VPN_INTERFACE_ESTABLISHED ||
+            status == ConnectionStatus.ENGINE_STARTED ||
+            status == ConnectionStatus.VERIFYING ||
+            status == ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED ||
+            status == ConnectionStatus.DEGRADED ||
             status == ConnectionStatus.RECONNECTING
     val isFailed = status == ConnectionStatus.FAILED
 
@@ -550,6 +555,10 @@ fun ConnectionButton(
                         ConnectionStatus.CONNECTING -> "CONNECTING"
                         ConnectionStatus.VPN_INTERFACE_ESTABLISHED -> "TUNNEL ON"
                         ConnectionStatus.PROXY_CONNECTING -> "HANDSHAKE"
+                        ConnectionStatus.ENGINE_STARTED -> "ENGINE ON"
+                        ConnectionStatus.VERIFYING -> "VERIFYING"
+                        ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED -> "NO TRAFFIC"
+                        ConnectionStatus.DEGRADED -> "DEGRADED"
                         ConnectionStatus.PREPARING -> "STARTING"
                         ConnectionStatus.RECONNECTING -> "RECONNECT"
                         ConnectionStatus.DISCONNECTING -> "DISCONNECT"
@@ -578,6 +587,10 @@ fun StatusBadge(
         ConnectionStatus.CONNECTED -> Pair(AppTheme.colors.statusConnected, "CONNECTED")
         ConnectionStatus.VPN_INTERFACE_ESTABLISHED -> Pair(AppTheme.colors.statusWarning, "VPN ESTABLISHED...")
         ConnectionStatus.PROXY_CONNECTING -> Pair(AppTheme.colors.statusWarning, "CONNECTING PROXY...")
+        ConnectionStatus.ENGINE_STARTED -> Pair(AppTheme.colors.statusWarning, "ENGINE STARTED...")
+        ConnectionStatus.VERIFYING -> Pair(AppTheme.colors.statusWarning, "VERIFYING TRAFFIC...")
+        ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED -> Pair(AppTheme.colors.statusError, "TUNNEL UP · NO TRAFFIC")
+        ConnectionStatus.DEGRADED -> Pair(AppTheme.colors.statusWarning, "DEGRADED")
         ConnectionStatus.CONNECTING, ConnectionStatus.PREPARING -> Pair(AppTheme.colors.statusWarning, "CONNECTING...")
         ConnectionStatus.RECONNECTING -> Pair(AppTheme.colors.statusWarning, "RECONNECTING...")
         ConnectionStatus.DISCONNECTING -> Pair(AppTheme.colors.textMuted, "DISCONNECTING...")

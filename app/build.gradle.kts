@@ -1,3 +1,5 @@
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.Base64
 
 // import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
@@ -20,8 +22,8 @@ android {
     minSdk = 24
     targetSdk = 36
     // Keep this monotonic so installs from the pre-public builds can upgrade.
-    versionCode = 26
-    versionName = "1.0.0"
+    versionCode = 27
+    versionName = "1.0.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -30,6 +32,12 @@ android {
     val hubPublicKey = System.getenv("HUB_PUBLIC_KEY").orEmpty().trim()
     require(hubPublicKey.all { it.isLetterOrDigit() || it in "+/=" }) { "HUB_PUBLIC_KEY must be base64" }
     buildConfigField("String", "HUB_PUBLIC_KEY", "\"$hubPublicKey\"")
+
+    // Which build made a diagnostic report. CI sets GITHUB_SHA; local builds say "unknown".
+    val gitCommit = System.getenv("GITHUB_SHA").orEmpty().take(12).filter { it.isLetterOrDigit() }.ifEmpty { "unknown" }
+    val buildTime = if (gitCommit == "unknown") "unknown" else Instant.now().truncatedTo(ChronoUnit.MINUTES).toString()
+    buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
+    buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
   }
 
   val rootDebugKeystore = file("${rootDir}/debug.keystore")

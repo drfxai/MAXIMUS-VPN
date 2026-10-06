@@ -66,6 +66,17 @@ jobs:
       - run: pip install cryptography
       - run: python3 -m unittest discover -s tools/aggregator/tests -v
 
+  bot:
+    name: Telegram bot tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tools/telegram-bot/test.mjs
+
   secrets:
     name: No committed secrets or assistant names
     runs-on: ubuntu-latest

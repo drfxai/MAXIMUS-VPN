@@ -481,7 +481,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (connectionState.isConnected) "VPN CONNECTED" else "DISCONNECTED",
+                        text = connectionState.statusLabel,
                         color = if (connectionState.isConnected) AppTheme.colors.statusConnected else AppTheme.colors.textSecondary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,

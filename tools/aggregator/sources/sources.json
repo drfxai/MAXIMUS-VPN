@@ -1,60 +1,69 @@
 {
   "version": 1,
-  "comment": "Each source is untrusted input: HTTPS only, size-limited, parsed and validated before anything is published. Add one entry per public list.",
+  "comment": "Each source is untrusted input: HTTPS only, size-limited, parsed and validated before anything is published. Add one entry per public list. Each source has a stable id; the manifest reports per source: fetch status, candidates and valid entries.",
   "sources": [
     {
       "name": "barry-far",
       "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",
       "kind": "public",
-      "note": "public GitHub collector; untrusted"
+      "note": "public GitHub collector; untrusted",
+      "id": "barry-far"
     },
     {
       "name": "epodonios",
       "url": "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt",
       "kind": "public",
-      "note": "public GitHub collector; untrusted"
+      "note": "public GitHub collector; untrusted",
+      "id": "epodonios"
     },
     {
       "name": "matinghanbari",
       "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt",
       "kind": "public",
-      "note": "public GitHub collector; untrusted"
+      "note": "public GitHub collector; untrusted",
+      "id": "matinghanbari"
     },
     {
       "name": "mahdibland",
       "url": "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt",
       "kind": "public",
-      "note": "public GitHub collector; untrusted"
+      "note": "public GitHub collector; untrusted",
+      "id": "mahdibland"
     },
     {
       "name": "10ium-vless",
       "url": "https://raw.githubusercontent.com/10ium/ScrapeAndCategorize/main/output_configs/Vless.txt",
       "kind": "public",
-      "note": "public GitHub collector; untrusted"
+      "note": "public GitHub collector; untrusted",
+      "id": "10ium-vless"
     },
     {
       "name": "mhditaheri",
       "url": "https://raw.githubusercontent.com/MhdiTaheri/V2rayCollector/main/sub/mix",
       "kind": "public",
-      "note": "public GitHub collector; untrusted"
+      "note": "public GitHub collector; untrusted",
+      "id": "mhditaheri"
     },
     {
       "name": "ebrasha",
       "url": "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/main/V2Ray-Config-By-EbraSha.txt",
       "kind": "public",
-      "note": "public GitHub collector; untrusted"
+      "note": "public GitHub collector; untrusted",
+      "id": "ebrasha"
     },
     {
       "name": "hans-thomas",
       "url": "https://raw.githubusercontent.com/hans-thomas/v2ray-subscription/master/servers.txt",
       "kind": "public",
-      "note": "public GitHub collector; untrusted"
+      "note": "public GitHub collector; untrusted",
+      "id": "hans-thomas"
     },
     {
       "name": "mahdi0024",
       "url": "https://raw.githubusercontent.com/Mahdi0024/ProxyCollector/master/sub/proxies.txt",
       "kind": "public",
-      "note": "public GitHub collector; untrusted"
+      "note": "public GitHub collector; untrusted",
+      "id": "mahdi0024"
     }
   ]
 }

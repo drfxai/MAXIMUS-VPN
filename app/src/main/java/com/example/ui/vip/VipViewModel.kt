@@ -113,7 +113,7 @@ class VipViewModel(app: Application) : AndroidViewModel(app) {
     /** Sends a real request through every VIP server, one at a time; each row updates as it finishes. */
     fun testAll() {
         if (_state.value.testing) return
-        if (VpnController.connectionState.value.let { it.isConnected || it.isBusy }) {
+        if (VpnController.connectionState.value.let { it.isTunnelUp || it.isBusy }) {
             _state.update { it.copy(message = "Disconnect first to test servers on your own network.") }
             return
         }

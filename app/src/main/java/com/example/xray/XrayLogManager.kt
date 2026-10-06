@@ -80,6 +80,19 @@ object XrayLogManager {
         }
 
         _logsFlow.value = ArrayList(logQueue)
+
+        // Errors also become structured events, so reports can group and count them.
+        if (level == LogLevel.ERROR || level == LogLevel.FATAL) {
+            runCatching {
+                com.example.vpn.diagnostics.events.EventLog.event(
+                    name = "log.error.${tag.lowercase()}",
+                    severity = if (level == LogLevel.FATAL) com.example.vpn.diagnostics.events.Severity.FATAL else com.example.vpn.diagnostics.events.Severity.ERROR,
+                    attributes = mapOf("message" to sanitizedMsg.take(300)),
+                    stage = com.example.vpn.diagnostics.FailureStage.fromText(message).takeIf { it != com.example.vpn.diagnostics.FailureStage.UNKNOWN },
+                    error = throwable
+                )
+            }
+        }
     }
 
     private fun addEntry(entry: String) {

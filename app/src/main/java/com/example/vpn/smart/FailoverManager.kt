@@ -10,8 +10,6 @@ import com.example.vpn.godmode.MaximusMeshManager
 import com.example.vpn.godmode.PsiphonConduitBridge
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,7 +50,7 @@ class FailoverManager(
         DEGRADED_OFFLINE(5, "Nothing is carrying traffic", "BLOCKED")
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = com.example.core.managerScope("FAILOVER")
     private var monitorJob: Job? = null
     private var recoveryProbeJob: Job? = null
     private var failoverJob: Job? = null

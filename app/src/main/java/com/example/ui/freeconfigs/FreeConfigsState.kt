@@ -19,8 +19,13 @@ data class FreeNode(
     /** Successful tests out of all tests run on this network since the screen opened. */
     val passes: Int = 0,
     val runs: Int = 0,
-    /** Which of YouTube, Telegram and X ("YT", "TG", "X") the server opened when the list was built. */
-    val sites: Set<String> = emptySet()
+    /**
+     * Which of YouTube, Telegram and X ("YT", "TG", "X") the server's exit opened when the list was built.
+     * The builder runs outside Iran: this is global reachability, not proof the server works here.
+     */
+    val sites: Set<String> = emptySet(),
+    /** What this phone's own measurements say about the server (see FreeConfigLifecycle). */
+    val lifecycle: com.example.vpn.hub.FreeConfigLifecycle = com.example.vpn.hub.FreeConfigLifecycle.GLOBAL_VERIFIED
 ) {
     val online: Boolean get() = health == NodeHealth.FAST || health == NodeHealth.SLOW
     val protocol: String get() = profile.protocolType.displayName
@@ -65,6 +70,9 @@ data class FreeNode(
     }
 }
 
+/** What one refresh did to the list. */
+data class RefreshSummary(val candidates: Int, val added: Int, val kept: Int, val retained: Int, val removed: Int, val at: Long)
+
 data class FreeConfigsUiState(
     /** False when this build has no key to check the list, so the list is never fetched. */
     val available: Boolean = true,
@@ -90,8 +98,23 @@ data class FreeConfigsUiState(
     /** Show only servers that opened this site ("YT", "TG", "X"), or null for all. */
     val site: String? = null,
     val showHidden: Boolean = false,
-    val message: String? = null
+    val message: String? = null,
+    /** The running refresh's step, or null. The saved list stays usable while it runs. */
+    val refreshProgress: com.example.vpn.subscription.FreeRefreshProgress? = null,
+    /** What the last successful refresh of this session changed. */
+    val lastRefresh: RefreshSummary? = null,
+    /** When the last refresh failed (0 if it did not) and why; the saved list was kept. */
+    val refreshFailedAt: Long = 0L,
+    val refreshFailure: String? = null
 ) {
+    /** Servers per lifecycle (what this phone's measurements say), for the summary card. */
+    val verifiedHere: Int get() = nodes.count { it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.IRAN_VERIFIED }
+    val onTrial: Int get() = nodes.count { it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.IRAN_PROBATION }
+    val failingHere: Int get() = nodes.count {
+        it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.DEGRADED || it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.DEAD
+    }
+    val checkedOutside: Int get() = total - verifiedHere - onTrial - failingHere
+
     val total: Int get() = nodes.size
     val online: List<FreeNode> get() = nodes.filter { it.online }
     val fast: Int get() = nodes.count { it.health == NodeHealth.FAST }

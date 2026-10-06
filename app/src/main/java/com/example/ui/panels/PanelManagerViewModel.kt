@@ -661,7 +661,7 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
             check(sample != null) { "This BPB panel has no TLS configs, which are the ones FIX BPB changes." }
             val choice = withContext(Dispatchers.IO) { com.example.panels.BpbFix.choose(sample) }
             appendLog("[BPB] FIX BPB test result: ${choice::class.simpleName}")
-            val reconnect = if (VpnController.connectionState.value.isConnected) " Reconnect the VPN to use the new settings." else ""
+            val reconnect = if (VpnController.connectionState.value.isTunnelUp) " Reconnect the VPN to use the new settings." else ""
             val status = when (choice) {
                 is com.example.panels.BpbFix.Choice.Verified -> {
                     val changed = applyBpbFix(host, choice.mask)

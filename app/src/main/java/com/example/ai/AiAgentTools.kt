@@ -42,7 +42,7 @@ object AiAgentTools {
             return ToolExecutionResult(name, false, "Tool unavailable: AI access is read-only.")
         }
         return withContext(Dispatchers.IO) {
-            val isRunning = RayVpnService.vpnState.value.isConnected
+            val isRunning = RayVpnService.vpnState.value.isTunnelUp
             val filter = args["filter_keyword"] as? String
             val maxLines = (args["max_lines"] as? Number)?.toInt()?.coerceIn(5, 100) ?: 30
             val allLogs = XrayLogManager.logsFlow.value

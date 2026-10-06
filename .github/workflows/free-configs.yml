@@ -3,6 +3,7 @@ name: Free config list
 # Builds the app's free configuration list from the public sources in tools/aggregator/sources,
 # drops unsafe entries and servers that do not answer, signs the manifest with HUB_SIGNING_KEY and
 # publishes the result on the free-configs branch, where the app and its CDN mirrors read it.
+# The runner is outside Iran: its results are GLOBAL evidence only (GLOBAL_VERIFIED), never Iran proof.
 on:
   schedule:
     - cron: '17 */6 * * *'
@@ -58,10 +59,30 @@ jobs:
           else
             echo "::warning::Country data not available; names carry no country this run."
           fi
+      - name: Earlier results
+        # history.json from the last published list: how often each server passed before. Optional.
+        run: |
+          h=$(mktemp)
+          if curl -fsSL --max-time 60 -o "$h" "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/free-configs/history.json"; then
+            echo "AGGREGATOR_HISTORY=$h" >> "$GITHUB_ENV"
+          else
+            echo "No earlier history; every server counts as first seen."
+          fi
       - name: Build and sign the list
         env:
           HUB_SIGNING_KEY: ${{ secrets.HUB_SIGNING_KEY }}
         run: python3 tools/aggregator/scripts/aggregate.py
+      - name: Keep the run's evidence
+        # Rejected entries (reason, host and port only) and the per-config scores, for inspection.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: free-config-evidence
+          path: |
+            tools/aggregator/output/quarantine.json
+            tools/aggregator/output/configs.json
+            tools/aggregator/output/manifest.json
+          if-no-files-found: ignore
       - name: Publish to the free-configs branch
         env:
           SIGNED: ${{ secrets.HUB_SIGNING_KEY != '' }}
@@ -81,7 +102,7 @@ jobs:
             exit 0
           fi
           publish=$(mktemp -d)
-          cp "$out/free.txt" "$out/free-base64.txt" "$out/manifest.json" "$out/manifest.sig" "$publish/"
+          cp "$out/free.txt" "$out/free-base64.txt" "$out/configs.json" "$out/history.json" "$out/manifest.json" "$out/manifest.sig" "$publish/"
           cd "$publish"
           git init -q -b free-configs
           git config user.name "github-actions[bot]"

@@ -37,6 +37,65 @@ class RayApplication : Application() {
     lateinit var settingsRepository: SettingsRepository
         private set
 
+    /** Up to three free configs that carried verified traffic here; a refresh never deletes them. */
+    val lastKnownGood: com.example.vpn.hub.LastKnownGoodPool by lazy {
+        val prefs = getSharedPreferences("free_last_known_good", MODE_PRIVATE)
+        com.example.vpn.hub.LastKnownGoodPool(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /** Free configs a refresh dropped while they were in use; removed after disconnect. */
+    val retainedFreeConfigs: com.example.vpn.hub.RetainedFreeConfigs by lazy {
+        val prefs = getSharedPreferences("free_retained", MODE_PRIVATE)
+        com.example.vpn.hub.RetainedFreeConfigs(
+            load = { prefs.getStringSet("ids", emptySet()).orEmpty().toSet() },
+            save = { prefs.edit().putStringSet("ids", it).apply() }
+        )
+    }
+
+    /** This phone's measurements of free configs, kept apart from the list builder's global checks. */
+    val freeConfigEvidence: com.example.vpn.hub.FreeConfigEvidenceStore by lazy {
+        val prefs = getSharedPreferences("free_config_evidence", MODE_PRIVATE)
+        com.example.vpn.hub.FreeConfigEvidenceStore(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /**
+     * Structured diagnostics: the persisted event log, crash/ANR/stall/memory evidence, and one event
+     * per connection state change, carrying the session and attempt ids. Disconnect cancels the
+     * session's background tests.
+     */
+    private fun startDiagnostics() {
+        val events = com.example.vpn.diagnostics.events.EventLog
+        val tests = com.example.vpn.diagnostics.events.Tests.registry
+        val scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+        events.context = {
+            val s = com.example.vpn.RayVpnService.vpnState.value
+            com.example.vpn.diagnostics.events.EventLog.Context(
+                sessionId = s.sessionId, attemptId = s.attemptId, engine = s.activeEngineName,
+                network = com.example.vpn.smart.NetworkCapabilityDetector.last?.key()
+            )
+        }
+        events.init(java.io.File(filesDir, "diagnostics/events"))
+        com.example.vpn.diagnostics.events.RuntimeHealth.install(this) { work -> scope.launch(Dispatchers.IO) { work() } }
+        scope.launch {
+            var previous = com.example.vpn.RayVpnService.vpnState.value
+            com.example.vpn.RayVpnService.vpnState.collect { state ->
+                if (state.sessionId != previous.sessionId) {
+                    if (state.sessionId == null) tests.endSession() else tests.beginSession(state.sessionId)
+                }
+                com.example.vpn.diagnostics.events.ConnectionEvents.between(previous, state, System.currentTimeMillis()) {
+                    com.example.vpn.diagnostics.events.DiagEvent.profileRef(it)
+                }.forEach { events.record(it) }
+                previous = state
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -51,10 +110,13 @@ class RayApplication : Application() {
                     throwable = throwable
                 )
             } catch (_: Exception) {}
+            // The crash event reaches disk before the process dies.
+            try { com.example.vpn.diagnostics.events.EventLog.flush(1000) } catch (_: Exception) {}
             defaultHandler?.uncaughtException(thread, throwable)
         }
 
         XrayLogManager.i("APP", "Maximus Application starting. Initializing database and subsystems...")
+        startDiagnostics()
 
         // Real-delay probes (server ping, FIX BPB) dial the server themselves; resolve its name without
         // trusting a filtering network's DNS answer. While the VPN runs the probe does not run at all.
@@ -62,7 +124,7 @@ class RayApplication : Application() {
             val host = profile.address.trim().removePrefix("[").removeSuffix("]")
             if (profile.profileType == com.example.data.model.ProfileType.XRAY_JSON ||
                 com.example.vpn.tunnel.ProxyDnsTransport.isLiteralAddress(host) ||
-                com.example.vpn.VpnController.connectionState.value.isConnected
+                com.example.vpn.VpnController.connectionState.value.isTunnelUp
             ) profile
             else runCatching {
                 val resolved = com.example.vpn.EndpointResolver.resolve(
@@ -105,6 +167,9 @@ class RayApplication : Application() {
 
         // Clean up legacy non-functional seed nodes and initialize profile state
         CoroutineScope(Dispatchers.IO).launch {
+            // Loaded here, off the main thread, so screens read it from memory.
+            runCatching { freeConfigEvidence.all() }
+            runCatching { lastKnownGood.entries() }
             try {
                 subscriptionRepository.migrateSensitiveUrls()
                 val prefs = getSharedPreferences("official_subscriptions", MODE_PRIVATE)

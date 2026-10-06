@@ -67,6 +67,9 @@ class RayVpnService : VpnService() {
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
         /** How long a clean-address scan may take before the connect goes on without one. */
         private const val CLEAN_IP_SCAN_LIMIT_MS = 12_000L
+        /** Requests through a new tunnel before it counts as unverified, and the pause between them. */
+        private const val VERIFY_ATTEMPTS = 3
+        private const val VERIFY_RETRY_MS = 1_500L
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
         const val NOTIFICATION_ID = 1001
@@ -77,6 +80,16 @@ class RayVpnService : VpnService() {
         fun updateState(state: ConnectionState) {
             _vpnState.value = state
         }
+
+        /** Changes the state atomically, so concurrent watchers never overwrite each other's fields. */
+        fun mutateState(change: (ConnectionState) -> ConnectionState) {
+            while (true) {
+                val current = _vpnState.value
+                if (_vpnState.compareAndSet(current, change(current))) return
+            }
+        }
+
+        private fun newId(): String = java.util.UUID.randomUUID().toString().take(12)
 
         private val _lockdown = MutableStateFlow(com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.UNKNOWN)
         private val _environment = MutableStateFlow<com.example.vpn.smart.NetworkEnvironment.Report?>(null)
@@ -139,7 +152,7 @@ class RayVpnService : VpnService() {
             settingsRepository.settingsFlow.collect { settings ->
                 val prevMode = lastObservedMode
                 lastObservedMode = settings.operationalMode
-                if (prevMode != null && prevMode != settings.operationalMode && _vpnState.value.isConnected) {
+                if (prevMode != null && prevMode != settings.operationalMode && _vpnState.value.isTunnelUp) {
                     handleLiveModeSwitch(prevMode, settings.operationalMode)
                 }
             }
@@ -393,6 +406,18 @@ class RayVpnService : VpnService() {
         var requestedProfile = userProfile
         // Engines receive [profile]; a hostname endpoint is replaced by its resolved IP below.
         var profile = requestedProfile
+        // Correlation: a session runs from the user's Connect to Disconnect; every attempt (failover,
+        // reconnect, mode switch) gets its own id, so a late result of an old attempt is ignored.
+        val previous = _vpnState.value
+        val sessionId = if (startedByUser || previous.sessionId == null || previous.status == ConnectionStatus.DISCONNECTED) newId()
+            else previous.sessionId
+        val attemptId = newId()
+        val selectedId = if (startedByUser || previous.selectedProfileId == null) userProfile.id else previous.selectedProfileId
+        fun fresh(status: ConnectionStatus, error: String? = null, stage: com.example.vpn.diagnostics.FailureStage? = null) = ConnectionState(
+            status = status, activeProfile = requestedProfile, errorMessage = error, failureStage = stage,
+            sessionId = sessionId, attemptId = attemptId, selectedProfileId = selectedId,
+            attemptedProfileId = requestedProfile.id, networkGeneration = previous.networkGeneration
+        )
         try {
             supervisor.requestProtection()
             ensureBlockingInterface()
@@ -404,10 +429,7 @@ class RayVpnService : VpnService() {
             if (prepareIntent != null) {
                 val err = "VPN permission is not granted by user (VpnService.prepare returned intent)."
                 XrayLogManager.e("VPN", "[DIAGNOSTICS] 1. VpnService.prepare() check: Permission DENIED.")
-                updateState(_vpnState.value.copy(
-                    status = ConnectionStatus.FAILED,
-                    errorMessage = "VPN permission not granted by Android system."
-                ))
+                updateState(fresh(ConnectionStatus.FAILED, "VPN permission not granted by Android system."))
                 if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
                 if (!protectionRequested) stopSelf()
                 return@withContext
@@ -421,10 +443,7 @@ class RayVpnService : VpnService() {
             val settings = policy.apply(settingsRepository.getSettings())
             val raceFirst = smart || policy.alwaysSmartConnect
 
-            updateState(ConnectionState(
-                status = ConnectionStatus.PREPARING,
-                activeProfile = profile
-            ))
+            updateState(fresh(ConnectionStatus.PREPARING))
 
             // 2. Diagnostic step 2: Start foreground service immediately
             if (!showForegroundNotification("Preparing VPN interface...")) {
@@ -459,11 +478,12 @@ class RayVpnService : VpnService() {
                     failure, startedByUser, settingsRepository.getSettings().operationalMode)
                 if (release) supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.INVALID_PROFILE_BY_USER)
                 disconnectResources()
-                updateState(ConnectionState(
-                    status = ConnectionStatus.FAILED,
-                    activeProfile = requestedProfile,
-                    errorMessage = if (release) "Cannot use this profile: ${e.localizedMessage}"
-                        else "Traffic blocked: ${e.localizedMessage}. Disconnect to use the network without the VPN."
+                updateState(fresh(
+                    ConnectionStatus.FAILED,
+                    if (release) "Cannot use this profile: ${e.localizedMessage}"
+                        else "Traffic blocked: ${e.localizedMessage}. Disconnect to use the network without the VPN.",
+                    if (failure == com.example.vpn.safety.FailClosedPolicy.Failure.UNRESOLVABLE_SERVER)
+                        com.example.vpn.diagnostics.FailureStage.DNS_RESOLUTION_FAILED else com.example.vpn.diagnostics.FailureStage.of(e)
                 ))
                 if (release) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
@@ -485,8 +505,15 @@ class RayVpnService : VpnService() {
                 .onSuccess { report ->
                     _environment.value = report
                     XrayLogManager.i("SMART", "Network: ${report.describe()}")
+                    // What was measured and what the app concludes from it are separate events.
+                    val signals = report.signals.joinToString(",") { it.name }
+                    com.example.vpn.diagnostics.events.EventLog.event("network.signals", attributes = mapOf("signals" to signals.ifEmpty { "none" }))
+                    com.example.vpn.diagnostics.events.EventLog.event("network.assessment", attributes = mapOf(
+                        "level" to report.level.name, "based.on" to signals.ifEmpty { "no failure signals" }
+                    ), kind = com.example.vpn.diagnostics.events.DiagEvent.Kind.ASSESSMENT)
                     if (policy.mode == com.example.data.model.OperationalMode.DAILY && com.example.vpn.smart.NetworkEnvironment.suggestsGodMode(report)) {
-                        XrayLogManager.w("SMART", "Filtering on this network is heavy; GOD MODE proxies everything and tests every server.")
+                        XrayLogManager.w("SMART", "Assessment: filtering looks ${report.level.name.lowercase()} " +
+                            "(based on: ${report.signals.joinToString { it.name.lowercase().replace('_', ' ') }}); GOD MODE proxies everything and tests every server.")
                     }
                 }
             var raced = false
@@ -499,7 +526,7 @@ class RayVpnService : VpnService() {
                 raced = true
                 win.variantKey?.let { networkMemory.variants(network)[win.owner.id] = it }
                 networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(win.profile), win.latencyMs)
-                updateState(_vpnState.value.copy(activeProfile = win.owner))
+                mutateState { it.copy(activeProfile = win.owner, attemptedProfileId = win.owner.id) }
             }
             val finder = com.example.vpn.stealth.StealthPathFinder(
                 memory = networkMemory.variants(network),
@@ -549,6 +576,7 @@ class RayVpnService : VpnService() {
                     com.example.vpn.engine.RuntimeCapabilities.requireSupported(choice.profile)
                     requestedProfile = choice.owner
                     activeProfile = choice.owner
+                    mutateState { it.copy(activeProfile = choice.owner, attemptedProfileId = choice.owner.id) }
                 }
                 profile = choice.profile
                 choice.latencyMs?.let {
@@ -623,7 +651,8 @@ class RayVpnService : VpnService() {
                 XrayLogManager.e("VPN", err)
                 updateState(_vpnState.value.copy(
                     status = ConnectionStatus.FAILED,
-                    errorMessage = "VPN interface establishment failed (permission revoked or another VPN active)."
+                    errorMessage = "VPN interface establishment failed (permission revoked or another VPN active).",
+                    failureStage = com.example.vpn.diagnostics.FailureStage.TUN_ESTABLISH_FAILED
                 ))
                 disconnectResources()
                 if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
@@ -702,9 +731,10 @@ class RayVpnService : VpnService() {
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 7. Proxy engine start result: $startResult.")
             if (startResult is com.example.core.AppResult.Error) {
                 engineBreaker.recordFailure(engineId)
-                throw startResult.exception
+                throw EngineStartException(startResult.exception)
             }
             engineBreaker.recordSuccess(engineId)
+            mutateState { if (it.attemptId == attemptId) it.copy(status = ConnectionStatus.ENGINE_STARTED) else it }
 
             if (!coroutineContext.isActive) {
                 disconnectResources()
@@ -768,18 +798,26 @@ class RayVpnService : VpnService() {
 
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 9. Upstream socket protection probe passed.")
 
-            // 10. Update Connection State to CONNECTED
+            // 10. Only real traffic through the tunnel makes the connection CONNECTED. Until a request
+            // goes through, the state says the tunnel is up but unverified.
             val startTime = System.currentTimeMillis()
-            updateState(_vpnState.value.copy(
-                status = ConnectionStatus.CONNECTED,
-                activeProfile = requestedProfile,
-                lastConnectedTime = startTime,
-                vpnIp = "172.19.0.1",
-                errorMessage = null
-            ))
-
-            showForegroundNotification("Connected to ${profile.name}")
-            XrayLogManager.i("VPN", "[DIAGNOSTICS] 10. Connection lifecycle complete. Final state: CONNECTED.")
+            mutateState { if (it.attemptId == attemptId) it.copy(status = ConnectionStatus.VERIFYING, vpnIp = "172.19.0.1", errorMessage = null) else it }
+            showForegroundNotification("Verifying traffic through ${profile.name}...")
+            val check = verifyTraffic()
+            mutateState {
+                com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, check.first != null, check.first, System.currentTimeMillis(), check.second)
+            }
+            if (_vpnState.value.isConnected) {
+                showForegroundNotification("Connected to ${profile.name}")
+                XrayLogManager.i("VPN", "[DIAGNOSTICS] 10. Traffic verified through the tunnel (${check.first} ms). Final state: CONNECTED.")
+                onTrafficVerified(requestedProfile, check.first)
+            } else {
+                val stage = check.second ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN
+                showForegroundNotification("Tunnel up, no traffic yet (${stage.name})")
+                XrayLogManager.w("VPN", "[DIAGNOSTICS] 10. Tunnel started but no request went through it (${stage.name}). " +
+                    "State: TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED; checks continue and failover may switch servers.")
+                recordFreeOutcome(requestedProfile, success = false, rttMs = null, stage = stage)
+            }
 
             // Refresh due subscriptions through the new tunnel: their addresses may be blocked outside it.
             serviceScope.launch {
@@ -830,7 +868,9 @@ class RayVpnService : VpnService() {
             XrayLogManager.e("VPN", "Fatal error establishing VPN connection: ${e.message}", e)
             updateState(_vpnState.value.copy(
                 status = ConnectionStatus.FAILED,
-                errorMessage = e.localizedMessage ?: "Unknown connection failure"
+                errorMessage = e.localizedMessage ?: "Unknown connection failure",
+                failureStage = if (e is EngineStartException) com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED
+                    else com.example.vpn.diagnostics.FailureStage.of(e)
             ))
             disconnectResources()
             if (protectionRequested) showForegroundNotification("Traffic blocked: connection failed")
@@ -980,10 +1020,12 @@ class RayVpnService : VpnService() {
         var lastTx = 0L
         var lastRx = 0L
         durationJob = serviceScope.launch {
-            while (isActive && _vpnState.value.isConnected) {
+            while (isActive && _vpnState.value.isTunnelUp) {
                 delay(1000)
                 val durationSec = (System.currentTimeMillis() - startTime) / 1000
                 if (!activeEngine.isRunning()) {
+                    com.example.vpn.diagnostics.events.RuntimeHealth.engineTerminated(
+                        _vpnState.value.activeEngineName ?: "engine", exitCode = null, expected = false)
                     connectionMutex.withLock {
                         updateState(_vpnState.value.copy(status = ConnectionStatus.FAILED,
                             errorMessage = "Proxy engine stopped. Traffic remains blocked; reconnect to resume."))
@@ -1016,24 +1058,108 @@ class RayVpnService : VpnService() {
         }
 
         pingJob?.cancel()
+        val attemptId = _vpnState.value.attemptId
         pingJob = serviceScope.launch {
-            while (isActive && _vpnState.value.isConnected) {
+            while (isActive && _vpnState.value.isTunnelUp && _vpnState.value.attemptId == attemptId) {
+                val wasConnected = _vpnState.value.isConnected
                 try {
                     val sample = com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService)
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                    if (_vpnState.value.isConnected) updateState(_vpnState.value.copy(
-                        pingMs = sample.latencyMs, exitCountryCode = sample.country,
-                        pingCheckedAt = System.currentTimeMillis()))
+                    if (_vpnState.value.attemptId == attemptId) passEvent("tunnel.recheck", sample.latencyMs)
+                    mutateState {
+                        com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, true, sample.latencyMs, System.currentTimeMillis())
+                            .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = sample.country) else s }
+                    }
+                    if (!wasConnected && _vpnState.value.isConnected && _vpnState.value.attemptId == attemptId) {
+                        XrayLogManager.i("VPN", "Traffic now goes through the tunnel (${sample.latencyMs} ms): CONNECTED.")
+                        showForegroundNotification("Connected to ${profile.name}")
+                        _vpnState.value.activeProfile?.let { onTrafficVerified(it, sample.latencyMs) }
+                    }
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
-                } catch (_: Exception) {
-                    if (_vpnState.value.isConnected) updateState(_vpnState.value.copy(
-                        pingMs = null, exitCountryCode = null, pingCheckedAt = System.currentTimeMillis()))
+                } catch (e: Exception) {
+                    val stage = com.example.vpn.diagnostics.FailureStage.of(e)
+                    mutateState {
+                        com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, false, null, System.currentTimeMillis(), stage)
+                            .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = null) else s }
+                    }
+                    if (wasConnected && _vpnState.value.status == ConnectionStatus.DEGRADED) {
+                        XrayLogManager.w("VPN", "Checks through the tunnel failed ${_vpnState.value.probeFailures} times in a row (${stage.name}): DEGRADED.")
+                        showForegroundNotification("Connection degraded (${stage.name})")
+                    }
                 }
-                delay(10000)
+                // An unverified tunnel is checked again sooner than a working one.
+                delay(if (_vpnState.value.isConnected) 10_000 else 4_000)
             }
         }
     }
+
+    /**
+     * Up to three real requests through the tunnel; returns (latency, null) on the first success or
+     * (null, the last failure's stage). Bound to the VPN network, so it never falls back to the ISP.
+     */
+    private suspend fun verifyTraffic(): Pair<Long?, com.example.vpn.diagnostics.FailureStage?> {
+        var stage: com.example.vpn.diagnostics.FailureStage? = null
+        repeat(VERIFY_ATTEMPTS) { i ->
+            try {
+                val ms = com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService)
+                passEvent("tunnel.verify", ms)
+                return ms to null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                stage = com.example.vpn.diagnostics.FailureStage.of(e)
+                XrayLogManager.w("VPN", "Traffic check ${i + 1}/$VERIFY_ATTEMPTS through the tunnel failed: ${stage?.name} (${e.javaClass.simpleName})")
+                if (i < VERIFY_ATTEMPTS - 1) delay(VERIFY_RETRY_MS)
+            }
+        }
+        return null to stage
+    }
+
+    /** A request that went through the tunnel, recorded so the PASS can be checked later. */
+    private fun passEvent(testType: String, elapsedMs: Long) {
+        val s = _vpnState.value
+        com.example.vpn.diagnostics.events.EventLog.pass(
+            testType = testType,
+            destination = java.net.URI(com.example.xray.RealDelayProbe.PROBE_URL).host,
+            profileRef = com.example.vpn.diagnostics.events.DiagEvent.profileRef(s.activeProfile?.id ?: s.attemptedProfileId),
+            elapsedMs = elapsedMs,
+            interfaceName = "tun (VPN network)"
+        )
+    }
+
+    /** Traffic went through [profile]: its evidence and, for a free config, the last-known-good pool. */
+    private fun onTrafficVerified(profile: VlessProfile, rttMs: Long?) {
+        recordFreeOutcome(profile, success = true, rttMs = rttMs, stage = null)
+    }
+
+    private fun recordFreeOutcome(profile: VlessProfile, success: Boolean, rttMs: Long?, stage: com.example.vpn.diagnostics.FailureStage?) {
+        if (!isFreeConfig(profile)) return
+        serviceScope.launch(Dispatchers.IO) {
+            runCatching {
+                val app = com.example.RayApplication.instance
+                val network = com.example.vpn.smart.NetworkCapabilityDetector.last?.key()
+                app.freeConfigEvidence.record(profile.effectiveFingerprint, com.example.vpn.hub.ConnectivityMeasurement(
+                    timestamp = System.currentTimeMillis(),
+                    kind = com.example.vpn.hub.ConnectivityMeasurement.Kind.CONNECTION,
+                    success = success, networkKey = network, rttMs = rttMs, failureStage = stage
+                ))
+                if (success) {
+                    app.lastKnownGood.recordVerified(profile, rttMs, System.currentTimeMillis())
+                    app.lastKnownGood.dropDead({ fp ->
+                        app.freeConfigEvidence.lifecycle(fp) == com.example.vpn.hub.FreeConfigLifecycle.DEAD
+                    }, profile.effectiveFingerprint)
+                }
+            }.onFailure { XrayLogManager.w("FREE", "Could not record the free config result: ${it.message}") }
+        }
+    }
+
+    private fun isFreeConfig(profile: VlessProfile): Boolean =
+        com.example.vpn.hub.FreeConfigList.isList(profile.sourceSubscription.orEmpty()) ||
+            com.example.vpn.hub.FreeConfigList.isList(profile.subscriptionUrl.orEmpty())
+
+    /** The engine reported a failed start: the stage is ENGINE_START_FAILED whatever the message says. */
+    private class EngineStartException(cause: Throwable) : RuntimeException(cause.message, cause)
 
     private suspend fun disconnect() = connectionMutex.withLock {
         disconnectLocked()
@@ -1053,8 +1179,13 @@ class RayVpnService : VpnService() {
             uploadBytes = 0,
             downloadBytes = 0,
             uploadSpeedBps = 0,
-            downloadSpeedBps = 0
+            downloadSpeedBps = 0,
+            networkGeneration = _vpnState.value.networkGeneration
         ))
+        // Free configs kept only because this session used them can go now.
+        serviceScope.launch {
+            runCatching { com.example.RayApplication.instance.subscriptionManager.releaseRetained() }
+        }
 
         if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
         if (!protectionRequested) stopSelf()
@@ -1107,6 +1238,8 @@ class RayVpnService : VpnService() {
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 XrayLogManager.appendLog("Underlying network available.", "NETWORK")
+                // Results measured on the previous network no longer hold.
+                mutateState { it.copy(networkGeneration = it.networkGeneration + 1) }
                 if (_vpnState.value.status == ConnectionStatus.RECONNECTING) {
                     activeProfile?.let { prof ->
                         serviceScope.launch {
@@ -1119,8 +1252,9 @@ class RayVpnService : VpnService() {
 
             override fun onLost(network: Network) {
                 XrayLogManager.appendLog("Underlying network connection lost.", "NETWORK")
+                mutateState { it.copy(networkGeneration = it.networkGeneration + 1) }
                 val settings = settingsRepository.getSettings()
-                if (_vpnState.value.isConnected && settings.autoReconnect) {
+                if (_vpnState.value.isTunnelUp && _vpnState.value.status != ConnectionStatus.RECONNECTING && settings.autoReconnect) {
                     XrayLogManager.appendLog("Auto-reconnect is enabled. Waiting for network recovery...", "VPN")
                     updateState(_vpnState.value.copy(status = ConnectionStatus.RECONNECTING))
                 }
@@ -1233,6 +1367,16 @@ class RayVpnService : VpnService() {
         try {
             networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
         } catch (_: Exception) {}
+        // The service is gone, so is any tunnel: a state left "up" would be stale (screens, tile and
+        // the session's background tests would keep acting on a connection that no longer exists).
+        val last = _vpnState.value
+        if (last.isTunnelUp || last.isBusy) {
+            updateState(ConnectionState(
+                status = ConnectionStatus.DISCONNECTED,
+                errorMessage = "The VPN service was stopped by the system.",
+                networkGeneration = last.networkGeneration
+            ))
+        }
         super.onDestroy()
     }
 }

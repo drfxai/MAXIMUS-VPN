@@ -2,7 +2,8 @@
 
 A TCP connection proves almost nothing: the large CDNs accept it for any config, and dead panels keep
 their port open. Here each candidate becomes an outbound of a local Xray core and fetches a small page
-through it, twice. Only servers that answer both times are kept, fastest first.
+through it, in three rounds. Only servers that answer at least twice are kept; every round's latency
+is returned so the pipeline can score steadiness and failure rate.
 
 Each server that passes then opens YouTube, Telegram and X through the same core ([SITES]). The result
 says which of the three it reached, so the list can hold only servers that open at least one of them.
@@ -200,7 +201,22 @@ def _answers(port: int, url: str, timeout: int) -> bool:
         return False
 
 
-Result = tuple  # (seconds, frozenset of SITES tags)
+ROUNDS = 3
+
+
+class Result(tuple):
+    """(seconds, sites reached) like before, plus every round's latency: [samples] has one entry per
+    successful round and [attempts] counts every round tried, so the failure rate is measured."""
+
+    def __new__(cls, seconds: float, sites: frozenset, samples: tuple = (), attempts: int = 0):
+        self = super().__new__(cls, (seconds, sites))
+        self.samples = tuple(samples)
+        self.attempts = attempts or len(samples)
+        return self
+
+    @property
+    def successes(self) -> int:
+        return len(self.samples)
 
 
 def _run_batch(xray: str, outbounds: list[dict], url: str, timeout: int, first_port: int,
@@ -220,18 +236,24 @@ def _run_batch(xray: str, outbounds: list[dict], url: str, timeout: int, first_p
                     raise RuntimeError("Xray did not start")
                 time.sleep(0.1)
             with ThreadPoolExecutor(max_workers=len(outbounds)) as pool:
-                first = list(pool.map(lambda i: _fetch(first_port + i, url, timeout), range(len(outbounds))))
-                # A second request on the servers that passed: one lucky answer is not "working".
-                again = list(pool.map(lambda i: _fetch(first_port + i, url, timeout) if first[i] is not None else None,
-                                      range(len(outbounds))))
-                speeds = [(a + b) / 2 if a is not None and b is not None else None for a, b in zip(first, again)]
-                jobs = [(i, tag, site) for i, s in enumerate(speeds) if s is not None for tag, site in (sites or {}).items()]
+                rounds = [list(pool.map(lambda i: _fetch(first_port + i, url, timeout), range(len(outbounds))))]
+                # More rounds on the servers that answered once: one lucky answer is not "working",
+                # and the spread of the answers shows how steady a server is.
+                for _ in range(ROUNDS - 1):
+                    rounds.append(list(pool.map(
+                        lambda i: _fetch(first_port + i, url, timeout) if rounds[0][i] is not None else None,
+                        range(len(outbounds)))))
+                attempts = [ROUNDS if rounds[0][i] is not None else 1 for i in range(len(outbounds))]
+                samples = [[r[i] for r in rounds if r[i] is not None] for i in range(len(outbounds))]
+                passing = [len(s) >= 2 for s in samples]
+                jobs = [(i, tag, site) for i, ok in enumerate(passing) if ok for tag, site in (sites or {}).items()]
                 reached = list(pool.map(lambda job: _answers(first_port + job[0], job[2], timeout), jobs))
             found: dict[int, set[str]] = {}
             for (i, tag, _), ok in zip(jobs, reached):
                 if ok:
                     found.setdefault(i, set()).add(tag)
-            return [None if s is None else (s, frozenset(found.get(i, ()))) for i, s in enumerate(speeds)]
+            return [Result(sum(samples[i]) / len(samples[i]), frozenset(found.get(i, ())), tuple(samples[i]), attempts[i])
+                    if passing[i] else None for i in range(len(outbounds))]
         finally:
             core.terminate()
             try:
@@ -255,8 +277,8 @@ def _measure(xray: str, outbounds: list[dict], url: str, timeout: int, first_por
 
 def probe(links: list[str], xray: str, url: str = PROBE_URL, timeout: int = REQUEST_TIMEOUT_SEC,
           budget_sec: float = 900, first_port: int = BASE_PORT, sites: dict[str, str] | None = None) -> dict[str, Result]:
-    """For each link that carried traffic both times: (seconds to fetch [url], the [sites] tags it reached).
-    Others are absent."""
+    """For each link that carried traffic in at least 2 of [ROUNDS] rounds: a [Result] with the mean seconds
+    to fetch [url], the [sites] tags it reached and every round's latency. Others are absent."""
     sites = SITES if sites is None else sites
     runnable = [(link, ob) for link in links if (ob := outbound(link)) is not None]
     result: dict[str, Result] = {}
@@ -273,6 +295,6 @@ def probe(links: list[str], xray: str, url: str = PROBE_URL, timeout: int = REQU
 
 def latencies(links: list[str], xray: str, url: str = PROBE_URL, timeout: int = REQUEST_TIMEOUT_SEC,
               budget_sec: float = 600, first_port: int = BASE_PORT) -> dict[str, float]:
-    """Seconds to fetch [url] through each link that carried traffic both times. Others are absent."""
+    """Seconds to fetch [url] through each link that carried traffic in at least 2 rounds. Others are absent."""
     return {link: seconds for link, (seconds, _) in
             probe(links, xray, url, timeout, budget_sec, first_port, sites={}).items()}
