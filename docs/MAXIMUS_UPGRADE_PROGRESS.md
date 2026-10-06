@@ -5,16 +5,16 @@ milestone. Branch: `feature/maximus-upgrade-7ooxpw` (from `main` 2bdf976).
 
 ## Current phase
 
-Phases 0 to 4 implemented. Next: Phase 5 (diagnostic reports).
+Phases 0 to 5 implemented. Next: Phases 6 and 7 (Free configs UI; previews for DrFX first).
 
 ## Exact next action
 
-Phase 5: add `vpn/diagnostics/report/` with a short readable summary and a detailed JSON report
-built from `EventLog.snapshot()`, `ErrorAggregator.aggregate`, `Tests.registry.tests`,
-`RuntimeHealth.summary` and the connection state; add BuildConfig `GIT_COMMIT` / `BUILD_TIME`
-(from the CI environment, "unknown" locally) and a report schema version; run a second redaction
-pass on export; write the export off the main thread; hook it into the Diagnostics screen's
-existing export/share action (no new UI layout, so no preview needed).
+Phases 6 and 7: draw previews (Delete Free button next to "ALL NODES · n / Ping All" with the
+confirmation dialog; per-config delete; refresh progress with pool/candidates/validated/retained/
+removed/added/last update; "Refresh failed — existing verified configurations retained."; YT/TG/X
+relabelled as a global check; lifecycle label) into `/mnt/project-files/previews/maximus-upgrade/`
+and ask DrFX to approve. While waiting, do Phase 8 (quality hardening). The logic for 6/7 already
+exists: `SubscriptionManager.deleteAllFree / deleteFree` and the `SyncResult` counts.
 
 ## Phase 0: inspection (done)
 
@@ -63,6 +63,14 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
 | Pure Kotlin tests on the JVM rig (FreeConfigEvidenceTest, LastKnownGoodTest) | 18 passed |
 | Hygiene scan | 0 problems |
 | CI checks.yml | run 37466933586 on dd58a8e (Phases 1-3): green |
+
+### Results after Phase 5
+
+| Check | Result |
+|---|---|
+| JVM rig (adds DiagnosticReportTest, 5 tests) | 41 passed |
+| Hygiene scan | 0 problems |
+| CI checks.yml | see the run for this commit |
 
 ### Results after Phase 4
 
@@ -127,11 +135,24 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   fatal log lines become events. Network signals (observation) and the filtering level
   (assessment, citing its signals) are separate events. Free Configs tests go through the registry.
 
+- Phase 5: `vpn/diagnostics/report/DiagnosticReportBuilder.kt` (pure): a short summary (status,
+  verified time, session/attempt/profile, network, earlier crash/ANR exits, top 5 failure groups,
+  background test counts, last verified PASS, truncation note) and a JSON report (schema 1: app
+  version/code/build commit/build time, Android, device model, engine and version, session,
+  network profile and observations, error groups, tests, attempts, runtime exits, events, truncated
+  flag; at most 400 events and 100 tests). `ReportRedaction.secondPass` runs on every string at
+  export (bot tokens, Google API keys, e-mail, phone numbers, long tokens, IPv4 masked to a.b.x.x,
+  IPv6). `ReportExporter` writes both on the IO dispatcher to `files/diagnostics/reports/` (newest 5
+  kept) and opens the share sheet (FileProvider limited to that folder). BuildConfig `GIT_COMMIT` and
+  `BUILD_TIME` come from CI (`GITHUB_SHA`), "unknown" locally. The existing Export Report button still
+  copies the readable report and now also shares the two files; that report shows a hashed profile
+  reference instead of the server address and gets the second redaction pass.
+
 ## Pending tasks
 
 - Phase 1 UI wording: the Free Configs screen must call the YT/TG/X badges a global check (outside
   Iran) and show the lifecycle label; goes with the Phase 6/7 previews.
-- Phases 5 to 11.
+- Phases 6 to 11.
 
 ## Files changed
 
@@ -145,7 +166,10 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
 - Phase 4: `vpn/diagnostics/events/{DiagEvent,EventLog,ErrorAggregator,TestRegistry,ConnectionEvents,RuntimeHealth}.kt`,
   `RayApplication.kt` (`startDiagnostics`), `RayVpnService.kt`, `xray/XrayLogManager.kt`,
   `vpn/sidecar/SidecarProcess.kt`, `ui/freeconfigs/FreeConfigsViewModel.kt`
-- Tests: `DiagnosticEventsTest`, `RuntimeHealthTest`, `ConnectionVerificationTest`, `FreeConfigEvidenceTest`, `LastKnownGoodTest`, `FreeListSwapIntegrationTest` (Robolectric,
+- Phase 5: `vpn/diagnostics/report/{DiagnosticReportBuilder,ReportExporter}.kt`,
+  `res/xml/diagnostic_paths.xml`, `AndroidManifest.xml` (FileProvider), `app/build.gradle.kts`
+  (GIT_COMMIT, BUILD_TIME), `ui/viewmodel/DiagnosticsViewModel.kt`, `ui/diagnostics/DiagnosticsScreen.kt`
+- Tests: `DiagnosticReportTest`, `DiagnosticEventsTest`, `RuntimeHealthTest`, `ConnectionVerificationTest`, `FreeConfigEvidenceTest`, `LastKnownGoodTest`, `FreeListSwapIntegrationTest` (Robolectric,
   scenarios A to D)
 
 ## Known issues
@@ -160,7 +184,8 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
 
 - No database schema change (still version 8). New SharedPreferences files:
   `free_config_evidence`, `free_last_known_good`, `free_retained`, `runtime_health`.
-- New files: `files/diagnostics/events/events.jsonl` and `events.1.jsonl` (at most about 1 MB).
+- New files: `files/diagnostics/events/events.jsonl` and `events.1.jsonl` (at most about 1 MB);
+  `files/diagnostics/reports/` (newest 5 exports).
 - The free-configs branch gains `configs.json` and `history.json` (listed and hashed in the signed
   manifest). Older app builds ignore them.
 - A server must now pass 2 of 3 rounds instead of 2 of 2.

@@ -186,7 +186,7 @@ class DiagnosticsViewModel(
         val profile = conn.activeProfile
 
         val profileSummary = if (profile != null) {
-            "${profile.name} (${profile.address}:${profile.port} • ${profile.transport.uppercase()}/${profile.security.ifBlank { "none" }.uppercase()})"
+            "${profile.name} (${com.example.vpn.diagnostics.events.DiagEvent.profileRef(profile.id)} • ${profile.transport.uppercase()}/${profile.security.ifBlank { "none" }.uppercase()})"
         } else {
             "No active server connected"
         }
@@ -219,6 +219,18 @@ class DiagnosticsViewModel(
             tunnelConnectivity = _tunnelConnectivity.value,
             dnsPathTest = _dnsPath.value
         )
+    }
+
+    /** Saves the summary and JSON reports (on the IO dispatcher), then hands back the share sheet. */
+    fun exportReports(onReady: (android.content.Intent) -> Unit) {
+        viewModelScope.launch {
+            runCatching {
+                val app = RayApplication.instance
+                val export = com.example.vpn.diagnostics.report.ReportExporter.export(app)
+                com.example.vpn.diagnostics.report.ReportExporter.shareIntent(app, export)
+            }.onSuccess(onReady)
+                .onFailure { XrayLogManager.w("DIAG", "Could not export the diagnostic report: ${it.message}") }
+        }
     }
 
     private fun dateFormatForDns(time: Long): String =
@@ -273,6 +285,6 @@ class DiagnosticsViewModel(
         sb.appendLine("==========================================")
         sb.appendLine("END OF DIAGNOSTIC REPORT")
         sb.appendLine("==========================================")
-        return SecretRedactor.redact(sb.toString())
+        return com.example.vpn.diagnostics.report.ReportRedaction.secondPass(sb.toString())
     }
 }

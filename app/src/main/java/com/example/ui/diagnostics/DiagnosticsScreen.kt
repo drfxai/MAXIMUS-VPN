@@ -270,6 +270,8 @@ fun DiagnosticsScreen(
                     val text = viewModel.formatReportText(report)
                     clipboardManager.setText(AnnotatedString(text))
                     Toast.makeText(context, "Sanitized report copied to clipboard", Toast.LENGTH_SHORT).show()
+                    // The short summary and the detailed JSON report, saved off the main thread and shared.
+                    viewModel.exportReports { intent -> runCatching { context.startActivity(intent) } }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surfaceElevated),
                 shape = RoundedCornerShape(10.dp),

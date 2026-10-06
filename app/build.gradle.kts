@@ -30,6 +30,12 @@ android {
     val hubPublicKey = System.getenv("HUB_PUBLIC_KEY").orEmpty().trim()
     require(hubPublicKey.all { it.isLetterOrDigit() || it in "+/=" }) { "HUB_PUBLIC_KEY must be base64" }
     buildConfigField("String", "HUB_PUBLIC_KEY", "\"$hubPublicKey\"")
+
+    // Which build made a diagnostic report. CI sets GITHUB_SHA; local builds say "unknown".
+    val gitCommit = System.getenv("GITHUB_SHA").orEmpty().take(12).filter { it.isLetterOrDigit() }.ifEmpty { "unknown" }
+    val buildTime = if (gitCommit == "unknown") "unknown" else java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MINUTES).toString()
+    buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
+    buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
   }
 
   val rootDebugKeystore = file("${rootDir}/debug.keystore")
