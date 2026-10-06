@@ -17,6 +17,29 @@ Admin commands (only the `ADMIN_ID` account; send `/admin` for the list):
 Free subscription links: `/addsub <url>`, `/editsub <n> <url>`, `/delsub <n or url>`. `/list` shows an
 overview. `/addconfig` and `/clearconfigs` still work as the older names of `/addfree` and `/clearfree`.
 
+Deleting always asks first: the bot shows the items and Yes/No buttons, and nothing is removed until
+you press Yes. `/admin` also shows buttons for the lists.
+
+## AI assistant (optional)
+
+Send `/setkey <your Gemini API key>` (from aistudio.google.com). The bot saves it in the `STORE`
+storage, deletes your message so the key does not stay in the chat, and from then on you can write
+normally, in Persian or English: "show the VIP list", "add these to VIP" followed by links, "move 3 to
+free", "delete the German free servers". `/ai` shows the status, `/model` shows or changes the model
+(default `gemini-3.8-flash`), `/reset` forgets the conversation, `/delkey` removes the key. A
+`GEMINI_API_KEY` secret on the Worker works too.
+
+Config links and web addresses are replaced by placeholders before anything is sent to Gemini, and
+the lists it reads show only protocol and name, so no server address or UUID leaves the Worker. Only
+the `ADMIN_ID` account can use the assistant.
+
+## If the bot does not answer
+
+Open `https://<worker>/status?secret=<WEBHOOK_SECRET>`. It shows what is missing and Telegram's last
+delivery error, and never shows a secret. `WEBHOOK_SECRET` may only contain letters, digits, `_` and
+`-`: Telegram rejects anything else and then never delivers messages. `/setup` now refuses such a
+secret with an explanation.
+
 `https://<worker>/sub` is the app's free subscription: every configuration from the admin's links
 and free configs, in the standard Base64 format. `https://<worker>/vip` serves only the VIP configs and
 feeds the app's VIP section. The app adds it on first launch and refreshes it
@@ -31,7 +54,8 @@ reaches every phone without an app update.
 3. Press **Edit code**, delete everything, paste the whole of `worker.js`, and press **Deploy**.
 4. Go to the Worker's **Settings** → **Variables and Secrets** and add:
    - `BOT_TOKEN` (type **Secret**): the token from step 1.
-   - `WEBHOOK_SECRET` (type **Secret**): any long random text, for example 40 letters and digits.
+   - `WEBHOOK_SECRET` (type **Secret**): 40 or so letters and digits. Only letters, digits, `_` and `-`
+     are allowed; Telegram rejects anything else.
    - `ADMIN_ID` (type **Secret**): your numeric Telegram ID. Keep it out of the repository.
    - `APP_URL` (type **Text**, optional): where people download the app.
 5. Go to **Storage & Databases** → **KV** → **Create**, name it `maximus-bot-store`. Back in the
