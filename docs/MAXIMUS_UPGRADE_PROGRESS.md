@@ -171,10 +171,17 @@ The cloud sandbox cannot run the Android Gradle build (Google Maven is blocked).
   session keeps its in-memory copy; LKG pool, retained ids and test evidence cleared; event history
   kept). Single delete from a node's ⋮ menu uses `deleteFree` for free configs.
 
+- Phase 7 (previews approved by DrFX 13:15Z): `SubscriptionManager.freeProgress` (DOWNLOADING →
+  SWAPPING with candidate and valid counts; null when done) shown in the summary card with a
+  "Refreshing" pill, step line, bar and "N still in use"; the card shows the lifecycle counts
+  (verified here / checked outside Iran / on trial / failing) and the last refresh's added / kept /
+  retained / removed; a failed refresh shows "Refresh failed — existing verified configurations
+  retained." with the reason and "Last try failed …" and never touches the list. Rows show the
+  lifecycle label, the YT·TG·X tag as "global", the site filter says "(global)", and a ⋮ menu has
+  Test / Connect / Delete (`deleteFree`).
+
 ## Pending tasks
 
-- Phase 1 UI wording: the Free Configs screen must call the YT/TG/X badges a global check (outside
-  Iran) and show the lifecycle label; goes with the Phase 6/7 previews.
 - Phases 6 to 11.
 
 ## Files changed

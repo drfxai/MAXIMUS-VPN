@@ -28,6 +28,8 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
@@ -35,9 +37,16 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,6 +74,7 @@ class FreeConfigsActions(
     val onProtocol: (String?) -> Unit = {},
     val onToggleHidden: () -> Unit = {},
     val onConnect: (FreeNode) -> Unit = {},
+    val onDelete: (FreeNode) -> Unit = {},
     val onDismissMessage: () -> Unit = {}
 )
 
@@ -100,6 +110,7 @@ fun FreeConfigsContent(
                         action = "Get the list", onAction = actions.onRefresh)
                 }
                 else -> {
+                    if (state.refreshFailedAt > 0L && !state.syncing) item { RefreshFailed(c, state.refreshFailure) }
                     item { Summary(c, state, ago, until) }
                     item { Segments(c, state.sort, actions.onSort) }
                     item { Chips(c, state, actions.onProtocol) }
@@ -119,7 +130,7 @@ fun FreeConfigsContent(
                         // batch redraws just the rows that changed instead of the whole card.
                         items(rows, key = { it.profile.id }) { node ->
                             Box(Modifier.padding(bottom = 8.dp).labCard(c, radius = 16.dp)) {
-                                NodeRow(c, node, best = node == best, last = true, onTest = { actions.onTestOne(node) }) { actions.onConnect(node) }
+                                NodeRow(c, node, best = node == best, last = true, onTest = { actions.onTestOne(node) }, onDelete = { actions.onDelete(node) }) { actions.onConnect(node) }
                             }
                         }
                     }
@@ -128,7 +139,7 @@ fun FreeConfigsContent(
                         val offline = state.offline
                         items(offline, key = { "off-" + it.profile.id }) { node ->
                             Box(Modifier.padding(top = 8.dp).labCard(c, radius = 16.dp)) {
-                                NodeRow(c, node, best = false, last = true, onTest = { actions.onTestOne(node) }) { actions.onConnect(node) }
+                                NodeRow(c, node, best = false, last = true, onTest = { actions.onTestOne(node) }, onDelete = { actions.onDelete(node) }) { actions.onConnect(node) }
                             }
                         }
                     }
@@ -183,9 +194,16 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 LabText("MAXIMUS Free", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
-                LabText("Public GitHub lists", c.text3, 12.sp, maxLines = 1)
+                LabText("Signed list · public GitHub sources", c.text3, 12.sp, maxLines = 1)
             }
-            if (s.verified) Row(
+            if (s.syncing) Row(
+                Modifier.clip(RoundedCornerShape(8.dp)).background(c.accentSoft).padding(start = 7.dp, end = 9.dp, top = 5.dp, bottom = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(Modifier.size(11.dp), color = c.accent, strokeWidth = 1.5.dp)
+                Spacer(Modifier.width(5.dp))
+                LabText("Refreshing", c.accent, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
+            } else if (s.verified) Row(
                 Modifier.clip(RoundedCornerShape(8.dp)).background(c.good.copy(alpha = 0.12f)).padding(start = 7.dp, end = 9.dp, top = 5.dp, bottom = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -212,6 +230,12 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
             Legend(c, c.bad, "Offline", s.offline.size)
             Legend(c, idle(c), "Not tested", s.queued)
         }
+        if (s.syncing) RefreshPanel(c, s) else LifecycleStats(c, s)
+        s.lastRefresh?.takeIf { !s.syncing }?.let { r ->
+            Spacer(Modifier.height(10.dp))
+            LabText("Last refresh: +${r.added} added · ${r.kept} kept · ${r.retained} retained · ${r.removed} removed",
+                c.text3, 11.5.sp, maxLines = 2)
+        }
         Spacer(Modifier.height(16.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
         Spacer(Modifier.height(14.dp))
@@ -219,12 +243,98 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
             Icon(Icons.Rounded.Schedule, null, tint = c.text2, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(6.dp))
             LabText(if (s.lastUpdated == 0L) "Not updated yet" else "Updated ${ago(s.lastUpdated)}", c.text2, 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
-            if (s.nextUpdate > 0L) LabText("Next update ${until(s.nextUpdate)}", c.text2, 12.5.sp, maxLines = 1)
+            if (s.refreshFailedAt > 0L && !s.syncing) LabText("Last try failed ${ago(s.refreshFailedAt)}", c.bad, 12.5.sp, maxLines = 1)
+            else if (s.nextUpdate > 0L) LabText("Next update ${until(s.nextUpdate)}", c.text2, 12.5.sp, maxLines = 1)
         }
     }
 }
 
 private fun idle(c: LabColors) = if (c.dark) Color(0xFF4B4E5E) else Color(0xFFCBD0DC)
+
+/** "Refresh failed — existing verified configurations retained." with the reason; the list is untouched. */
+@Composable
+private fun RefreshFailed(c: LabColors, reason: String?) {
+    Row(
+        Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bad.copy(alpha = 0.10f))
+            .border(1.dp, c.bad.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).padding(12.dp)
+    ) {
+        Icon(Icons.Rounded.WarningAmber, null, tint = c.bad, modifier = Modifier.padding(top = 1.dp).size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Column {
+            LabText("Refresh failed — existing verified configurations retained.", c.text, 13.sp, FontWeight.SemiBold, maxLines = 2)
+            reason?.let {
+                Spacer(Modifier.height(3.dp))
+                LabText(it + " Tap refresh to try again.", c.text2, 12.sp, maxLines = 3)
+            }
+        }
+    }
+}
+
+/** The steps of a running refresh. The configs above stay usable until the swap. */
+@Composable
+private fun RefreshPanel(c: LabColors, s: FreeConfigsUiState) {
+    val p = s.refreshProgress
+    val swapping = p?.stage == com.example.vpn.subscription.FreeRefreshProgress.Stage.SWAPPING
+    Spacer(Modifier.height(16.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        LabText(if (swapping) "Checked ${p?.candidates ?: 0} candidates · ${p?.valid ?: 0} passed" else "Downloading the signed list",
+            c.text, 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+        LabText("${s.total} still in use", c.text2, 12.sp, maxLines = 1)
+    }
+    Spacer(Modifier.height(6.dp))
+    LinearProgressIndicator(
+        progress = { p?.fraction ?: 0.1f },
+        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
+        color = c.accent, trackColor = c.cardAlt
+    )
+    Spacer(Modifier.height(6.dp))
+    LabText(
+        if (swapping) "✓ Downloaded   ✓ Signature valid   ✓ Security filter   ◌ Swap"
+        else "◌ Download   ○ Signature   ○ Security filter   ○ Swap",
+        c.text3, 11.5.sp, maxLines = 1
+    )
+    Spacer(Modifier.height(4.dp))
+    LabText("Configs in use or last known to work are retained; a refresh never empties the list.", c.text3, 11.5.sp, maxLines = 2)
+}
+
+/** What this phone's own measurements say, next to what the list builder checked outside Iran. */
+@Composable
+private fun LifecycleStats(c: LabColors, s: FreeConfigsUiState) {
+    Spacer(Modifier.height(14.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Stat(c, "${s.verifiedHere}", "Verified here", c.good, Modifier.weight(1f))
+        Stat(c, "${s.checkedOutside}", "Checked outside Iran", c.text, Modifier.weight(1f))
+        Stat(c, "${s.onTrial}", "On trial", c.okay, Modifier.weight(1f))
+        Stat(c, "${s.failingHere}", "Failing", c.bad, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun Stat(c: LabColors, value: String, label: String, color: Color, modifier: Modifier) {
+    Column(modifier.clip(RoundedCornerShape(10.dp)).background(c.cardAlt).padding(vertical = 7.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        LabText(value, color, 16.sp, FontWeight.Bold, maxLines = 1)
+        LabText(label, c.text2, 10.5.sp, maxLines = 2, modifier = Modifier.fillMaxWidth(), lineHeight = 13.sp)
+    }
+}
+
+/** Short words for what this phone measured; never "works in Iran". */
+private fun lifecycleLabel(l: com.example.vpn.hub.FreeConfigLifecycle): String = when (l) {
+    com.example.vpn.hub.FreeConfigLifecycle.NEW -> "New"
+    com.example.vpn.hub.FreeConfigLifecycle.GLOBAL_VERIFIED -> "Checked outside Iran"
+    com.example.vpn.hub.FreeConfigLifecycle.IRAN_PROBATION -> "On trial on your network"
+    com.example.vpn.hub.FreeConfigLifecycle.IRAN_VERIFIED -> "✓ Verified on your network"
+    com.example.vpn.hub.FreeConfigLifecycle.DEGRADED -> "Weak on your network"
+    com.example.vpn.hub.FreeConfigLifecycle.DEAD -> "Failing on your network"
+    com.example.vpn.hub.FreeConfigLifecycle.QUARANTINED -> "Quarantined"
+}
+
+private fun lifecycleColor(c: LabColors, l: com.example.vpn.hub.FreeConfigLifecycle): Color = when (l) {
+    com.example.vpn.hub.FreeConfigLifecycle.IRAN_VERIFIED -> c.good
+    com.example.vpn.hub.FreeConfigLifecycle.IRAN_PROBATION, com.example.vpn.hub.FreeConfigLifecycle.DEGRADED -> c.okay
+    com.example.vpn.hub.FreeConfigLifecycle.DEAD, com.example.vpn.hub.FreeConfigLifecycle.QUARANTINED -> c.bad
+    else -> c.text2
+}
 
 @Composable
 private fun HealthBar(c: LabColors, s: FreeConfigsUiState) {
@@ -307,7 +417,7 @@ private fun SiteChips(c: LabColors, s: FreeConfigsUiState, onSite: (String?) -> 
             ) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(color))
                 Spacer(Modifier.width(6.dp))
-                LabText("Opens ${names[tag] ?: tag}", if (on) c.text else c.text2, 12.5.sp, if (on) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
+                LabText("Opens ${names[tag] ?: tag} (global)", if (on) c.text else c.text2, 12.5.sp, if (on) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
                 Spacer(Modifier.width(4.dp))
                 LabText("$count", c.text3, 12.5.sp, maxLines = 1)
             }
@@ -343,7 +453,8 @@ private fun Flag(c: LabColors, country: String?) {
 }
 
 @Composable
-private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, onTest: () -> Unit = {}, onClick: () -> Unit) {
+private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, onTest: () -> Unit = {}, onDelete: () -> Unit = {}, onClick: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
     val healthColor = when (node.health) {
         NodeHealth.FAST -> c.good
         NodeHealth.SLOW -> c.okay
@@ -371,18 +482,27 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                     }
                 }
                 Spacer(Modifier.height(5.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    // The sites it opened first, in their colours, then protocol and transport.
-                    FreeConfigList.SITE_TAGS.filter { it in node.sites }.forEach { tag ->
-                        val color = siteColor(c, tag)
-                        Box(Modifier.clip(RoundedCornerShape(5.dp)).background(color.copy(alpha = 0.13f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                            LabText(tag, color, 10.5.sp, FontWeight.Bold, letterSpacing = 0.2.sp, maxLines = 1)
-                        }
-                    }
-                    (listOf(node.protocol) + node.tags).take(if (node.sites.size >= 3) 2 else 3).forEach { tag ->
+                // What this phone measured (the list builder's check is the default).
+                val lc = lifecycleColor(c, node.lifecycle)
+                Box(Modifier.clip(RoundedCornerShape(5.dp)).background(lc.copy(alpha = 0.13f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    LabText(lifecycleLabel(node.lifecycle), lc, 10.5.sp, FontWeight.Bold, maxLines = 1)
+                }
+                Spacer(Modifier.height(5.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    (listOf(node.protocol) + node.tags).take(2).forEach { tag ->
                         Box(Modifier.clip(RoundedCornerShape(5.dp)).background(c.cardAlt).padding(horizontal = 6.dp, vertical = 2.dp)) {
                             LabText(tag, c.text2, 10.5.sp, FontWeight.SemiBold, letterSpacing = 0.2.sp, maxLines = 1)
                         }
+                    }
+                    // Sites the list builder reached outside Iran: a global check, not proof it works here.
+                    val sites = FreeConfigList.SITE_TAGS.filter { it in node.sites }
+                    if (sites.isNotEmpty()) Row(
+                        Modifier.clip(RoundedCornerShape(5.dp)).border(1.dp, c.stroke, RoundedCornerShape(5.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.Public, null, tint = c.text3, modifier = Modifier.size(11.dp))
+                        Spacer(Modifier.width(3.dp))
+                        LabText(sites.joinToString("·") + " · global", c.text3, 10.5.sp, FontWeight.SemiBold, maxLines = 1)
                     }
                 }
             }
@@ -400,6 +520,15 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                         NodeHealth.FAST -> "Fast"; NodeHealth.SLOW -> "Slow"; NodeHealth.OFFLINE -> "Offline"; NodeHealth.QUEUED -> "Not tested"
                     }, c.text3, 11.5.sp, maxLines = 1
                 )
+            }
+            Box {
+                Icon(Icons.Rounded.MoreVert, "More", tint = c.text3,
+                    modifier = Modifier.clip(CircleShape).clickable { menu = true }.padding(4.dp).size(18.dp))
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("Test") }, onClick = { menu = false; onTest() })
+                    DropdownMenuItem(text = { Text("Connect") }, onClick = { menu = false; onClick() })
+                    DropdownMenuItem(text = { Text("Delete", color = c.bad) }, onClick = { menu = false; onDelete() })
+                }
             }
         }
         if (!last) Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))

@@ -284,6 +284,8 @@ class SubscriptionManager(
             return@withContext SyncResult(subscription.id, 0, 0, 0, false, FREE_OFF)
         }
 
+        val isFree = FreeConfigList.isList(subscription.url)
+        if (isFree) _freeProgress.value = FreeRefreshProgress(FreeRefreshProgress.Stage.DOWNLOADING)
         val candidates = SubscriptionSources.candidates(subscription.url, subscription.mirrors)
             .filter { isValidSubscriptionUrl(it) }
         val fetcher = SubscriptionFetcher(
@@ -298,7 +300,10 @@ class SubscriptionManager(
             when (val outcome = fetcher.fetch(candidates)) {
                 is SubscriptionFetcher.Outcome.Fetched -> {
                     val importResult = parse(outcome.payload, subscription)
-                    if (FreeConfigList.isList(subscription.url)) {
+                    if (isFree) {
+                        // Downloaded and its signature checked (the download refuses unsigned lists).
+                        _freeProgress.value = FreeRefreshProgress(FreeRefreshProgress.Stage.SWAPPING,
+                            candidates = importResult.configurationsFound, valid = importResult.validProfiles.size)
                         return@withContext swapFreeList(subscription, importResult, outcome)
                     }
                     val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
@@ -341,8 +346,14 @@ class SubscriptionManager(
             XrayLogManager.e("SUBSCRIPTION", "Error syncing '${subscription.name}': $errMsg")
             subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
             SyncResult(subscription.id, 0, 0, 0, false, errMsg)
+        } finally {
+            if (isFree) _freeProgress.value = null
         }
     }
+
+    private val _freeProgress = kotlinx.coroutines.flow.MutableStateFlow<FreeRefreshProgress?>(null)
+    /** Where a running free list refresh is; null when none runs. */
+    val freeProgress: kotlinx.coroutines.flow.StateFlow<FreeRefreshProgress?> = _freeProgress
 
     /**
      * Replaces the free list with the verified new one in one database transaction (see

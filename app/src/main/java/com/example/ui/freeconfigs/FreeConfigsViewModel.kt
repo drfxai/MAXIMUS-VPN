@@ -10,6 +10,7 @@ import com.example.vpn.diagnostics.FailureStage
 import com.example.vpn.hub.ConnectivityMeasurement
 import com.example.vpn.hub.FreeConfigList
 import com.example.vpn.smart.NetworkCapabilityDetector
+import com.example.vpn.subscription.SubscriptionManager
 import com.example.xray.RealDelayProbe
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +52,9 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             serverRepository.getProfilesBySubscription(FreeConfigList.URL).collect { profiles -> publish(profiles) }
+        }
+        viewModelScope.launch {
+            subscriptionManager.freeProgress.collect { p -> _state.update { it.copy(refreshProgress = p) } }
         }
         viewModelScope.launch {
             publish(withContext(Dispatchers.IO) { trimSurplus() })
@@ -125,9 +129,20 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             loadSubscription()
-            result.exceptionOrNull()?.let { e ->
-                XrayLogManager.w("FREE", "Free list refresh failed: ${e.message}")
-                _state.update { it.copy(message = "Could not update the list. The last verified list stays in use.") }
+            val sync = result.getOrNull()
+            // A failed refresh never touches the saved list; the screen says so and keeps it.
+            val failure = result.exceptionOrNull()?.message
+                ?: sync?.takeIf { !it.isSuccess && it.errorMessage != SubscriptionManager.FREE_OFF }?.let { it.errorMessage ?: "unknown error" }
+            if (failure != null) {
+                XrayLogManager.w("FREE", "Free list refresh failed: $failure")
+                _state.update { it.copy(refreshFailedAt = System.currentTimeMillis(), refreshFailure = failure) }
+            } else if (sync != null && sync.isSuccess) {
+                _state.update {
+                    it.copy(refreshFailedAt = 0L, refreshFailure = null, lastRefresh = RefreshSummary(
+                        candidates = sync.totalFound, added = sync.addedCount, kept = sync.keptCount,
+                        retained = sync.retainedCount, removed = sync.removedCount, at = sync.finishedAt
+                    ))
+                }
             }
             _state.update { it.copy(syncing = false) }
         }
@@ -191,6 +206,14 @@ class FreeConfigsViewModel(app: Application) : AndroidViewModel(app) {
                 testIds.forEach { registry.cancel(it, "stopped") }
                 _state.update { it.copy(testing = false) }
             }
+        }
+    }
+
+    /** Deletes one free config; a session using it keeps running until disconnect. */
+    fun delete(node: FreeNode) {
+        viewModelScope.launch {
+            runCatching { subscriptionManager.deleteFree(node.profile) }
+                .onFailure { XrayLogManager.w("FREE", "Could not delete the free config: ${it.message}") }
         }
     }
 

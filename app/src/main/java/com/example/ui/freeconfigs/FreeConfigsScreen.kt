@@ -38,6 +38,7 @@ fun FreeConfigsScreen(
                 onProtocol = viewModel::setProtocol,
                 onToggleHidden = viewModel::toggleHidden,
                 onConnect = { onConnect(it.profile) },
+                onDelete = viewModel::delete,
                 onDismissMessage = viewModel::dismissMessage
             )
         },
