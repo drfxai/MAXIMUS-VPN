@@ -73,7 +73,9 @@ class MaximusAiGateway(
             val b = breaker(route.providerId)
             if (!b.allow()) {
                 attempts += AiAttempt(route.providerId, route.modelId, "skipped", AiErrorKind.CIRCUIT_OPEN)
-                last = last ?: AiError(AiErrorKind.CIRCUIT_OPEN, "${route.providerId} is paused")
+                // The reason the breaker opened (AUTH_FAILED, RATE_LIMITED, QUOTA_EXHAUSTED, TIMEOUT...) is a
+                // category, never provider text, so it is safe to log.
+                last = last ?: AiError(AiErrorKind.CIRCUIT_OPEN, "${route.providerId} is paused after ${b.openedBy ?: "repeated failures"}")
                 continue
             }
             val config = settings.provider(route.providerId) ?: continue

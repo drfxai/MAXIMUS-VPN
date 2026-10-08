@@ -558,6 +558,22 @@ fun SettingsScreen(
                     checked = settings.killSwitchEnabled,
                     onCheckedChange = { viewModel.setKillSwitch(it) }
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                // The packet guard works inside the tunnel. Only Android's own lockdown also covers the moment
+                // Android stops or restarts the app, so the user is taken straight to that setting.
+                androidx.compose.material3.OutlinedButton(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Open Android VPN settings (Always-on, Block connections without VPN)", fontSize = 12.sp)
+                }
                 Spacer(modifier = Modifier.height(12.dp))
                 SettingToggleItem(
                     icon = Icons.Default.Route,

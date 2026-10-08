@@ -221,7 +221,7 @@ fun LandingHeroBanner(
             ) {
                 LandingStatPill(label = "Zero Logs", icon = Icons.Default.VisibilityOff, modifier = Modifier.weight(1f))
                 LandingStatPill(label = "REALITY", icon = Icons.Default.Lock, modifier = Modifier.weight(1f))
-                LandingStatPill(label = "No DNS Leaks", icon = Icons.Default.Shield, modifier = Modifier.weight(1.25f))
+                LandingStatPill(label = "Encrypted DNS", icon = Icons.Default.Shield, modifier = Modifier.weight(1.25f))
                 Surface(
                     onClick = onExploreArchitecture,
                     shape = CircleShape,
@@ -296,11 +296,11 @@ fun PromotionalFeatureShowcase(
                 tag = "ULTRA SPEED",
                 tagColor = Color(0xFF00E5FF),
                 headline = "Undetectable Camouflage",
-                description = "Disguises VPN traffic as normal TLS 1.3 web requests using SNI spoofing and XTLS direct streaming.",
+                description = "Makes VPN traffic look like ordinary TLS 1.3 web traffic with REALITY and XTLS Vision.",
                 primaryIcon = Icons.Default.Lock,
                 gradientColors = listOf(Color(0xFF0D2538), Color(0xFF131C30)),
                 actionLabel = "Explore Nodes",
-                metricsList = listOf("Latency" to "14ms", "Speed" to "1.2 Gbps", "Bypass" to "100%")
+                metricsList = listOf("Protocol" to "REALITY", "Flow" to "XTLS Vision", "TLS" to "1.3")
             ),
             PromoFeatureItem(
                 id = "god_mode",
@@ -308,11 +308,11 @@ fun PromotionalFeatureShowcase(
                 tag = "MAX SURVIVABILITY",
                 tagColor = Color(0xFFFF5252),
                 headline = "Multi-Tier Failover Cascade",
-                description = "Automatically escalates from VLESS to Hysteria2, Psiphon Conduit bridges, and local peer-to-peer mesh when blocked.",
+                description = "When a server is blocked, tries your other servers, clean Cloudflare addresses and the signed free list, each checked with a real request. Traffic stays blocked when nothing works.",
                 primaryIcon = Icons.Default.Shield,
                 gradientColors = listOf(Color(0xFF381216), Color(0xFF22111E)),
                 actionLabel = "Open Hardened Suite",
-                metricsList = listOf("Cascade" to "4 Tiers", "Mesh" to "P2P Active", "DPI Guard" to "Armed")
+                metricsList = listOf("Ladder" to "4 steps", "Checks" to "Real traffic", "When blocked" to "Fail-closed")
             ),
             PromoFeatureItem(
                 id = "ai_agent",
@@ -320,11 +320,11 @@ fun PromotionalFeatureShowcase(
                 tag = "SMART ROUTING",
                 tagColor = Color(0xFFB388FF),
                 headline = "Autonomous Diagnostics",
-                description = "Integrated with Gemini intelligence to analyze connection health, ping anomalies, and recommend gaming/streaming nodes.",
+                description = "Uses the AI provider you choose to explain connection health and diagnostics. It can read, never change, your connection.",
                 primaryIcon = Icons.Default.AutoAwesome,
                 gradientColors = listOf(Color(0xFF221538), Color(0xFF141930)),
                 actionLabel = "Launch AI Agent",
-                metricsList = listOf("Model" to "Gemini Flash", "Modes" to "Voice & Chat", "Privacy" to "Filtered")
+                metricsList = listOf("Providers" to "Your choice", "Access" to "Read-only", "Privacy" to "Filtered")
             ),
             PromoFeatureItem(
                 id = "hardened_tools",

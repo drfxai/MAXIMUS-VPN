@@ -209,7 +209,7 @@ fun LandingTourDialog(
                 PillarRow(
                     icon = Icons.Default.Security,
                     title = "Zero Logs & DNS Shield",
-                    desc = "Encrypted DNS-over-HTTPS (DoH) routing with strict DNS leak prevention. Ephemeral chat and browser histories reside exclusively in transient memory.",
+                    desc = "DNS-over-HTTPS (DoH) sent through the tunnel; the external leak test is shown as not tested until it is run. Ephemeral chat and browser histories reside exclusively in transient memory.",
                     color = Color(0xFF00E676)
                 )
 

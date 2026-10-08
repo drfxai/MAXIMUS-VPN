@@ -110,7 +110,9 @@ class AiAgentManager(
         } catch (e: CancellationException) {
             throw e
         } catch (e: AiException) {
-            XrayLogManager.w("AI_AGENT", "Gateway: ${e.error.kind} after ${e.attempts.size} attempt(s)")
+            val why = e.attempts.joinToString { "${it.providerId}: ${it.error ?: it.outcome}" }
+            val paused = if (e.error.kind == com.example.ai.gateway.AiErrorKind.CIRCUIT_OPEN) "; ${e.error.message}" else ""
+            XrayLogManager.w("AI_AGENT", "Gateway: ${e.error.kind} after ${e.attempts.size} attempt(s) [$why]$paused. VPN is not affected.")
             ChatMessage(sender = MessageSender.AGENT, text = "❌ ${e.error.userMessage()}")
         } catch (e: Exception) {
             XrayLogManager.e("AI_AGENT", "Request failed: ${e.javaClass.simpleName}")
