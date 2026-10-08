@@ -53,28 +53,17 @@ class LabController(
     private val generator: CandidateGenerator = CandidateGenerator(),
     private val policy: CandidatePromotionPolicy = CandidatePromotionPolicy.DEFAULT
 ) {
-    data class Snapshot(
-        val network: NetworkContext? = null,
-        val capability: NetworkCapabilityProfile? = null,
-        val automation: AutomationLevel = AutomationLevel.RECOMMEND,
-        val running: LabExperiment? = null,
-        val experiments: List<LabExperiment> = emptyList(),
-        val verified: List<VerifiedNetworkProfile> = emptyList(),
-        val discoveries: List<LabDiscovery> = emptyList(),
-        val networks: List<LabStore.NetworkSeen> = emptyList(),
-        val plan: LabStore.ReturnPlan? = null,
-        val message: String? = null
-    )
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val tracker = NetworkSessionTracker()
     private val recentStarts = ArrayDeque<Long>()
     private val lastStartForConfig = mutableMapOf<String, Long>()
     private var job: Job? = null
     private var refreshJob: Job? = null
+    private val steps = mutableListOf<LabStep>()
+    private val log = ArrayDeque<String>()
 
-    private val _state = MutableStateFlow(Snapshot())
-    val state: StateFlow<Snapshot> = _state.asStateFlow()
+    private val _state = MutableStateFlow(LabSnapshot())
+    val state: StateFlow<LabSnapshot> = _state.asStateFlow()
 
     fun start() {
         publish()
@@ -122,7 +111,9 @@ class LabController(
         val plan = store.planFor(ctx.contextKey, policy)
         if (isNew) {
             XrayLogManager.i("LAB", "Network session ${ctx.sessionId} on ${NetworkKey.describe(key)} ($families).")
-            if (!plan.explore && store.automation().mayExperiment) scope.launch { revalidate(ctx, plan, userStarted = false) }
+            if (!plan.explore && store.automation().mayExperiment && job?.isActive != true) {
+                job = scope.launch { runCatching { revalidate(ctx, plan.revalidate, userStarted = false) } }
+            }
         }
         publish(network = ctx, capability = cap, plan = plan)
     }
@@ -139,30 +130,107 @@ class LabController(
         job?.cancel()
     }
 
+    fun dismissMessage() = publish(message = null)
+
+    fun showMessage(message: String) = publish(message = message)
+
     /** Runs one experiment for a saved config: a baseline real request, then safe copies if the baseline failed. */
-    fun experiment(profileId: String, userStarted: Boolean = true) {
+    fun experiment(profileId: String, userStarted: Boolean = true) = launchJob { runExperiment(profileId, userStarted) }
+
+    /** "Retest" on a Verified Profile: one recheck round of that profile on the current network. */
+    fun retest(profileId: String) = launchJob {
+        val v = store.verifiedProfiles().firstOrNull { it.profileId == profileId } ?: return@launchJob
+        if (tracker.current == null) refreshNetwork()
+        val ctx = tracker.current ?: return@launchJob publish(message = "No network to test on.")
+        if (ctx.contextKey != v.contextKey) return@launchJob publish(message = "${v.profileId} belongs to ${v.networkLabel}; the phone is on ${ctx.label} now.")
+        revalidate(ctx, listOf(v), userStarted = true)
+    }
+
+    private fun launchJob(block: suspend () -> Unit) {
         if (job?.isActive == true) { publish(message = "An experiment is already running."); return }
-        job = scope.launch { runCatching { runExperiment(profileId, userStarted) }.onFailure { if (it !is kotlinx.coroutines.CancellationException) publish(message = "LAB stopped: ${it.message}") } }
+        job = scope.launch {
+            try {
+                block()
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                step(null, LabStep.State.SKIPPED)
+                publish(running = null, message = "Experiment cancelled. Nothing was changed.")
+                throw c
+            } catch (e: Exception) {
+                publish(running = null, message = "LAB stopped: ${e.message}")
+            }
+        }
+    }
+
+    /** An AI reading becomes an unverified discovery card; it never changes a measurement or a state. */
+    fun recordAdvice(explanation: String, patterns: List<String>, confidence: Double, model: String) {
+        if (explanation.isBlank()) return
+        val ctx = tracker.current
+        store.addDiscovery(LabDiscovery("advice-${ctx?.contextKey ?: "none"}", LabDiscovery.Kind.NETWORK_BEHAVIOR,
+            "LAB Agent: " + (patterns.firstOrNull() ?: "reading of ${ctx?.label ?: "this network"}"),
+            explanation + " (AI reading, not a measurement.)", "LAB Agent · $model", confidence.coerceIn(0.0, 1.0), false, System.currentTimeMillis()))
+        publish()
+    }
+
+    /**
+     * Tests one change the LAB Agent suggested, only if the user asks. The suggestion goes through the same
+     * allowlist and security gate as every candidate; a refused one is reported and never tested.
+     */
+    fun testSuggestion(profileId: String, field: String, value: String) = launchJob {
+        val parent = loadProfile(profileId) ?: return@launchJob publish(message = "That config no longer exists.")
+        val (verdict, copy) = CandidateMutationPolicy.checkRequest(parent, mapOf(field to value))
+        if (copy == null) return@launchJob publish(message = "LAB refused the suggestion: ${verdict.reason}")
+        if (tracker.current == null) refreshNetwork()
+        val ctx = tracker.current ?: return@launchJob publish(message = "No network to test on.")
+        val now = System.currentTimeMillis()
+        refusal(true, parent.effectiveFingerprint, now)?.let { return@launchJob publish(message = it) }
+        recentStarts.addLast(now)
+        val id = store.newExperimentId()
+        val mutation = CandidateGenerator.suggestionId(field, value)
+        val cand = LabCandidate(CandidateGenerator.idOf(id, mutation, null), id, parent.id, parent.effectiveFingerprint, mutation, null,
+            BpbRecoveryEngine.diff(parent, copy) + if (field == "targetStrategy") listOf(com.example.vpn.connectivity.FieldChange(field, parent.targetStrategy, value)) else emptyList(),
+            now, true, null, PromotionState.EXPERIMENTAL)
+        steps.clear()
+        steps += LabStep("LAB Agent suggestion checked by the security gate", LabStep.State.DONE, "$field passed")
+        listOf(STEP_TESTING, STEP_STABILITY, STEP_DONE).forEach { steps += LabStep(it, LabStep.State.PENDING) }
+        val e = LabExperiment(id, ctx.sessionId, ctx.contextKey, ctx.label, parent.id, parent.effectiveFingerprint, null, ExperimentState.CREATED, now,
+            candidates = listOf(cand), aiRecommendationId = "lab-agent", note = "Testing a LAB Agent suggestion.")
+        store.saveExperiment(e)
+        run(e, mapOf(cand.candidateId to copy), budget, parent, ctx)
     }
 
     private suspend fun runExperiment(profileId: String, userStarted: Boolean) {
-        if (tracker.current == null) refreshNetwork(userStarted)
-        val ctx = tracker.current ?: return publish(message = "No network to experiment on.")
         if (!userStarted && !store.automation().mayExperiment) return
         val parent = loadProfile(profileId) ?: return publish(message = "That config no longer exists.")
         val now = System.currentTimeMillis()
         refusal(userStarted, parent.effectiveFingerprint, now)?.let { return publish(message = it) }
         recentStarts.addLast(now)
         lastStartForConfig[parent.effectiveFingerprint] = now
+        steps.clear()
+        LIVE_STEPS.forEach { steps += LabStep(it, LabStep.State.PENDING) }
 
+        step(STEP_BASELINE, LabStep.State.RUNNING)
+        refreshNetwork(userStarted)
+        val ctx = tracker.current ?: return fail(STEP_BASELINE, "No network outside the VPN.")
         val cap = NetworkCapabilityDetector.last
-        publish(message = "Measuring ${parent.name} as it is...")
+        step(STEP_BASELINE, LabStep.State.DONE, "${ctx.label} · ${ctx.families}")
+        step(STEP_DNS, cap?.dnsWorking.asStep(), measuredWord(cap?.dnsWorking))
+        step(STEP_IPV6, cap?.ipv6Available.asStep(), measuredWord(cap?.ipv6Available))
+        step(STEP_TLS, cap?.tlsAvailable.asStep(), measuredWord(cap?.tlsAvailable))
+
+        step(STEP_TRANSPORT, LabStep.State.RUNNING, parent.name)
         val baseline = withContext(Dispatchers.IO) { RealDelayProbe.measure(parent, budget.probeTimeoutSec) }
         val category = when (baseline) {
-            is RealDelayProbe.Outcome.NotRun -> return publish(message = "LAB could not test (${baseline.reason}). Nothing was changed.")
-            is RealDelayProbe.Outcome.Delay -> return publish(message = "${parent.name} already works here (${baseline.latencyMs} ms); nothing to test.")
+            is RealDelayProbe.Outcome.NotRun -> return fail(STEP_TRANSPORT, "Could not test (${baseline.reason}). Nothing was changed.")
+            is RealDelayProbe.Outcome.Delay -> {
+                step(STEP_TRANSPORT, LabStep.State.DONE, "Works as it is (${baseline.latencyMs} ms)")
+                steps.replaceAll { if (it.state == LabStep.State.PENDING) it.copy(state = LabStep.State.SKIPPED) else it }
+                return publish(message = "${parent.name} already works here (${baseline.latencyMs} ms); nothing to test.")
+            }
             is RealDelayProbe.Outcome.Failed -> categoryOf(baseline.reason, parent, cap)
         }
+        step(STEP_TRANSPORT, LabStep.State.FAILED, FailureClassifier.assess(category).text)
+
+        step(STEP_CANDIDATES, LabStep.State.RUNNING)
         val id = store.newExperimentId()
         val builds = generator.generate(
             id, parent, category, cap,
@@ -170,6 +238,11 @@ class LabController(
             retired = store.retiredMutations(ctx.contextKey, parent.effectiveFingerprint),
             max = budget.maxCandidates
         )
+        if (builds.isEmpty()) return fail(STEP_CANDIDATES, "No safe change applies to this failure; the original config is left as it is.")
+        step(STEP_CANDIDATES, LabStep.State.DONE, "${builds.size} copies")
+        val passed = builds.count { it.profile != null }
+        step(STEP_SECURITY, if (passed > 0) LabStep.State.DONE else LabStep.State.FAILED, "$passed of ${builds.size} passed")
+
         val created = LabExperiment(
             id, ctx.sessionId, ctx.contextKey, ctx.label, parent.id, parent.effectiveFingerprint, category,
             ExperimentState.CREATED, now, candidates = builds.map { it.candidate },
@@ -177,41 +250,86 @@ class LabController(
         )
         store.saveExperiment(created)
         val copies = builds.mapNotNull { b -> b.profile?.let { b.candidate.candidateId to it } }.toMap()
-        val result = ExperimentEngine(budget, policy).run(created, copies, ::test, { tracker.isCurrent(ctx.sessionId) }) { e ->
-            store.saveExperiment(e)
-            publish(running = e.takeIf { !it.state.terminal })
-        }
-        finish(result, parent, ctx)
+        run(created, copies, budget, parent, ctx)
     }
 
     /** Network Memory: a returning network rechecks what worked there once before anything broader runs. */
-    private suspend fun revalidate(ctx: NetworkContext, plan: LabStore.ReturnPlan, userStarted: Boolean) {
-        if (job?.isActive == true) return
+    private suspend fun revalidate(ctx: NetworkContext, profiles: List<VerifiedNetworkProfile>, userStarted: Boolean) {
         val now = System.currentTimeMillis()
-        val first = plan.revalidate.firstOrNull() ?: return
-        if (refusal(userStarted, first.parentFingerprint, now) != null) return
+        val first = profiles.firstOrNull() ?: return
+        refusal(userStarted, first.parentFingerprint, now)?.let { if (userStarted) publish(message = it); return }
         // One original config per recheck, so results and any AUTO_APPLY stay with the right config.
-        val parents = plan.revalidate.filter { it.parentFingerprint == first.parentFingerprint }
-            .mapNotNull { v -> loadProfile(v.parentProfileId)?.let { v to it } }
-        if (parents.isEmpty()) return
+        val parent = loadProfile(first.parentProfileId) ?: return
         recentStarts.addLast(now)
         val id = store.newExperimentId()
-        val built = parents.mapNotNull { (v, p) ->
-            val copy = generator.rebuild(p, v.mutationProfileId, v.endpoint) ?: return@mapNotNull null
+        val built = profiles.filter { it.parentFingerprint == first.parentFingerprint }.mapNotNull { v ->
+            val copy = generator.rebuild(parent, v.mutationProfileId, v.endpoint) ?: return@mapNotNull null
             LabCandidate(
-                CandidateGenerator.idOf(id, v.mutationProfileId, v.endpoint), id, p.id, p.effectiveFingerprint, v.mutationProfileId,
-                v.endpoint, BpbRecoveryEngine.diff(p, copy).map { if (it.field == "address") it.copy(from = "original") else it },
+                CandidateGenerator.idOf(id, v.mutationProfileId, v.endpoint), id, parent.id, parent.effectiveFingerprint, v.mutationProfileId,
+                v.endpoint, BpbRecoveryEngine.diff(parent, copy).map { if (it.field == "address") it.copy(from = "original") else it },
                 now, true, null, PromotionState.EXPERIMENTAL
             ) to copy
         }
         if (built.isEmpty()) return
-        val e = LabExperiment(id, ctx.sessionId, ctx.contextKey, ctx.label, first.parentProfileId, first.parentFingerprint, null,
+        steps.clear()
+        steps += LabStep(STEP_RECHECK, LabStep.State.DONE, "${ctx.label}: ${built.size} profile(s) that worked here before")
+        listOf(STEP_TESTING, STEP_STABILITY, STEP_DONE).forEach { steps += LabStep(it, LabStep.State.PENDING) }
+        val e = LabExperiment(id, ctx.sessionId, ctx.contextKey, ctx.label, parent.id, parent.effectiveFingerprint, null,
             ExperimentState.CREATED, now, candidates = built.map { it.first }, note = "Recheck on a returning network.")
-        job = scope.launch {
-            val result = ExperimentEngine(budget.copy(rounds = 1), policy).run(e, built.associate { it.first.candidateId to it.second }, ::test,
-                { tracker.isCurrent(ctx.sessionId) }) { store.saveExperiment(it); publish(running = it.takeIf { x -> !x.state.terminal }) }
-            parents.firstOrNull { it.second.id == result.parentProfileId }?.second?.let { finish(result, it, ctx) }
+        run(e, built.associate { it.first.candidateId to it.second }, budget.copy(rounds = 1), parent, ctx)
+    }
+
+    private suspend fun run(e: LabExperiment, copies: Map<String, VlessProfile>, b: LabBudget, parent: VlessProfile, ctx: NetworkContext) {
+        var round = 0
+        val result = ExperimentEngine(b, policy).run(e, copies, ::test, { tracker.isCurrent(ctx.sessionId) }) { x ->
+            store.saveExperiment(x)
+            when (x.state) {
+                ExperimentState.TESTING -> {
+                    round = x.measurements.map { it.stage }.distinct().size + 1
+                    step(STEP_TESTING, LabStep.State.RUNNING, "Round ${round.coerceAtMost(b.rounds)} of ${b.rounds} · ${x.candidates.count { it.securityPassed }} copies")
+                }
+                ExperimentState.VERIFYING -> {
+                    step(STEP_TESTING, LabStep.State.DONE, "${x.measurements.size} real requests")
+                    step(STEP_STABILITY, LabStep.State.RUNNING)
+                }
+                else -> Unit
+            }
+            publish(running = x.takeIf { !it.state.terminal })
         }
+        val ok = result.state == ExperimentState.VERIFIED || result.state == ExperimentState.CANDIDATE
+        if (result.state != ExperimentState.CANCELLED && result.state != ExperimentState.REJECTED) {
+            step(STEP_STABILITY, if (ok) LabStep.State.DONE else LabStep.State.FAILED, result.best?.let { "${it.candidateId} · ${(it.stats.successRate * 100).toInt()}%" } ?: "")
+        }
+        step(STEP_DONE, if (ok) LabStep.State.DONE else LabStep.State.FAILED, result.state.name.lowercase().replaceFirstChar { it.uppercase() })
+        steps.replaceAll { if (it.state == LabStep.State.PENDING || it.state == LabStep.State.RUNNING) it.copy(state = LabStep.State.SKIPPED) else it }
+        finish(result, parent, ctx)
+    }
+
+    private fun Boolean?.asStep() = when (this) { true -> LabStep.State.DONE; false -> LabStep.State.FAILED; null -> LabStep.State.SKIPPED }
+    private fun measuredWord(v: Boolean?) = when (v) { true -> "Works"; false -> "Blocked or unavailable"; null -> "Not measured" }
+
+    private fun step(title: String?, state: LabStep.State, detail: String = "") {
+        if (title == null) {
+            steps.replaceAll { if (it.state == LabStep.State.RUNNING || it.state == LabStep.State.PENDING) it.copy(state = state) else it }
+        } else {
+            val i = steps.indexOfFirst { it.title == title }
+            val s = LabStep(title, state, detail)
+            if (i >= 0) steps[i] = s else steps += s
+            if (state != LabStep.State.PENDING) log("$title: ${state.name.lowercase()}${if (detail.isNotBlank()) " · $detail" else ""}")
+        }
+        publish()
+    }
+
+    private fun fail(title: String, why: String) {
+        step(title, LabStep.State.FAILED, why)
+        steps.replaceAll { if (it.state == LabStep.State.PENDING) it.copy(state = LabStep.State.SKIPPED) else it }
+        publish(running = null, message = why)
+    }
+
+    private fun log(line: String) {
+        val t = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        log.addLast("$t $line")
+        while (log.size > 80) log.removeFirst()
     }
 
     private suspend fun test(profiles: List<VlessProfile>): List<TestOutcome> = withContext(Dispatchers.IO) {
@@ -304,14 +422,27 @@ class LabController(
         plan: LabStore.ReturnPlan? = _state.value.plan,
         message: String? = _state.value.message
     ) {
-        _state.value = Snapshot(
-            network = network ?: tracker.current, capability = capability, automation = store.automation(), running = running,
+        _state.value = LabSnapshot(
+            network = network ?: tracker.current, capability = capability, automation = store.automation(), running = running, steps = steps.toList(),
             experiments = store.experiments().sortedByDescending { it.startTime }, verified = store.verifiedProfiles(),
-            discoveries = store.discoveries(), networks = store.networks(), plan = plan, message = message
+            discoveries = store.discoveries(), networks = store.networks(), plan = plan, message = message, log = log.toList()
         )
     }
 
     companion object {
         const val APPLY_TTL_MS = 24L * 60 * 60 * 1000
+
+        const val STEP_BASELINE = "Measuring network baseline"
+        const val STEP_DNS = "Checking DNS"
+        const val STEP_IPV6 = "Testing IPv6"
+        const val STEP_TLS = "Testing TLS"
+        const val STEP_TRANSPORT = "Evaluating the config as it is"
+        const val STEP_CANDIDATES = "Creating safe candidates"
+        const val STEP_SECURITY = "Security validation"
+        const val STEP_TESTING = "Testing candidates"
+        const val STEP_STABILITY = "Stability verification"
+        const val STEP_DONE = "Experiment completed"
+        const val STEP_RECHECK = "Known network: rechecking what worked"
+        val LIVE_STEPS = listOf(STEP_BASELINE, STEP_DNS, STEP_IPV6, STEP_TLS, STEP_TRANSPORT, STEP_CANDIDATES, STEP_SECURITY, STEP_TESTING, STEP_STABILITY, STEP_DONE)
     }
 }

@@ -13,7 +13,7 @@ listed under Limitations until the product owner runs it on a phone.
 | Field | Value |
 |---|---|
 | Branch | `feature/ai-gateway-lab-uvhw6m` |
-| Base | `main` at `8640eb8` (Merge PR #30) |
+| Base | `main` at `8640eb8` (Merge PR #30); DrFX merged the work up to the LAB controller as PR #32 |
 | Version | 1.0.0 / 27 during the work; V1.0.1 at the end, as the product owner asked (overrides section 60's "do not auto-increment") |
 
 ---
@@ -105,3 +105,25 @@ network memory, network-session tracking; research candidates; core capability r
 | Task | Phase | Status | Files | Tests | Result / limitation |
 |---|---|---|---|---|---|
 | MX-AI-P00-T01 | 0 Audit | COMPLETED | this file | n/a | Audit above |
+| MX-AI-P01-T01 | 1 Gateway foundation | COMPLETED | `ai/gateway/AiTypes.kt`, `AiProviderAdapter.kt`, `ProviderHttp.kt`, `ProviderRegistry.kt`, `MaximusAiGateway.kt` | `AiGatewayTest` | Untested against real provider APIs |
+| MX-AI-P02-T01 | 2 BYOK vault | COMPLETED | `AiCredentialVault.kt`, `KeystoreSecretStore.kt` | `AiGatewayTest`, `AiGatewayBoundaryTest` | Keystore path runs only on a phone |
+| MX-AI-P02-T02 | 2 Adapters (Gemini, NVIDIA NIM, 9Router, OpenRouter, OpenAI, compatible) | COMPLETED | `OpenAiCompatibleAdapterBase.kt`, `GeminiAdapter.kt` | `AiGatewayTest` (MockWebServer) | Response shapes from public docs, not live calls |
+| MX-AI-P02-T03 | 2 Model discovery and custom IDs | COMPLETED | `AiGatewaySettings.kt` (ModelCatalog), `ModelHeuristics.kt` | `AiGatewayTest` | Inferred metadata is labelled INFERRED |
+| MX-AI-P03-T01 | 3 Router (Manual, Auto, Smart) | COMPLETED | `SmartModelRouter.kt` | `AiGatewayTest` | |
+| MX-AI-P03-T02 | 3 Failover, health, circuit breaker | COMPLETED | `ProviderCircuitBreaker.kt`, `MaximusAiGateway.kt` | `AiGatewayTest` | |
+| MX-AI-P03-T03 | 3 Main Agent through the gateway | COMPLETED | `ai/AiAgentManager.kt`, `AiAgentPreferences.kt` | `AiGatewayBoundaryTest`, `PrivateDnsAndSecurityTest` | Old Gemini key migrates into the vault once; untested on a phone |
+| MX-AI-P04-T01 | 4 Failure taxonomy | COMPLETED | `vpn/lab/FailureClassifier.kt`, `LabModels.kt` | `LabCoreTest` | |
+| MX-AI-P04-T02 | 4 Mutation allowlist + Security Gate | COMPLETED | `CandidateMutationPolicy.kt` | `LabCoreTest`, `LabResearchTest` | |
+| MX-AI-P04-T03 | 4 Candidates, experiments, budget | COMPLETED | `CandidateGenerator.kt`, `ExperimentEngine.kt` | `LabCoreTest` | Fake tester in tests |
+| MX-AI-P04-T04 | 4 Promotion, store, Network Memory, sessions | COMPLETED | `CandidatePromotionPolicy.kt`, `LabStore.kt` | `LabCoreTest` | |
+| MX-AI-P04-T05 | 4 Core capability registry | COMPLETED | `CoreCapabilityRegistry.kt` | `LabCoreTest` | MASQUE and TUIC marked unsupported |
+| MX-AI-P04-T06 | 4 Phone controller, AUTO_APPLY via recovery ledger | IMPLEMENTED | `LabController.kt` | CI compile only | Needs a phone: real requests, network callbacks, battery |
+| MX-AI-P05-T01 | 5 LAB screens | IMPLEMENTED | `ui/lab/*` | previews | Waiting for DrFX's approval of `/previews/ai-lab` |
+| MX-AI-P05-T02 | 5 AI settings screens | IMPLEMENTED | `ui/ai/AiSettings*` | previews | Waiting for DrFX's approval |
+| MX-AI-P06-T01 | 6 LAB Agent (advisory) | COMPLETED | `ai/agents/AdvisoryAgents.kt`, `vpn/lab/LabBrief.kt` | `AdvisoryAgentsTest`, `LabResearchTest` | Suggestions only reach LAB through the allowlist |
+| MX-AI-P07-T01 | 7 Research pipeline + Research Agent | COMPLETED | `vpn/lab/research/*`, `ai/agents/AdvisoryAgents.kt` | `LabResearchTest`, `AdvisoryAgentsTest` | GitHub API reachability from Iran unknown |
+| MX-AI-P07-T02 | 7 Remote probes | IMPLEMENTED | `research/RemoteProbe.kt` | n/a | Interface only, by design (section 37) |
+| MX-AI-P07-T03 | Telemetry (section 49) | NOT_STARTED | n/a | n/a | Skipped on purpose: DrFX rejected telemetry on 2026-10-08 |
+| MX-AI-P08-T01 | 8 Docs | COMPLETED | `docs/MAXIMUS_AI_GATEWAY.md`, `docs/MAXIMUS_NETWORK_LAB.md` | n/a | |
+| MX-AI-P08-T02 | 8 Tests, lint, hygiene in CI | TESTING | `.github/workflows/checks.yml` | CI | |
+| MX-AI-P08-T03 | 8 Privacy fix: provider-style keys redacted from model-bound text | COMPLETED | `core/AiPrivacyFilter.kt` | `AdvisoryAgentsTest` | Found while testing the LAB Agent |

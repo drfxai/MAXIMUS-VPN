@@ -120,9 +120,10 @@ class CandidateGenerator(
 
     /** Rebuilds a stored candidate's copy from its original; null when the mutation no longer exists or passes. */
     fun rebuild(parent: VlessProfile, mutationProfileId: String, endpoint: String?): VlessProfile? {
-        val derived = when (mutationProfileId) {
-            TRANSPORT_H2 -> TransportCapabilityEngine.h2Fallback(parent)
-            FAMILY_V6 -> parent.copy(targetStrategy = "UseIPv6v4")
+        val derived = when {
+            mutationProfileId.startsWith(SUGGESTION) -> suggestionOf(mutationProfileId)?.let { (f, v) -> CandidateMutationPolicy.checkRequest(parent, mapOf(f to v)).second }
+            mutationProfileId == TRANSPORT_H2 -> TransportCapabilityEngine.h2Fallback(parent)
+            mutationProfileId == FAMILY_V6 -> parent.copy(targetStrategy = "UseIPv6v4")
             else -> profiles.firstOrNull { it.key == mutationProfileId && !it.isExpired(clock()) }?.derive(parent, endpoint)
         } ?: return null
         return derived.takeIf { CandidateMutationPolicy.check(parent, it).allowed }
@@ -131,6 +132,11 @@ class CandidateGenerator(
     companion object {
         const val TRANSPORT_H2 = "transport-h2-fallback@v1"
         const val FAMILY_V6 = "address-family-ipv6-first@v1"
+        /** A change the LAB Agent suggested, kept as field=value so it can be rebuilt and checked again. */
+        const val SUGGESTION = "suggested:"
+
+        fun suggestionId(field: String, value: String) = "$SUGGESTION$field=$value"
+        fun suggestionOf(id: String): Pair<String, String>? = id.removePrefix(SUGGESTION).split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] }
 
         fun idOf(experimentId: String, mutation: String, endpoint: String?): String {
             val d = MessageDigest.getInstance("SHA-256").digest("$experimentId|$mutation|${endpoint.orEmpty()}".toByteArray())

@@ -102,7 +102,7 @@ internal fun LabText(
 internal fun Modifier.labCard(c: LabColors, radius: Dp = 20.dp) =
     this.clip(RoundedCornerShape(radius)).background(c.card).border(1.dp, c.stroke, RoundedCornerShape(radius))
 
-private fun accentBrush(c: LabColors) = Brush.linearGradient(listOf(c.accent, c.accent2))
+internal fun accentBrush(c: LabColors) = Brush.linearGradient(listOf(c.accent, c.accent2))
 
 internal fun LabFamily.icon(): ImageVector = when (this) {
     LabFamily.REALITY -> Icons.Rounded.Shield
@@ -153,7 +153,7 @@ internal fun scoreWord(score: Int) = when {
 }
 
 @Composable
-private fun Gauge(c: LabColors, value: Int?, size: Dp, label: String, sub: String) {
+internal fun Gauge(c: LabColors, value: Int?, size: Dp, label: String, sub: String) {
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val sw = size.toPx() * 0.075f
@@ -190,7 +190,7 @@ internal fun GradientButton(c: LabColors, text: String, icon: ImageVector, enabl
 }
 
 @Composable
-private fun Pill(text: String, color: Color, filled: Boolean = true) {
+internal fun Pill(text: String, color: Color, filled: Boolean = true) {
     Box(
         Modifier.clip(RoundedCornerShape(50)).background(if (filled) color.copy(alpha = 0.14f) else Color.Transparent)
             .border(if (filled) 0.dp else 1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(50))
@@ -206,7 +206,7 @@ internal fun IconTile(icon: ImageVector, color: Color, size: Dp = 40.dp) {
 }
 
 @Composable
-private fun SectionLabel(c: LabColors, text: String, trailing: String = "", onTrailing: () -> Unit = {}) {
+internal fun SectionLabel(c: LabColors, text: String, trailing: String = "", onTrailing: () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         LabText(text.uppercase(), c.text3, 11.5.sp, FontWeight.SemiBold, Modifier.weight(1f), letterSpacing = 0.9.sp, maxLines = 1)
         if (trailing.isNotEmpty()) LabText(trailing, c.accent, 12.5.sp, FontWeight.SemiBold, Modifier.clickable(onClick = onTrailing), maxLines = 1)
@@ -259,7 +259,7 @@ internal fun ToggleRow(c: LabColors, title: String, sub: String, on: Boolean, on
 }
 
 @Composable
-private fun Stat(c: LabColors, label: String, value: String, modifier: Modifier) {
+internal fun Stat(c: LabColors, label: String, value: String, modifier: Modifier) {
     Column(modifier.clip(RoundedCornerShape(14.dp)).background(c.cardAlt).padding(horizontal = 12.dp, vertical = 10.dp)) {
         LabText(label, c.text3, 11.sp, FontWeight.Medium, maxLines = 1)
         Spacer(Modifier.height(2.dp))

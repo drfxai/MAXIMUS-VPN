@@ -99,8 +99,8 @@ configuration with a single tap.
 
 | File | For |
 |---|---|
-| `MAXIMUSVPN-V1.0.0-arm64-v8a.apk` | Most modern Android phones (recommended) |
-| `MAXIMUSVPN-V1.0.0-universal.apk` | Any supported Android device |
+| `MAXIMUSVPN-V1.0.1-arm64-v8a.apk` | Most modern Android phones (recommended) |
+| `MAXIMUSVPN-V1.0.1-universal.apk` | Any supported Android device |
 | `SHA256SUMS` | Verify your download |
 
 **[Get the latest release →](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)**

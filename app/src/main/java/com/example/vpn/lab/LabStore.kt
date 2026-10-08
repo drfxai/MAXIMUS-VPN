@@ -151,6 +151,7 @@ class LabStore(
         mutation.startsWith("endpoint") -> "Edge address"
         mutation == CandidateGenerator.TRANSPORT_H2 -> "HTTP/2 instead of QUIC"
         mutation == CandidateGenerator.FAMILY_V6 -> "IPv6 first"
+        mutation.startsWith(CandidateGenerator.SUGGESTION) -> "Suggested " + (CandidateGenerator.suggestionOf(mutation)?.first ?: "change")
         else -> mutation.substringBefore('@')
     }
 

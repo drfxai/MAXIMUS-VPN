@@ -8,10 +8,13 @@ object AiPrivacyFilter {
     private val domains = Regex("(?i)\\b(?:[a-z0-9_-]+\\.)+[a-z][a-z0-9-]{1,62}\\b")
     private val keys = Regex("(?i)\\b(?:api[_-]?key|api[_-]?token|admin[_-]?password|password|passwd|private[_-]?key|secret|authorization|token)\\b[\\s\"']*[:=][\\s\"']*[^\\s,}\"']+")
     private val googleKeys = Regex("\\bAIza[A-Za-z0-9_-]{20,}\\b")
+    /** OpenAI, OpenRouter and NVIDIA style provider keys (sk-…, sk-or-…, sk-proj-…, nvapi-…). */
+    private val providerKeys = Regex("\\b(?:sk|nvapi)-[A-Za-z0-9_-]{16,}")
     fun redact(text: String): String {
         var result = SecretRedactor.redact(text)
         result = keys.replace(result, "[REDACTED_SECRET]")
         result = googleKeys.replace(result, "[REDACTED_SECRET]")
+        result = providerKeys.replace(result, "[REDACTED_SECRET]")
         result = urls.replace(result, "[REDACTED_URL]")
         result = ipv4.replace(result, "[REDACTED_IP]")
         result = ipv6.replace(result, "[REDACTED_IP]")

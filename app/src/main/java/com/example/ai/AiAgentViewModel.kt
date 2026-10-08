@@ -198,6 +198,9 @@ class AiAgentViewModel(
         preferences.resetTokens()
     }
 
+    /** Picks up provider changes made on the AI settings screen. */
+    fun refreshGateway() = preferences.refreshGateway()
+
     fun openSetupDialog(show: Boolean) {
         _uiState.value = _uiState.value.copy(showSetupDialog = show, testKeyStatus = null)
     }
