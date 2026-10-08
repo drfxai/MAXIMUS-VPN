@@ -63,11 +63,32 @@ object ServerTester {
                     ServerTestResult(profile.id, ServerTestStatus.Unavailable("No traffic through the proxy: ${outcome.reason}"))
                 }
                 is RealDelayProbe.Outcome.NotRun, null -> {
+                    // An unprotected check while the VPN runs goes through the tunnel: it measures the
+                    // current server's exit, which cannot reach many servers (a Cloudflare Worker exit
+                    // cannot open Cloudflare addresses), so a working server would be reported as down.
+                    if (protectSocket == null && (outcome as? RealDelayProbe.Outcome.NotRun)?.reason == RealDelayProbe.CORE_RUNNING) {
+                        return@map whileTunnelRuns(profile, com.example.vpn.VpnController.connectionState.value)
+                    }
                     XrayLogManager.d("SERVER", "Real-delay test not run for '${profile.name}' (${(outcome as? RealDelayProbe.Outcome.NotRun)?.reason}); checking reachability only.")
                     testTransport(profile, timeoutMs, protectSocket)
                 }
             }
         }
+    }
+
+    /**
+     * The result for [profile] while the VPN's core runs and no real test is possible: the server in use
+     * reports the latency of the last request verified through the tunnel; any other server is not
+     * measured ([ServerTestStatus.Idle]) rather than reported as down.
+     */
+    internal fun whileTunnelRuns(profile: VlessProfile, state: com.example.data.model.ConnectionState): ServerTestResult {
+        val active = state.activeProfile
+        val ping = state.pingMs
+        if (state.isConnected && ping != null && active != null && active.effectiveFingerprint == profile.effectiveFingerprint) {
+            return ServerTestResult(profile.id, if (ping < REAL_DELAY_FAST_MS) ServerTestStatus.Available(ping) else ServerTestStatus.Slow(ping))
+        }
+        XrayLogManager.d("SERVER", "'${profile.name}' not tested while the VPN is on; disconnect to test it on this network.")
+        return ServerTestResult(profile.id, ServerTestStatus.Idle)
     }
 
     /** A request through a Cloudflare Worker on a filtered network often needs several seconds. */

@@ -424,12 +424,12 @@ class ServerViewModel(
             val result = ServerTester.testServer(profile)
             _serverTestingStates.value = _serverTestingStates.value + (profile.id to result.status)
 
-            if (result.status is ServerTestStatus.Available) {
-                repository.updateLatency(profile.id, result.status.latencyMs)
-            } else if (result.status is ServerTestStatus.Slow) {
-                repository.updateLatency(profile.id, result.status.latencyMs)
-            } else {
-                repository.updateLatency(profile.id, null)
+            when (result.status) {
+                is ServerTestStatus.Available -> repository.updateLatency(profile.id, result.status.latencyMs)
+                is ServerTestStatus.Slow -> repository.updateLatency(profile.id, result.status.latencyMs)
+                // Not measured (the VPN is on): the last result stays.
+                ServerTestStatus.Idle -> Unit
+                else -> repository.updateLatency(profile.id, null)
             }
         }
     }
@@ -461,7 +461,8 @@ class ServerViewModel(
                         is ServerTestStatus.Slow -> result.status.latencyMs
                         else -> null
                     }
-                    repository.updateLatency(profile.id, latency)
+                    // Not measured (the VPN is on): the last result stays.
+                    if (result.status != ServerTestStatus.Idle) repository.updateLatency(profile.id, latency)
                     _testAllProgress.value = (i + 1) to currentProfiles.size
                 }
             } finally {

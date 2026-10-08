@@ -21,6 +21,9 @@ import java.lang.reflect.Proxy
 object RealDelayProbe {
     const val PROBE_URL = "https://www.gstatic.com/generate_204"
 
+    /** The [Outcome.NotRun] reason while the VPN's own core runs (libXray then refuses a probe). */
+    const val CORE_RUNNING = "the VPN's Xray core is running"
+
     /** libXray accepts at most five configs per pingBatch call. */
     const val MAX_BATCH = 5
 
@@ -114,7 +117,7 @@ object RealDelayProbe {
         // Never replace the dialer controller of a running VPN core.
         val state = JSONObject(call(JSONObject().put("apiVersion", 3).put("method", "getXrayState").toString()))
         if (state.optJSONObject("data")?.optBoolean("running", false) == true) {
-            return JSONObject().put("success", false).put("error", "the VPN's Xray core is running").toString()
+            return JSONObject().put("success", false).put("error", CORE_RUNNING).toString()
         }
         registerDialerController(cls)
         return call(request)

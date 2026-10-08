@@ -75,11 +75,12 @@ class LabController(
         runCatching {
             cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) = scheduleRefresh()
-                override fun onLost(network: Network) {
-                    tracker.lost()
-                    scheduleRefresh()
-                }
-                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = scheduleRefresh()
+                // Losing one network (mobile data dropping while Wi-Fi stays, for example) is not losing the
+                // phone's network: the refresh measures what is left and starts a new session only when the
+                // network really changed, or ends the session when nothing is left.
+                override fun onLost(network: Network) = scheduleRefresh()
+                // Capability updates arrive every few seconds on Wi-Fi (signal strength, bandwidth). They do
+                // not change the network, so they no longer start a measurement each time.
             })
         }.onFailure { XrayLogManager.w("LAB", "Network watch unavailable: ${it.message}") }
         scheduleRefresh()
