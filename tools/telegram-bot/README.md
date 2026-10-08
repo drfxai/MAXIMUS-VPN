@@ -20,6 +20,13 @@ overview. `/addconfig` and `/clearconfigs` still work as the older names of `/ad
 Deleting always asks first: the bot shows the items and Yes/No buttons, and nothing is removed until
 you press Yes. `/admin` also shows buttons for the lists.
 
+## Signed subscription (`/sub.signed`, `/vip.signed`)
+
+With the secret `OFFICIAL_SIGNING_KEY` (ECDSA P-256, PKCS#8 PEM) the Worker also serves the
+subscriptions as signed envelopes that any mirror can copy unchanged. The app then accepts the official
+subscription only when signed, and tries independent mirrors when the Worker is blocked. Setup, mirrors
+and key handling: [docs/SUBSCRIPTIONS.md](../../docs/SUBSCRIPTIONS.md).
+
 ## Free list status from Telegram
 
 `/statusfree` shows the published free list (count, age, signature, rejection reasons), `/sources` each

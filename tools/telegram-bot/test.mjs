@@ -1,7 +1,7 @@
 // node tools/telegram-bot/test.mjs
 import assert from "node:assert/strict";
-import worker, { handle, collectConfigs, extractLinks, gitHubMirrors, describe, pickNumbers, redact, unseal, keyStatus, normalizeModel, verifyInitData, nextBuild, scrub } from "./worker.js";
-import { createHmac } from "node:crypto";
+import worker, { signedSubscription, SIGNED_TTL_MS, handle, collectConfigs, extractLinks, gitHubMirrors, describe, pickNumbers, redact, unseal, keyStatus, normalizeModel, verifyInitData, nextBuild, scrub } from "./worker.js";
+import { createHmac, generateKeyPairSync, verify as verifySignature, createHash } from "node:crypto";
 
 const MODELS = { models: [
   { name: "models/gemini-3.8-flash", displayName: "Gemini 3.8 Flash", supportedGenerationMethods: ["generateContent"] },
@@ -521,6 +521,29 @@ async function call(env, path, { body, data, now = NOW } = {}) {
   assert.equal(kv.get("origin"), "https://bot.example");
   await handle(777, "/panel", env, 0);
   assert.equal(sent.at(-1).reply_markup.inline_keyboard[0][0].web_app.url, "https://bot.example/admin");
+}
+
+// The signed subscription: one envelope, verifiable with SHA256withECDSA (DER) as the app does it.
+{
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const pem = privateKey.export({ type: "pkcs8", format: "pem" });
+  const env = { ...fakeEnv(() => ({ body: links.join("\n") })).env, OFFICIAL_SIGNING_KEY: pem, VIP_CONFIGS: links[0] };
+  const res = await signedSubscription(env, "free", 1_700_000_000_000);
+  assert.equal(res.status, 200);
+  const envelope = JSON.parse(await res.text());
+  const manifest = JSON.parse(envelope.manifest);
+  assert.equal(manifest.id, "official-sub");
+  assert.equal(manifest.sequence, 1_700_000_000_000);
+  assert.equal(manifest.expires, 1_700_000_000_000 + SIGNED_TTL_MS);
+  assert.equal(manifest.sha256, createHash("sha256").update(envelope.payload).digest("hex"));
+  assert.ok(verifySignature("sha256", Buffer.from(envelope.manifest), { key: publicKey, dsaEncoding: "der" }, Buffer.from(envelope.signature, "base64")));
+  // A changed manifest no longer verifies.
+  assert.ok(!verifySignature("sha256", Buffer.from(envelope.manifest.replace("official-sub", "official-vip")), { key: publicKey, dsaEncoding: "der" }, Buffer.from(envelope.signature, "base64")));
+  const vip = JSON.parse(await (await signedSubscription(env, "vip")).text());
+  assert.equal(JSON.parse(vip.manifest).id, "official-vip");
+  // Routed, and refused when the Worker has no key.
+  assert.equal((await worker.fetch(new Request("https://bot.example/sub.signed"), env)).status, 200);
+  assert.equal((await worker.fetch(new Request("https://bot.example/sub.signed"), { ...env, OFFICIAL_SIGNING_KEY: "" })).status, 503);
 }
 
 console.log("telegram bot: all checks passed");

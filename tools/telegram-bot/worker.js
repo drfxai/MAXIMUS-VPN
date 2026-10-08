@@ -40,6 +40,8 @@ export default {
     if (request.method === "GET" && url.pathname === "/status") return status(url, env);
     if (request.method === "GET" && url.pathname === "/sub") return subscription(env);
     if (request.method === "GET" && url.pathname === "/vip") return subscription(env, "vip");
+    if (request.method === "GET" && url.pathname === "/sub.signed") return signedSubscription(env);
+    if (request.method === "GET" && url.pathname === "/vip.signed") return signedSubscription(env, "vip");
     if (request.method === "GET" && url.pathname === "/admin") return adminPage();
     if (url.pathname.startsWith("/api/")) return api(request, env);
     if (request.method === "POST" && url.pathname === "/webhook") {
@@ -79,6 +81,62 @@ export async function subscription(env, tier = "free") {
       "profile-update-interval": "6",
     },
   });
+}
+
+/** How long a signed copy stays valid; mirrors must refresh their copy before it runs out. */
+export const SIGNED_TTL_MS = 7 * 24 * 3_600_000;
+
+/**
+ * The subscription as one signed envelope: {manifest, signature, payload}. Built from a single snapshot,
+ * so payload and signature always match, and any mirror can serve the file unchanged (the app checks
+ * the signature, the subscription id, the SHA-256, the expiry and that the sequence never goes back).
+ * Signed with OFFICIAL_SIGNING_KEY, an ECDSA P-256 private key in PKCS#8 PEM form (a Worker secret).
+ */
+export async function signedSubscription(env, tier = "free", now = Date.now()) {
+  if (!env.OFFICIAL_SIGNING_KEY) return new Response("signing is not configured", { status: 503 });
+  const plain = await subscription(env, tier);
+  if (plain.status !== 200) return plain;
+  const payload = await plain.text();
+  const manifest = JSON.stringify({
+    version: 1,
+    id: tier === "vip" ? "official-vip" : "official-sub",
+    sequence: now,
+    expires: now + SIGNED_TTL_MS,
+    sha256: await sha256Hex(payload),
+    bytes: new TextEncoder().encode(payload).length,
+  });
+  const signature = await signManifest(manifest, env.OFFICIAL_SIGNING_KEY);
+  return new Response(JSON.stringify({ manifest, signature, payload }), {
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300" },
+  });
+}
+
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** ECDSA P-256 / SHA-256 over the manifest's UTF-8 bytes, DER-encoded and Base64, as Java's SHA256withECDSA expects. */
+export async function signManifest(manifest, pem) {
+  const der = Uint8Array.from(atob(pem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "")), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const raw = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(manifest)));
+  let binary = "";
+  for (const b of rawToDer(raw)) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+/** WebCrypto returns r||s (64 bytes); DER is SEQUENCE { INTEGER r, INTEGER s }. */
+function rawToDer(raw) {
+  const int = (bytes) => {
+    let i = 0;
+    while (i < bytes.length - 1 && bytes[i] === 0) i++;
+    let v = bytes.slice(i);
+    if (v[0] & 0x80) v = Uint8Array.from([0, ...v]);
+    return [0x02, v.length, ...v];
+  };
+  const body = [...int(raw.slice(0, 32)), ...int(raw.slice(32))];
+  return Uint8Array.from([0x30, body.length, ...body]);
 }
 
 async function processUpdate(update, env) {

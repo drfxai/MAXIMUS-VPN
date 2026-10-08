@@ -52,7 +52,15 @@ class SubscriptionManager(
     /** Receives the Iran intelligence rules published with the free list, after their signature check. */
     private val intelSink: ((String) -> Unit)? = runCatching {
         com.example.RayApplication.instance.iranIntel.let { store -> { json: String -> store.replace(json) } }
-    }.getOrNull()
+    }.getOrNull(),
+    /** The official subscriptions' signing key (empty: they are accepted unsigned, as before). */
+    private val officialKey: String = OfficialSigning.PUBLIC_KEY,
+    /** The highest signed sequence accepted per official subscription (anti-rollback). */
+    private val officialSequences: OfficialSequences = runCatching {
+        OfficialSequences.Prefs(com.example.RayApplication.instance.getSharedPreferences("official_sequences", android.content.Context.MODE_PRIVATE))
+    }.getOrElse { OfficialSequences.InMemory() },
+    /** Independent copies of the official subscriptions (base addresses). */
+    private val officialMirrorBases: String = com.example.BuildConfig.OFFICIAL_MIRRORS
 ) {
     companion object {
         private const val MAX_SAFE_REDIRECTS = 5
@@ -290,12 +298,24 @@ class SubscriptionManager(
 
         val isFree = FreeConfigList.isList(subscription.url)
         if (isFree) _freeProgress.value = FreeRefreshProgress(FreeRefreshProgress.Stage.DOWNLOADING)
-        val candidates = SubscriptionSources.candidates(subscription.url, subscription.mirrors)
+        // A signed official subscription can come from any independent copy: the envelope verifies on its own.
+        val signedOfficial = OfficialSigning.isOfficial(subscription.url) && OfficialSigning.enforced(officialKey)
+        val officialId = OfficialSigning.idFor(subscription.url)
+        val extraMirrors = if (signedOfficial) OfficialSubscriptions.mirrorsFor(subscription.url, officialMirrorBases) else emptyList()
+        val candidates = SubscriptionSources.candidates(subscription.url, (subscription.mirrors + extraMirrors).distinct())
             .filter { isValidSubscriptionUrl(it) }
+        val verifiedSequence = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val fetcher = SubscriptionFetcher(
             download = (download ?: ::httpDownload).let { get ->
-                // The free list is taken from any address only with a valid signature beside it.
-                if (FreeConfigList.isList(subscription.url)) { url: String -> FreeConfigList.download(url, get, freeListKey) } else get
+                when {
+                    // The free list is taken from any address only with a valid signature beside it.
+                    FreeConfigList.isList(subscription.url) -> { url: String -> FreeConfigList.download(url, get, freeListKey) }
+                    signedOfficial -> { url: String ->
+                        OfficialSigning.download(url, get, officialId, officialSequences.last(officialId), officialKey)
+                            .also { verifiedSequence[url] = it.sequence }.payload
+                    }
+                    else -> get
+                }
             },
             count = { parse(it, subscription).validProfiles.size },
             staggerMs = staggerMs
@@ -309,6 +329,9 @@ class SubscriptionManager(
                         _freeProgress.value = FreeRefreshProgress(FreeRefreshProgress.Stage.SWAPPING,
                             candidates = importResult.configurationsFound, valid = importResult.validProfiles.size)
                         return@withContext swapFreeList(subscription, importResult, outcome)
+                    }
+                    if (signedOfficial) {
+                        return@withContext replaceOfficial(subscription, importResult, outcome, officialId, verifiedSequence[outcome.url])
                     }
                     val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
                     snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
@@ -354,6 +377,34 @@ class SubscriptionManager(
         } finally {
             if (isFree) _freeProgress.value = null
         }
+    }
+
+    /**
+     * A verified official list replaces that subscription's servers in one transaction: servers the admin
+     * removed go, new ones are added, the rest keep their test results. The server in use, the selected
+     * one and favourites are never removed. The sequence is recorded only after the swap succeeded.
+     */
+    private suspend fun replaceOfficial(
+        subscription: SubscriptionInfo,
+        importResult: com.example.data.model.UniversalImportResult,
+        outcome: SubscriptionFetcher.Outcome.Fetched,
+        officialId: String,
+        sequence: Long?
+    ): SyncResult {
+        val all = serverRepository.getAllProfilesOnce()
+        val saved = serverRepository.getProfilesBySubscription(subscription.url).first()
+        val plan = OfficialSwap.plan(saved, importResult.validProfiles, all, inUseIds())
+        serverRepository.replaceAtomically(plan.delete.map { it.id }, plan.insert)
+        sequence?.let { officialSequences.record(officialId, it) }
+        snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
+        val viaMirror = outcome.url.takeIf { it != subscription.url }
+        outcome.failures.forEach { (url, why) ->
+            XrayLogManager.w("SUBSCRIPTION", "Source ${SecretRedactor.redact(url)} failed: ${SecretRedactor.redact(why)}")
+        }
+        subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), error = null)
+        XrayLogManager.i("SUBSCRIPTION", "Signed subscription '${subscription.name}' verified${viaMirror?.let { " via ${SecretRedactor.redact(it)}" }.orEmpty()}: " +
+            "${plan.insert.size} added, ${plan.delete.size} removed, ${plan.kept} kept, ${plan.retained} kept because in use or favourite.")
+        return SyncResult(subscription.id, importResult.configurationsFound, plan.insert.size, 0, true, viaMirror = viaMirror)
     }
 
     private val _freeProgress = kotlinx.coroutines.flow.MutableStateFlow<FreeRefreshProgress?>(null)

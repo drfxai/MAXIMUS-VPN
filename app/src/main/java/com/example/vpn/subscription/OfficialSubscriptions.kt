@@ -17,6 +17,18 @@ object OfficialSubscriptions {
     val URLS: List<String> = listOf("https://maximus-bot.drpouriafx.workers.dev/sub")
 
     /**
+     * Independent copies of an official subscription: each base address (comma-separated, from the
+     * build's OFFICIAL_MIRRORS) followed by the subscription's own name, e.g. `https://mirror.example/m`
+     * gives `https://mirror.example/m/sub` (served as `sub.signed`). Merged at sync time, so installs that
+     * added the subscription earlier get them too. Only https addresses are used.
+     */
+    fun mirrorsFor(url: String, bases: String = com.example.BuildConfig.OFFICIAL_MIRRORS): List<String> {
+        if (!OfficialSigning.isOfficial(url)) return emptyList()
+        val name = url.substringBefore('?').trimEnd('/').substringAfterLast('/')
+        return bases.split(',').map { it.trim().trimEnd('/') }.filter { it.startsWith("https://") }.map { "$it/$name" }
+    }
+
+    /**
      * Adds the official subscription if it was never added on this install. [seeded] and [markSeeded]
      * remember which addresses were offered already. Returns the new subscription, to sync, or null.
      */

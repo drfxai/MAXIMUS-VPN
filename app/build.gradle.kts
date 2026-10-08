@@ -32,6 +32,14 @@ android {
     val hubPublicKey = System.getenv("HUB_PUBLIC_KEY").orEmpty().trim()
     require(hubPublicKey.all { it.isLetterOrDigit() || it in "+/=" }) { "HUB_PUBLIC_KEY must be base64" }
     buildConfigField("String", "HUB_PUBLIC_KEY", "\"$hubPublicKey\"")
+    // Public half of OFFICIAL_SIGNING_KEY: with it, the official subscription is accepted only when signed.
+    val officialPublicKey = System.getenv("OFFICIAL_PUBLIC_KEY").orEmpty().trim()
+    require(officialPublicKey.all { it.isLetterOrDigit() || it in "+/=" }) { "OFFICIAL_PUBLIC_KEY must be base64" }
+    buildConfigField("String", "OFFICIAL_PUBLIC_KEY", "\"$officialPublicKey\"")
+    // Independent copies of the official subscription (comma-separated base addresses, see docs/SUBSCRIPTIONS.md).
+    val officialMirrors = System.getenv("OFFICIAL_MIRRORS").orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    require(officialMirrors.all { it.matches(Regex("https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?")) }) { "OFFICIAL_MIRRORS must be https base addresses" }
+    buildConfigField("String", "OFFICIAL_MIRRORS", "\"${officialMirrors.joinToString(",")}\"")
 
     // Which build made a diagnostic report. CI sets GITHUB_SHA; local builds say "unknown".
     val gitCommit = System.getenv("GITHUB_SHA").orEmpty().take(12).filter { it.isLetterOrDigit() }.ifEmpty { "unknown" }
