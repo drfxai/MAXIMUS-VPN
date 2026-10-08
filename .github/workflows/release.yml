@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag (for example v1.0.0)
+        description: Release tag (for example V1.0.1); must match release-version.txt
         required: true
 
 permissions:
@@ -19,6 +19,14 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Read the release version
+        # release-version.txt (for example V1.0.1) names the tag, the APK files and the release title; the app's
+        # versionName must match it, so a release never ships a build that reports another version.
+        run: |
+          V=$(tr -d '[:space:]' < release-version.txt)
+          case "$V" in V[0-9]*.[0-9]*.[0-9]*) ;; *) echo "Bad release-version.txt: $V"; exit 1 ;; esac
+          grep -q "versionName = \"${V#V}\"" app/build.gradle.kts || { echo "versionName does not match $V"; exit 1; }
+          echo "APP_VERSION=$V" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -96,18 +104,18 @@ jobs:
         run: |
           test -n "$STORE_PASSWORD" && test -n "$KEY_PASSWORD" && test -s "$KEYSTORE_PATH"
           bash gradlew --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk MAXIMUSVPN-V1.0.0-universal.apk
+          cp app/build/outputs/apk/release/app-release.apk MAXIMUSVPN-${APP_VERSION}-universal.apk
           bash gradlew --no-daemon -PtargetAbi=arm64-v8a :app:assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk MAXIMUSVPN-V1.0.0-arm64-v8a.apk
+          cp app/build/outputs/apk/release/app-release.apk MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk
       - name: Verify packaging, signatures and checksums
         run: |
-          python3 scripts/check-apk.py MAXIMUSVPN-V1.0.0-arm64-v8a.apk arm64-v8a
-          python3 scripts/check-apk.py MAXIMUSVPN-V1.0.0-universal.apk universal
-          for apk in MAXIMUSVPN-V1.0.0-arm64-v8a.apk MAXIMUSVPN-V1.0.0-universal.apk; do
+          python3 scripts/check-apk.py MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk arm64-v8a
+          python3 scripts/check-apk.py MAXIMUSVPN-${APP_VERSION}-universal.apk universal
+          for apk in MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk; do
             "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "$apk"
             "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
           done
-          sha256sum MAXIMUSVPN-V1.0.0-arm64-v8a.apk MAXIMUSVPN-V1.0.0-universal.apk > SHA256SUMS
+          sha256sum MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk > SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Enable KVM
         run: |
@@ -122,7 +130,7 @@ jobs:
           target: google_apis
           disable-animations: true
           script: |
-            APP_PACKAGE=com.drfxai.maximusvpn bash scripts/install-smoke.sh MAXIMUSVPN-V1.0.0-universal.apk
+            APP_PACKAGE=com.drfxai.maximusvpn bash scripts/install-smoke.sh MAXIMUSVPN-${APP_VERSION}-universal.apk
             echo "ARM64 APK was independently package/signature verified; launch testing requires a physical ARM64 device."
       - name: Preserve installation diagnostics
         if: failure()
@@ -135,8 +143,8 @@ jobs:
         with:
           name: maximus-verified-apks
           path: |
-            MAXIMUSVPN-V1.0.0-arm64-v8a.apk
-            MAXIMUSVPN-V1.0.0-universal.apk
+            MAXIMUSVPN-${{ env.APP_VERSION }}-arm64-v8a.apk
+            MAXIMUSVPN-${{ env.APP_VERSION }}-universal.apk
             SHA256SUMS
           retention-days: 30
           if-no-files-found: error
@@ -157,9 +165,9 @@ jobs:
           fi
           # The hidden maximus-build line is what the in-app update check reads.
           notes=$(printf 'Build %s\n\n<!-- maximus-build: %s -->' "$MAXIMUS_RELEASE_BUILD" "$MAXIMUS_RELEASE_BUILD")
-          gh release create "$RELEASE_TAG" MAXIMUSVPN-V1.0.0-arm64-v8a.apk MAXIMUSVPN-V1.0.0-universal.apk SHA256SUMS --target "$GITHUB_SHA" --title "Android version V1.0.0" --notes "$notes" --latest
+          gh release create "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS --target "$GITHUB_SHA" --title "Android version $RELEASE_TAG" --notes "$notes" --latest
           actual="$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$actual" = 'MAXIMUSVPN-V1.0.0-arm64-v8a.apk,MAXIMUSVPN-V1.0.0-universal.apk,SHA256SUMS' || { echo "Unexpected assets: $actual"; exit 1; }
+          test "$actual" = "MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,SHA256SUMS" || { echo "Unexpected assets: $actual"; exit 1; }
           echo 'Published three uploaded assets plus two GitHub-generated source archives.'
       - name: Publish update information for the in-app update pop-up
         # update.json on the update-info branch is what the app reads through jsDelivr/Statically when
