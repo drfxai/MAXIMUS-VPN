@@ -215,7 +215,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | MX-IR-P06-T01 | Transport capability engine | TESTING |
 | MX-IR-P07-T01 | Top-30 diversity on the phone | TESTING |
 | MX-IR-P08-T01 | Last-Known-Good and atomic refresh | TESTING |
-| MX-IR-P09-T01 | Smart failover | NOT_STARTED |
+| MX-IR-P09-T01 | Smart failover | TESTING |
 | MX-IR-P10-T01 | DNS resilience and endpoint scoring | NOT_STARTED |
 | MX-IR-P11-T01 | Iran intelligence | NOT_STARTED |
 | MX-IR-P12-T01 | AI layer | NOT_STARTED |
@@ -375,3 +375,21 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Test result: pending CI (Robolectric; no Android SDK in the build sandbox).
 - Known limitations: none known.
 - Security impact: none; the offline copy is the last list that passed signature verification.
+
+### MX-IR-P09-T01 Smart failover
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `vpn/connectivity/SmartFailoverPolicy.kt` (new), `vpn/smart/FailoverManager.kt`.
+- Architecture impact: the existing watchdog (3 failed real requests in a row, kind-aware choice) now also
+  - keeps a Primary / Backup A / Backup B plan, A and B on failure domains other than the primary's and each
+    other's (an empty slot rather than a backup that fails with the primary), logged at connect;
+  - prefers a replacement off the failed config's CDN or network;
+  - backs off: each switch within 10 minutes doubles the wait before the next (20 s up to 5 min);
+  - does not oscillate: a config left after failing is not chosen again for 2 minutes, doubling each time it
+    is left (up to 30 min), unless it is the only candidate;
+  - returns to the primary only after 3 passed checks spanning at least a minute and at least 2 minutes on
+    the backup (before: one passed check).
+- Tests run: `SmartFailoverPolicyTest` (6).
+- Test result: pass in the JVM harness; full suite in CI.
+- Known limitations: the backup plan is recorded and logged; the connect race still picks the replacement
+  from live measurements, with the plan's ordering rules. Not tested on a real outage.
+- Security impact: none; only already-eligible configs are chosen.
