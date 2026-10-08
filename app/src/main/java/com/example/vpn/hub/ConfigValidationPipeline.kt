@@ -59,9 +59,15 @@ object ConfigValidationPipeline {
             !encrypted -> "Sends traffic without encryption"
             profile.allowInsecure -> "Does not check the server's certificate"
             ip != null && com.example.vpn.EndpointResolver.isBlockedAnswer(ip) -> "Points at a private or reserved address"
-            else -> null
+            // TLS settings the engine that would run it cannot honour, or that weaken authentication.
+            else -> com.example.vpn.connectivity.TlsResilienceEngine.assess(profile, engineOf(profile)).reason
         }
     }
+
+    private fun engineOf(profile: VlessProfile): com.example.vpn.connectivity.TlsResilienceEngine.Engine =
+        if (com.example.vpn.engine.EngineSelectionPolicy.select(profile) == com.example.vpn.engine.EngineSelectionPolicy.Runtime.XRAY)
+            com.example.vpn.connectivity.TlsResilienceEngine.Engine.XRAY
+        else com.example.vpn.connectivity.TlsResilienceEngine.Engine.KOTLIN
 
     private fun looksLikeIp(host: String): Boolean =
         host.isNotEmpty() && (host.all { it.isDigit() || it == '.' } || host.contains(':'))

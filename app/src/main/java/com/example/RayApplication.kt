@@ -66,7 +66,18 @@ class RayApplication : Application() {
 
     /** Recovers degraded BPB / Cloudflare-fronted configs with derived copies; originals are never changed. */
     val bpbRecovery: com.example.vpn.connectivity.BpbRecoveryEngine by lazy {
-        com.example.vpn.connectivity.BpbRecoveryEngine(ledger = recoveryLedger)
+        com.example.vpn.connectivity.BpbRecoveryEngine(ledger = recoveryLedger, fragmentReverted = { key, network ->
+            fragmentProfiles.decide(key, network) == com.example.vpn.connectivity.FragmentProfileEngine.Decision.REVERT
+        })
+    }
+
+    /** Fragmentation trials against the plain config, so fragmentation that makes things worse is reverted. */
+    val fragmentProfiles: com.example.vpn.connectivity.FragmentProfileEngine by lazy {
+        val prefs = getSharedPreferences("fragment_trials", MODE_PRIVATE)
+        com.example.vpn.connectivity.FragmentProfileEngine(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
     }
 
     /** This phone's measurements of free configs, kept apart from the list builder's global checks. */

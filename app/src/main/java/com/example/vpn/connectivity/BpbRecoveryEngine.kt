@@ -54,7 +54,9 @@ class BpbRecoveryEngine(
     private val ledger: RecoveryLedger,
     private val clock: () -> Long = System::currentTimeMillis,
     val maxCandidates: Int = 6,
-    val candidateTtlMs: Long = 24L * 60 * 60 * 1000
+    val candidateTtlMs: Long = 24L * 60 * 60 * 1000,
+    /** A fragmentation profile measured worse than the plain config on a network (see [FragmentProfileEngine]) is skipped there. */
+    private val fragmentReverted: (profileKey: String, network: String?) -> Boolean = { _, _ -> false }
 ) {
     /** TLS over a transport a CDN can carry: BPB workers and other Cloudflare-fronted configs. */
     fun isRecoverable(profile: VlessProfile): Boolean =
@@ -85,6 +87,7 @@ class BpbRecoveryEngine(
         val usable = profiles
             .filter { !it.isExpired(now) && it.networkConditions.any { s -> s in wanted } && it.appliesTo(parent) }
             .filter { !ledger.profileIsWorse(it.key, network) }
+            .filter { RecoveryProfile.Strategy.FRAGMENT !in it.networkConditions || !fragmentReverted(it.key, network) }
             .sortedWith(compareBy({ -ledger.profileSuccessRate(it.key, network, it.confidence) }, { it.key }))
         val out = mutableListOf<DerivedRecoveryCandidate>()
         for (rp in usable) {

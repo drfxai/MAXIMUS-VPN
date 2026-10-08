@@ -669,7 +669,14 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val candidates = recovery.generate(sample, com.example.vpn.diagnostics.FailureStage.TLS_HANDSHAKE_FAILED, network)
                 val tested = recovery.test(candidates) { ps -> com.example.xray.RealDelayProbe.measure(ps, 8).map(::asRecoveryResult) }
-                val winner = tested.firstOrNull { it.test is com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed }
+                recordFragmentTrials(plain, tested, network)
+                val fragments = RayApplication.instance.fragmentProfiles
+                val winner = tested.firstOrNull {
+                    it.test is com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed &&
+                        // Fragmentation that does no better than the plain config here is not kept.
+                        !(it.recoveryProfileKey in fragmentKeys &&
+                            fragments.decide(it.recoveryProfileKey, network) == com.example.vpn.connectivity.FragmentProfileEngine.Decision.REVERT)
+                }
                 appendLog("[BPB] FIX BPB tested ${tested.size} derived settings: ${winner?.recoveryProfileKey ?: "none worked"}")
                 when {
                     winner != null -> {
@@ -688,6 +695,34 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             _state.value.copy(status = status)
+        }
+    }
+
+    private val fragmentKeys: Set<String> = com.example.vpn.connectivity.FragmentProfileEngine.PROFILES.map { it.key }.toSet()
+
+    /** The plain config's result and each fragmentation profile's, for the keep-or-revert comparison. */
+    private fun recordFragmentTrials(
+        plain: com.example.xray.RealDelayProbe.Outcome,
+        tested: List<com.example.vpn.connectivity.DerivedRecoveryCandidate>,
+        network: String
+    ) {
+        val engine = RayApplication.instance.fragmentProfiles
+        val now = System.currentTimeMillis()
+        fun trial(key: String, ok: Boolean, ms: Long?, reason: String?) = engine.record(
+            com.example.vpn.connectivity.FragmentProfileEngine.Trial(key, network, now, handshakeOk = ok, internetOk = ok, latencyMs = ms,
+                failureStage = reason?.let { com.example.vpn.diagnostics.FailureStage.fromText(it) })
+        )
+        when (plain) {
+            is com.example.xray.RealDelayProbe.Outcome.Delay -> trial(com.example.vpn.connectivity.FragmentProfileEngine.PLAIN, true, plain.latencyMs, null)
+            is com.example.xray.RealDelayProbe.Outcome.Failed -> trial(com.example.vpn.connectivity.FragmentProfileEngine.PLAIN, false, null, plain.reason)
+            else -> Unit
+        }
+        tested.filter { it.recoveryProfileKey in fragmentKeys }.forEach { c ->
+            when (val t = c.test) {
+                is com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed -> trial(c.recoveryProfileKey, true, t.latencyMs, null)
+                is com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Failed -> trial(c.recoveryProfileKey, false, null, t.reason)
+                else -> Unit
+            }
         }
     }
 
