@@ -59,6 +59,7 @@ import com.example.ui.importing.ImportScreen
 import com.example.ui.importing.ImportViewModel
 import com.example.ui.panels.PanelManagerScreen
 import com.example.ui.panels.PanelManagerViewModel
+import com.example.ui.popups.LaunchPopups
 import com.example.ui.protocols.ProtocolsScreen
 import com.example.ui.freeconfigs.FreeConfigsScreen
 import com.example.ui.vip.VipScreen
@@ -376,4 +377,6 @@ fun MainApp(
             }
         }
     }
+
+    LaunchPopups()
 }

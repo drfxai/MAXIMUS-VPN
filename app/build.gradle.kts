@@ -38,6 +38,11 @@ android {
     val buildTime = if (gitCommit == "unknown") "unknown" else Instant.now().truncatedTo(ChronoUnit.MINUTES).toString()
     buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
     buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
+
+    // The release build number the update pop-up compares (the release workflow's run number, also
+    // published with each release). 0 for local and test builds, which never show the pop-up.
+    val releaseBuild = System.getenv("MAXIMUS_RELEASE_BUILD").orEmpty().trim().toIntOrNull()?.coerceAtLeast(0) ?: 0
+    buildConfigField("int", "RELEASE_BUILD", "$releaseBuild")
   }
 
   val rootDebugKeystore = file("${rootDir}/debug.keystore")
