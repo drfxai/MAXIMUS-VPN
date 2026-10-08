@@ -214,7 +214,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | TESTING |
 | MX-IR-P06-T01 | Transport capability engine | TESTING |
 | MX-IR-P07-T01 | Top-30 diversity on the phone | TESTING |
-| MX-IR-P08-T01 | Last-Known-Good and atomic refresh | NOT_STARTED |
+| MX-IR-P08-T01 | Last-Known-Good and atomic refresh | TESTING |
 | MX-IR-P09-T01 | Smart failover | NOT_STARTED |
 | MX-IR-P10-T01 | DNS resilience and endpoint scoring | NOT_STARTED |
 | MX-IR-P11-T01 | Iran intelligence | NOT_STARTED |
@@ -358,3 +358,20 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Known limitations: a free config the user starred that the new list dropped can now be removed when the
   list is full (only the one in use and the last-known-good ones are guaranteed to stay).
 - Security impact: none; selection only orders and caps already-eligible configs.
+
+### MX-IR-P08-T01 Last-Known-Good and atomic refresh
+- Status: TESTING (full Android CI pending; the changed path needs Room, so it runs only there)
+- Files changed: `vpn/subscription/SubscriptionManager.kt`, `FreeListSwapIntegrationTest.kt`.
+- Existing behaviour kept (audit items 8 and 9): up to three last-known-good configs; one leaves only when a
+  newer config carried verified traffic here and takes its place, when its own evidence says dead, or when the
+  user deletes it. The free list is swapped in one database transaction; the screen already says
+  "Refresh failed — existing verified configurations retained." with the reason.
+- Architecture impact: when every source of the free list fails, the configs on the phone now stay exactly as
+  they are. Before, the offline copy was merged back in, which could re-add configs the user deleted and
+  push the list past 30. Only a phone with no free configs at all gets the offline copy, through the same
+  capped, atomic swap as a normal refresh.
+- Tests run: `FreeListSwapIntegrationTest` B2 (new): failed refresh re-adds nothing; an empty list is restored
+  to exactly 30 from the offline copy. Existing A to D unchanged.
+- Test result: pending CI (Robolectric; no Android SDK in the build sandbox).
+- Known limitations: none known.
+- Security impact: none; the offline copy is the last list that passed signature verification.

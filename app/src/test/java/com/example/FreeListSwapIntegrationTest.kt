@@ -10,6 +10,7 @@ import com.example.vpn.hub.FreeConfigList
 import com.example.vpn.hub.LastKnownGoodPool
 import com.example.vpn.hub.RetainedFreeConfigs
 import com.example.vpn.subscription.SubscriptionManager
+import com.example.vpn.subscription.SubscriptionSnapshots
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -20,7 +21,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -65,8 +68,12 @@ class FreeListSwapIntegrationTest {
         published = mapOf("$base/manifest.json" to manifest, "$base/manifest.sig" to sig, FreeConfigList.URL to list)
     }
 
+    @get:Rule val tmp = TemporaryFolder()
+    private var snapshots: SubscriptionSnapshots? = null
+
     private fun manager() = SubscriptionManager(
         subscriptions, servers,
+        snapshots = snapshots,
         download = { url -> published?.get(url) ?: throw java.io.IOException("unreachable") },
         staggerMs = 10,
         freeListEnabled = { true },
@@ -138,6 +145,27 @@ class FreeListSwapIntegrationTest {
         val result = manager().syncSubscription(subscriptions.getSubscriptionByUrl(FreeConfigList.URL)!!)
         assertTrue(result.fromOfflineCopy || !result.isSuccess)
         assertEquals(before, free().map { it.id }.toSet())
+    }
+
+    @Test
+    fun `B2 - a failed refresh with an offline copy re-adds nothing, and an empty list comes back capped`() = runBlocking {
+        snapshots = SubscriptionSnapshots(tmp.root, encrypt = { it.reversed() }, decrypt = { it.reversed() })
+        publish(1..30)
+        manager().addAndSyncSubscription(FreeConfigList.NAME, FreeConfigList.URL)
+        val gone = free().first()
+        manager().deleteFree(gone)
+        published = null
+        val sub = subscriptions.getSubscriptionByUrl(FreeConfigList.URL)!!
+        val failed = manager().syncSubscription(sub)
+        assertFalse(failed.isSuccess)
+        assertFalse(failed.fromOfflineCopy)
+        // Existing verified configurations retained; the one the user deleted does not come back.
+        assertEquals(29, free().size)
+        assertTrue(free().none { it.effectiveFingerprint == gone.effectiveFingerprint })
+        manager().deleteAllFree()
+        val restored = manager().syncSubscription(sub)
+        assertTrue(restored.fromOfflineCopy)
+        assertEquals(30, free().size)
     }
 
     @Test

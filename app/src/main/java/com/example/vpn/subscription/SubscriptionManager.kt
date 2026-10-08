@@ -324,6 +324,7 @@ class SubscriptionManager(
                     val reason = outcome.failures.firstOrNull()?.second ?: "no source to try"
                     val tried = outcome.failures.count { it.first.startsWith("http") }
                     val snapshot = snapshots?.load(subscription.id)
+                    if (isFree) return@withContext keepFreeListAfterFailure(subscription, snapshot, outcome, reason, tried)
                     if (snapshot == null) {
                         val errMsg = if (tried > 1) "All $tried sources failed. First: $reason" else reason
                         XrayLogManager.e("SUBSCRIPTION", "Sync failed for '${subscription.name}': ${SecretRedactor.redact(errMsg)}")
@@ -354,6 +355,38 @@ class SubscriptionManager(
     private val _freeProgress = kotlinx.coroutines.flow.MutableStateFlow<FreeRefreshProgress?>(null)
     /** Where a running free list refresh is; null when none runs. */
     val freeProgress: kotlinx.coroutines.flow.StateFlow<FreeRefreshProgress?> = _freeProgress
+
+    /**
+     * Every source of the free list failed. Configs already on the phone stay exactly as they are (nothing
+     * is re-added from the offline copy, so deleted ones do not come back and the list never passes 30).
+     * Only when the phone has no free configs at all is the offline copy restored, through the same capped,
+     * atomic swap as a normal refresh.
+     */
+    private suspend fun keepFreeListAfterFailure(
+        subscription: SubscriptionInfo,
+        snapshot: SubscriptionSnapshots.Snapshot?,
+        outcome: SubscriptionFetcher.Outcome.AllFailed,
+        reason: String,
+        tried: Int
+    ): SyncResult {
+        val why = if (tried > 1) "All $tried sources failed. First: $reason" else reason
+        val saved = serverRepository.getAllProfilesOnce().count {
+            it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
+        }
+        if (saved > 0 || snapshot == null) {
+            // The screen shows "Refresh failed — existing verified configurations retained." with this reason.
+            XrayLogManager.w("SUBSCRIPTION", "'${subscription.name}' refresh failed; existing verified configurations retained " +
+                "($saved unchanged): ${SecretRedactor.redact(why)}")
+            subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), why)
+            return SyncResult(subscription.id, 0, 0, 0, false, why, poolBefore = saved, keptCount = saved)
+        }
+        val restored = swapFreeList(subscription, parse(snapshot.payload, subscription),
+            SubscriptionFetcher.Outcome.Fetched(snapshot.sourceUrl, snapshot.payload, 0, outcome.failures))
+        val day = java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(java.util.Date(snapshot.savedAt))
+        val errMsg = "Offline copy from $day in use. Every source failed ($reason)."
+        subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), errMsg)
+        return restored.copy(isSuccess = false, errorMessage = errMsg, fromOfflineCopy = true, viaMirror = null)
+    }
 
     /**
      * Replaces the free list with the verified new one in one database transaction (see
