@@ -211,14 +211,14 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | MX-IR-P02-T01 | Connection state correctness | COMPLETED |
 | MX-IR-P03-T01 | Connection score and candidate states | COMPLETED |
 | MX-IR-P04-T01 | BPB recovery engine | COMPLETED |
-| MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | TESTING |
-| MX-IR-P06-T01 | Transport capability engine | TESTING |
-| MX-IR-P07-T01 | Top-30 diversity on the phone | TESTING |
+| MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | COMPLETED |
+| MX-IR-P06-T01 | Transport capability engine | COMPLETED |
+| MX-IR-P07-T01 | Top-30 diversity on the phone | COMPLETED |
 | MX-IR-P08-T01 | Last-Known-Good and atomic refresh | TESTING |
 | MX-IR-P09-T01 | Smart failover | TESTING |
 | MX-IR-P10-T01 | DNS resilience and endpoint scoring | TESTING |
 | MX-IR-P11-T01 | Iran intelligence | TESTING |
-| MX-IR-P12-T01 | AI layer | NOT_STARTED |
+| MX-IR-P12-T01 | AI layer | TESTING |
 | MX-IR-P13-T01 | Real-device validation (owner, on phones in Iran) | BLOCKED |
 
 ### MX-IR-P00-T01 Stage 0 audit
@@ -312,7 +312,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
   fingerprint verified to keep certificate checks in Xray v26.9.9.
 
 ### MX-IR-P05-T01 TLS / ECH / fragmentation profiles
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 7 commit pass)
 - Files changed: `vpn/connectivity/TlsResilienceEngine.kt` (new), `vpn/connectivity/FragmentProfileEngine.kt`
   (new), `vpn/hub/ConfigValidationPipeline.kt`, `RayApplication.kt`, `ui/panels/PanelManagerViewModel.kt`.
 - Architecture impact: every config passes one TLS check before use: no allowInsecure, only the fingerprints
@@ -328,7 +328,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Security impact: refuses more than before (unknown fingerprints, weak ciphers, faked ECH); disables nothing.
 
 ### MX-IR-P06-T01 Transport capability engine
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 7 commit pass)
 - Files changed: `vpn/connectivity/TransportCapabilityEngine.kt` (new), `vpn/safety/VpnRoutePolicy.kt` (new),
   `vpn/RayVpnService.kt`.
 - Architecture impact: UDP/QUIC/HTTP/3 and TCP/TLS/HTTP/2, IPv4 and IPv6 are judged from this network's own
@@ -342,7 +342,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Security impact: closes any IPv6 route gap by construction.
 
 ### MX-IR-P07-T01 Top-30 diversity on the phone
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 7 commit pass)
 - Files changed: `vpn/connectivity/DiversitySelector.kt` (new), `vpn/smart/ServerRace.kt`,
   `vpn/hub/LastKnownGood.kt` (`FreeListSwap`).
 - Architecture impact: the phone uses the list builder's rules (`select_diverse`): failure domain
@@ -435,3 +435,27 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Known limitations: the list builder does not publish `intel.json` yet, so no rules are active; publishing
   rules needs evidence from real Iranian networks (owner's decision).
 - Security impact: bounded by construction; same signature key and checks as the free list.
+
+### MX-IR-P12-T01 AI layer
+- Status: TESTING (full Android CI pending)
+- Files changed: `AiBoundaryTest.kt` (new). No production change was needed.
+- Audit result: the AI agent already exposes one read-only tool (a privacy-filtered health summary), refuses
+  every other tool name whatever approval fields the model sends, and withholds raw logs, endpoints, DNS and
+  routing details (`ai/AiAgentTools.kt`, tested in `PrivateDnsAndSecurityTest`).
+- Architecture impact: a new boundary test fails the build if the AI code ever references what changes
+  connections or their evidence: repositories and settings, free-config evidence, last-known-good, recovery,
+  intelligence rules, DNS and endpoint scores, failover, the kill switch or fail-closed policy, connect or
+  disconnect, or process / class loading. So the AI cannot mark configs alive or dead, bypass the security
+  gate, alter the kill switch or feed intelligence rules.
+- Tests run: `AiBoundaryTest` (1), existing `PrivateDnsAndSecurityTest`.
+- Test result: pending CI.
+- Known limitations: the AI may still explain diagnostics in words; explanations are not acted on.
+- Security impact: locks in the current read-only boundary.
+
+## Not done from the build environment
+
+- MX-IR-P13-T01 (BLOCKED): sections 32 and 33 on real phones: Irancell, MCI and Wi-Fi in Iran, IPv4-only and
+  dual-stack, at different times of day; a BPB worker through FIX BPB; DNS tampering on each operator; failover
+  during a real outage; battery and ANR behaviour over a day. The build environment reaches neither Iranian
+  networks nor workers.dev.
+- Release gate (section 34): not attempted; no version change (versionName 1.0.0, versionCode 27).
