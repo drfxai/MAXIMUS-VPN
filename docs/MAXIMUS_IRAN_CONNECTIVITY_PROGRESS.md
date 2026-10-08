@@ -207,18 +207,18 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | ID | Task | Status |
 |---|---|---|
 | MX-IR-P00-T01 | Stage 0 audit | COMPLETED |
-| MX-IR-P01-T01 | Multi-probe engine and probe results | NOT_STARTED |
-| MX-IR-P02-T01 | Connection state correctness | NOT_STARTED |
-| MX-IR-P03-T01 | Connection score and candidate states | NOT_STARTED |
-| MX-IR-P04-T01 | BPB recovery engine | NOT_STARTED |
-| MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | NOT_STARTED |
-| MX-IR-P06-T01 | Transport capability engine | NOT_STARTED |
-| MX-IR-P07-T01 | Top-30 diversity on the phone | NOT_STARTED |
-| MX-IR-P08-T01 | Last-Known-Good and atomic refresh | NOT_STARTED |
-| MX-IR-P09-T01 | Smart failover | NOT_STARTED |
-| MX-IR-P10-T01 | DNS resilience and endpoint scoring | NOT_STARTED |
-| MX-IR-P11-T01 | Iran intelligence | NOT_STARTED |
-| MX-IR-P12-T01 | AI layer | NOT_STARTED |
+| MX-IR-P01-T01 | Multi-probe engine and probe results | COMPLETED |
+| MX-IR-P02-T01 | Connection state correctness | COMPLETED |
+| MX-IR-P03-T01 | Connection score and candidate states | COMPLETED |
+| MX-IR-P04-T01 | BPB recovery engine | COMPLETED |
+| MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | COMPLETED |
+| MX-IR-P06-T01 | Transport capability engine | COMPLETED |
+| MX-IR-P07-T01 | Top-30 diversity on the phone | COMPLETED |
+| MX-IR-P08-T01 | Last-Known-Good and atomic refresh | COMPLETED |
+| MX-IR-P09-T01 | Smart failover | COMPLETED |
+| MX-IR-P10-T01 | DNS resilience and endpoint scoring | COMPLETED |
+| MX-IR-P11-T01 | Iran intelligence | COMPLETED |
+| MX-IR-P12-T01 | AI layer | COMPLETED |
 | MX-IR-P13-T01 | Real-device validation (owner, on phones in Iran) | BLOCKED |
 
 ### MX-IR-P00-T01 Stage 0 audit
@@ -229,3 +229,233 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Known limitations: audit read from code; nothing verified on a phone
 - Security impact: none
 - Next action: Stage 1, MultiProbeHealthEngine
+
+### MX-IR-P01-T01 Multi-probe engine and probe results
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 4 commit pass)
+- Files changed: `vpn/connectivity/ProbeResult.kt`, `vpn/connectivity/ProbeBudget.kt`,
+  `vpn/connectivity/MultiProbeHealthEngine.kt`, `vpn/connectivity/ProbeEvents.kt`,
+  `vpn/diagnostics/FailureStage.kt` (new codes DNS_RESPONSE_INVALID, CERTIFICATE_VALIDATION_FAILED,
+  DNS_TUNNEL_FAILED, SECURITY_REJECTED and `taxonomyName` for the spec's names), `vpn/RayVpnService.kt`
+  (post-connect verification runs through the engine).
+- Architecture impact: one engine runs ordered steps (DNS, DNS query, TCP, TLS, protocol, engine, TUN,
+  HTTP through tunnel, DNS through tunnel, stability) supplied by the caller; returns `ProbeResult` per step
+  and a `HealthReport` (verdict, failed step, stage, OBSERVATION text, ASSESSMENT text). ICMP is not a step.
+  Per-step and per-config time limits, bounded retries with exponential backoff, no retry of security,
+  certificate or login failures. A run overtaken by a new attempt or network change is `stale` and never a
+  pass. `ProbeBudget` holds the concurrency, timeout, retry, metered and battery limits (P1.9).
+  The post-connect check keeps its old behaviour (3 tries, 1.5 s apart) and now logs each step.
+- Tests run: `MultiProbeHealthEngineTest` (16): ICMP-free health, TCP ok/TLS fail, refused certificate not
+  retried, TLS ok/protocol fail, tunnel up/HTTP fail, HTTP ok/DNS-tunnel fail, network change mid-probe,
+  stale rejection, step timeout inside the config budget, flaky retry, security refusal before any network
+  step, stability, result privacy, backoff, metered/battery budget, certificate texts.
+- Test result: 16/16 pass in a JVM harness (pure sources); full `testDebugUnitTest` and lint run in CI.
+- Known limitations: pre-connect tests still use `RealDelayProbe` directly (they already measure a real
+  request); their stages will be expressed as engine steps where Stage 6/10 need per-step data.
+- Security impact: none weakened; adds a security gate hook that stops a run before any network step.
+
+### MX-IR-P02-T01 Connection state correctness
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 4 commit pass)
+- Files changed: `data/model/ConnectionState.kt` (SWITCHING, NETWORK_CHANGED, `onNetworkChanged`, `onSwitching`),
+  `vpn/RayVpnService.kt` (network callbacks and failover use them), `ui/components/CyberComponents.kt`,
+  `vpn/tile/VpnTileService.kt` (labels for the new states).
+- Architecture impact: the existing chain DISCONNECTED → PREPARING/CONNECTING → VPN_INTERFACE_ESTABLISHED →
+  ENGINE_STARTED → VERIFYING → CONNECTED stays. New: when the phone's network changes under a verified tunnel
+  the status becomes NETWORK_CHANGED (tunnel still up, traffic still inside it, old PASS cleared) until a
+  request through the tunnel passes again (rechecked every 4 s). When failover starts, the status becomes
+  SWITCHING and late checks of the old tunnel are ignored. Old results stay in the event log as history.
+- Tests run: `ConnectionStateCorrectnessTest` (8) and the existing `ConnectionVerificationTest`.
+- Test result: 8/8 pass in the JVM harness; full suite in CI.
+- Known limitations: behaviour on a real handover (Wi-Fi to cellular) is untested on a phone.
+- Security impact: none; the kill switch and routes are unchanged (the tunnel is not torn down on a network change).
+
+### MX-IR-P03-T01 Connection score and candidate states
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 4 commit pass)
+- Files changed: `vpn/connectivity/ConnectionScore.kt` (new), `vpn/hub/FreeConfigEvidence.kt` (states renamed
+  and extended), `ui/freeconfigs/FreeConfigsContent.kt`, `ui/freeconfigs/FreeConfigsState.kt`, tests using the names.
+- Architecture impact: candidate states are now NEW, GLOBAL_VERIFIED, GLOBAL_FAILED, LOCAL_PROBATION,
+  LOCAL_NETWORK_VERIFIED, DEGRADED, RECOVERY, DEAD, QUARANTINED, SECURITY_REJECTED. Stored IRAN_PROBATION /
+  IRAN_VERIFIED still load (mapped to the LOCAL_ names). SECURITY_REJECTED and QUARANTINED are sticky.
+  `ConnectionScore` ranks with explained parts (stages 20, recent 20, history 10, stability 15, latency 8,
+  DNS-in-tunnel 5, network match 7, local sessions 10, security mode 5), ages local evidence (6 h half-life),
+  and refuses security-rejected, quarantined, dead and globally failed candidates outright. A bounded
+  adjustment slot (±5) is reserved for Stage 11. `FreeConfigScore` (the mirror of the builder's score) is unchanged.
+- Tests run: `ConnectionScoreTest` (11), existing `FreeConfigEvidenceTest`, `ConnectionVerificationTest`.
+- Test result: all pass in the JVM harness and in CI.
+- Known limitations: the score is used by the selector and failover from Stages 7 and 9 on.
+- Security impact: security refusal now overrides any positive score by construction.
+
+### MX-IR-P04-T01 BPB recovery engine
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 4 commit pass)
+- Files changed: `vpn/connectivity/RecoveryProfile.kt` (model + 10 reviewed built-in profiles, expiring
+  every 120 days), `vpn/connectivity/RecoverySecurityGate.kt`, `vpn/connectivity/BpbRecoveryEngine.kt`
+  (`DerivedRecoveryCandidate`, `FieldChange`, `BpbRecoveryEngine`, `RecoveryLedger`), `RayApplication.kt`,
+  `vpn/RayVpnService.kt` (step 3a), `ui/panels/PanelManagerViewModel.kt` (FIX BPB).
+- Architecture impact: original → failure classification → strategies → derived copies (one recovery profile
+  each, only finalMask / fingerprint / ALPN / cipher list / ECH / endpoint address may change) → security
+  gate → real-request test → ledger by original config, profile, endpoint and network. Not attempted after a
+  refused certificate, failed login, proxy-protocol error or security refusal. Connect tries a candidate that
+  worked on this network first (one request), then the existing stealth/clean-IP search.
+  FIX BPB no longer overwrites saved configs: it tests derived copies, records the winner, and offers it to the
+  worker's other TLS configs. Rollback: 2 failures in a row after working withdraw a candidate; a profile that
+  failed 3 times on a network without working is not offered there again (until expiry). Configs changed by
+  earlier FIX BPB versions keep their saved settings.
+- Tests run: `BpbRecoveryEngineTest` (11): unrecoverable failures, bounded safe candidates with the original
+  untouched, blocked endpoint with validated IPv4/IPv6 alternatives, gate refusals (private endpoint,
+  allowInsecure, downgrade, SNI change, pin removal, unknown fingerprint, weak cipher, non-IP ECH resolver,
+  unbounded or unknown mask), refused candidates never tested, ECH candidate, success then rollback,
+  never-working profile retired, expiry, ledger persistence without credentials, identity fields locked.
+- Test result: 11/11 pass in the JVM harness and in CI.
+- Known limitations: endpoint alternatives need locally validated addresses (Stage 10 supplies them; until
+  then the existing clean-IP scan in the connect path covers that case). Not tested against a real BPB worker
+  from Iran.
+- Security impact: tightens FIX BPB (no untested settings applied, no saved config rewritten). "unsafe"
+  fingerprint verified to keep certificate checks in Xray v26.9.9.
+
+### MX-IR-P05-T01 TLS / ECH / fragmentation profiles
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 7 commit pass)
+- Files changed: `vpn/connectivity/TlsResilienceEngine.kt` (new), `vpn/connectivity/FragmentProfileEngine.kt`
+  (new), `vpn/hub/ConfigValidationPipeline.kt`, `RayApplication.kt`, `ui/panels/PanelManagerViewModel.kt`.
+- Architecture impact: every config passes one TLS check before use: no allowInsecure, only the fingerprints
+  Xray v26.9.9 knows, no weak ciphers, bounded fragment masks, and ECH only on an engine that does ECH (Xray);
+  elsewhere ECH is refused, never silently dropped. Fragmentation profiles are measured against the same
+  config without fragmentation on the same network (7-day trials) and reverted when they do no better.
+- "fingerprint: unsafe": in Xray v26.9.9 it selects Go's own TLS stack instead of a uTLS mimic. Certificate
+  and hostname checks stay on (transport/internet/tcp/dialer.go). It is accepted, with a note; REALITY
+  refuses it, as Xray does.
+- Tests run: `TlsAndFragmentTest` (7).
+- Test result: 7/7 pass in the JVM harness; full suite in CI.
+- Known limitations: no on-network measurement of which fingerprint a given Iranian network blocks.
+- Security impact: refuses more than before (unknown fingerprints, weak ciphers, faked ECH); disables nothing.
+
+### MX-IR-P06-T01 Transport capability engine
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 7 commit pass)
+- Files changed: `vpn/connectivity/TransportCapabilityEngine.kt` (new), `vpn/safety/VpnRoutePolicy.kt` (new),
+  `vpn/RayVpnService.kt`.
+- Architecture impact: UDP/QUIC/HTTP/3 and TCP/TLS/HTTP/2, IPv4 and IPv6 are judged from this network's own
+  measurement (used only when under 10 minutes old) and its recent results. Measured-blocked transports are
+  skipped, repeatedly failing ones go last, nothing is forced; an HTTP/3 XHTTP config can get its HTTP/2 form.
+  Both TUN builders now take their addresses, routes (0.0.0.0/0 and ::/0) and DNS from one route policy, so
+  IPv6 is always captured and cannot leak around the tunnel.
+- Tests run: `TransportCapabilityTest` (9).
+- Test result: 9/9 pass in the JVM harness; full suite in CI.
+- Known limitations: UDP history comes from per-kind failures in NetworkMemory; no dedicated UDP probe yet.
+- Security impact: closes any IPv6 route gap by construction.
+
+### MX-IR-P07-T01 Top-30 diversity on the phone
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 7 commit pass)
+- Files changed: `vpn/connectivity/DiversitySelector.kt` (new), `vpn/smart/ServerRace.kt`,
+  `vpn/hub/LastKnownGood.kt` (`FreeListSwap`).
+- Architecture impact: the phone uses the list builder's rules (`select_diverse`): failure domain
+  (cdn:cloudflare, cdn:<name>, the /16 of an IPv4 address, the /32 of an IPv6 one, the registered domain),
+  at most 3 per domain, 10 per kind, 12 per source, at most 70% CDN when direct ones exist, one IPv4 and one
+  IPv6 seeded, caps relaxed in steps instead of leaving the list short. One list, never more than 30. The
+  servers raced at connect now come from this selection, so they never all sit on one CDN range.
+  A list refresh now never leaves more than 30 free configs: the one in use and the last-known-good ones
+  always stay; favourites, then configs the new list still has, then new ones fill the room left.
+- Tests run: `DiversitySelectorTest` (6), `LastKnownGoodTest` (+2: favourites cannot pass 30, kept configs
+  follow the new list's order).
+- Test result: pass in the JVM harness; full suite in CI.
+- Known limitations: a free config the user starred that the new list dropped can now be removed when the
+  list is full (only the one in use and the last-known-good ones are guaranteed to stay).
+- Security impact: none; selection only orders and caps already-eligible configs.
+
+### MX-IR-P08-T01 Last-Known-Good and atomic refresh
+- Status: COMPLETED (full Android CI passes, PR #29)
+- Files changed: `vpn/subscription/SubscriptionManager.kt`, `FreeListSwapIntegrationTest.kt`.
+- Existing behaviour kept (audit items 8 and 9): up to three last-known-good configs; one leaves only when a
+  newer config carried verified traffic here and takes its place, when its own evidence says dead, or when the
+  user deletes it. The free list is swapped in one database transaction; the screen already says
+  "Refresh failed — existing verified configurations retained." with the reason.
+- Architecture impact: when every source of the free list fails, the configs on the phone now stay exactly as
+  they are. Before, the offline copy was merged back in, which could re-add configs the user deleted and
+  push the list past 30. Only a phone with no free configs at all gets the offline copy, through the same
+  capped, atomic swap as a normal refresh.
+- Tests run: `FreeListSwapIntegrationTest` B2 (new): failed refresh re-adds nothing; an empty list is restored
+  to exactly 30 from the offline copy. Existing A to D unchanged.
+- Test result: passes in CI.
+- Known limitations: none known.
+- Security impact: none; the offline copy is the last list that passed signature verification.
+
+### MX-IR-P09-T01 Smart failover
+- Status: COMPLETED (JVM harness and full Android CI pass, PR #29)
+- Files changed: `vpn/connectivity/SmartFailoverPolicy.kt` (new), `vpn/smart/FailoverManager.kt`.
+- Architecture impact: the existing watchdog (3 failed real requests in a row, kind-aware choice) now also
+  - keeps a Primary / Backup A / Backup B plan, A and B on failure domains other than the primary's and each
+    other's (an empty slot rather than a backup that fails with the primary), logged at connect;
+  - prefers a replacement off the failed config's CDN or network;
+  - backs off: each switch within 10 minutes doubles the wait before the next (20 s up to 5 min);
+  - does not oscillate: a config left after failing is not chosen again for 2 minutes, doubling each time it
+    is left (up to 30 min), unless it is the only candidate;
+  - returns to the primary only after 3 passed checks spanning at least a minute and at least 2 minutes on
+    the backup (before: one passed check).
+- Tests run: `SmartFailoverPolicyTest` (6).
+- Test result: pass in the JVM harness; full suite in CI.
+- Known limitations: the backup plan is recorded and logged; the connect race still picks the replacement
+  from live measurements, with the plan's ordering rules. Not tested on a real outage.
+- Security impact: none; only already-eligible configs are chosen.
+
+### MX-IR-P10-T01 DNS resilience and endpoint scoring
+- Status: COMPLETED (JVM harness and full Android CI pass, PR #29)
+- Files changed: `vpn/connectivity/DnsResilienceEngine.kt` (new: `DnsOutcome`, `DnsResilienceProfile`,
+  `DnsResilienceEngine`), `vpn/connectivity/EndpointScoringEngine.kt` (new), `vpn/EndpointResolver.kt`,
+  `vpn/RayVpnService.kt`, `RayApplication.kt`, `ui/panels/PanelManagerViewModel.kt`.
+- Architecture impact:
+  - Every real query made to look up a server name (the network's DNS and each DoH resolver) is recorded per
+    network: answer, block-page answer, no answer, timeout, error, and time. No ICMP.
+  - The DNS resilience profile for a network orders the DoH resolvers by success then speed, leaves out ones
+    that never answered there (always keeping at least three), and lists the names the network's DNS keeps
+    answering with a block page; those go straight to DoH without the 1.5 s grace wait. Samples expire after
+    24 h. Never a downgrade: GOD MODE names still never reach the network's DNS.
+  - Edge addresses get a per-network score from real exchanges with the config's own server (the clean-address
+    scan's WebSocket upgrade to the real origin, and recovery candidates tested through the proxy). Only
+    addresses that passed in the last 24 h and succeed at least half the time are handed to FIX BPB as
+    endpoint alternatives, still behind the recovery security gate.
+- Tests run: `DnsAndEndpointTest` (8).
+- Test result: pass in the JVM harness; full suite in CI.
+- Known limitations: the connect path's recovery (step 3a) reuses endpoints FIX BPB already proved; it does
+  not scan on its own. Resolver behaviour on Irancell / MCI is not measured from here.
+- Security impact: no secrets stored (server host names and resolver addresses only, on the phone); DoH stays
+  at pinned IP addresses with certificate checks.
+
+### MX-IR-P11-T01 Iran intelligence
+- Status: COMPLETED (JVM harness and full Android CI pass, PR #29)
+- Files changed: `vpn/connectivity/IranIntelligence.kt` (new: `Rule`, `Store`), `vpn/hub/FreeConfigList.kt`
+  (`downloadIntel`), `vpn/subscription/SubscriptionManager.kt`, `vpn/smart/ServerRace.kt`, `vpn/RayVpnService.kt`,
+  `RayApplication.kt`.
+- Architecture impact: rules carry id, version, issue time, TTL (max 30 days), confidence (0..1), an adjustment
+  (±5) and match conditions (network or "cell:*", connection kind, transport, address family, CDN or direct).
+  Matching rules add adjustment × confidence, clamped to ±5 in total, to the race order of servers that are
+  already eligible; they never make a config eligible, never change one, and carry no commands. A rule with an
+  unreadable condition is dropped rather than widened. The newest version of each id wins.
+  Rules are accepted only from `intel.json` named, with its SHA-256, in the free list's signed manifest; the
+  last verified file is kept on the phone until its rules expire. Nothing reads rules from Telegram, feeds or
+  the AI agent.
+- Tests run: `IranIntelligenceTest` (5), `FreeListSwapIntegrationTest` E (signed rules taken, changed rules refused).
+- Test result: JVM part passes in the harness; the signed-download test runs in CI (Robolectric).
+- Known limitations: the list builder does not publish `intel.json` yet, so no rules are active; publishing
+  rules needs evidence from real Iranian networks (owner's decision).
+- Security impact: bounded by construction; same signature key and checks as the free list.
+
+### MX-IR-P12-T01 AI layer
+- Status: COMPLETED (full Android CI passes, PR #29)
+- Files changed: `AiBoundaryTest.kt` (new). No production change was needed.
+- Audit result: the AI agent already exposes one read-only tool (a privacy-filtered health summary), refuses
+  every other tool name whatever approval fields the model sends, and withholds raw logs, endpoints, DNS and
+  routing details (`ai/AiAgentTools.kt`, tested in `PrivateDnsAndSecurityTest`).
+- Architecture impact: a new boundary test fails the build if the AI code ever references what changes
+  connections or their evidence: repositories and settings, free-config evidence, last-known-good, recovery,
+  intelligence rules, DNS and endpoint scores, failover, the kill switch or fail-closed policy, connect or
+  disconnect, or process / class loading. So the AI cannot mark configs alive or dead, bypass the security
+  gate, alter the kill switch or feed intelligence rules.
+- Tests run: `AiBoundaryTest` (1), existing `PrivateDnsAndSecurityTest`.
+- Test result: passes in CI.
+- Known limitations: the AI may still explain diagnostics in words; explanations are not acted on.
+- Security impact: locks in the current read-only boundary.
+
+## Not done from the build environment
+
+- MX-IR-P13-T01 (BLOCKED): sections 32 and 33 on real phones: Irancell, MCI and Wi-Fi in Iran, IPv4-only and
+  dual-stack, at different times of day; a BPB worker through FIX BPB; DNS tampering on each operator; failover
+  during a real outage; battery and ANR behaviour over a day. The build environment reaches neither Iranian
+  networks nor workers.dev.
+- Release gate (section 34): not attempted; no version change (versionName 1.0.0, versionCode 27).

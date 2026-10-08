@@ -322,17 +322,21 @@ private fun Stat(c: LabColors, value: String, label: String, color: Color, modif
 private fun lifecycleLabel(l: com.example.vpn.hub.FreeConfigLifecycle): String = when (l) {
     com.example.vpn.hub.FreeConfigLifecycle.NEW -> "New"
     com.example.vpn.hub.FreeConfigLifecycle.GLOBAL_VERIFIED -> "Checked outside Iran"
-    com.example.vpn.hub.FreeConfigLifecycle.IRAN_PROBATION -> "On trial on your network"
-    com.example.vpn.hub.FreeConfigLifecycle.IRAN_VERIFIED -> "✓ Verified on your network"
+    com.example.vpn.hub.FreeConfigLifecycle.LOCAL_PROBATION -> "On trial on your network"
+    com.example.vpn.hub.FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED -> "✓ Verified on your network"
     com.example.vpn.hub.FreeConfigLifecycle.DEGRADED -> "Weak on your network"
     com.example.vpn.hub.FreeConfigLifecycle.DEAD -> "Failing on your network"
     com.example.vpn.hub.FreeConfigLifecycle.QUARANTINED -> "Quarantined"
+    com.example.vpn.hub.FreeConfigLifecycle.GLOBAL_FAILED -> "Failed outside Iran"
+    com.example.vpn.hub.FreeConfigLifecycle.RECOVERY -> "Trying recovery"
+    com.example.vpn.hub.FreeConfigLifecycle.SECURITY_REJECTED -> "Refused: unsafe"
 }
 
 private fun lifecycleColor(c: LabColors, l: com.example.vpn.hub.FreeConfigLifecycle): Color = when (l) {
-    com.example.vpn.hub.FreeConfigLifecycle.IRAN_VERIFIED -> c.good
-    com.example.vpn.hub.FreeConfigLifecycle.IRAN_PROBATION, com.example.vpn.hub.FreeConfigLifecycle.DEGRADED -> c.okay
-    com.example.vpn.hub.FreeConfigLifecycle.DEAD, com.example.vpn.hub.FreeConfigLifecycle.QUARANTINED -> c.bad
+    com.example.vpn.hub.FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED -> c.good
+    com.example.vpn.hub.FreeConfigLifecycle.LOCAL_PROBATION, com.example.vpn.hub.FreeConfigLifecycle.DEGRADED -> c.okay
+    com.example.vpn.hub.FreeConfigLifecycle.DEAD, com.example.vpn.hub.FreeConfigLifecycle.QUARANTINED,
+    com.example.vpn.hub.FreeConfigLifecycle.SECURITY_REJECTED, com.example.vpn.hub.FreeConfigLifecycle.GLOBAL_FAILED -> c.bad
     else -> c.text2
 }
 

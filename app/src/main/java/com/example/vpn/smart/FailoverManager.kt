@@ -6,6 +6,7 @@ import com.example.data.model.OperationalMode
 import com.example.data.model.ServerTestStatus
 import com.example.data.model.VlessProfile
 import com.example.data.repository.ServerRepository
+import com.example.vpn.connectivity.SmartFailoverPolicy
 import com.example.vpn.godmode.MaximusMeshManager
 import com.example.vpn.godmode.PsiphonConduitBridge
 import com.example.xray.XrayLogManager
@@ -58,6 +59,10 @@ class FailoverManager(
     private val _currentTier = MutableStateFlow(CascadeTier.TIER_1_PRIMARY_REALITY)
     val currentTier: StateFlow<CascadeTier> = _currentTier.asStateFlow()
 
+    /** The primary and its Backup A / Backup B on other failure domains (SmartFailoverPolicy.plan). */
+    private val _backupPlan = MutableStateFlow<SmartFailoverPolicy.Plan?>(null)
+    val backupPlan: StateFlow<SmartFailoverPolicy.Plan?> = _backupPlan.asStateFlow()
+
     private val _failoverEvents = MutableStateFlow<String?>(null)
     val failoverEvents: StateFlow<String?> = _failoverEvents.asStateFlow()
 
@@ -78,6 +83,13 @@ class FailoverManager(
         monitorJob = scope.launch {
             val safeName = SecretRedactor.redact(currentProfile.name)
             XrayLogManager.i("FAILOVER", "Failover watchdog active for '$safeName' [Mode: ${settings.operationalMode.displayName}, Tier: ${_currentTier.value.badge}].")
+            runCatching {
+                val plan = SmartFailoverPolicy.plan(currentProfile,
+                    eligibleFallbacks(serverRepository.allProfiles.first(), currentProfile), { it.overallScore })
+                _backupPlan.value = plan
+                XrayLogManager.i("FAILOVER", "Backups ready: A ${plan.backupA?.let { "${it.kind} on ${it.failureDomain}" } ?: "none on another network"}, " +
+                    "B ${plan.backupB?.let { "${it.kind} on ${it.failureDomain}" } ?: "none on a third network"}.")
+            }.onFailure { if (it is CancellationException) throw it }
 
             while (isActive) {
                 // Every 12 s while healthy, every 3 s after a failed check (see WatchPolicy).
@@ -93,7 +105,7 @@ class FailoverManager(
                     // Several failures in a row, so one lost request does not cause flapping.
                     if (failures >= WatchPolicy.FAILURES_TO_SWITCH) {
                         // The cooldown must survive a service switch, which creates a new manager.
-                        if (acquireFailoverCooldown(25000)) {
+                        if (acquireFailoverCooldown(maxOf(25000L, policy.cooldownMs()))) {
                             attemptFailover(currentProfile, settings)
                         }
                     }
@@ -138,7 +150,7 @@ class FailoverManager(
         XrayLogManager.w("FAILOVER", "Active tunnel error reported on '$safeName' ($failures/3): ${SecretRedactor.redact(reason)}")
 
         if (failures >= 3) {
-            if (acquireFailoverCooldown(20000)) {
+            if (acquireFailoverCooldown(maxOf(20000L, policy.cooldownMs()))) {
                 failoverJob?.cancel()
                 failoverJob = scope.launch {
                     attemptFailover(profile, settings)
@@ -217,8 +229,12 @@ class FailoverManager(
                         val profiles = serverRepository.allProfiles.first()
                         val topPrimary = profiles.filter { !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") && !it.id.startsWith("hub-") }
                             .maxByOrNull { it.overallScore }
+                            ?.takeIf { it.effectiveFingerprint != currentActiveProfile?.effectiveFingerprint }
 
-                        if (topPrimary != null && checkHealth(topPrimary, 450L)) {
+                        // Back to the primary only after it passed several checks over a minute and this
+                        // config has run for a while (hysteresis), so the two never alternate.
+                        if (topPrimary != null && policy.recordPrimaryCheck(checkHealth(topPrimary, 450L))) {
+                            policy.recordSwitch(currentActiveProfile, failed = false)
                             val reason = "Your own server answers again; switching back to ${topPrimary.name}."
                             _currentTier.value = CascadeTier.TIER_1_PRIMARY_REALITY
                             _failoverEvents.value = reason
@@ -253,8 +269,10 @@ class FailoverManager(
         if (otherFamilies.size < nonDegraded.size && otherFamilies.isNotEmpty()) {
             XrayLogManager.i("FAILOVER", "Trying a different kind of connection than ${failedFamilies.joinToString()}.")
         }
-        val scoredCandidates = otherFamilies.filter { it.overallScore > 0 }
-        val candidateProfiles = if (scoredCandidates.isNotEmpty()) scoredCandidates else otherFamilies
+        // Off the failed config's CDN or network, and not one that was just left after failing.
+        val otherDomains = policy.withoutPenalized(SmartFailoverPolicy.preferOtherDomains(otherFamilies, degradedProfile))
+        val scoredCandidates = otherDomains.filter { it.overallScore > 0 }
+        val candidateProfiles = if (scoredCandidates.isNotEmpty()) scoredCandidates else otherDomains
 
         // --- GOD MODE CASCADE LADDER ---
         if (settings.operationalMode == OperationalMode.GOD_MODE) {
@@ -268,6 +286,7 @@ class FailoverManager(
                 val reason = "Switched to ${bestFallback.profile.name}."
                 _failoverEvents.value = reason
                 XrayLogManager.i("GOD_MODE", reason)
+                policy.recordSwitch(degradedProfile)
                 onTriggerSwitch(bestFallback.profile, reason)
                 return
             }
@@ -297,6 +316,7 @@ class FailoverManager(
             val reason = "Failover: Availability or latency policy triggered on $safeDegraded. Switched to ${fallback.profile.name}."
             _failoverEvents.value = reason
             XrayLogManager.i("FAILOVER", reason)
+            policy.recordSwitch(degradedProfile)
             onTriggerSwitch(fallback.profile, reason)
         } else {
             consecutiveFailures.set(0)
@@ -308,6 +328,9 @@ class FailoverManager(
         internal const val REAL_REQUEST_LATENCY_FLOOR_MS = 3000L
 
         private val lastFailoverAt = java.util.concurrent.atomic.AtomicLong(0L)
+
+        /** Backoff, penalties and switch-back hysteresis; shared because a switch creates a new manager. */
+        internal val policy = SmartFailoverPolicy()
 
         private fun acquireFailoverCooldown(intervalMs: Long): Boolean {
             val now = System.nanoTime() / 1_000_000

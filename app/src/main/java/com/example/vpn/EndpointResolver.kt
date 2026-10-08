@@ -1,5 +1,7 @@
 package com.example.vpn
 
+import com.example.vpn.connectivity.DnsOutcome
+import com.example.vpn.connectivity.DnsResilienceEngine
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.InetAddress
@@ -43,12 +45,19 @@ object EndpointResolver {
      *
      * [private] (GOD MODE): the network's DNS is never asked, so the server's name is not sent to the
      * ISP in plaintext; only the DoH resolvers answer.
+     *
+     * [doh] is the resolver order for this network and [skipSystem] skips the grace wait for a name this
+     * network's DNS is known to block (DnsResilienceProfile). Every query's [DnsOutcome] goes to [onOutcome]
+     * (resolver "system" for the network's own DNS), so the next lookup on this network is better informed.
      */
     fun resolve(
         host: String,
         system: (String) -> List<InetAddress>,
         open: (URL) -> HttpURLConnection,
-        private: Boolean = false
+        private: Boolean = false,
+        doh: List<String> = DOH_ENDPOINTS,
+        skipSystem: Boolean = false,
+        onOutcome: (resolver: String, outcome: DnsOutcome, ms: Long?) -> Unit = { _, _, _ -> }
     ): Result {
         val pool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "endpoint-resolver").apply { isDaemon = true } }
         try {
@@ -56,23 +65,38 @@ object EndpointResolver {
             var systemError: Exception? = null
             var systemPick: InetAddress? = null
             val systemFuture = if (private) null else done.submit {
+                val started = System.nanoTime()
                 val answers = try { system(host) } catch (e: Exception) { systemError = e; emptyList() }
                 systemPick = answers.firstOrNull { it is java.net.Inet4Address } ?: answers.firstOrNull()
+                val ms = (System.nanoTime() - started) / 1_000_000
+                report(onOutcome, DnsResilienceEngine.SYSTEM, when {
+                    systemError is java.net.SocketTimeoutException -> DnsOutcome.TIMEOUT
+                    systemError != null && systemError !is java.net.UnknownHostException -> DnsOutcome.ERROR
+                    systemPick == null -> DnsOutcome.NO_ANSWER
+                    isBlockedAnswer(systemPick!!) -> DnsOutcome.BLOCKED_ANSWER
+                    else -> DnsOutcome.ANSWER
+                }, ms)
                 systemPick?.takeIf { !isBlockedAnswer(it) }?.hostAddress to false
             }
-            val first = if (private) null else done.poll(SYSTEM_GRACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            val first = if (private || skipSystem) null else done.poll(SYSTEM_GRACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
             if (first != null) {
                 first.get().first?.let { return Result(it, viaDoh = false) }
             }
 
             var dohError: Exception? = null
-            val pending = DOH_ENDPOINTS.size + if (first == null && !private) 1 else 0
-            DOH_ENDPOINTS.forEach { endpoint ->
+            val resolvers = doh.ifEmpty { DOH_ENDPOINTS }
+            val pending = resolvers.size + if (first == null && !private) 1 else 0
+            resolvers.forEach { endpoint ->
                 done.submit {
+                    val started = System.nanoTime()
                     try {
-                        queryEndpoint(endpoint, host, open) to true
+                        queryEndpoint(endpoint, host, open).also {
+                            report(onOutcome, endpoint, if (it != null) DnsOutcome.ANSWER else DnsOutcome.NO_ANSWER,
+                                (System.nanoTime() - started) / 1_000_000)
+                        } to true
                     } catch (e: Exception) {
                         dohError = e
+                        report(onOutcome, endpoint, if (e is java.net.SocketTimeoutException) DnsOutcome.TIMEOUT else DnsOutcome.ERROR, null)
                         null to true
                     }
                 }
@@ -94,6 +118,12 @@ object EndpointResolver {
         } finally {
             pool.shutdownNow()
         }
+    }
+
+    private fun report(onOutcome: (String, DnsOutcome, Long?) -> Unit, resolver: String, outcome: DnsOutcome, ms: Long?) {
+        // Interrupted when the lookup finished first: not a measurement of the resolver.
+        if (Thread.currentThread().isInterrupted) return
+        runCatching { onOutcome(resolver, outcome, ms) }
     }
 
     private fun queryEndpoint(endpoint: String, host: String, open: (URL) -> HttpURLConnection): String? =

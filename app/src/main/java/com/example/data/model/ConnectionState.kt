@@ -27,7 +27,14 @@ enum class ConnectionStatus {
     DEGRADED,
     RECONNECTING,
     DISCONNECTING,
-    FAILED
+    FAILED,
+    /** Failover is moving the session to a backup; the old tunnel's PASS no longer counts. */
+    SWITCHING,
+    /**
+     * The phone's own network changed under a running tunnel. Traffic stays inside the tunnel, but the
+     * earlier PASS was measured on the old network, so the tunnel is re-verified before it counts again.
+     */
+    NETWORK_CHANGED
 }
 
 data class ConnectionState(
@@ -85,6 +92,8 @@ data class ConnectionState(
         ConnectionStatus.VPN_INTERFACE_ESTABLISHED -> "TUNNEL CREATED"
         ConnectionStatus.PREPARING, ConnectionStatus.CONNECTING -> "CONNECTING"
         ConnectionStatus.RECONNECTING -> "RECONNECTING"
+        ConnectionStatus.SWITCHING -> "SWITCHING SERVER"
+        ConnectionStatus.NETWORK_CHANGED -> "NETWORK CHANGED · RE-CHECKING"
         ConnectionStatus.DISCONNECTING -> "DISCONNECTING"
         ConnectionStatus.FAILED -> "FAILED"
         ConnectionStatus.DISCONNECTED -> "DISCONNECTED"
@@ -94,12 +103,12 @@ data class ConnectionState(
         val TUNNEL_UP = setOf(
             ConnectionStatus.VPN_INTERFACE_ESTABLISHED, ConnectionStatus.ENGINE_STARTED, ConnectionStatus.PROXY_CONNECTING,
             ConnectionStatus.VERIFYING, ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED, ConnectionStatus.CONNECTED,
-            ConnectionStatus.DEGRADED, ConnectionStatus.RECONNECTING
+            ConnectionStatus.DEGRADED, ConnectionStatus.RECONNECTING, ConnectionStatus.SWITCHING, ConnectionStatus.NETWORK_CHANGED
         )
         val BUSY = setOf(
             ConnectionStatus.CONNECTING, ConnectionStatus.PREPARING, ConnectionStatus.VPN_INTERFACE_ESTABLISHED,
             ConnectionStatus.ENGINE_STARTED, ConnectionStatus.PROXY_CONNECTING, ConnectionStatus.VERIFYING,
-            ConnectionStatus.RECONNECTING, ConnectionStatus.DISCONNECTING
+            ConnectionStatus.RECONNECTING, ConnectionStatus.DISCONNECTING, ConnectionStatus.SWITCHING
         )
     }
 }
@@ -121,7 +130,8 @@ object ConnectionVerification {
     ): ConnectionState {
         if (attemptId == null || attemptId != state.attemptId) return state
         val live = state.status == ConnectionStatus.VERIFYING || state.status == ConnectionStatus.CONNECTED ||
-            state.status == ConnectionStatus.DEGRADED || state.status == ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED
+            state.status == ConnectionStatus.DEGRADED || state.status == ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED ||
+            state.status == ConnectionStatus.NETWORK_CHANGED
         if (!live) return state
         if (success) {
             return state.copy(
@@ -137,7 +147,7 @@ object ConnectionVerification {
         }
         val failures = state.probeFailures + 1
         return when (state.status) {
-            ConnectionStatus.VERIFYING -> state.copy(
+            ConnectionStatus.VERIFYING, ConnectionStatus.NETWORK_CHANGED -> state.copy(
                 status = ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED,
                 probeFailures = failures, failureStage = stage ?: FailureStage.UNKNOWN,
                 errorMessage = "The tunnel is up but no request went through it (${(stage ?: FailureStage.UNKNOWN).name})."
@@ -148,4 +158,22 @@ object ConnectionVerification {
             else -> state.copy(probeFailures = failures, failureStage = stage ?: state.failureStage, pingMs = null, pingCheckedAt = now)
         }
     }
+
+    /**
+     * The phone's network changed. Measurements from the old network stop counting: a CONNECTED or
+     * DEGRADED tunnel becomes NETWORK_CHANGED until a request through it passes again. A tunnel that is
+     * still starting keeps its status; its own verification runs next.
+     */
+    fun onNetworkChanged(state: ConnectionState): ConnectionState {
+        val next = state.copy(networkGeneration = state.networkGeneration + 1)
+        return if (state.status == ConnectionStatus.CONNECTED || state.status == ConnectionStatus.DEGRADED) next.copy(
+            status = ConnectionStatus.NETWORK_CHANGED, verifiedAt = null, pingMs = null, pingCheckedAt = null,
+            probeFailures = 0, failureStage = null
+        ) else next
+    }
+
+    /** Failover begins moving a running session to a backup. The old PASS is cleared at once. */
+    fun onSwitching(state: ConnectionState): ConnectionState =
+        if (state.isTunnelUp) state.copy(status = ConnectionStatus.SWITCHING, verifiedAt = null, pingMs = null, pingCheckedAt = null)
+        else state
 }

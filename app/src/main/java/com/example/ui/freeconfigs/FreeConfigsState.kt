@@ -108,8 +108,8 @@ data class FreeConfigsUiState(
     val refreshFailure: String? = null
 ) {
     /** Servers per lifecycle (what this phone's measurements say), for the summary card. */
-    val verifiedHere: Int get() = nodes.count { it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.IRAN_VERIFIED }
-    val onTrial: Int get() = nodes.count { it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.IRAN_PROBATION }
+    val verifiedHere: Int get() = nodes.count { it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED }
+    val onTrial: Int get() = nodes.count { it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.LOCAL_PROBATION }
     val failingHere: Int get() = nodes.count {
         it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.DEGRADED || it.lifecycle == com.example.vpn.hub.FreeConfigLifecycle.DEAD
     }

@@ -55,6 +55,58 @@ class RayApplication : Application() {
         )
     }
 
+    /** What BPB recovery learned here: derived settings that worked, per original config and network. */
+    val recoveryLedger: com.example.vpn.connectivity.RecoveryLedger by lazy {
+        val prefs = getSharedPreferences("recovery_ledger", MODE_PRIVATE)
+        com.example.vpn.connectivity.RecoveryLedger(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /** Recovers degraded BPB / Cloudflare-fronted configs with derived copies; originals are never changed. */
+    val bpbRecovery: com.example.vpn.connectivity.BpbRecoveryEngine by lazy {
+        com.example.vpn.connectivity.BpbRecoveryEngine(ledger = recoveryLedger, fragmentReverted = { key, network ->
+            fragmentProfiles.decide(key, network) == com.example.vpn.connectivity.FragmentProfileEngine.Decision.REVERT
+        })
+    }
+
+    /** Iran intelligence rules from the signed free list's manifest; they only nudge the order servers are tried in. */
+    val iranIntel: com.example.vpn.connectivity.IranIntelligence.Store by lazy {
+        val prefs = getSharedPreferences("iran_intel", MODE_PRIVATE)
+        com.example.vpn.connectivity.IranIntelligence.Store(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /** Real DNS queries per network: resolver order and names this network's DNS blocks. */
+    val dnsResilience: com.example.vpn.connectivity.DnsResilienceEngine by lazy {
+        val prefs = getSharedPreferences("dns_resilience", MODE_PRIVATE)
+        com.example.vpn.connectivity.DnsResilienceEngine(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /** Edge addresses that completed real exchanges on each network; the validated ones feed recovery. */
+    val endpointScores: com.example.vpn.connectivity.EndpointScoringEngine by lazy {
+        val prefs = getSharedPreferences("endpoint_scores", MODE_PRIVATE)
+        com.example.vpn.connectivity.EndpointScoringEngine(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /** Fragmentation trials against the plain config, so fragmentation that makes things worse is reverted. */
+    val fragmentProfiles: com.example.vpn.connectivity.FragmentProfileEngine by lazy {
+        val prefs = getSharedPreferences("fragment_trials", MODE_PRIVATE)
+        com.example.vpn.connectivity.FragmentProfileEngine(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
     /** This phone's measurements of free configs, kept apart from the list builder's global checks. */
     val freeConfigEvidence: com.example.vpn.hub.FreeConfigEvidenceStore by lazy {
         val prefs = getSharedPreferences("free_config_evidence", MODE_PRIVATE)

@@ -126,6 +126,8 @@ class RayVpnService : VpnService() {
     private lateinit var serverRepository: ServerRepository
     private lateinit var settingsRepository: SettingsRepository
     private var activeProfile: VlessProfile? = null
+    /** The recovery candidate this session runs on, when a derived copy carried its traffic. */
+    @Volatile private var activeRecovery: com.example.vpn.connectivity.DerivedRecoveryCandidate? = null
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var settingsObserverJob: Job? = null
@@ -333,9 +335,16 @@ class RayVpnService : VpnService() {
         // Profiles carried by an engine program cannot be measured before it runs, so they are not raced.
         val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
             .filter { com.example.vpn.sidecar.Sidecars.forProfile(it) == null }
-        val candidates = com.example.vpn.smart.ServerRace.rank(
-            all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude
+        val intel = runCatching { com.example.RayApplication.instance.iranIntel.current() }.getOrNull()
+        val ranked = com.example.vpn.smart.ServerRace.rank(
+            all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude,
+            adjust = { p -> intel?.adjustmentFor(p, network)?.value ?: 0.0 }
         )
+        // UDP where UDP is blocked, IPv6 where there is no IPv6: skipped, not hammered (TransportCapabilityEngine).
+        val candidates = com.example.vpn.connectivity.TransportCapabilityEngine.order(ranked, transportCapabilities(network))
+        if (candidates.size < ranked.size) {
+            XrayLogManager.i("SMART", "Skipped ${ranked.size - candidates.size} servers whose transport this network does not carry.")
+        }
         // Servers left out because their saved form just failed are still tried in disguise.
         val dead = if (retryDisguised) all.filter { it.id in exclude } else emptyList()
         if (candidates.isEmpty() && dead.isEmpty()) return null
@@ -347,6 +356,23 @@ class RayVpnService : VpnService() {
         val best = candidates.firstOrNull() ?: return null
         val choice = runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() ?: return null
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
+    }
+
+    /** What this network was measured to carry, plus how UDP kinds fared here lately. */
+    private fun transportCapabilities(network: String): com.example.vpn.connectivity.TransportCapabilityEngine.Capabilities {
+        val working = networkMemory.workingKinds(network)
+        val failing = networkMemory.recentFailures(network)
+        val udpKinds = setOf("QUIC", "WireGuard")
+        val udpFailing = failing.any { it in udpKinds } && working.none { it in udpKinds }
+        // Measurements older than ten minutes may describe another network: treated as not measured.
+        val measured = com.example.vpn.smart.NetworkCapabilityDetector.last
+            ?.takeIf { System.currentTimeMillis() - it.measuredAt < 10 * 60_000L }
+        return com.example.vpn.connectivity.TransportCapabilityEngine.capabilities(
+            measured,
+            com.example.vpn.connectivity.TransportCapabilityEngine.History(
+                udpFailures = if (udpFailing) com.example.vpn.connectivity.TransportCapabilityEngine.IMPAIRED_AFTER else 0
+            )
+        )
     }
 
     /**
@@ -517,6 +543,7 @@ class RayVpnService : VpnService() {
                     }
                 }
             var raced = false
+            activeRecovery = null
             fun adopt(win: com.example.vpn.smart.ServerRace.Winner) {
                 com.example.vless.VlessValidator.validate(win.profile)
                 com.example.vpn.engine.RuntimeCapabilities.requireSupported(win.profile)
@@ -551,6 +578,30 @@ class RayVpnService : VpnService() {
                         raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder, retryDisguised = true)?.let { adopt(it) }
                     }
                     is com.example.xray.RealDelayProbe.Outcome.NotRun -> Unit
+                }
+            }
+
+            // 3a. A recovery candidate that carried traffic for this config on this network before (FIX BPB
+            // or earlier recovery): a derived copy, the saved config itself is unchanged. One request decides;
+            // a failure counts towards its rollback and the normal path search continues.
+            if (!raced) {
+                val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile) }.getOrNull()
+                if (recovery != null) {
+                    showForegroundNotification("Trying the recovered settings...")
+                    when (val outcome = com.example.xray.RealDelayProbe.measure(recovery.profile, timeouts.firstSec)) {
+                        is com.example.xray.RealDelayProbe.Outcome.Delay -> {
+                            profile = recovery.profile
+                            raced = true
+                            activeRecovery = recovery
+                            com.example.RayApplication.instance.bpbRecovery.recordOutcome(recovery, success = true)
+                            XrayLogManager.i("RECOVERY", "Recovered settings ${recovery.recoveryProfileKey} carried traffic (${outcome.latencyMs} ms).")
+                        }
+                        is com.example.xray.RealDelayProbe.Outcome.Failed -> {
+                            com.example.RayApplication.instance.bpbRecovery.recordOutcome(recovery, success = false)
+                            XrayLogManager.w("RECOVERY", "Recovered settings ${recovery.recoveryProfileKey} carried no traffic; trying other paths.")
+                        }
+                        is com.example.xray.RealDelayProbe.Outcome.NotRun -> Unit
+                    }
                 }
             }
 
@@ -619,17 +670,15 @@ class RayVpnService : VpnService() {
 
             // 4. Diagnostic step 4 & 5: Configure and establish Android VpnService TUN interface
             val safeMtu = settings.mtu.coerceIn(1280, 1500)
-            val primaryDns = "172.19.0.2"
+            val primaryDns = com.example.vpn.safety.VpnRoutePolicy.DNS_SERVER
             val builder = Builder()
                 .setSession("Maximus - ${profile.name}")
                 .setMtu(safeMtu)
                 .setBlocking(true)
-                .addAddress("172.19.0.1", 30)
-                .addRoute("0.0.0.0", 0)
                 .addDnsServer(primaryDns)
-                // Always capture IPv6. Unsupported engines drop it inside the TUN.
-                .addAddress("fdfe:dcba:9876::1", 126)
-                .addRoute("::", 0)
+            // IPv4 and IPv6 are always captured (VpnRoutePolicy); unsupported engines drop IPv6 inside the TUN.
+            com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { builder.addAddress(it.address, it.prefix) }
+            com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { builder.addRoute(it.address, it.prefix) }
             val sidecarEngine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
             if (sidecarEngine != null) {
                 // A separate engine program cannot ask Android to keep its own sockets out of the VPN,
@@ -843,12 +892,16 @@ class RayVpnService : VpnService() {
                 protectSocket = { socket -> safeProtectSocket(socket) },
                 tunnelProbe = { com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) },
                 onTriggerSwitch = { newProfile, reason ->
+                    // A recovered path that stopped carrying traffic counts towards its rollback.
+                    activeRecovery?.let { com.example.RayApplication.instance.bpbRecovery.recordOutcome(it, success = false) }
+                    activeRecovery = null
                     val degraded = requestedProfile.id
                     // The kind that just stopped carrying traffic goes last in the race.
                     networkMemory.recordFailure(
                         com.example.vpn.smart.NetworkKey.current(this@RayVpnService),
                         com.example.vpn.stealth.ConnectionKind.of(profile)
                     )
+                    mutateState { com.example.data.model.ConnectionVerification.onSwitching(it) }
                     serviceScope.launch {
                         XrayLogManager.w("FAILOVER", "Executing auto-failover, '${newProfile.name}' first: $reason")
                         // Race the saved servers so the switch lands on one that carries traffic now.
@@ -901,13 +954,20 @@ class RayVpnService : VpnService() {
                 !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
         }
         var lastError: Exception? = null
+        // What earlier real queries on this network showed: resolver order, names its DNS blocks.
+        val dns = runCatching { com.example.RayApplication.instance.dnsResilience }.getOrNull()
+        val networkKey = runCatching { com.example.vpn.smart.NetworkKey.current(this) }.getOrNull()
+        val dnsProfile = dns?.profile(networkKey, EndpointResolver.DOH_ENDPOINTS)
         for (network in networks) {
             try {
                 val resolved = EndpointResolver.resolve(
                     hostName,
                     system = { network.getAllByName(it).toList() },
                     open = { url -> network.openConnection(url) as java.net.HttpURLConnection },
-                    private = privateServerLookup
+                    private = privateServerLookup,
+                    doh = dnsProfile?.resolverOrder ?: EndpointResolver.DOH_ENDPOINTS,
+                    skipSystem = dnsProfile?.skipSystemFor(hostName) == true,
+                    onOutcome = { resolver, outcome, ms -> dns?.record(networkKey, resolver, hostName, outcome, ms) }
                 )
                 dnsPoisoned = resolved.viaDoh ||
                     EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))
@@ -985,9 +1045,11 @@ class RayVpnService : VpnService() {
 
     private fun createBlockingInterface(): ParcelFileDescriptor = Builder().setSession("Maximus traffic protection")
             .setMtu(1280).setBlocking(true)
-            .addAddress("172.19.0.1", 30).addRoute("0.0.0.0", 0)
-            .addAddress("fdfe:dcba:9876::1", 126).addRoute("::", 0)
-            .addDnsServer("172.19.0.2").establish()
+            .apply {
+                com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { addAddress(it.address, it.prefix) }
+                com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { addRoute(it.address, it.prefix) }
+            }
+            .addDnsServer(com.example.vpn.safety.VpnRoutePolicy.DNS_SERVER).establish()
             ?: error("Android refused the blocking VPN interface")
 
     private fun safeProtectSocket(socket: Socket): Boolean {
@@ -1099,21 +1161,36 @@ class RayVpnService : VpnService() {
      * (null, the last failure's stage). Bound to the VPN network, so it never falls back to the ISP.
      */
     private suspend fun verifyTraffic(): Pair<Long?, com.example.vpn.diagnostics.FailureStage?> {
-        var stage: com.example.vpn.diagnostics.FailureStage? = null
-        repeat(VERIFY_ATTEMPTS) { i ->
-            try {
-                val ms = com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService)
-                passEvent("tunnel.verify", ms)
-                return ms to null
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                stage = com.example.vpn.diagnostics.FailureStage.of(e)
-                XrayLogManager.w("VPN", "Traffic check ${i + 1}/$VERIFY_ATTEMPTS through the tunnel failed: ${stage?.name} (${e.javaClass.simpleName})")
-                if (i < VERIFY_ATTEMPTS - 1) delay(VERIFY_RETRY_MS)
-            }
+        val state = _vpnState.value
+        val attemptId = state.attemptId
+        val generation = state.networkGeneration
+        val engine = com.example.vpn.connectivity.MultiProbeHealthEngine(
+            com.example.vpn.connectivity.ProbeBudget(
+                maxRetries = VERIFY_ATTEMPTS - 1, retryBackoffMs = VERIFY_RETRY_MS, maxBackoffMs = VERIFY_RETRY_MS,
+                perStepTimeoutMs = 11_000, perConfigTimeoutMs = 40_000
+            )
+        )
+        val report = engine.run(
+            com.example.vpn.connectivity.MultiProbeHealthEngine.Subject(
+                sessionId = state.sessionId ?: attemptId ?: "none",
+                configFingerprint = state.activeProfile?.effectiveFingerprint,
+                engine = state.activeEngineName,
+                networkProfileId = com.example.vpn.smart.NetworkCapabilityDetector.last?.key()
+            ),
+            listOf(com.example.vpn.connectivity.MultiProbeHealthEngine.step(com.example.vpn.connectivity.ProbeStep.HTTP_THROUGH_TUNNEL) {
+                com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService)
+            }),
+            // A result for an older attempt or an earlier network never verifies this one.
+            freshness = { _vpnState.value.attemptId == attemptId && _vpnState.value.networkGeneration == generation }
+        )
+        com.example.vpn.connectivity.ProbeEvents.record(report, state.activeProfile?.id)
+        val result = report.results.lastOrNull()
+        if (report.passed && result?.valueMs != null) {
+            passEvent("tunnel.verify", result.valueMs)
+            return result.valueMs to null
         }
-        return null to stage
+        XrayLogManager.w("VPN", "Traffic check through the tunnel failed: ${report.observation()}. ${report.assessment()}")
+        return null to (report.failureStage ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN)
     }
 
     /** A request that went through the tunnel, recorded so the PASS can be checked later. */
@@ -1238,8 +1315,8 @@ class RayVpnService : VpnService() {
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 XrayLogManager.appendLog("Underlying network available.", "NETWORK")
-                // Results measured on the previous network no longer hold.
-                mutateState { it.copy(networkGeneration = it.networkGeneration + 1) }
+                // Results measured on the previous network no longer hold: a verified tunnel is re-checked.
+                mutateState { com.example.data.model.ConnectionVerification.onNetworkChanged(it) }
                 if (_vpnState.value.status == ConnectionStatus.RECONNECTING) {
                     activeProfile?.let { prof ->
                         serviceScope.launch {
@@ -1252,7 +1329,7 @@ class RayVpnService : VpnService() {
 
             override fun onLost(network: Network) {
                 XrayLogManager.appendLog("Underlying network connection lost.", "NETWORK")
-                mutateState { it.copy(networkGeneration = it.networkGeneration + 1) }
+                mutateState { com.example.data.model.ConnectionVerification.onNetworkChanged(it) }
                 val settings = settingsRepository.getSettings()
                 if (_vpnState.value.isTunnelUp && _vpnState.value.status != ConnectionStatus.RECONNECTING && settings.autoReconnect) {
                     XrayLogManager.appendLog("Auto-reconnect is enabled. Waiting for network recovery...", "VPN")

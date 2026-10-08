@@ -10,6 +10,7 @@ import com.example.vpn.hub.FreeConfigList
 import com.example.vpn.hub.LastKnownGoodPool
 import com.example.vpn.hub.RetainedFreeConfigs
 import com.example.vpn.subscription.SubscriptionManager
+import com.example.vpn.subscription.SubscriptionSnapshots
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -20,7 +21,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -56,24 +59,32 @@ class FreeListSwapIntegrationTest {
         .digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
     /** Publishes a signed list holding servers [range]. */
-    private fun publish(range: IntRange) {
+    private fun publish(range: IntRange, intelRules: String? = null) {
         val list = range.joinToString("\n") { link(it) } + "\n"
-        val manifest = """{"count":${range.count()},"created":"2026-10-06T12:00:00Z","files":{"free.txt":{"bytes":${list.length},"sha256":"${sha(list)}"}},"version":1}"""
+        val intelEntry = intelRules?.let { ""","intel.json":{"bytes":${it.length},"sha256":"${sha(it)}"}""" }.orEmpty()
+        val manifest = """{"count":${range.count()},"created":"2026-10-06T12:00:00Z","files":{"free.txt":{"bytes":${list.length},"sha256":"${sha(list)}"}$intelEntry},"version":1}"""
         val sig = java.util.Base64.getEncoder().encodeToString(
             Signature.getInstance("SHA256withECDSA").run { initSign(keys.private); update(manifest.toByteArray()); sign() })
         val base = FreeConfigList.URL.substringBeforeLast('/')
-        published = mapOf("$base/manifest.json" to manifest, "$base/manifest.sig" to sig, FreeConfigList.URL to list)
+        published = mapOf("$base/manifest.json" to manifest, "$base/manifest.sig" to sig, FreeConfigList.URL to list) +
+            listOfNotNull(intelRules?.let { "$base/${FreeConfigList.INTEL_FILE}" to it })
     }
+
+    @get:Rule val tmp = TemporaryFolder()
+    private var intel: String? = null
+    private var snapshots: SubscriptionSnapshots? = null
 
     private fun manager() = SubscriptionManager(
         subscriptions, servers,
+        snapshots = snapshots,
         download = { url -> published?.get(url) ?: throw java.io.IOException("unreachable") },
         staggerMs = 10,
         freeListEnabled = { true },
         lastKnownGood = { pool },
         inUseIds = { inUse },
         freeListKey = publicKey,
-        retainedStore = retained
+        retainedStore = retained,
+        intelSink = { intel = it }
     )
 
     private suspend fun free(): List<VlessProfile> = servers.getProfilesBySubscription(FreeConfigList.URL).first()
@@ -138,6 +149,41 @@ class FreeListSwapIntegrationTest {
         val result = manager().syncSubscription(subscriptions.getSubscriptionByUrl(FreeConfigList.URL)!!)
         assertTrue(result.fromOfflineCopy || !result.isSuccess)
         assertEquals(before, free().map { it.id }.toSet())
+    }
+
+    @Test
+    fun `B2 - a failed refresh with an offline copy re-adds nothing, and an empty list comes back capped`() = runBlocking {
+        snapshots = SubscriptionSnapshots(tmp.root, encrypt = { it.reversed() }, decrypt = { it.reversed() })
+        publish(1..30)
+        manager().addAndSyncSubscription(FreeConfigList.NAME, FreeConfigList.URL)
+        val gone = free().first()
+        manager().deleteFree(gone)
+        published = null
+        val sub = subscriptions.getSubscriptionByUrl(FreeConfigList.URL)!!
+        val failed = manager().syncSubscription(sub)
+        assertFalse(failed.isSuccess)
+        assertFalse(failed.fromOfflineCopy)
+        // Existing verified configurations retained; the one the user deleted does not come back.
+        assertEquals(29, free().size)
+        assertTrue(free().none { it.effectiveFingerprint == gone.effectiveFingerprint })
+        manager().deleteAllFree()
+        val restored = manager().syncSubscription(sub)
+        assertTrue(restored.fromOfflineCopy)
+        assertEquals(30, free().size)
+    }
+
+    @Test
+    fun `E - intelligence rules are taken only when the signed manifest names them`() = runBlocking {
+        val rules = """{"rules":[{"id":"r1","issued":1,"ttlHours":24,"confidence":1,"adjustment":1}]}"""
+        publish(1..5, intelRules = rules)
+        manager().addAndSyncSubscription(FreeConfigList.NAME, FreeConfigList.URL)
+        assertEquals(rules, intel)
+        // Changed after signing: refused, nothing is handed over (the store keeps what it had).
+        intel = null
+        publish(1..5, intelRules = rules)
+        published = published!! + (FreeConfigList.URL.substringBeforeLast('/') + "/" + FreeConfigList.INTEL_FILE to rules.replace("\"adjustment\":1", "\"adjustment\":5"))
+        manager().syncSubscription(subscriptions.getSubscriptionByUrl(FreeConfigList.URL)!!)
+        assertEquals(null, intel)
     }
 
     @Test
