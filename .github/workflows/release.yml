@@ -88,6 +88,8 @@ jobs:
         run: bash scripts/build-engines.sh arm64-v8a armeabi-v7a x86_64
       - name: Build, test and stage standalone APKs
         env:
+          # The build number the in-app update pop-up compares; published with the release below.
+          MAXIMUS_RELEASE_BUILD: ${{ github.run_number }}
           KEYSTORE_PATH: ${{ runner.temp }}/release.jks
           STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
@@ -144,6 +146,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN || github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
+          MAXIMUS_RELEASE_BUILD: ${{ github.run_number }}
         run: |
           if [ -z "$RELEASE_TAG" ]; then RELEASE_TAG=$(cat release-version.txt); fi
           case "$RELEASE_TAG" in [vV][0-9]*.[0-9]*.[0-9]*) ;; *) echo 'Expected semver tag such as V1.0.0'; exit 1 ;; esac
@@ -152,7 +155,30 @@ jobs:
           if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             gh release delete "$RELEASE_TAG" --yes --cleanup-tag
           fi
-          gh release create "$RELEASE_TAG" MAXIMUSVPN-V1.0.0-arm64-v8a.apk MAXIMUSVPN-V1.0.0-universal.apk SHA256SUMS --target "$GITHUB_SHA" --title "Android version V1.0.0" --notes "" --latest
+          # The hidden maximus-build line is what the in-app update check reads.
+          notes=$(printf 'Build %s\n\n<!-- maximus-build: %s -->' "$MAXIMUS_RELEASE_BUILD" "$MAXIMUS_RELEASE_BUILD")
+          gh release create "$RELEASE_TAG" MAXIMUSVPN-V1.0.0-arm64-v8a.apk MAXIMUSVPN-V1.0.0-universal.apk SHA256SUMS --target "$GITHUB_SHA" --title "Android version V1.0.0" --notes "$notes" --latest
           actual="$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | sort | join(",")')"
           test "$actual" = 'MAXIMUSVPN-V1.0.0-arm64-v8a.apk,MAXIMUSVPN-V1.0.0-universal.apk,SHA256SUMS' || { echo "Unexpected assets: $actual"; exit 1; }
           echo 'Published three uploaded assets plus two GitHub-generated source archives.'
+      - name: Publish update information for the in-app update pop-up
+        # update.json on the update-info branch is what the app reads through jsDelivr/Statically when
+        # api.github.com is blocked. Written only after the release itself is published.
+        if: ${{ !startsWith(inputs.tag, 'dry-run') }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN || github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          MAXIMUS_RELEASE_BUILD: ${{ github.run_number }}
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then RELEASE_TAG=$(cat release-version.txt); fi
+          dir="$RUNNER_TEMP/update-info"
+          mkdir -p "$dir" && cd "$dir"
+          python3 -c 'import json,sys; print(json.dumps({"version": sys.argv[1], "build": int(sys.argv[2]), "url": "https://github.com/" + sys.argv[3] + "/releases/tag/" + sys.argv[1]}))' \
+            "$RELEASE_TAG" "$MAXIMUS_RELEASE_BUILD" "$GITHUB_REPOSITORY" > update.json
+          cat update.json
+          git init -q -b update-info
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add update.json
+          git commit -q -m "Update information: $RELEASE_TAG build $MAXIMUS_RELEASE_BUILD"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" update-info
