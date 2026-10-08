@@ -849,6 +849,7 @@ class RayVpnService : VpnService() {
                         com.example.vpn.smart.NetworkKey.current(this@RayVpnService),
                         com.example.vpn.stealth.ConnectionKind.of(profile)
                     )
+                    mutateState { com.example.data.model.ConnectionVerification.onSwitching(it) }
                     serviceScope.launch {
                         XrayLogManager.w("FAILOVER", "Executing auto-failover, '${newProfile.name}' first: $reason")
                         // Race the saved servers so the switch lands on one that carries traffic now.
@@ -1253,8 +1254,8 @@ class RayVpnService : VpnService() {
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 XrayLogManager.appendLog("Underlying network available.", "NETWORK")
-                // Results measured on the previous network no longer hold.
-                mutateState { it.copy(networkGeneration = it.networkGeneration + 1) }
+                // Results measured on the previous network no longer hold: a verified tunnel is re-checked.
+                mutateState { com.example.data.model.ConnectionVerification.onNetworkChanged(it) }
                 if (_vpnState.value.status == ConnectionStatus.RECONNECTING) {
                     activeProfile?.let { prof ->
                         serviceScope.launch {
@@ -1267,7 +1268,7 @@ class RayVpnService : VpnService() {
 
             override fun onLost(network: Network) {
                 XrayLogManager.appendLog("Underlying network connection lost.", "NETWORK")
-                mutateState { it.copy(networkGeneration = it.networkGeneration + 1) }
+                mutateState { com.example.data.model.ConnectionVerification.onNetworkChanged(it) }
                 val settings = settingsRepository.getSettings()
                 if (_vpnState.value.isTunnelUp && _vpnState.value.status != ConnectionStatus.RECONNECTING && settings.autoReconnect) {
                     XrayLogManager.appendLog("Auto-reconnect is enabled. Waiting for network recovery...", "VPN")

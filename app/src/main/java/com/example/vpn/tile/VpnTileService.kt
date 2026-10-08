@@ -130,6 +130,7 @@ class VpnTileService : TileService() {
                 }
             }
             ConnectionStatus.CONNECTING, ConnectionStatus.RECONNECTING, ConnectionStatus.PREPARING,
+            ConnectionStatus.SWITCHING, ConnectionStatus.NETWORK_CHANGED,
             ConnectionStatus.VPN_INTERFACE_ESTABLISHED, ConnectionStatus.ENGINE_STARTED,
             ConnectionStatus.PROXY_CONNECTING, ConnectionStatus.VERIFYING -> {
                 tile.state = Tile.STATE_UNAVAILABLE

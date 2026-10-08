@@ -208,7 +208,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 |---|---|---|
 | MX-IR-P00-T01 | Stage 0 audit | COMPLETED |
 | MX-IR-P01-T01 | Multi-probe engine and probe results | TESTING |
-| MX-IR-P02-T01 | Connection state correctness | NOT_STARTED |
+| MX-IR-P02-T01 | Connection state correctness | TESTING |
 | MX-IR-P03-T01 | Connection score and candidate states | NOT_STARTED |
 | MX-IR-P04-T01 | BPB recovery engine | NOT_STARTED |
 | MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | NOT_STARTED |
@@ -252,3 +252,18 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Known limitations: pre-connect tests still use `RealDelayProbe` directly (they already measure a real
   request); their stages will be expressed as engine steps where Stage 6/10 need per-step data.
 - Security impact: none weakened; adds a security gate hook that stops a run before any network step.
+
+### MX-IR-P02-T01 Connection state correctness
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `data/model/ConnectionState.kt` (SWITCHING, NETWORK_CHANGED, `onNetworkChanged`, `onSwitching`),
+  `vpn/RayVpnService.kt` (network callbacks and failover use them), `ui/components/CyberComponents.kt`,
+  `vpn/tile/VpnTileService.kt` (labels for the new states).
+- Architecture impact: the existing chain DISCONNECTED → PREPARING/CONNECTING → VPN_INTERFACE_ESTABLISHED →
+  ENGINE_STARTED → VERIFYING → CONNECTED stays. New: when the phone's network changes under a verified tunnel
+  the status becomes NETWORK_CHANGED (tunnel still up, traffic still inside it, old PASS cleared) until a
+  request through the tunnel passes again (rechecked every 4 s). When failover starts, the status becomes
+  SWITCHING and late checks of the old tunnel are ignored. Old results stay in the event log as history.
+- Tests run: `ConnectionStateCorrectnessTest` (8) and the existing `ConnectionVerificationTest`.
+- Test result: 8/8 pass in the JVM harness; full suite in CI.
+- Known limitations: behaviour on a real handover (Wi-Fi to cellular) is untested on a phone.
+- Security impact: none; the kill switch and routes are unchanged (the tunnel is not torn down on a network change).

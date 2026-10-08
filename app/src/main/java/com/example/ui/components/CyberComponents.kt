@@ -561,6 +561,8 @@ fun ConnectionButton(
                         ConnectionStatus.DEGRADED -> "DEGRADED"
                         ConnectionStatus.PREPARING -> "STARTING"
                         ConnectionStatus.RECONNECTING -> "RECONNECT"
+                        ConnectionStatus.SWITCHING -> "SWITCHING"
+                        ConnectionStatus.NETWORK_CHANGED -> "RE-CHECK"
                         ConnectionStatus.DISCONNECTING -> "DISCONNECT"
                         ConnectionStatus.FAILED -> "RESET"
                         ConnectionStatus.DISCONNECTED -> "CONNECT"
@@ -593,6 +595,8 @@ fun StatusBadge(
         ConnectionStatus.DEGRADED -> Pair(AppTheme.colors.statusWarning, "DEGRADED")
         ConnectionStatus.CONNECTING, ConnectionStatus.PREPARING -> Pair(AppTheme.colors.statusWarning, "CONNECTING...")
         ConnectionStatus.RECONNECTING -> Pair(AppTheme.colors.statusWarning, "RECONNECTING...")
+        ConnectionStatus.SWITCHING -> Pair(AppTheme.colors.statusWarning, "SWITCHING SERVER...")
+        ConnectionStatus.NETWORK_CHANGED -> Pair(AppTheme.colors.statusWarning, "NETWORK CHANGED · RE-CHECKING")
         ConnectionStatus.DISCONNECTING -> Pair(AppTheme.colors.textMuted, "DISCONNECTING...")
         ConnectionStatus.FAILED -> Pair(AppTheme.colors.statusError, "FAILED")
         ConnectionStatus.DISCONNECTED -> Pair(AppTheme.colors.textMuted, "DISCONNECTED")
