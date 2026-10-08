@@ -16,7 +16,26 @@ enum class FailureStage {
     TIMEOUT,
     CANCELLED,
     NETWORK_CHANGED,
-    UNKNOWN;
+    UNKNOWN,
+    /** A DNS answer came back but cannot be used (malformed, private block-page address, odd NXDOMAIN). */
+    DNS_RESPONSE_INVALID,
+    /** TLS reached the certificate check and the certificate was refused (chain, name or pin). */
+    CERTIFICATE_VALIDATION_FAILED,
+    /** Traffic goes through the tunnel but names do not resolve through it. */
+    DNS_TUNNEL_FAILED,
+    /** The config or a derived candidate was refused by the security gate; never tried on the network. */
+    SECURITY_REJECTED;
+
+    /**
+     * The name the Iran connectivity spec uses for this stage. Stored data keeps the enum names above,
+     * so earlier saved evidence still loads; reports show this name.
+     */
+    val taxonomyName: String get() = when (this) {
+        PROXY_AUTH_FAILED -> "AUTH_FAILED"
+        PROXY_HANDSHAKE_FAILED -> "PROTOCOL_HANDSHAKE_FAILED"
+        HTTP_REQUEST_FAILED, HTTP_STATUS_INVALID -> "HTTP_CONNECTIVITY_FAILED"
+        else -> name
+    }
 
     companion object {
         /**
@@ -25,6 +44,16 @@ enum class FailureStage {
          * is followed, because wrappers hide the real class.
          */
         fun of(error: Throwable?): FailureStage {
+            // A refused certificate anywhere in the chain is more precise than the TLS wrapper around it.
+            var c = error
+            var d = 0
+            while (c != null && d < 6) {
+                if (c is java.security.cert.CertificateException || c is java.security.cert.CertPathValidatorException) {
+                    return CERTIFICATE_VALIDATION_FAILED
+                }
+                c = c.cause
+                d++
+            }
             var e = error
             var depth = 0
             while (e != null && depth < 6) {
@@ -42,7 +71,6 @@ enum class FailureStage {
             is java.net.ConnectException -> TCP_CONNECT_FAILED
             is java.net.NoRouteToHostException -> TCP_CONNECT_FAILED
             is javax.net.ssl.SSLException -> TLS_HANDSHAKE_FAILED
-            is java.security.cert.CertificateException -> TLS_HANDSHAKE_FAILED
             else -> null
         }
 
@@ -57,6 +85,8 @@ enum class FailureStage {
                 "timed out" in t || "timeout" in t || "deadline" in t -> TIMEOUT
                 "establish" in t && ("tun" in t || "interface" in t) -> TUN_ESTABLISH_FAILED
                 "engine" in t && ("start" in t || "did not" in t) -> ENGINE_START_FAILED
+                "x509" in t || "unknown authority" in t || "certificate verify failed" in t ||
+                    "certificate is not valid" in t || "pinned" in t && "cert" in t -> CERTIFICATE_VALIDATION_FAILED
                 "handshake" in t && ("tls" in t || "ssl" in t || "certificate" in t) -> TLS_HANDSHAKE_FAILED
                 "certificate" in t || "ssl" in t || "tls" in t -> TLS_HANDSHAKE_FAILED
                 "auth" in t || "invalid user" in t || "unauthor" in t || "407" in t -> PROXY_AUTH_FAILED

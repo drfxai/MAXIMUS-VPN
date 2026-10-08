@@ -1099,21 +1099,36 @@ class RayVpnService : VpnService() {
      * (null, the last failure's stage). Bound to the VPN network, so it never falls back to the ISP.
      */
     private suspend fun verifyTraffic(): Pair<Long?, com.example.vpn.diagnostics.FailureStage?> {
-        var stage: com.example.vpn.diagnostics.FailureStage? = null
-        repeat(VERIFY_ATTEMPTS) { i ->
-            try {
-                val ms = com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService)
-                passEvent("tunnel.verify", ms)
-                return ms to null
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                stage = com.example.vpn.diagnostics.FailureStage.of(e)
-                XrayLogManager.w("VPN", "Traffic check ${i + 1}/$VERIFY_ATTEMPTS through the tunnel failed: ${stage?.name} (${e.javaClass.simpleName})")
-                if (i < VERIFY_ATTEMPTS - 1) delay(VERIFY_RETRY_MS)
-            }
+        val state = _vpnState.value
+        val attemptId = state.attemptId
+        val generation = state.networkGeneration
+        val engine = com.example.vpn.connectivity.MultiProbeHealthEngine(
+            com.example.vpn.connectivity.ProbeBudget(
+                maxRetries = VERIFY_ATTEMPTS - 1, retryBackoffMs = VERIFY_RETRY_MS, maxBackoffMs = VERIFY_RETRY_MS,
+                perStepTimeoutMs = 11_000, perConfigTimeoutMs = 40_000
+            )
+        )
+        val report = engine.run(
+            com.example.vpn.connectivity.MultiProbeHealthEngine.Subject(
+                sessionId = state.sessionId ?: attemptId ?: "none",
+                configFingerprint = state.activeProfile?.effectiveFingerprint,
+                engine = state.activeEngineName,
+                networkProfileId = com.example.vpn.smart.NetworkCapabilityDetector.last?.key()
+            ),
+            listOf(com.example.vpn.connectivity.MultiProbeHealthEngine.step(com.example.vpn.connectivity.ProbeStep.HTTP_THROUGH_TUNNEL) {
+                com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService)
+            }),
+            // A result for an older attempt or an earlier network never verifies this one.
+            freshness = { _vpnState.value.attemptId == attemptId && _vpnState.value.networkGeneration == generation }
+        )
+        com.example.vpn.connectivity.ProbeEvents.record(report, state.activeProfile?.id)
+        val result = report.results.lastOrNull()
+        if (report.passed && result?.valueMs != null) {
+            passEvent("tunnel.verify", result.valueMs)
+            return result.valueMs to null
         }
-        return null to stage
+        XrayLogManager.w("VPN", "Traffic check through the tunnel failed: ${report.observation()}. ${report.assessment()}")
+        return null to (report.failureStage ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN)
     }
 
     /** A request that went through the tunnel, recorded so the PASS can be checked later. */

@@ -207,7 +207,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | ID | Task | Status |
 |---|---|---|
 | MX-IR-P00-T01 | Stage 0 audit | COMPLETED |
-| MX-IR-P01-T01 | Multi-probe engine and probe results | NOT_STARTED |
+| MX-IR-P01-T01 | Multi-probe engine and probe results | TESTING |
 | MX-IR-P02-T01 | Connection state correctness | NOT_STARTED |
 | MX-IR-P03-T01 | Connection score and candidate states | NOT_STARTED |
 | MX-IR-P04-T01 | BPB recovery engine | NOT_STARTED |
@@ -229,3 +229,26 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Known limitations: audit read from code; nothing verified on a phone
 - Security impact: none
 - Next action: Stage 1, MultiProbeHealthEngine
+
+### MX-IR-P01-T01 Multi-probe engine and probe results
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `vpn/connectivity/ProbeResult.kt`, `vpn/connectivity/ProbeBudget.kt`,
+  `vpn/connectivity/MultiProbeHealthEngine.kt`, `vpn/connectivity/ProbeEvents.kt`,
+  `vpn/diagnostics/FailureStage.kt` (new codes DNS_RESPONSE_INVALID, CERTIFICATE_VALIDATION_FAILED,
+  DNS_TUNNEL_FAILED, SECURITY_REJECTED and `taxonomyName` for the spec's names), `vpn/RayVpnService.kt`
+  (post-connect verification runs through the engine).
+- Architecture impact: one engine runs ordered steps (DNS, DNS query, TCP, TLS, protocol, engine, TUN,
+  HTTP through tunnel, DNS through tunnel, stability) supplied by the caller; returns `ProbeResult` per step
+  and a `HealthReport` (verdict, failed step, stage, OBSERVATION text, ASSESSMENT text). ICMP is not a step.
+  Per-step and per-config time limits, bounded retries with exponential backoff, no retry of security,
+  certificate or login failures. A run overtaken by a new attempt or network change is `stale` and never a
+  pass. `ProbeBudget` holds the concurrency, timeout, retry, metered and battery limits (P1.9).
+  The post-connect check keeps its old behaviour (3 tries, 1.5 s apart) and now logs each step.
+- Tests run: `MultiProbeHealthEngineTest` (16): ICMP-free health, TCP ok/TLS fail, refused certificate not
+  retried, TLS ok/protocol fail, tunnel up/HTTP fail, HTTP ok/DNS-tunnel fail, network change mid-probe,
+  stale rejection, step timeout inside the config budget, flaky retry, security refusal before any network
+  step, stability, result privacy, backoff, metered/battery budget, certificate texts.
+- Test result: 16/16 pass in a JVM harness (pure sources); full `testDebugUnitTest` and lint run in CI.
+- Known limitations: pre-connect tests still use `RealDelayProbe` directly (they already measure a real
+  request); their stages will be expressed as engine steps where Stage 6/10 need per-step data.
+- Security impact: none weakened; adds a security gate hook that stops a run before any network step.
