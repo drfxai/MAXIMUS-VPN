@@ -335,9 +335,14 @@ class RayVpnService : VpnService() {
         // Profiles carried by an engine program cannot be measured before it runs, so they are not raced.
         val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
             .filter { com.example.vpn.sidecar.Sidecars.forProfile(it) == null }
-        val candidates = com.example.vpn.smart.ServerRace.rank(
+        val ranked = com.example.vpn.smart.ServerRace.rank(
             all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude
         )
+        // UDP where UDP is blocked, IPv6 where there is no IPv6: skipped, not hammered (TransportCapabilityEngine).
+        val candidates = com.example.vpn.connectivity.TransportCapabilityEngine.order(ranked, transportCapabilities(network))
+        if (candidates.size < ranked.size) {
+            XrayLogManager.i("SMART", "Skipped ${ranked.size - candidates.size} servers whose transport this network does not carry.")
+        }
         // Servers left out because their saved form just failed are still tried in disguise.
         val dead = if (retryDisguised) all.filter { it.id in exclude } else emptyList()
         if (candidates.isEmpty() && dead.isEmpty()) return null
@@ -349,6 +354,23 @@ class RayVpnService : VpnService() {
         val best = candidates.firstOrNull() ?: return null
         val choice = runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() ?: return null
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
+    }
+
+    /** What this network was measured to carry, plus how UDP kinds fared here lately. */
+    private fun transportCapabilities(network: String): com.example.vpn.connectivity.TransportCapabilityEngine.Capabilities {
+        val working = networkMemory.workingKinds(network)
+        val failing = networkMemory.recentFailures(network)
+        val udpKinds = setOf("QUIC", "WireGuard")
+        val udpFailing = failing.any { it in udpKinds } && working.none { it in udpKinds }
+        // Measurements older than ten minutes may describe another network: treated as not measured.
+        val measured = com.example.vpn.smart.NetworkCapabilityDetector.last
+            ?.takeIf { System.currentTimeMillis() - it.measuredAt < 10 * 60_000L }
+        return com.example.vpn.connectivity.TransportCapabilityEngine.capabilities(
+            measured,
+            com.example.vpn.connectivity.TransportCapabilityEngine.History(
+                udpFailures = if (udpFailing) com.example.vpn.connectivity.TransportCapabilityEngine.IMPAIRED_AFTER else 0
+            )
+        )
     }
 
     /**
@@ -646,17 +668,15 @@ class RayVpnService : VpnService() {
 
             // 4. Diagnostic step 4 & 5: Configure and establish Android VpnService TUN interface
             val safeMtu = settings.mtu.coerceIn(1280, 1500)
-            val primaryDns = "172.19.0.2"
+            val primaryDns = com.example.vpn.safety.VpnRoutePolicy.DNS_SERVER
             val builder = Builder()
                 .setSession("Maximus - ${profile.name}")
                 .setMtu(safeMtu)
                 .setBlocking(true)
-                .addAddress("172.19.0.1", 30)
-                .addRoute("0.0.0.0", 0)
                 .addDnsServer(primaryDns)
-                // Always capture IPv6. Unsupported engines drop it inside the TUN.
-                .addAddress("fdfe:dcba:9876::1", 126)
-                .addRoute("::", 0)
+            // IPv4 and IPv6 are always captured (VpnRoutePolicy); unsupported engines drop IPv6 inside the TUN.
+            com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { builder.addAddress(it.address, it.prefix) }
+            com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { builder.addRoute(it.address, it.prefix) }
             val sidecarEngine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
             if (sidecarEngine != null) {
                 // A separate engine program cannot ask Android to keep its own sockets out of the VPN,
@@ -1016,9 +1036,11 @@ class RayVpnService : VpnService() {
 
     private fun createBlockingInterface(): ParcelFileDescriptor = Builder().setSession("Maximus traffic protection")
             .setMtu(1280).setBlocking(true)
-            .addAddress("172.19.0.1", 30).addRoute("0.0.0.0", 0)
-            .addAddress("fdfe:dcba:9876::1", 126).addRoute("::", 0)
-            .addDnsServer("172.19.0.2").establish()
+            .apply {
+                com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { addAddress(it.address, it.prefix) }
+                com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { addRoute(it.address, it.prefix) }
+            }
+            .addDnsServer(com.example.vpn.safety.VpnRoutePolicy.DNS_SERVER).establish()
             ?: error("Android refused the blocking VPN interface")
 
     private fun safeProtectSocket(socket: Socket): Boolean {
