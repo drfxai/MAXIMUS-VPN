@@ -3,7 +3,6 @@ package com.example.ui.ai
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -27,10 +25,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.NetworkCheck
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Tune
@@ -61,14 +59,21 @@ import com.example.ai.gateway.ModelSource
 import com.example.ai.gateway.ProviderHealth
 import com.example.ai.gateway.ProviderHealthState
 import com.example.ai.gateway.RouteChoice
-import com.example.ui.protocols.GradientButton
-import com.example.ui.protocols.IconTile
+import com.example.ui.lab.Badge
+import com.example.ui.lab.Footnote
+import com.example.ui.lab.GroupLabel
+import com.example.ui.lab.Gutter
+import com.example.ui.lab.Hairline
+import com.example.ui.lab.KeyValue
+import com.example.ui.lab.Panel
+import com.example.ui.lab.PrimaryButton
+import com.example.ui.lab.SecondaryButton
+import com.example.ui.lab.Segmented
+import com.example.ui.lab.TextAction
+import com.example.ui.lab.TitleBar
 import com.example.ui.protocols.InterFamily
 import com.example.ui.protocols.LabColors
 import com.example.ui.protocols.LabText
-import com.example.ui.protocols.Pill
-import com.example.ui.protocols.SectionLabel
-import com.example.ui.protocols.labCard
 import com.example.ui.protocols.labColors
 
 /** One provider as the settings screen sees it: never the key itself, only its masked form. */
@@ -162,40 +167,37 @@ private fun healthColor(c: LabColors, h: ProviderHealth?, hasKey: Boolean): Colo
 private fun SimplePage(c: LabColors, state: AiSettingsUiState, actions: AiSettingsActions) {
     val p = state.primary
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 28.dp)) {
-        item { Header(c, "AI", "Your providers, your keys", actions.onBack) }
+        item { TitleBar(c, "AI", "Your providers, your keys", Icons.AutoMirrored.Rounded.ArrowBack, actions.onBack) }
         state.message?.let { m -> item { Banner(c, m, actions.onDismissMessage) } }
+        item { GroupLabel(c, "Active route") }
         item {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth().labCard(c)) {
-                InfoRow(c, "Mode", modeWord(state.settings.mode))
-                InfoRow(c, "Provider", p?.name ?: "Not set")
-                InfoRow(c, "Model", state.settings.primary?.modelId ?: "Auto")
-                InfoRow(c, "Status", healthWord(p?.health, p?.keyMasked != null), healthColor(c, p?.health, p?.keyMasked != null))
-                InfoRow(c, "API Key", p?.keyMasked ?: "Not set", last = true)
+            val hasKey = p?.keyMasked != null
+            Panel(c) {
+                KeyValue(c, "Mode", modeWord(state.settings.mode))
+                Hairline(c, 14.dp)
+                KeyValue(c, "Provider", p?.name ?: "Not set")
+                Hairline(c, 14.dp)
+                KeyValue(c, "Model", state.settings.primary?.modelId ?: "Auto")
+                Hairline(c, 14.dp)
+                KeyValue(c, "Status", "") { Badge(healthWord(p?.health, hasKey), healthColor(c, p?.health, hasKey)) }
+                Hairline(c, 14.dp)
+                KeyValue(c, "API key", p?.keyMasked ?: "Not set", if (hasKey) c.text2 else c.text3)
             }
         }
         if (p != null && p.keyMasked != null) item {
-            Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlineButton(c, if (state.busy?.startsWith("Testing") == true) "Testing…" else "Test Connection", Icons.Rounded.NetworkCheck, Modifier.weight(1f), state.busy == null) { actions.onTest(p.id) }
-                OutlineButton(c, if (state.busy?.startsWith("Refreshing") == true) "Refreshing…" else "Refresh Models", Icons.Rounded.Refresh, Modifier.weight(1f), state.busy == null) { actions.onRefreshModels(p.id) }
+            Row(Modifier.padding(start = Gutter, end = Gutter, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SecondaryButton(c, if (state.busy?.startsWith("Testing") == true) "Testing…" else "Test connection", Icons.Rounded.NetworkCheck, Modifier.weight(1f), state.busy == null) { actions.onTest(p.id) }
+                SecondaryButton(c, if (state.busy?.startsWith("Refreshing") == true) "Refreshing…" else "Refresh models", Icons.Rounded.Refresh, Modifier.weight(1f), state.busy == null) { actions.onRefreshModels(p.id) }
             }
         }
         item {
-            GradientButton(c, "Manage", Icons.Rounded.Tune, modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) { actions.onManage(true) }
+            PrimaryButton(c, "Manage providers", Icons.Rounded.Tune, Modifier.padding(start = Gutter, end = Gutter, top = 10.dp).fillMaxWidth()) { actions.onManage(true) }
         }
         item {
-            LabText("Keys are stored encrypted on this phone and are sent only to the provider they belong to. Maximus works fully without AI; " +
-                "AI only explains and suggests, it never controls the VPN.", c.text3, 12.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), maxLines = 4)
+            Footnote(c, "Keys are stored encrypted on this phone and are sent only to the provider they belong to. Maximus works fully without AI; " +
+                "AI only explains and suggests, it never controls the VPN.")
         }
     }
-}
-
-@Composable
-private fun InfoRow(c: LabColors, label: String, value: String, valueColor: Color? = null, last: Boolean = false) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        LabText(label, c.text2, 14.sp, FontWeight.Medium, Modifier.weight(1f), maxLines = 1)
-        LabText(value, valueColor ?: c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
-    }
-    if (!last) Box(Modifier.padding(horizontal = 18.dp).fillMaxWidth().height(1.dp).background(c.divider))
 }
 
 // ---------------------------------------------------------------- manage
@@ -203,29 +205,23 @@ private fun InfoRow(c: LabColors, label: String, value: String, valueColor: Colo
 @Composable
 private fun ManagePage(c: LabColors, state: AiSettingsUiState, actions: AiSettingsActions, relativeTime: (Long) -> String) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 28.dp)) {
-        item { Header(c, "Manage AI", "Providers, models and fallbacks") { actions.onManage(false) } }
+        item { TitleBar(c, "Manage AI", "Providers, models and fallbacks", Icons.AutoMirrored.Rounded.ArrowBack, { actions.onManage(false) }) }
         state.message?.let { m -> item { Banner(c, m, actions.onDismissMessage) } }
-        item { SectionLabel(c, "Mode") }
+        item { GroupLabel(c, "Routing mode") }
         item {
-            Column(Modifier.padding(horizontal = 20.dp).fillMaxWidth().labCard(c).padding(6.dp)) {
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.cardAlt).padding(4.dp)) {
-                    AiRoutingMode.entries.forEach { m ->
-                        val on = m == state.settings.mode
-                        Box(Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (on) c.accent else Color.Transparent)
-                            .clickable { actions.onMode(m) }.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
-                            LabText(modeWord(m), if (on) c.onAccent else c.text2, 13.sp, FontWeight.SemiBold, maxLines = 1)
-                        }
-                    }
+            Panel(c) {
+                Column(Modifier.padding(10.dp)) {
+                    Segmented(c, AiRoutingMode.entries, state.settings.mode, ::modeWord, actions.onMode)
+                    LabText(modeDetail(state.settings.mode), c.text2, 12.sp, modifier = Modifier.padding(start = 4.dp, top = 9.dp, bottom = 2.dp), maxLines = 2)
                 }
-                LabText(modeDetail(state.settings.mode), c.text2, 12.5.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp), maxLines = 2)
             }
         }
-        item { SectionLabel(c, "Providers") }
+        item { GroupLabel(c, "Providers") }
         state.providers.forEach { p ->
             item(key = p.id) { ProviderCard(c, state, p, state.open == p.id, actions, relativeTime) }
         }
         item { AddProviderRow(c, state, actions) }
-        item { SectionLabel(c, "Fallbacks") }
+        item { GroupLabel(c, "Fallback order") }
         item { FallbackList(c, state, actions) }
     }
 }
@@ -234,22 +230,25 @@ private fun ManagePage(c: LabColors, state: AiSettingsUiState, actions: AiSettin
 private fun ProviderCard(c: LabColors, state: AiSettingsUiState, p: AiProviderUi, open: Boolean, actions: AiSettingsActions, relativeTime: (Long) -> String) {
     val hasKey = p.keyMasked != null
     val isPrimary = state.settings.primary?.providerId == p.id
-    Column(Modifier.padding(horizontal = 20.dp, vertical = 5.dp).fillMaxWidth().labCard(c, 18.dp)) {
-        Row(Modifier.fillMaxWidth().clickable { actions.onOpen(if (open) null else p.id) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(Icons.Rounded.Key, healthColor(c, p.health, hasKey), 38.dp)
+    Panel(c, Modifier.padding(bottom = 10.dp)) {
+        Row(Modifier.fillMaxWidth().clickable { actions.onOpen(if (open) null else p.id) }.padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).background(c.cardAlt), contentAlignment = Alignment.Center) {
+                LabText(p.name.take(1), c.text2, 15.sp, FontWeight.Bold, maxLines = 1)
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LabText(p.name, c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
-                    if (isPrimary) { Spacer(Modifier.width(6.dp)); Pill("Primary", c.accent) }
+                    if (isPrimary) LabText("  ·  Primary", c.accent, 12.sp, FontWeight.SemiBold, maxLines = 1)
                 }
-                LabText(listOfNotNull(p.keyMasked ?: "No key", if (p.models.isNotEmpty()) "${p.models.size} models" else null,
-                    p.health?.recentLatencyMs?.let { "$it ms" }).joinToString(" · "), c.text2, 12.sp, maxLines = 1)
+                LabText(listOfNotNull(if (p.models.isNotEmpty()) "${p.models.size} models" else null,
+                    p.health?.recentLatencyMs?.let { "$it ms" }, if (hasKey) "key saved" else "no key").joinToString(" · "), c.text3, 12.sp, maxLines = 1)
             }
-            Pill(healthWord(p.health, hasKey), healthColor(c, p.health, hasKey))
-            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = c.text3, modifier = Modifier.padding(start = 4.dp))
+            Badge(healthWord(p.health, hasKey), healthColor(c, p.health, hasKey))
+            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = c.text3, modifier = Modifier.padding(start = 4.dp).size(20.dp))
         }
-        if (open) ProviderEditor(c, state, p, actions, relativeTime)
+        if (open) { Hairline(c); ProviderEditor(c, state, p, actions, relativeTime) }
     }
 }
 
@@ -259,8 +258,8 @@ private fun ProviderEditor(c: LabColors, state: AiSettingsUiState, p: AiProvider
     var advanced by remember(p.id) { mutableStateOf(false) }
     var modelsOpen by remember(p.id) { mutableStateOf(false) }
     val chosen = state.settings.primary?.takeIf { it.providerId == p.id }?.modelId
-    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-        LabText("API Key", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
+    Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 6.dp)) {
+        LabText("API key", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Field(c, key, { key = it }, p.keyMasked ?: p.config.kind.keyHint, Modifier.weight(1f), secret = true)
@@ -269,14 +268,14 @@ private fun ProviderEditor(c: LabColors, state: AiSettingsUiState, p: AiProvider
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlineButton(c, "Test", Icons.Rounded.NetworkCheck, Modifier.weight(1f), state.busy == null && p.keyMasked != null) { actions.onTest(p.id) }
-            OutlineButton(c, "Refresh Models", Icons.Rounded.Refresh, Modifier.weight(1f), state.busy == null && p.keyMasked != null) { actions.onRefreshModels(p.id) }
+            SecondaryButton(c, "Test", Icons.Rounded.NetworkCheck, Modifier.weight(1f), state.busy == null && p.keyMasked != null) { actions.onTest(p.id) }
+            SecondaryButton(c, "Refresh models", Icons.Rounded.Refresh, Modifier.weight(1f), state.busy == null && p.keyMasked != null) { actions.onRefreshModels(p.id) }
         }
         p.modelsRefreshedAt?.let { LabText("Models updated ${relativeTime(it)}", c.text3, 11.5.sp, modifier = Modifier.padding(top = 6.dp), maxLines = 1) }
         Spacer(Modifier.height(12.dp))
         LabText("Model", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
         Spacer(Modifier.height(4.dp))
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.cardAlt).clickable { modelsOpen = !modelsOpen }.padding(12.dp),
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).border(1.dp, c.stroke, RoundedCornerShape(10.dp)).clickable { modelsOpen = !modelsOpen }.padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically) {
             LabText(chosen ?: "Auto", c.text, 14.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
             Icon(if (modelsOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = c.text3)
@@ -292,20 +291,20 @@ private fun ProviderEditor(c: LabColors, state: AiSettingsUiState, p: AiProvider
                 if (p.models.size > 30) LabText("${p.models.size - 30} more · type an ID under Advanced", c.text3, 11.5.sp, modifier = Modifier.padding(8.dp), maxLines = 1)
             }
         }
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (state.settings.primary?.providerId != p.id) SmallButton(c, "Make primary", Modifier.weight(1f)) { actions.onPrimary(RouteChoice(p.id, null)) }
-            SmallButton(c, "Add as fallback", Modifier.weight(1f)) { actions.onAddFallback(RouteChoice(p.id, null)) }
-        }
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { advanced = !advanced }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.height(4.dp))
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { advanced = !advanced }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             LabText("Advanced", c.text2, 13.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
-            Icon(if (advanced) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = c.text3)
+            Icon(if (advanced) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = c.text3, modifier = Modifier.size(20.dp))
         }
         if (advanced) AdvancedSection(c, p, actions)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (p.keyMasked != null) SmallButton(c, "Remove key", Modifier.weight(1f), danger = true) { actions.onRemoveKey(p.id) }
-            SmallButton(c, "Remove provider", Modifier.weight(1f), danger = true) { actions.onRemoveProvider(p.id) }
-        }
+    }
+    Hairline(c)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (state.settings.primary?.providerId != p.id) TextAction(c, "Make primary") { actions.onPrimary(RouteChoice(p.id, null)) }
+        TextAction(c, "Add as fallback") { actions.onAddFallback(RouteChoice(p.id, null)) }
+        Spacer(Modifier.weight(1f))
+        if (p.keyMasked != null) TextAction(c, "Remove key", color = c.bad) { actions.onRemoveKey(p.id) }
+        TextAction(c, "Remove", color = c.bad) { actions.onRemoveProvider(p.id) }
     }
 }
 
@@ -329,6 +328,7 @@ private fun ModelRow(c: LabColors, name: String, detail: String, selected: Boole
             LabText(name, if (selected) c.accent else c.text, 13.5.sp, FontWeight.SemiBold, maxLines = 1)
             if (detail.isNotBlank()) LabText(detail, c.text3, 11.5.sp, maxLines = 1)
         }
+        if (selected) Icon(Icons.Rounded.Check, null, tint = c.accent, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -369,17 +369,14 @@ private fun AdvancedSection(c: LabColors, p: AiProviderUi, actions: AiSettingsAc
 @Composable
 private fun AddProviderRow(c: LabColors, state: AiSettingsUiState, actions: AiSettingsActions) {
     val missing = AiProviderKind.entries.filter { k -> k == AiProviderKind.OPENAI_COMPATIBLE || state.providers.none { it.config.kind == k } }
-    Column(Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
-        LabText("Add a provider", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            missing.forEach { k ->
-                Row(Modifier.clip(RoundedCornerShape(50)).border(1.dp, c.stroke, RoundedCornerShape(50)).clickable { actions.onAddProvider(k) }
-                    .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Add, null, tint = c.accent, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    LabText(k.displayName, c.text, 13.sp, FontWeight.Medium, maxLines = 1)
-                }
+    if (missing.isEmpty()) return
+    Panel(c) {
+        missing.forEachIndexed { i, k ->
+            if (i > 0) Hairline(c, 48.dp)
+            Row(Modifier.fillMaxWidth().clickable { actions.onAddProvider(k) }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Add, null, tint = c.accent, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(14.dp))
+                LabText("Add ${k.displayName}", c.text, 14.sp, FontWeight.Medium, Modifier.weight(1f), maxLines = 1)
             }
         }
     }
@@ -388,11 +385,12 @@ private fun AddProviderRow(c: LabColors, state: AiSettingsUiState, actions: AiSe
 @Composable
 private fun FallbackList(c: LabColors, state: AiSettingsUiState, actions: AiSettingsActions) {
     val names = state.providers.associate { it.id to it.name }
-    Column(Modifier.padding(horizontal = 20.dp).fillMaxWidth().labCard(c).padding(vertical = 6.dp)) {
+    Panel(c) {
         state.settings.primary?.let { p ->
             ChainRow(c, "1", names[p.providerId] ?: p.providerId, p.modelId ?: "Auto", "Primary", null, null)
         }
         state.settings.fallbacks.forEachIndexed { i, f ->
+            Hairline(c, 52.dp)
             ChainRow(c, "${i + 2}", names[f.providerId] ?: f.providerId, f.modelId ?: "Auto", null,
                 if (i > 0) ({ actions.onMoveFallbackUp(i) }) else null, { actions.onRemoveFallback(i) })
         }
@@ -405,14 +403,14 @@ private fun FallbackList(c: LabColors, state: AiSettingsUiState, actions: AiSett
 
 @Composable
 private fun ChainRow(c: LabColors, n: String, provider: String, model: String, badge: String?, onUp: (() -> Unit)?, onRemove: (() -> Unit)?) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(26.dp).clip(CircleShape).background(c.cardAlt), contentAlignment = Alignment.Center) { LabText(n, c.text2, 12.sp, FontWeight.Bold, maxLines = 1) }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(26.dp).clip(CircleShape).border(1.dp, c.stroke, CircleShape), contentAlignment = Alignment.Center) { LabText(n, c.text2, 12.sp, FontWeight.Bold, maxLines = 1) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             LabText(provider, c.text, 14.sp, FontWeight.SemiBold, maxLines = 1)
-            LabText(model, c.text2, 12.sp, maxLines = 1)
+            LabText(model, c.text3, 12.sp, maxLines = 1)
         }
-        badge?.let { Pill(it, c.accent) }
+        badge?.let { Badge(it, c.accent) }
         onUp?.let { Box(Modifier.size(34.dp).clip(CircleShape).clickable(onClick = it), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.ArrowUpward, "Move up", tint = c.text2, modifier = Modifier.size(18.dp)) } }
         onRemove?.let { Box(Modifier.size(34.dp).clip(CircleShape).clickable(onClick = it), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Close, "Remove", tint = c.text2, modifier = Modifier.size(18.dp)) } }
     }
@@ -421,24 +419,12 @@ private fun ChainRow(c: LabColors, n: String, provider: String, model: String, b
 // ---------------------------------------------------------------- building blocks
 
 @Composable
-private fun Header(c: LabColors, title: String, sub: String, onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 20.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = c.text)
-        }
-        Spacer(Modifier.width(4.dp))
-        Column {
-            LabText(title, c.text, 24.sp, FontWeight.Bold, maxLines = 1)
-            LabText(sub, c.text2, 13.sp, maxLines = 1)
-        }
-    }
-}
-
-@Composable
 private fun Banner(c: LabColors, message: String, onDismiss: () -> Unit) {
-    Row(Modifier.padding(horizontal = 20.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.info.copy(alpha = 0.12f))
-        .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        LabText(message, c.text, 13.sp, modifier = Modifier.weight(1f), maxLines = 3)
+    Row(Modifier.padding(horizontal = Gutter, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.card)
+        .border(1.dp, c.stroke, RoundedCornerShape(12.dp)).padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(7.dp).clip(CircleShape).background(c.info))
+        Spacer(Modifier.width(10.dp))
+        LabText(message, c.text, 12.5.sp, modifier = Modifier.weight(1f), maxLines = 3)
         Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.Close, "Dismiss", tint = c.text2, modifier = Modifier.size(18.dp))
         }
@@ -446,20 +432,9 @@ private fun Banner(c: LabColors, message: String, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun OutlineButton(c: LabColors, text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, enabled: Boolean = true, onClick: () -> Unit) {
-    val color = if (enabled) c.accent else c.text3
-    Row(modifier.height(46.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-        .clickable(enabled = enabled, onClick = onClick), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(6.dp))
-        LabText(text, color, 13.5.sp, FontWeight.SemiBold, maxLines = 1)
-    }
-}
-
-@Composable
 private fun SmallButton(c: LabColors, text: String, modifier: Modifier = Modifier, enabled: Boolean = true, danger: Boolean = false, onClick: () -> Unit) {
     val color = when { !enabled -> c.text3; danger -> c.bad; else -> c.accent }
-    Box(modifier.height(40.dp).clip(RoundedCornerShape(12.dp)).background(color.copy(alpha = 0.12f)).clickable(enabled = enabled, onClick = onClick)
+    Box(modifier.height(44.dp).clip(RoundedCornerShape(10.dp)).border(1.dp, if (enabled) color.copy(alpha = 0.35f) else c.stroke, RoundedCornerShape(10.dp)).clickable(enabled = enabled, onClick = onClick)
         .padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
         LabText(text, color, 13.sp, FontWeight.SemiBold, maxLines = 1)
     }
@@ -467,7 +442,7 @@ private fun SmallButton(c: LabColors, text: String, modifier: Modifier = Modifie
 
 @Composable
 private fun Field(c: LabColors, value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier, secret: Boolean = false, number: Boolean = false) {
-    Box(modifier.height(44.dp).clip(RoundedCornerShape(12.dp)).background(c.cardAlt).border(1.dp, c.stroke, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp),
+    Box(modifier.height(44.dp).clip(RoundedCornerShape(10.dp)).background(c.cardAlt).border(1.dp, c.stroke, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp),
         contentAlignment = Alignment.CenterStart) {
         if (value.isEmpty()) LabText(hint, c.text3, 13.sp, maxLines = 1)
         BasicTextField(

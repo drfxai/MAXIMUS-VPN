@@ -114,6 +114,7 @@ val bottomNavItems = listOf(
     Screen.Top10,
     Screen.AiAgent,
     Screen.Lab,
+    Screen.Panels,
     Screen.Settings
 )
 
@@ -169,7 +170,8 @@ fun MainApp(
                             label = {
                                 Text(
                                     text = screen.title,
-                                    fontSize = if (screen == Screen.Benchmark) 8.5.sp else 9.5.sp,
+                                    // Seven tabs: labels a little smaller so each fits on one line.
+                                    fontSize = if (bottomNavItems.size > 6) 8.5.sp else 9.5.sp,
                                     maxLines = 1,
                                     softWrap = false,
                                     overflow = TextOverflow.Ellipsis
