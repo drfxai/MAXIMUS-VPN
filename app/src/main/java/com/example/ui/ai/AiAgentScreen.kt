@@ -161,11 +161,11 @@ fun AiAgentScreen(
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Surface(
-                                    color = if (config.apiKey.isNotBlank()) Color(0xFF1B5E20) else Color(0xFFB71C1C),
+                                    color = if (config.aiReady) Color(0xFF1B5E20) else Color(0xFFB71C1C),
                                     shape = RoundedCornerShape(4.dp)
                                 ) {
                                     Text(
-                                        text = if (config.apiKey.isNotBlank()) "ACTIVE" else "NO KEY",
+                                        text = if (config.aiReady) "ACTIVE" else "NO KEY",
                                         fontSize = 8.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
@@ -353,7 +353,7 @@ fun AiChatTabContent(
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Warning Banner if API Key is missing
-        if (config.apiKey.isBlank()) {
+        if (!config.aiReady) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()

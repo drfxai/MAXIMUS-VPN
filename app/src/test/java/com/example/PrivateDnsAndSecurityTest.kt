@@ -43,8 +43,8 @@ class PrivateDnsAndSecurityTest {
             assertFalse(result.success)
             assertTrue(result.details.isEmpty())
         }
-        assertEquals(listOf("get_app_diagnostics_and_logs"),
-            AiAgentTools.TOOL_DECLARATIONS.flatMap { it.functionDeclarations }.map { it.name })
+        // No model calls tools any more: the one read-only summary is attached by the app itself.
+        assertEquals("get_app_diagnostics_and_logs", AiAgentTools.HEALTH_TOOL)
     }
 
     @Test fun plainVlessDohUsesProxyTlsAndRejectsUntrustedOrMismatchedCertificates() {

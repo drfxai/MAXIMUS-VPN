@@ -206,44 +206,25 @@ class AiAgentViewModel(
         _uiState.value = _uiState.value.copy(showTokenStatsModal = show)
     }
 
+    /** Saves the Gemini key, then checks it through the gateway (a models list call). */
     fun testApiKey(apiKey: String) {
         _uiState.value = _uiState.value.copy(isTestingKey = true, testKeyStatus = null)
         viewModelScope.launch {
             try {
-                val service = GeminiApiClient.service
-                val req = GeminiRequest(
-                    contents = listOf(
-                        GeminiContent(parts = listOf(GeminiPart(text = "Hello! Test connection.")))
-                    ),
-                    generationConfig = GeminiGenerationConfig(maxOutputTokens = 10)
-                )
-                val response = service.generateContent(
-                    model = config.value.model.ifBlank { GeminiModelCatalog.GEMINI_3_5_FLASH },
-                    apiKey = apiKey.trim(),
-                    request = req
-                )
-
-                if (response.error == null) {
-                    // A key that passed the test is saved at once, so the screen behind the
-                    // dialog stops showing "NO KEY" even if the dialog is closed without Save.
-                    preferences.setApiKey(apiKey.trim())
-                    _uiState.value = _uiState.value.copy(
-                        isTestingKey = false,
-                        testKeyStatus = "✅ API key is valid and saved"
-                    )
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        isTestingKey = false,
-                        testKeyStatus = "❌ Invalid API Key: ${response.error.message}"
-                    )
+                preferences.setApiKey(apiKey)?.let { refused ->
+                    _uiState.value = _uiState.value.copy(isTestingKey = false, testKeyStatus = "❌ $refused")
+                    return@launch
                 }
+                val result = com.example.ai.gateway.AiGatewayHolder.get().testConnection(com.example.ai.gateway.AiProviderKind.GEMINI.id)
+                preferences.refreshGateway()
+                _uiState.value = _uiState.value.copy(
+                    isTestingKey = false,
+                    testKeyStatus = if (result.ok) "✅ API key is valid and saved" else "❌ ${result.message}"
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isTestingKey = false,
-                    testKeyStatus = "❌ Test failed: ${e.message}"
-                )
+                _uiState.value = _uiState.value.copy(isTestingKey = false, testKeyStatus = "❌ Test failed")
             }
         }
     }

@@ -107,6 +107,18 @@ class RayApplication : Application() {
         )
     }
 
+    /** The Autonomous Network LAB: experiments on safe derived copies, verified profiles per network. */
+    val lab: com.example.vpn.lab.LabController by lazy {
+        val prefs = getSharedPreferences("network_lab", MODE_PRIVATE)
+        com.example.vpn.lab.LabController(
+            context = this,
+            store = com.example.vpn.lab.LabStore(load = { prefs.getString("v1", null) }, save = { prefs.edit().putString("v1", it).apply() }),
+            ledger = recoveryLedger,
+            endpoints = endpointScores,
+            loadProfile = { id -> serverRepository.getProfileById(id) }
+        ).also { it.start() }
+    }
+
     /** This phone's measurements of free configs, kept apart from the list builder's global checks. */
     val freeConfigEvidence: com.example.vpn.hub.FreeConfigEvidenceStore by lazy {
         val prefs = getSharedPreferences("free_config_evidence", MODE_PRIVATE)
