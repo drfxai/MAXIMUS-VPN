@@ -422,9 +422,17 @@ class SubscriptionManager(
         }
         snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
         // Rules beside the list, accepted only when the same signed manifest names them.
-        if (intelSink != null && outcome.configs > 0) runCatching {
-            FreeConfigList.downloadIntel(outcome.url, download ?: ::httpDownload, freeListKey)?.let(intelSink)
-        }.onFailure { XrayLogManager.w("SUBSCRIPTION", "Intelligence rules not taken: ${SecretRedactor.redact(it.message.orEmpty())}") }
+        val sink = intelSink
+        if (sink != null && outcome.configs > 0) {
+            val get: (String) -> String = download ?: { url -> httpDownload(url) }
+            try {
+                FreeConfigList.downloadIntel(outcome.url, get, freeListKey)?.let { sink(it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                XrayLogManager.w("SUBSCRIPTION", "Intelligence rules not taken: ${SecretRedactor.redact(e.message.orEmpty())}")
+            }
+        }
         val viaMirror = outcome.url.takeIf { it != subscription.url }
         outcome.failures.forEach { (url, why) ->
             XrayLogManager.w("SUBSCRIPTION", "Source ${SecretRedactor.redact(url)} failed: ${SecretRedactor.redact(why)}")
