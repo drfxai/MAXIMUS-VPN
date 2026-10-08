@@ -48,6 +48,10 @@ class SubscriptionManager(
     /** Free configs kept only because they were in use when the list dropped them, by id. */
     private val retainedStore: com.example.vpn.hub.RetainedFreeConfigs? = runCatching {
         com.example.RayApplication.instance.retainedFreeConfigs
+    }.getOrNull(),
+    /** Receives the Iran intelligence rules published with the free list, after their signature check. */
+    private val intelSink: ((String) -> Unit)? = runCatching {
+        com.example.RayApplication.instance.iranIntel.let { store -> { json: String -> store.replace(json) } }
     }.getOrNull()
 ) {
     companion object {
@@ -417,6 +421,10 @@ class SubscriptionManager(
                 plan.delete.map { it.effectiveFingerprint }.filter { fp -> plan.kept.none { it.effectiveFingerprint == fp } })
         }
         snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
+        // Rules beside the list, accepted only when the same signed manifest names them.
+        if (intelSink != null && outcome.configs > 0) runCatching {
+            FreeConfigList.downloadIntel(outcome.url, download ?: ::httpDownload, freeListKey)?.let(intelSink)
+        }.onFailure { XrayLogManager.w("SUBSCRIPTION", "Intelligence rules not taken: ${SecretRedactor.redact(it.message.orEmpty())}") }
         val viaMirror = outcome.url.takeIf { it != subscription.url }
         outcome.failures.forEach { (url, why) ->
             XrayLogManager.w("SUBSCRIPTION", "Source ${SecretRedactor.redact(url)} failed: ${SecretRedactor.redact(why)}")

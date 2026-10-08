@@ -217,7 +217,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | MX-IR-P08-T01 | Last-Known-Good and atomic refresh | TESTING |
 | MX-IR-P09-T01 | Smart failover | TESTING |
 | MX-IR-P10-T01 | DNS resilience and endpoint scoring | TESTING |
-| MX-IR-P11-T01 | Iran intelligence | NOT_STARTED |
+| MX-IR-P11-T01 | Iran intelligence | TESTING |
 | MX-IR-P12-T01 | AI layer | NOT_STARTED |
 | MX-IR-P13-T01 | Real-device validation (owner, on phones in Iran) | BLOCKED |
 
@@ -416,3 +416,22 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
   not scan on its own. Resolver behaviour on Irancell / MCI is not measured from here.
 - Security impact: no secrets stored (server host names and resolver addresses only, on the phone); DoH stays
   at pinned IP addresses with certificate checks.
+
+### MX-IR-P11-T01 Iran intelligence
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `vpn/connectivity/IranIntelligence.kt` (new: `Rule`, `Store`), `vpn/hub/FreeConfigList.kt`
+  (`downloadIntel`), `vpn/subscription/SubscriptionManager.kt`, `vpn/smart/ServerRace.kt`, `vpn/RayVpnService.kt`,
+  `RayApplication.kt`.
+- Architecture impact: rules carry id, version, issue time, TTL (max 30 days), confidence (0..1), an adjustment
+  (±5) and match conditions (network or "cell:*", connection kind, transport, address family, CDN or direct).
+  Matching rules add adjustment × confidence, clamped to ±5 in total, to the race order of servers that are
+  already eligible; they never make a config eligible, never change one, and carry no commands. A rule with an
+  unreadable condition is dropped rather than widened. The newest version of each id wins.
+  Rules are accepted only from `intel.json` named, with its SHA-256, in the free list's signed manifest; the
+  last verified file is kept on the phone until its rules expire. Nothing reads rules from Telegram, feeds or
+  the AI agent.
+- Tests run: `IranIntelligenceTest` (5), `FreeListSwapIntegrationTest` E (signed rules taken, changed rules refused).
+- Test result: JVM part passes in the harness; the signed-download test runs in CI (Robolectric).
+- Known limitations: the list builder does not publish `intel.json` yet, so no rules are active; publishing
+  rules needs evidence from real Iranian networks (owner's decision).
+- Security impact: bounded by construction; same signature key and checks as the free list.

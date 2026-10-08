@@ -335,8 +335,10 @@ class RayVpnService : VpnService() {
         // Profiles carried by an engine program cannot be measured before it runs, so they are not raced.
         val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
             .filter { com.example.vpn.sidecar.Sidecars.forProfile(it) == null }
+        val intel = runCatching { com.example.RayApplication.instance.iranIntel.current() }.getOrNull()
         val ranked = com.example.vpn.smart.ServerRace.rank(
-            all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude
+            all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude,
+            adjust = { p -> intel?.adjustmentFor(p, network)?.value ?: 0.0 }
         )
         // UDP where UDP is blocked, IPv6 where there is no IPv6: skipped, not hammered (TransportCapabilityEngine).
         val candidates = com.example.vpn.connectivity.TransportCapabilityEngine.order(ranked, transportCapabilities(network))

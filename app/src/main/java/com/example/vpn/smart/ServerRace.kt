@@ -3,6 +3,7 @@ package com.example.vpn.smart
 import com.example.core.SecretRedactor
 import com.example.data.model.ServerCategory
 import com.example.data.model.VlessProfile
+import com.example.vpn.connectivity.ConnectionScore
 import com.example.vpn.connectivity.DiversitySelector
 import com.example.vpn.engine.RuntimeCapabilities
 import com.example.vpn.stealth.ConnectionKind
@@ -146,7 +147,9 @@ class ServerRace(
             first: VlessProfile? = null,
             exclude: Set<String> = emptySet(),
             now: Long = System.currentTimeMillis(),
-            limit: Int = MAX_CANDIDATES
+            limit: Int = MAX_CANDIDATES,
+            /** Iran intelligence: a bounded nudge (±5) for eligible servers only; see IranIntelligence. */
+            adjust: (VlessProfile) -> Double = { 0.0 }
         ): List<VlessProfile> {
             val eligible = profiles.filter {
                 it.id !in exclude && it.id != first?.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") &&
@@ -163,6 +166,7 @@ class ServerRace(
                 if (p.isFavorite) s += 15.0
                 if (p.category == ServerCategory.OFFLINE) s -= 50.0
                 if (ConnectionKind.of(p) in failedKinds) s -= 1000.0
+                s += adjust(p).coerceIn(-ConnectionScore.MAX_ADJUSTMENT, ConnectionScore.MAX_ADJUSTMENT)
                 return s
             }
             val byScore = eligible.sortedByDescending(::score)

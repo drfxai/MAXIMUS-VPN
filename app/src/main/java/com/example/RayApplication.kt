@@ -71,6 +71,15 @@ class RayApplication : Application() {
         })
     }
 
+    /** Iran intelligence rules from the signed free list's manifest; they only nudge the order servers are tried in. */
+    val iranIntel: com.example.vpn.connectivity.IranIntelligence.Store by lazy {
+        val prefs = getSharedPreferences("iran_intel", MODE_PRIVATE)
+        com.example.vpn.connectivity.IranIntelligence.Store(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
     /** Real DNS queries per network: resolver order and names this network's DNS blocks. */
     val dnsResilience: com.example.vpn.connectivity.DnsResilienceEngine by lazy {
         val prefs = getSharedPreferences("dns_resilience", MODE_PRIVATE)
