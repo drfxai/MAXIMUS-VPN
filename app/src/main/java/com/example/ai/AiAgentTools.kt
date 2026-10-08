@@ -12,33 +12,15 @@ data class ToolExecutionResult(
     val details: Map<String, Any?> = emptyMap()
 )
 
-/** Model access is read-only. Approval fields in model arguments confer no authority. */
+/** Model access is read-only: the app gathers this summary itself; no model can call anything. */
 object AiAgentTools {
-    val TOOL_DECLARATIONS: List<GeminiToolWrapper> = listOf(
-        GeminiToolWrapper(functionDeclarations = listOf(
-                GeminiFunctionDeclaration(
-                    name = "get_app_diagnostics_and_logs",
-                    description = "Reads a privacy-filtered health summary containing VPN running status and event/error counts. Raw logs and network details are withheld.",
-                    parameters = GeminiFunctionParameters(
-                        properties = mapOf(
-                            "filter_keyword" to GeminiParameterProperty(
-                                type = "STRING",
-                                description = "Optional keyword to filter logs (e.g., 'error', 'handshake', 'timeout', 'dns', 'vless')."
-                            ),
-                            "max_lines" to GeminiParameterProperty(
-                                type = "INTEGER",
-                                description = "Number of log lines to inspect (default: 30, max: 100)."
-                            )
-                        )
-                    )
-                )
-        ))
-    )
+    /** The one read-only summary the Main Agent attaches to each question. */
+    const val HEALTH_TOOL = "get_app_diagnostics_and_logs"
 
     suspend fun executeTool(name: String, args: Map<String, Any?>): ToolExecutionResult {
         // Explicit allowlist before accessing application state. Unknown and future tools
         // fail closed; there is no mutation implementation or boolean approval bypass.
-        if (name != "get_app_diagnostics_and_logs") {
+        if (name != HEALTH_TOOL) {
             return ToolExecutionResult(name, false, "Tool unavailable: AI access is read-only.")
         }
         return withContext(Dispatchers.IO) {

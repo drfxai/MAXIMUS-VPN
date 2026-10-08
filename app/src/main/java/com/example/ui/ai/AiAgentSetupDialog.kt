@@ -47,7 +47,7 @@ fun AiAgentSetupDialog(
     onTestKey: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var apiKeyInput by remember(config.apiKey) { mutableStateOf(config.apiKey) }
+    var apiKeyInput by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
     val c = AppTheme.colors
@@ -107,7 +107,7 @@ fun AiAgentSetupDialog(
                         value = apiKeyInput,
                         onValueChange = { apiKeyInput = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Paste your AI Studio key (AIza…)", fontSize = 13.sp) },
+                        placeholder = { Text(config.keyMasked.ifBlank { "Paste your AI Studio key (AIza…)" }, fontSize = 13.sp) },
                         textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.5.sp),
                         visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                         leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(18.dp)) },
@@ -138,7 +138,7 @@ fun AiAgentSetupDialog(
                     KeyStatusRow(
                         isTesting = isTestingKey,
                         status = testKeyStatus,
-                        hasSavedKey = config.apiKey.isNotBlank(),
+                        hasSavedKey = config.keyMasked.isNotBlank(),
                         canTest = apiKeyInput.isNotBlank() && !isTestingKey,
                         onTest = { onTestKey(apiKeyInput) }
                     )
@@ -206,7 +206,7 @@ fun AiAgentSetupDialog(
                     }
                     Button(
                         onClick = {
-                            onSaveApiKey(apiKeyInput)
+                            if (apiKeyInput.isNotBlank()) onSaveApiKey(apiKeyInput)
                             onDismiss()
                         },
                         modifier = Modifier.weight(1.6f).height(46.dp),
