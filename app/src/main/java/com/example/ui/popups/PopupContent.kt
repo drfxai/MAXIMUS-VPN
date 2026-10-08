@@ -263,14 +263,15 @@ fun CommunityPopupContent(
 }
 
 /**
- * "New update available". [version] is the release name (for example V1.0.0) and [build] / [installedBuild]
- * are release build numbers, shown because a rebuilt release can keep its version name.
+ * "New update available". [version] / [installedVersion] are version names (for example V1.0.1) and
+ * [build] / [installedBuild] release build numbers, shown because a rebuilt release keeps its name.
  */
 @Composable
 fun UpdatePopupContent(
     emblem: Painter,
     version: String,
     build: Int,
+    installedVersion: String,
     installedBuild: Int,
     onLater: () -> Unit,
     onDownload: () -> Unit,
@@ -308,7 +309,7 @@ fun UpdatePopupContent(
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (installedBuild > 0) "Build $build · you have build $installedBuild" else "Build $build",
+                    "Build $build · you have V${installedVersion.trimStart('v', 'V')}" + if (installedBuild > 0) " build $installedBuild" else "",
                     color = Lux.textSoft.copy(alpha = 0.75f), fontSize = 12.sp
                 )
                 Spacer(Modifier.height(18.dp))

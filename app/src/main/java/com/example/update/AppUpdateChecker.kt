@@ -11,8 +11,8 @@ import java.util.concurrent.TimeUnit
 /**
  * Finds out whether a newer release of the app is published on GitHub.
  *
- * Release V1.0.0 is rebuilt under the same name, so versions are compared by release build number:
- * the release workflow stamps its run number into the APK (BuildConfig.RELEASE_BUILD), into the
+ * A release is newer when its version number is higher, or when it has the same version and a higher
+ * release build number (V1.0.0 is rebuilt under the same name). The release workflow stamps its run number into the APK (BuildConfig.RELEASE_BUILD), into the
  * release notes ("maximus-build: N") and into update.json on the update-info branch, which the
  * jsDelivr/Statically mirrors serve when GitHub is blocked.
  *
@@ -63,12 +63,34 @@ object AppUpdateChecker {
     }
 
     /**
-     * Whether to show the pop-up: only for a real release build (installedBuild > 0), only when the
-     * published build is newer, and not while "Later" snoozes that same build.
+     * Whether to show the pop-up: when the published version number is higher than the installed one,
+     * or the version is the same and its release build is newer (a rebuilt release). Never for an
+     * older version, and not while "Later" snoozes that same build.
      */
-    fun shouldShow(release: ReleaseInfo, installedBuild: Int, snoozedBuild: Int, snoozedUntil: Long, now: Long): Boolean {
-        if (installedBuild <= 0 || release.build <= installedBuild) return false
+    fun shouldShow(
+        release: ReleaseInfo,
+        installedVersion: String,
+        installedBuild: Int,
+        snoozedBuild: Int,
+        snoozedUntil: Long,
+        now: Long
+    ): Boolean {
+        val byVersion = compareVersions(release.version, installedVersion)
+        val newer = byVersion > 0 || (byVersion == 0 && installedBuild > 0 && release.build > installedBuild)
+        if (!newer) return false
         return !(snoozedBuild == release.build && now < snoozedUntil)
+    }
+
+    /** Compares "V1.0.10" with "1.0.9-debug" by number: negative, zero or positive. */
+    fun compareVersions(a: String, b: String): Int {
+        fun parts(v: String) = v.trim().trimStart('v', 'V').substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+        val x = parts(a)
+        val y = parts(b)
+        for (i in 0 until maxOf(x.size, y.size)) {
+            val d = x.getOrElse(i) { 0 }.compareTo(y.getOrElse(i) { 0 })
+            if (d != 0) return d
+        }
+        return 0
     }
 
     /** Every address that can answer, in order: the API first, then update.json and its CDN copies. */

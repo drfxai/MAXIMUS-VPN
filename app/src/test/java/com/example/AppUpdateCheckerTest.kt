@@ -51,16 +51,28 @@ class AppUpdateCheckerTest {
     }
 
     @Test
-    fun showsOnlyForANewerBuildThatIsNotSnoozed() {
+    fun comparesTheVersionNumberThenTheBuildNumber() {
         val release = ReleaseInfo("V1.0.0", 142, AppUpdateChecker.RELEASES_URL)
         val now = 1_000_000L
-        assertTrue(AppUpdateChecker.shouldShow(release, 138, 0, 0, now))
-        assertFalse("the installed build", AppUpdateChecker.shouldShow(release, 142, 0, 0, now))
-        assertFalse("an older release", AppUpdateChecker.shouldShow(release, 150, 0, 0, now))
-        assertFalse("a local build", AppUpdateChecker.shouldShow(release, 0, 0, 0, now))
-        assertFalse("Later on this build", AppUpdateChecker.shouldShow(release, 138, 142, now + 1, now))
-        assertTrue("Later has run out", AppUpdateChecker.shouldShow(release, 138, 142, now - 1, now))
-        assertTrue("a newer build than the snoozed one", AppUpdateChecker.shouldShow(release.copy(build = 143), 138, 142, now + 1, now))
+        fun show(r: ReleaseInfo, version: String, build: Int, snoozedBuild: Int = 0, snoozedUntil: Long = 0) =
+            AppUpdateChecker.shouldShow(r, version, build, snoozedBuild, snoozedUntil, now)
+        assertTrue("same version, newer build", show(release, "1.0.0", 138))
+        assertFalse("the installed build", show(release, "1.0.0", 142))
+        assertFalse("same version, older build", show(release, "1.0.0", 150))
+        assertFalse("same version, local build", show(release, "1.0.0-debug", 0))
+        assertTrue("newer version, lower build", show(ReleaseInfo("V1.0.1", 5, AppUpdateChecker.RELEASES_URL), "1.0.0", 150))
+        assertTrue("newer version on a local build", show(ReleaseInfo("V1.1.0", 5, AppUpdateChecker.RELEASES_URL), "1.0.0-debug", 0))
+        assertFalse("older version, higher build", show(release, "1.0.1", 100))
+        assertFalse("Later on this build", show(release, "1.0.0", 138, 142, now + 1))
+        assertTrue("Later has run out", show(release, "1.0.0", 138, 142, now - 1))
+        assertTrue("a newer build than the snoozed one", show(release.copy(build = 143), "1.0.0", 138, 142, now + 1))
+    }
+
+    @Test
+    fun versionNumbersCompareAsNumbers() {
+        assertTrue(AppUpdateChecker.compareVersions("V1.0.10", "1.0.9") > 0)
+        assertEquals(0, AppUpdateChecker.compareVersions("V1.0", "1.0.0-debug"))
+        assertTrue(AppUpdateChecker.compareVersions("1.2.0", "V1.10.0") < 0)
     }
 
     @Test

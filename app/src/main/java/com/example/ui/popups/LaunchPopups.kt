@@ -60,9 +60,9 @@ fun LaunchPopups() {
     }
 
     LaunchedEffect(Unit) {
-        if (LaunchPopupSession.updateHandled || installedBuild <= 0) return@LaunchedEffect
+        if (LaunchPopupSession.updateHandled) return@LaunchedEffect
         val latest = AppUpdateChecker.fetchLatest() ?: return@LaunchedEffect
-        if (AppUpdateChecker.shouldShow(latest, installedBuild, prefs.snoozedBuild, prefs.snoozedUntil, System.currentTimeMillis())) {
+        if (AppUpdateChecker.shouldShow(latest, BuildConfig.VERSION_NAME, installedBuild, prefs.snoozedBuild, prefs.snoozedUntil, System.currentTimeMillis())) {
             update = latest
         }
     }
@@ -97,6 +97,7 @@ fun LaunchPopups() {
             emblem = emblem,
             version = release.version,
             build = release.build,
+            installedVersion = BuildConfig.VERSION_NAME.substringBefore('-'),
             installedBuild = installedBuild,
             onLater = later,
             onDownload = {
