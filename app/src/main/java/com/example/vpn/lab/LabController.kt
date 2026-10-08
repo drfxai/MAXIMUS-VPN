@@ -159,6 +159,43 @@ class LabController(
         }
     }
 
+    /** An AI reading becomes an unverified discovery card; it never changes a measurement or a state. */
+    fun recordAdvice(explanation: String, patterns: List<String>, confidence: Double, model: String) {
+        if (explanation.isBlank()) return
+        val ctx = tracker.current
+        store.addDiscovery(LabDiscovery("advice-${ctx?.contextKey ?: "none"}", LabDiscovery.Kind.NETWORK_BEHAVIOR,
+            "LAB Agent: " + (patterns.firstOrNull() ?: "reading of ${ctx?.label ?: "this network"}"),
+            explanation + " (AI reading, not a measurement.)", "LAB Agent · $model", confidence.coerceIn(0.0, 1.0), false, System.currentTimeMillis()))
+        publish()
+    }
+
+    /**
+     * Tests one change the LAB Agent suggested, only if the user asks. The suggestion goes through the same
+     * allowlist and security gate as every candidate; a refused one is reported and never tested.
+     */
+    fun testSuggestion(profileId: String, field: String, value: String) = launchJob {
+        val parent = loadProfile(profileId) ?: return@launchJob publish(message = "That config no longer exists.")
+        val (verdict, copy) = CandidateMutationPolicy.checkRequest(parent, mapOf(field to value))
+        if (copy == null) return@launchJob publish(message = "LAB refused the suggestion: ${verdict.reason}")
+        if (tracker.current == null) refreshNetwork()
+        val ctx = tracker.current ?: return@launchJob publish(message = "No network to test on.")
+        val now = System.currentTimeMillis()
+        refusal(true, parent.effectiveFingerprint, now)?.let { return@launchJob publish(message = it) }
+        recentStarts.addLast(now)
+        val id = store.newExperimentId()
+        val mutation = CandidateGenerator.suggestionId(field, value)
+        val cand = LabCandidate(CandidateGenerator.idOf(id, mutation, null), id, parent.id, parent.effectiveFingerprint, mutation, null,
+            BpbRecoveryEngine.diff(parent, copy) + if (field == "targetStrategy") listOf(com.example.vpn.connectivity.FieldChange(field, parent.targetStrategy, value)) else emptyList(),
+            now, true, null, PromotionState.EXPERIMENTAL)
+        steps.clear()
+        steps += LabStep("LAB Agent suggestion checked by the security gate", LabStep.State.DONE, "$field passed")
+        listOf(STEP_TESTING, STEP_STABILITY, STEP_DONE).forEach { steps += LabStep(it, LabStep.State.PENDING) }
+        val e = LabExperiment(id, ctx.sessionId, ctx.contextKey, ctx.label, parent.id, parent.effectiveFingerprint, null, ExperimentState.CREATED, now,
+            candidates = listOf(cand), aiRecommendationId = "lab-agent", note = "Testing a LAB Agent suggestion.")
+        store.saveExperiment(e)
+        run(e, mapOf(cand.candidateId to copy), budget, parent, ctx)
+    }
+
     private suspend fun runExperiment(profileId: String, userStarted: Boolean) {
         if (!userStarted && !store.automation().mayExperiment) return
         val parent = loadProfile(profileId) ?: return publish(message = "That config no longer exists.")
