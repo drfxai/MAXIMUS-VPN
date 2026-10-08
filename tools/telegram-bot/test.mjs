@@ -370,6 +370,15 @@ async function call(env, path, { body, data, now = NOW } = {}) {
   assert.equal(r.body.configured, false);
   r = await call(env, "gemini/key", { body: { key: "short" } });
   assert.equal(r.status, 400);
+  // A key pasted on a phone with direction marks, a zero-width space and a line break is accepted
+  // and stored without them; a too-short one says why without echoing it.
+  r = await call(env, "gemini/key", { body: { key: "\u200FAIzaSyPhoneKey_\u200B0123456789PHNE\n" } });
+  assert.equal(r.status, 200);
+  assert.equal(await unseal(env, kv.get("gemini_key_enc")), "AIzaSyPhoneKey_0123456789PHNE");
+  r = await call(env, "gemini/key", { body: { key: "AIzaShort" } });
+  assert.match(r.body.error, /only 9 characters/);
+  assert.ok(!r.body.error.includes("AIzaShort"));
+  assert.match((await call(env, "gemini/key", { body: { key: "  " } })).body.error, /empty/);
   r = await call(env, "gemini/key", { body: { key: "AIzaSyPanelKey_0123456789ABCD" } });
   assert.equal(r.status, 200);
   assert.equal(r.body.valid, true);

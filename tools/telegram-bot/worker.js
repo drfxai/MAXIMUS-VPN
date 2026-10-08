@@ -551,6 +551,23 @@ const KEY_ENC = "gemini_key_enc";
 const KEY_META = "gemini_key_meta";
 const LEGACY_KEY = "gemini_key";
 const KEY_FORMAT = /^[A-Za-z0-9_-]{20,200}$/;
+
+/**
+ * A pasted key often carries characters nobody can see: spaces or line breaks from copying, and on
+ * phones set to Persian or Arabic, direction marks (U+200E/U+200F and friends) or zero-width spaces.
+ * They are removed before the key is checked, so only real typos are refused.
+ */
+export function cleanKey(raw) {
+  return String(raw || "").replace(/[\s\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF"'`]/g, "");
+}
+
+/** Why a cleaned key was refused, without repeating any of it. */
+function keyProblem(key) {
+  if (!key) return "The key field was empty. Paste the key and press Save again.";
+  if (key.length < 20) return `That is only ${key.length} characters; a Gemini API key from aistudio.google.com is usually 39 and starts with AIza.`;
+  if (key.length > 200) return `That is ${key.length} characters, far longer than a Gemini API key (usually 39, starting with AIza). Copy only the key.`;
+  return "The key has characters a Gemini API key never contains (only letters, digits, - and _). Copy it again with the copy button in aistudio.google.com.";
+}
 const utf8 = new TextEncoder();
 
 function b64(bytes) {
@@ -711,8 +728,8 @@ export async function setModel(env, raw) {
 
 /** Saves a new key encrypted and checks it with Google straight away. */
 export async function storeKey(env, key) {
-  key = String(key || "").trim();
-  if (!KEY_FORMAT.test(key)) return { ok: false, message: "That does not look like a Gemini API key (from aistudio.google.com)." };
+  key = cleanKey(key);
+  if (!KEY_FORMAT.test(key)) return { ok: false, message: keyProblem(key) };
   await saveKey(env, key);
   await activity(env, "Gemini key saved");
   const v = await validateKey(env);
@@ -1490,7 +1507,7 @@ var VIEWS = {
   }); },
   gemini: function () { return api("gemini").then(function (g) {
     var keyInput = h("input", { type: "password", autocomplete: "off", placeholder: "Paste your key from aistudio.google.com" });
-    var save = button(g.configured ? "Save new key" : "Save and validate", "main", function () { var k = keyInput.value.trim(); keyInput.value = ""; return api("gemini/key", { key: k }).then(function (r) { note(r.valid ? "Saved encrypted. Google accepted the key." : "Saved encrypted, but Google did not accept it: " + r.message); return show("gemini"); }); });
+    var save = button(g.configured ? "Save new key" : "Save and validate", "main", function () { var k = keyInput.value.replace(/[\\s\\u200B-\\u200F\\u202A-\\u202E\\u2066-\\u2069\\uFEFF]/g, ""); keyInput.value = ""; return api("gemini/key", { key: k }).then(function (r) { note(r.valid ? "Saved encrypted. Google accepted the key." : "Saved encrypted, but Google did not accept it: " + r.message); return show("gemini"); }); });
     var box = h("div", { style: "margin-top:12px;display:" + (g.configured ? "none" : "block") }, keyInput, h("div", { style: "margin-top:10px" }, save));
     var select = h("select", null, (g.models.length ? g.models : [{ id: g.model, name: g.model }]).map(function (m) { var o = h("option", { value: m.id }, m.name + " (" + m.id + ")"); if (m.id === g.model) o.setAttribute("selected", ""); return o; }));
     return [
