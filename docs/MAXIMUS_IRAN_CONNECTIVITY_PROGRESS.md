@@ -214,11 +214,11 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | COMPLETED |
 | MX-IR-P06-T01 | Transport capability engine | COMPLETED |
 | MX-IR-P07-T01 | Top-30 diversity on the phone | COMPLETED |
-| MX-IR-P08-T01 | Last-Known-Good and atomic refresh | TESTING |
-| MX-IR-P09-T01 | Smart failover | TESTING |
-| MX-IR-P10-T01 | DNS resilience and endpoint scoring | TESTING |
-| MX-IR-P11-T01 | Iran intelligence | TESTING |
-| MX-IR-P12-T01 | AI layer | TESTING |
+| MX-IR-P08-T01 | Last-Known-Good and atomic refresh | COMPLETED |
+| MX-IR-P09-T01 | Smart failover | COMPLETED |
+| MX-IR-P10-T01 | DNS resilience and endpoint scoring | COMPLETED |
+| MX-IR-P11-T01 | Iran intelligence | COMPLETED |
+| MX-IR-P12-T01 | AI layer | COMPLETED |
 | MX-IR-P13-T01 | Real-device validation (owner, on phones in Iran) | BLOCKED |
 
 ### MX-IR-P00-T01 Stage 0 audit
@@ -360,7 +360,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Security impact: none; selection only orders and caps already-eligible configs.
 
 ### MX-IR-P08-T01 Last-Known-Good and atomic refresh
-- Status: TESTING (full Android CI pending; the changed path needs Room, so it runs only there)
+- Status: COMPLETED (full Android CI passes, PR #29)
 - Files changed: `vpn/subscription/SubscriptionManager.kt`, `FreeListSwapIntegrationTest.kt`.
 - Existing behaviour kept (audit items 8 and 9): up to three last-known-good configs; one leaves only when a
   newer config carried verified traffic here and takes its place, when its own evidence says dead, or when the
@@ -372,12 +372,12 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
   capped, atomic swap as a normal refresh.
 - Tests run: `FreeListSwapIntegrationTest` B2 (new): failed refresh re-adds nothing; an empty list is restored
   to exactly 30 from the offline copy. Existing A to D unchanged.
-- Test result: pending CI (Robolectric; no Android SDK in the build sandbox).
+- Test result: passes in CI.
 - Known limitations: none known.
 - Security impact: none; the offline copy is the last list that passed signature verification.
 
 ### MX-IR-P09-T01 Smart failover
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and full Android CI pass, PR #29)
 - Files changed: `vpn/connectivity/SmartFailoverPolicy.kt` (new), `vpn/smart/FailoverManager.kt`.
 - Architecture impact: the existing watchdog (3 failed real requests in a row, kind-aware choice) now also
   - keeps a Primary / Backup A / Backup B plan, A and B on failure domains other than the primary's and each
@@ -395,7 +395,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Security impact: none; only already-eligible configs are chosen.
 
 ### MX-IR-P10-T01 DNS resilience and endpoint scoring
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and full Android CI pass, PR #29)
 - Files changed: `vpn/connectivity/DnsResilienceEngine.kt` (new: `DnsOutcome`, `DnsResilienceProfile`,
   `DnsResilienceEngine`), `vpn/connectivity/EndpointScoringEngine.kt` (new), `vpn/EndpointResolver.kt`,
   `vpn/RayVpnService.kt`, `RayApplication.kt`, `ui/panels/PanelManagerViewModel.kt`.
@@ -418,7 +418,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
   at pinned IP addresses with certificate checks.
 
 ### MX-IR-P11-T01 Iran intelligence
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and full Android CI pass, PR #29)
 - Files changed: `vpn/connectivity/IranIntelligence.kt` (new: `Rule`, `Store`), `vpn/hub/FreeConfigList.kt`
   (`downloadIntel`), `vpn/subscription/SubscriptionManager.kt`, `vpn/smart/ServerRace.kt`, `vpn/RayVpnService.kt`,
   `RayApplication.kt`.
@@ -437,7 +437,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Security impact: bounded by construction; same signature key and checks as the free list.
 
 ### MX-IR-P12-T01 AI layer
-- Status: TESTING (full Android CI pending)
+- Status: COMPLETED (full Android CI passes, PR #29)
 - Files changed: `AiBoundaryTest.kt` (new). No production change was needed.
 - Audit result: the AI agent already exposes one read-only tool (a privacy-filtered health summary), refuses
   every other tool name whatever approval fields the model sends, and withholds raw logs, endpoints, DNS and
@@ -448,7 +448,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
   disconnect, or process / class loading. So the AI cannot mark configs alive or dead, bypass the security
   gate, alter the kill switch or feed intelligence rules.
 - Tests run: `AiBoundaryTest` (1), existing `PrivateDnsAndSecurityTest`.
-- Test result: pending CI.
+- Test result: passes in CI.
 - Known limitations: the AI may still explain diagnostics in words; explanations are not acted on.
 - Security impact: locks in the current read-only boundary.
 
