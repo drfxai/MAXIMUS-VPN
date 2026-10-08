@@ -86,11 +86,14 @@ class FailoverManager(
             val safeName = SecretRedactor.redact(currentProfile.name)
             XrayLogManager.i("FAILOVER", "Failover watchdog active for '$safeName' [Mode: ${settings.operationalMode.displayName}, Tier: ${_currentTier.value.badge}].")
             runCatching {
+                // Backups with recent real-traffic evidence first; the label says what is actually known.
                 val plan = SmartFailoverPolicy.plan(currentProfile,
-                    eligibleFallbacks(serverRepository.allProfiles.first(), currentProfile), { it.overallScore })
+                    eligibleFallbacks(serverRepository.allProfiles.first(), currentProfile), { com.example.vpn.connectivity.BackupEvidence.rank(it) })
                 _backupPlan.value = plan
-                XrayLogManager.i("FAILOVER", "Backups ready: A ${plan.backupA?.let { "${it.kind} on ${it.failureDomain}" } ?: "none on another network"}, " +
-                    "B ${plan.backupB?.let { "${it.kind} on ${it.failureDomain}" } ?: "none on a third network"}.")
+                fun label(b: SmartFailoverPolicy.Backup?, none: String) =
+                    b?.let { "${it.kind} on ${it.failureDomain} (${com.example.vpn.connectivity.BackupEvidence.describe(it.profile)})" } ?: none
+                XrayLogManager.i("FAILOVER", "Backup plan: A ${label(plan.backupA, "none on another network")}, " +
+                    "B ${label(plan.backupB, "none on a third network")}.")
             }.onFailure { if (it is CancellationException) throw it }
 
             while (isActive) {
@@ -239,11 +242,18 @@ class FailoverManager(
                             .maxByOrNull { it.overallScore }
                             ?.takeIf { it.effectiveFingerprint != currentActiveProfile?.effectiveFingerprint }
 
+                        // While this connection is healthy the primary cannot get a real test (the running core
+                        // refuses one), and a handshake proves nothing about traffic: a healthy tunnel is never
+                        // dropped on that evidence. The watchdog switches only when this connection is failing
+                        // or nothing works; then trying the primary costs nothing.
+                        val currentFailing = _currentTier.value == CascadeTier.DEGRADED_OFFLINE || consecutiveFailures.get() > 0
+                        if (!currentFailing) continue
+
                         // Back to the primary only after it passed several checks over a minute and this
                         // config has run for a while (hysteresis), so the two never alternate.
-                        if (topPrimary != null && policy.recordPrimaryCheck(checkHealth(topPrimary, 450L))) {
+                        if (topPrimary != null && policy.recordPrimaryCheck(checkHealth(topPrimary, maxOf(450L, settings.failoverThresholdMs)))) {
                             policy.recordSwitch(currentActiveProfile, failed = false)
-                            val reason = "Your own server answers again; switching back to ${topPrimary.name}."
+                            val reason = "This connection is failing and your own server answers again; trying ${topPrimary.name}."
                             _currentTier.value = CascadeTier.TIER_1_PRIMARY_REALITY
                             _failoverEvents.value = reason
                             XrayLogManager.i("GOD_MODE", reason)
