@@ -209,7 +209,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | MX-IR-P00-T01 | Stage 0 audit | COMPLETED |
 | MX-IR-P01-T01 | Multi-probe engine and probe results | TESTING |
 | MX-IR-P02-T01 | Connection state correctness | TESTING |
-| MX-IR-P03-T01 | Connection score and candidate states | NOT_STARTED |
+| MX-IR-P03-T01 | Connection score and candidate states | TESTING |
 | MX-IR-P04-T01 | BPB recovery engine | NOT_STARTED |
 | MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | NOT_STARTED |
 | MX-IR-P06-T01 | Transport capability engine | NOT_STARTED |
@@ -267,3 +267,19 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Test result: 8/8 pass in the JVM harness; full suite in CI.
 - Known limitations: behaviour on a real handover (Wi-Fi to cellular) is untested on a phone.
 - Security impact: none; the kill switch and routes are unchanged (the tunnel is not torn down on a network change).
+
+### MX-IR-P03-T01 Connection score and candidate states
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `vpn/connectivity/ConnectionScore.kt` (new), `vpn/hub/FreeConfigEvidence.kt` (states renamed
+  and extended), `ui/freeconfigs/FreeConfigsContent.kt`, `ui/freeconfigs/FreeConfigsState.kt`, tests using the names.
+- Architecture impact: candidate states are now NEW, GLOBAL_VERIFIED, GLOBAL_FAILED, LOCAL_PROBATION,
+  LOCAL_NETWORK_VERIFIED, DEGRADED, RECOVERY, DEAD, QUARANTINED, SECURITY_REJECTED. Stored IRAN_PROBATION /
+  IRAN_VERIFIED still load (mapped to the LOCAL_ names). SECURITY_REJECTED and QUARANTINED are sticky.
+  `ConnectionScore` ranks with explained parts (stages 20, recent 20, history 10, stability 15, latency 8,
+  DNS-in-tunnel 5, network match 7, local sessions 10, security mode 5), ages local evidence (6 h half-life),
+  and refuses security-rejected, quarantined, dead and globally failed candidates outright. A bounded
+  adjustment slot (±5) is reserved for Stage 11. `FreeConfigScore` (the mirror of the builder's score) is unchanged.
+- Tests run: `ConnectionScoreTest` (11), existing `FreeConfigEvidenceTest`, `ConnectionVerificationTest`.
+- Test result: all pass in the JVM harness; full suite in CI.
+- Known limitations: the score is used by the selector and failover from Stages 7 and 9 on.
+- Security impact: security refusal now overrides any positive score by construction.

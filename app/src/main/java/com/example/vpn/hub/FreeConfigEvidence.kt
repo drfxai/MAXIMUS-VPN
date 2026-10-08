@@ -7,29 +7,54 @@ import org.json.JSONObject
 /**
  * The life of a free config. The list builder runs outside Iran, so the best it can say is
  * GLOBAL_VERIFIED. Everything after that comes from this phone's own measurements on its own network:
- * a config earns IRAN_VERIFIED only by carrying traffic here, more than once.
+ * a config earns LOCAL_NETWORK_VERIFIED only by carrying traffic here, more than once.
  *
- * The names follow the plan; the app shows them as "verified on your network" rather than as a claim
- * about Iran as a whole.
+ * One phone's success means "worked on this device and network", never "works across Iran". Earlier
+ * builds stored IRAN_PROBATION / IRAN_VERIFIED; [parse] still reads them.
+ *
+ * SECURITY_REJECTED and QUARANTINED are sticky: no measurement can lift them. RECOVERY marks a config
+ * whose derived recovery candidates are being tested (the original itself is never changed).
  */
 enum class FreeConfigLifecycle {
     NEW,
     GLOBAL_VERIFIED,
-    IRAN_PROBATION,
-    IRAN_VERIFIED,
+    GLOBAL_FAILED,
+    LOCAL_PROBATION,
+    LOCAL_NETWORK_VERIFIED,
     DEGRADED,
+    RECOVERY,
     DEAD,
-    QUARANTINED;
+    QUARANTINED,
+    SECURITY_REJECTED;
+
+    /** True for states no measurement may lift. */
+    val sticky: Boolean get() = this == QUARANTINED || this == SECURITY_REJECTED
+
+    /** True when the config may be offered or tried at all. */
+    val usable: Boolean get() = this != DEAD && this != QUARANTINED && this != SECURITY_REJECTED && this != GLOBAL_FAILED
 
     /** Words for the screen; never "works in Iran". */
     val label: String get() = when (this) {
         NEW -> "New"
         GLOBAL_VERIFIED -> "Checked by the list builder (outside Iran)"
-        IRAN_PROBATION -> "Worked once on your network"
-        IRAN_VERIFIED -> "Verified on your network"
+        LOCAL_PROBATION -> "Worked once on your network"
+        LOCAL_NETWORK_VERIFIED -> "Verified on your network"
         DEGRADED -> "Failing lately on your network"
         DEAD -> "Not working on your network"
-        QUARANTINED -> "Refused: unsafe settings"
+        QUARANTINED -> "Refused: no engine here can run it"
+        GLOBAL_FAILED -> "Failed the list builder's checks"
+        RECOVERY -> "Trying safe recovery settings"
+        SECURITY_REJECTED -> "Refused: unsafe settings"
+    }
+
+    companion object {
+        /** A stored name, including the names earlier builds used. */
+        fun parse(name: String?): FreeConfigLifecycle? = when (name) {
+            "IRAN_PROBATION" -> LOCAL_PROBATION
+            "IRAN_VERIFIED" -> LOCAL_NETWORK_VERIFIED
+            null -> null
+            else -> entries.firstOrNull { it.name == name }
+        }
     }
 }
 
@@ -94,7 +119,7 @@ data class LocalEvidence(
 
         fun fromJson(o: JSONObject): LocalEvidence = LocalEvidence(
             fingerprint = o.getString("f"),
-            lifecycle = runCatching { FreeConfigLifecycle.valueOf(o.optString("l")) }.getOrDefault(FreeConfigLifecycle.GLOBAL_VERIFIED),
+            lifecycle = FreeConfigLifecycle.parse(o.optString("l")) ?: FreeConfigLifecycle.GLOBAL_VERIFIED,
             attempts = o.optInt("a"),
             successes = o.optInt("s"),
             consecutiveFailures = o.optInt("cf"),
@@ -124,7 +149,7 @@ object FreeConfigLifecycleRules {
     const val DEAD_AFTER_MS = 24L * 60 * 60 * 1000
 
     fun apply(e: LocalEvidence, m: ConnectivityMeasurement): LocalEvidence {
-        if (e.lifecycle == FreeConfigLifecycle.QUARANTINED) return e
+        if (e.lifecycle.sticky) return e
         val weight = if (m.kind == ConnectivityMeasurement.Kind.CONNECTION && m.success) CONNECTION_WEIGHT else 1
         val next = if (m.success) e.copy(
             attempts = e.attempts + weight,
@@ -146,14 +171,14 @@ object FreeConfigLifecycleRules {
     }
 
     fun lifecycleOf(e: LocalEvidence, now: Long): FreeConfigLifecycle = when {
-        e.lifecycle == FreeConfigLifecycle.QUARANTINED -> FreeConfigLifecycle.QUARANTINED
+        e.lifecycle.sticky -> e.lifecycle
         e.attempts == 0 -> e.lifecycle
         e.consecutiveFailures >= DEAD_AFTER_FAILURES &&
             (e.lastSuccessAt == null || now - e.lastSuccessAt >= DEAD_AFTER_MS) -> FreeConfigLifecycle.DEAD
         e.consecutiveFailures >= DEGRADED_AFTER_FAILURES && e.successes > 0 -> FreeConfigLifecycle.DEGRADED
         e.consecutiveFailures >= DEGRADED_AFTER_FAILURES -> FreeConfigLifecycle.DEAD
-        e.successes >= VERIFY_SUCCESSES && e.consecutiveFailures == 0 -> FreeConfigLifecycle.IRAN_VERIFIED
-        e.successes > 0 -> FreeConfigLifecycle.IRAN_PROBATION
+        e.successes >= VERIFY_SUCCESSES && e.consecutiveFailures == 0 -> FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED
+        e.successes > 0 -> FreeConfigLifecycle.LOCAL_PROBATION
         else -> FreeConfigLifecycle.GLOBAL_VERIFIED
     }
 }
@@ -268,10 +293,12 @@ object FreeConfigScore {
             else -> e.successes.toDouble() / e.attempts
         }
         val history = when (e.lifecycle) {
-            FreeConfigLifecycle.IRAN_VERIFIED -> 1.0
-            FreeConfigLifecycle.IRAN_PROBATION -> 0.75
+            FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED -> 1.0
+            FreeConfigLifecycle.LOCAL_PROBATION -> 0.75
             FreeConfigLifecycle.DEGRADED -> 0.25
-            FreeConfigLifecycle.DEAD, FreeConfigLifecycle.QUARANTINED -> 0.0
+            FreeConfigLifecycle.DEAD, FreeConfigLifecycle.QUARANTINED, FreeConfigLifecycle.SECURITY_REJECTED,
+            FreeConfigLifecycle.GLOBAL_FAILED -> 0.0
+            FreeConfigLifecycle.RECOVERY -> 0.25
             else -> 0.5
         }
         val parts = mapOf(

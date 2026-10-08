@@ -84,7 +84,7 @@ class FreeConfigsStateTest {
 
     @Test fun lifecycleCountsKeepPhoneEvidenceApartFromTheBuildersCheck() {
         val s = FreeConfigsUiState(nodes = listOf(
-            de.copy(lifecycle = com.example.vpn.hub.FreeConfigLifecycle.IRAN_VERIFIED), nl.copy(lifecycle = com.example.vpn.hub.FreeConfigLifecycle.IRAN_PROBATION),
+            de.copy(lifecycle = com.example.vpn.hub.FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED), nl.copy(lifecycle = com.example.vpn.hub.FreeConfigLifecycle.LOCAL_PROBATION),
             us.copy(lifecycle = com.example.vpn.hub.FreeConfigLifecycle.DEAD), down.copy(lifecycle = com.example.vpn.hub.FreeConfigLifecycle.DEGRADED), waiting
         ))
         assertEquals(1, s.verifiedHere)

@@ -25,17 +25,17 @@ class FreeConfigEvidenceTest {
         var e = LocalEvidence("fp")
         assertEquals(FreeConfigLifecycle.GLOBAL_VERIFIED, e.lifecycle)
         e = FreeConfigLifecycleRules.apply(e, ok(1))
-        assertEquals(FreeConfigLifecycle.IRAN_PROBATION, e.lifecycle)
+        assertEquals(FreeConfigLifecycle.LOCAL_PROBATION, e.lifecycle)
         e = FreeConfigLifecycleRules.apply(e, ok(2))
-        assertEquals(FreeConfigLifecycle.IRAN_PROBATION, e.lifecycle)
+        assertEquals(FreeConfigLifecycle.LOCAL_PROBATION, e.lifecycle)
         e = FreeConfigLifecycleRules.apply(e, ok(3))
-        assertEquals(FreeConfigLifecycle.IRAN_VERIFIED, e.lifecycle)
+        assertEquals(FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED, e.lifecycle)
     }
 
     @Test fun aVerifiedVpnSessionCountsMoreThanAPing() {
         var e = FreeConfigLifecycleRules.apply(LocalEvidence("fp"), ok(1, kind = Kind.CONNECTION))
         e = FreeConfigLifecycleRules.apply(e, ok(2))
-        assertEquals(FreeConfigLifecycle.IRAN_VERIFIED, e.lifecycle)
+        assertEquals(FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED, e.lifecycle)
         assertEquals(1, e.verifiedConnections)
     }
 
@@ -43,7 +43,7 @@ class FreeConfigEvidenceTest {
         var e = LocalEvidence("fp")
         repeat(3) { e = FreeConfigLifecycleRules.apply(e, ok(it.toLong())) }
         e = FreeConfigLifecycleRules.apply(e, fail(10))
-        assertEquals(FreeConfigLifecycle.IRAN_VERIFIED, FreeConfigLifecycleRules.lifecycleOf(e.copy(consecutiveFailures = 0), 10))
+        assertEquals(FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED, FreeConfigLifecycleRules.lifecycleOf(e.copy(consecutiveFailures = 0), 10))
         e = FreeConfigLifecycleRules.apply(e, fail(11, FailureStage.TLS_HANDSHAKE_FAILED))
         assertEquals(FreeConfigLifecycle.DEGRADED, e.lifecycle)
         assertEquals(FailureStage.TLS_HANDSHAKE_FAILED, e.lastFailureStage)
@@ -53,7 +53,7 @@ class FreeConfigEvidenceTest {
         assertEquals(FreeConfigLifecycle.DEAD, e.lifecycle)
         // Its earlier successes still count, so one new success restores it.
         e = FreeConfigLifecycleRules.apply(e, ok(day + 14))
-        assertEquals(FreeConfigLifecycle.IRAN_VERIFIED, e.lifecycle)
+        assertEquals(FreeConfigLifecycle.LOCAL_NETWORK_VERIFIED, e.lifecycle)
     }
 
     @Test fun neverWorkedHereIsDeadAfterTwoFailures() {
