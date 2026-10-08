@@ -139,8 +139,11 @@ object FreeListSwap {
 
     /**
      * [saved] are the free configs on the phone, [fresh] the verified new list. [protectedIds] are the
-     * last-known-good pool's, [activeId] the config the VPN is using. At most [limit] configs result:
-     * retained ones take places first (they are proven here), then kept, then new ones in list order.
+     * last-known-good pool's and the ones in use, [activeId] the config the VPN is using. At most [limit]
+     * configs result, in this order of claim: the one in use, the protected ones, favourites, the saved
+     * configs the new list still has (in its order), then new ones in list order. Only the one in use and
+     * the protected ones (a handful: the pool holds three) may never be deleted, so a long list of starred
+     * free configs cannot push the free list past [limit].
      */
     fun plan(
         saved: List<VlessProfile>,
@@ -151,22 +154,22 @@ object FreeListSwap {
     ): Plan {
         val freshKeys = fresh.map { it.effectiveFingerprint }.toSet()
         val savedKeys = saved.map { it.effectiveFingerprint }.toSet()
-        val dropped = saved.filter { it.effectiveFingerprint !in freshKeys }
-        val retained = dropped.filter { it.id in protectedIds || it.id == activeId || it.isFavorite }
-        val keptAll = saved.filter { it.effectiveFingerprint in freshKeys }
-        // Kept in the new list's order, so the best of the new list stays when the limit bites.
         val freshOrder = fresh.mapIndexed { i, p -> p.effectiveFingerprint to i }.toMap()
-        val keptSorted = keptAll.sortedBy { freshOrder[it.effectiveFingerprint] ?: Int.MAX_VALUE }
-        val room = (limit - retained.size).coerceAtLeast(0)
-        // Protected and in-use configs among the kept ones always stay; the rest fill the room left.
-        val mustKeep = keptSorted.filter { it.id in protectedIds || it.id == activeId || it.isFavorite }
-        val kept = (mustKeep + keptSorted.filter { it !in mustKeep }.take((room - mustKeep.size).coerceAtLeast(0))).distinct()
-        val overflow = keptSorted.filter { it !in kept }
+        fun inList(p: VlessProfile) = p.effectiveFingerprint in freshKeys
+        fun order(p: VlessProfile) = freshOrder[p.effectiveFingerprint] ?: Int.MAX_VALUE
+        val stay = mutableListOf<VlessProfile>()
+        // Never deleted: the config in use, then the protected ones.
+        saved.filter { it.id == activeId }.forEach { stay += it }
+        saved.filter { it.id in protectedIds && it !in stay }.sortedBy(::order).forEach { stay += it }
+        // Then, while there is room: favourites, then the saved configs the new list still has.
+        val optional = saved.filter { it !in stay && it.isFavorite }.sortedWith(compareBy({ !inList(it) }, ::order)) +
+            saved.filter { it !in stay && !it.isFavorite && inList(it) }.sortedBy(::order)
+        optional.forEach { if (stay.size < limit) stay += it }
         val newOnes = fresh.filter { it.effectiveFingerprint !in savedKeys }
             .distinctBy { it.effectiveFingerprint }
-            .take((room - kept.size).coerceAtLeast(0))
-        val delete = (dropped - retained.toSet()) + overflow
-        return Plan(delete = delete, insert = newOnes, retained = retained, kept = kept)
+            .take((limit - stay.size).coerceAtLeast(0))
+        val delete = saved.filter { it !in stay }
+        return Plan(delete = delete, insert = newOnes, retained = stay.filter { !inList(it) }, kept = stay.filter(::inList))
     }
 }
 

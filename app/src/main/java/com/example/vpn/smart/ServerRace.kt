@@ -3,6 +3,7 @@ package com.example.vpn.smart
 import com.example.core.SecretRedactor
 import com.example.data.model.ServerCategory
 import com.example.data.model.VlessProfile
+import com.example.vpn.connectivity.DiversitySelector
 import com.example.vpn.engine.RuntimeCapabilities
 import com.example.vpn.stealth.ConnectionKind
 import com.example.vpn.stealth.StealthPathFinder
@@ -164,9 +165,13 @@ class ServerRace(
                 if (ConnectionKind.of(p) in failedKinds) s -= 1000.0
                 return s
             }
-            val sorted = eligible.sortedByDescending(::score).toMutableList()
+            val byScore = eligible.sortedByDescending(::score)
             val head = listOfNotNull(first?.takeIf { it.id !in exclude && RuntimeCapabilities.unsupportedReason(it) == null })
-            return (head + spreadKinds(sorted, head.map { ConnectionKind.of(it) })).take(limit)
+            // The few that are raced never all sit on one CDN, network or source (DiversitySelector); ties keep their order.
+            val position = byScore.withIndex().associate { (i, p) -> p.id to "%06d".format(i) }
+            val diverse = DiversitySelector.select(byScore, ::score, DiversitySelector::traitsOf, { position.getValue(it.id) },
+                limit = (limit - head.size).coerceIn(0, DiversitySelector.MAX))
+            return (head + spreadKinds(diverse.toMutableList(), head.map { ConnectionKind.of(it) })).take(limit)
         }
 
         /** Keeps the order but, within each batch of five, takes a kind not yet in that batch when one is left. */

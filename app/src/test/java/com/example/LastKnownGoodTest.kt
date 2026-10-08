@@ -81,6 +81,29 @@ class LastKnownGoodTest {
         assertEquals((1..30).map { "id$it" }, plan.insert.map { it.id })
     }
 
+    @Test fun manyFavouritesNeverPushTheListPastThirty() {
+        val saved = (1..40).map { p(it).copy(isFavorite = true) }
+        val fresh = (41..80).map { p(it) }
+        val plan = FreeListSwap.plan(saved, fresh, protectedIds = setOf("id40"), activeId = "id39")
+        assertEquals(30, plan.resultingCount)
+        // The one in use and the protected one always stay; favourites fill what room is left, new ones none.
+        assertTrue(plan.retained.map { it.id }.containsAll(listOf("id39", "id40")))
+        assertTrue(plan.insert.isEmpty())
+        assertEquals(10, plan.delete.size)
+        assertTrue(plan.delete.none { it.id == "id39" || it.id == "id40" })
+    }
+
+    @Test fun keptConfigsBeyondTheLimitMakeWayInTheNewListsOrder() {
+        val saved = (1..30).map { p(it) }
+        val fresh = (30 downTo 1).map { p(it) } + (31..40).map { p(it) }
+        val plan = FreeListSwap.plan(saved, fresh, protectedIds = setOf("id1"), activeId = null)
+        assertEquals(30, plan.resultingCount)
+        assertTrue(plan.insert.isEmpty())
+        assertTrue(plan.delete.isEmpty())
+        assertEquals("id1", plan.kept.first().id)
+        assertEquals("id30", plan.kept[1].id)
+    }
+
     @Test fun retainedConfigsAreRememberedUntilReleased() {
         var ids = emptySet<String>()
         val store = RetainedFreeConfigs({ ids }, { ids = it })

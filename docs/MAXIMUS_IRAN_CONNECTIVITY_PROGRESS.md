@@ -207,13 +207,13 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | ID | Task | Status |
 |---|---|---|
 | MX-IR-P00-T01 | Stage 0 audit | COMPLETED |
-| MX-IR-P01-T01 | Multi-probe engine and probe results | TESTING |
-| MX-IR-P02-T01 | Connection state correctness | TESTING |
-| MX-IR-P03-T01 | Connection score and candidate states | TESTING |
-| MX-IR-P04-T01 | BPB recovery engine | TESTING |
-| MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | NOT_STARTED |
-| MX-IR-P06-T01 | Transport capability engine | NOT_STARTED |
-| MX-IR-P07-T01 | Top-30 diversity on the phone | NOT_STARTED |
+| MX-IR-P01-T01 | Multi-probe engine and probe results | COMPLETED |
+| MX-IR-P02-T01 | Connection state correctness | COMPLETED |
+| MX-IR-P03-T01 | Connection score and candidate states | COMPLETED |
+| MX-IR-P04-T01 | BPB recovery engine | COMPLETED |
+| MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | TESTING |
+| MX-IR-P06-T01 | Transport capability engine | TESTING |
+| MX-IR-P07-T01 | Top-30 diversity on the phone | TESTING |
 | MX-IR-P08-T01 | Last-Known-Good and atomic refresh | NOT_STARTED |
 | MX-IR-P09-T01 | Smart failover | NOT_STARTED |
 | MX-IR-P10-T01 | DNS resilience and endpoint scoring | NOT_STARTED |
@@ -231,7 +231,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Next action: Stage 1, MultiProbeHealthEngine
 
 ### MX-IR-P01-T01 Multi-probe engine and probe results
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 4 commit pass)
 - Files changed: `vpn/connectivity/ProbeResult.kt`, `vpn/connectivity/ProbeBudget.kt`,
   `vpn/connectivity/MultiProbeHealthEngine.kt`, `vpn/connectivity/ProbeEvents.kt`,
   `vpn/diagnostics/FailureStage.kt` (new codes DNS_RESPONSE_INVALID, CERTIFICATE_VALIDATION_FAILED,
@@ -254,7 +254,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Security impact: none weakened; adds a security gate hook that stops a run before any network step.
 
 ### MX-IR-P02-T01 Connection state correctness
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 4 commit pass)
 - Files changed: `data/model/ConnectionState.kt` (SWITCHING, NETWORK_CHANGED, `onNetworkChanged`, `onSwitching`),
   `vpn/RayVpnService.kt` (network callbacks and failover use them), `ui/components/CyberComponents.kt`,
   `vpn/tile/VpnTileService.kt` (labels for the new states).
@@ -269,7 +269,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Security impact: none; the kill switch and routes are unchanged (the tunnel is not torn down on a network change).
 
 ### MX-IR-P03-T01 Connection score and candidate states
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 4 commit pass)
 - Files changed: `vpn/connectivity/ConnectionScore.kt` (new), `vpn/hub/FreeConfigEvidence.kt` (states renamed
   and extended), `ui/freeconfigs/FreeConfigsContent.kt`, `ui/freeconfigs/FreeConfigsState.kt`, tests using the names.
 - Architecture impact: candidate states are now NEW, GLOBAL_VERIFIED, GLOBAL_FAILED, LOCAL_PROBATION,
@@ -280,12 +280,12 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
   and refuses security-rejected, quarantined, dead and globally failed candidates outright. A bounded
   adjustment slot (±5) is reserved for Stage 11. `FreeConfigScore` (the mirror of the builder's score) is unchanged.
 - Tests run: `ConnectionScoreTest` (11), existing `FreeConfigEvidenceTest`, `ConnectionVerificationTest`.
-- Test result: all pass in the JVM harness; full suite in CI.
+- Test result: all pass in the JVM harness and in CI.
 - Known limitations: the score is used by the selector and failover from Stages 7 and 9 on.
 - Security impact: security refusal now overrides any positive score by construction.
 
 ### MX-IR-P04-T01 BPB recovery engine
-- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Status: COMPLETED (JVM harness and the full Android CI run on the Stage 4 commit pass)
 - Files changed: `vpn/connectivity/RecoveryProfile.kt` (model + 10 reviewed built-in profiles, expiring
   every 120 days), `vpn/connectivity/RecoverySecurityGate.kt`, `vpn/connectivity/BpbRecoveryEngine.kt`
   (`DerivedRecoveryCandidate`, `FieldChange`, `BpbRecoveryEngine`, `RecoveryLedger`), `RayApplication.kt`,
@@ -304,9 +304,57 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
   allowInsecure, downgrade, SNI change, pin removal, unknown fingerprint, weak cipher, non-IP ECH resolver,
   unbounded or unknown mask), refused candidates never tested, ECH candidate, success then rollback,
   never-working profile retired, expiry, ledger persistence without credentials, identity fields locked.
-- Test result: 11/11 pass in the JVM harness; full suite in CI.
+- Test result: 11/11 pass in the JVM harness and in CI.
 - Known limitations: endpoint alternatives need locally validated addresses (Stage 10 supplies them; until
   then the existing clean-IP scan in the connect path covers that case). Not tested against a real BPB worker
   from Iran.
 - Security impact: tightens FIX BPB (no untested settings applied, no saved config rewritten). "unsafe"
   fingerprint verified to keep certificate checks in Xray v26.9.9.
+
+### MX-IR-P05-T01 TLS / ECH / fragmentation profiles
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `vpn/connectivity/TlsResilienceEngine.kt` (new), `vpn/connectivity/FragmentProfileEngine.kt`
+  (new), `vpn/hub/ConfigValidationPipeline.kt`, `RayApplication.kt`, `ui/panels/PanelManagerViewModel.kt`.
+- Architecture impact: every config passes one TLS check before use: no allowInsecure, only the fingerprints
+  Xray v26.9.9 knows, no weak ciphers, bounded fragment masks, and ECH only on an engine that does ECH (Xray);
+  elsewhere ECH is refused, never silently dropped. Fragmentation profiles are measured against the same
+  config without fragmentation on the same network (7-day trials) and reverted when they do no better.
+- "fingerprint: unsafe": in Xray v26.9.9 it selects Go's own TLS stack instead of a uTLS mimic. Certificate
+  and hostname checks stay on (transport/internet/tcp/dialer.go). It is accepted, with a note; REALITY
+  refuses it, as Xray does.
+- Tests run: `TlsAndFragmentTest` (7).
+- Test result: 7/7 pass in the JVM harness; full suite in CI.
+- Known limitations: no on-network measurement of which fingerprint a given Iranian network blocks.
+- Security impact: refuses more than before (unknown fingerprints, weak ciphers, faked ECH); disables nothing.
+
+### MX-IR-P06-T01 Transport capability engine
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `vpn/connectivity/TransportCapabilityEngine.kt` (new), `vpn/safety/VpnRoutePolicy.kt` (new),
+  `vpn/RayVpnService.kt`.
+- Architecture impact: UDP/QUIC/HTTP/3 and TCP/TLS/HTTP/2, IPv4 and IPv6 are judged from this network's own
+  measurement (used only when under 10 minutes old) and its recent results. Measured-blocked transports are
+  skipped, repeatedly failing ones go last, nothing is forced; an HTTP/3 XHTTP config can get its HTTP/2 form.
+  Both TUN builders now take their addresses, routes (0.0.0.0/0 and ::/0) and DNS from one route policy, so
+  IPv6 is always captured and cannot leak around the tunnel.
+- Tests run: `TransportCapabilityTest` (9).
+- Test result: 9/9 pass in the JVM harness; full suite in CI.
+- Known limitations: UDP history comes from per-kind failures in NetworkMemory; no dedicated UDP probe yet.
+- Security impact: closes any IPv6 route gap by construction.
+
+### MX-IR-P07-T01 Top-30 diversity on the phone
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `vpn/connectivity/DiversitySelector.kt` (new), `vpn/smart/ServerRace.kt`,
+  `vpn/hub/LastKnownGood.kt` (`FreeListSwap`).
+- Architecture impact: the phone uses the list builder's rules (`select_diverse`): failure domain
+  (cdn:cloudflare, cdn:<name>, the /16 of an IPv4 address, the /32 of an IPv6 one, the registered domain),
+  at most 3 per domain, 10 per kind, 12 per source, at most 70% CDN when direct ones exist, one IPv4 and one
+  IPv6 seeded, caps relaxed in steps instead of leaving the list short. One list, never more than 30. The
+  servers raced at connect now come from this selection, so they never all sit on one CDN range.
+  A list refresh now never leaves more than 30 free configs: the one in use and the last-known-good ones
+  always stay; favourites, then configs the new list still has, then new ones fill the room left.
+- Tests run: `DiversitySelectorTest` (6), `LastKnownGoodTest` (+2: favourites cannot pass 30, kept configs
+  follow the new list's order).
+- Test result: pass in the JVM harness; full suite in CI.
+- Known limitations: a free config the user starred that the new list dropped can now be removed when the
+  list is full (only the one in use and the last-known-good ones are guaranteed to stay).
+- Security impact: none; selection only orders and caps already-eligible configs.
