@@ -132,6 +132,8 @@ class LabController(
 
     fun dismissMessage() = publish(message = null)
 
+    fun showMessage(message: String) = publish(message = message)
+
     /** Runs one experiment for a saved config: a baseline real request, then safe copies if the baseline failed. */
     fun experiment(profileId: String, userStarted: Boolean = true) = launchJob { runExperiment(profileId, userStarted) }
 

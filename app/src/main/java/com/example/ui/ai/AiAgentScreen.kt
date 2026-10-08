@@ -63,11 +63,15 @@ enum class AiPageTab(val title: String, val icon: androidx.compose.ui.graphics.v
 @Composable
 fun AiAgentScreen(
     onNavigateBack: () -> Unit = {},
+    /** Opens the AI provider settings; without it the quick Gemini key dialog opens. */
+    onOpenAiSettings: (() -> Unit)? = null,
     viewModel: com.example.ai.AiAgentViewModel = viewModel()
 ) {
     BackHandler {
         onNavigateBack()
     }
+    // Coming back from the AI settings screen: pick up new keys and providers.
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshGateway() }
 
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -218,7 +222,7 @@ fun AiAgentScreen(
                         Spacer(modifier = Modifier.width(4.dp))
 
                         IconButton(
-                            onClick = { viewModel.openSetupDialog(true) },
+                            onClick = { onOpenAiSettings?.invoke() ?: viewModel.openSetupDialog(true) },
                             modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
@@ -289,7 +293,7 @@ fun AiAgentScreen(
                     config = config,
                     isSpeaking = isSpeaking,
                     isListening = isListening,
-                    onOpenSetup = { viewModel.openSetupDialog(true) }
+                    onOpenSetup = { onOpenAiSettings?.invoke() ?: viewModel.openSetupDialog(true) }
                 )
                 AiPageTab.MODES -> AiModesTabContent(
                     config = config,
@@ -381,13 +385,13 @@ fun AiChatTabContent(
                         Spacer(modifier = Modifier.width(6.dp))
                         Column {
                             Text(
-                                text = "Gemini API Key Required",
+                                text = "AI provider key required",
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                             Text(
-                                text = "Tap here to configure key & unlock autonomous control",
+                                text = "Tap to add a key for Gemini, 9Router, OpenRouter, NVIDIA NIM or OpenAI",
                                 fontSize = 10.sp,
                                 color = Color(0xFFFFCDD2)
                             )

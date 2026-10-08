@@ -93,8 +93,15 @@ data class LabConfigOption(val id: String, val name: String, val detail: String)
 /** A research card (Phase 7). Never shown as verified until LAB measured it on this phone. */
 data class LabResearchItem(val id: String, val title: String, val state: String, val source: String, val compatibility: String, val at: Long)
 
+/** A change the LAB Agent suggested; testing it goes through the LAB's allowlist and security gate. */
+data class LabSuggestionUi(val field: String, val value: String, val why: String)
+
 data class NetworkLabUiState(
     val snapshot: LabSnapshot = LabSnapshot(),
+    /** True when an AI provider is set up; the LAB works the same without one. */
+    val aiReady: Boolean = false,
+    val advising: Boolean = false,
+    val suggestions: List<LabSuggestionUi> = emptyList(),
     val configs: List<LabConfigOption> = emptyList(),
     val research: List<LabResearchItem> = emptyList(),
     val section: LabSection? = null,
@@ -114,7 +121,9 @@ class NetworkLabActions(
     val onDisable: (String, Boolean) -> Unit = { _, _ -> },
     val onRetire: (String) -> Unit = {},
     val onDismissMessage: () -> Unit = {},
-    val onResearchRefresh: () -> Unit = {}
+    val onResearchRefresh: () -> Unit = {},
+    val onAskAgent: () -> Unit = {},
+    val onTestSuggestion: (LabSuggestionUi) -> Unit = {}
 )
 
 @Composable
@@ -129,7 +138,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
                     LabSection.NETWORKS -> NetworksPage(c, state.snapshot, relativeTime)
                     LabSection.LIVE -> LivePage(c, state, actions)
                     LabSection.EXPERIMENTS -> ExperimentsPage(c, state.snapshot.experiments, relativeTime)
-                    LabSection.DISCOVERIES -> DiscoveriesPage(c, state.snapshot.discoveries, relativeTime)
+                    LabSection.DISCOVERIES -> DiscoveriesPage(c, state, actions, relativeTime)
                     LabSection.VERIFIED -> VerifiedPage(c, state.snapshot, actions, relativeTime)
                     LabSection.RESEARCH -> ResearchPage(c, state.research, actions, relativeTime)
                 }
@@ -503,8 +512,35 @@ private fun LabDiscovery.Kind.icon(): ImageVector = when (this) {
 }
 
 @Composable
-private fun DiscoveriesPage(c: LabColors, items: List<LabDiscovery>, relativeTime: (Long) -> String) {
+private fun DiscoveriesPage(c: LabColors, state: NetworkLabUiState, actions: NetworkLabActions, relativeTime: (Long) -> String) {
+    val items = state.snapshot.discoveries
     LazyColumn(contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (state.aiReady) item {
+            Row(Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, c.stroke, RoundedCornerShape(14.dp))
+                .clickable(enabled = !state.advising, onClick = actions.onAskAgent), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Lightbulb, null, tint = c.accent, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                LabText(if (state.advising) "LAB Agent is reading…" else "Ask LAB Agent to explain", c.accent, 14.sp, FontWeight.SemiBold, maxLines = 1)
+            }
+        }
+        if (state.suggestions.isNotEmpty()) item {
+            Column(Modifier.fillMaxWidth().labCard(c, 18.dp).padding(16.dp)) {
+                LabText("Suggested by LAB Agent · not tested yet", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
+                state.suggestions.forEach { sug ->
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            LabText("${sug.field} → ${sug.value}", c.text, 14.sp, FontWeight.SemiBold, maxLines = 1)
+                            if (sug.why.isNotBlank()) LabText(sug.why, c.text2, 12.sp, maxLines = 2)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        ActionChip(c, "Test", enabled = state.snapshot.running == null && !state.vpnOn, Modifier.width(64.dp)) { actions.onTestSuggestion(sug) }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                LabText("A test runs only if the change passes the LAB allowlist and security gate.", c.text3, 11.5.sp, maxLines = 2)
+            }
+        }
         if (items.isEmpty()) item { Empty(c, "No discoveries yet", "Findings from experiments and research appear here.") }
         items(items, key = { it.id }) { d ->
             Row(Modifier.fillMaxWidth().labCard(c, 18.dp).padding(16.dp)) {

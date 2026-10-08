@@ -78,6 +78,8 @@ import com.example.ui.viewmodel.VpnViewModel
 
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.outlined.Science
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector, val unselectedIcon: ImageVector) {
     data object Home : Screen("home", "Tunnel", Icons.Filled.Shield, Icons.Outlined.Shield)
@@ -102,6 +104,8 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector,
         fun route(profileId: String) = "edit_server/${android.net.Uri.encode(profileId)}"
     }
     data object GodBrowser : Screen("god_browser", "GOD Browser", Icons.Filled.Shield, Icons.Outlined.Shield)
+    data object Lab : Screen("lab", "LAB", Icons.Filled.Science, Icons.Outlined.Science)
+    data object AiSettings : Screen("ai_settings", "AI", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome)
 }
 
 val bottomNavItems = listOf(
@@ -109,7 +113,7 @@ val bottomNavItems = listOf(
     Screen.Servers,
     Screen.Top10,
     Screen.AiAgent,
-    Screen.Panels,
+    Screen.Lab,
     Screen.Settings
 )
 
@@ -372,8 +376,15 @@ fun MainApp(
             }
             composable(Screen.AiAgent.route) {
                 com.example.ui.ai.AiAgentScreen(
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    onOpenAiSettings = { navController.navigate(Screen.AiSettings.route) }
                 )
+            }
+            composable(Screen.AiSettings.route) {
+                com.example.ui.ai.AiSettingsScreen(onNavigateBack = { navController.popBackStack() })
+            }
+            composable(Screen.Lab.route) {
+                com.example.ui.lab.NetworkLabScreen(onNavigateBack = { navController.popBackStack() })
             }
         }
     }
