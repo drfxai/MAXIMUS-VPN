@@ -216,7 +216,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | MX-IR-P07-T01 | Top-30 diversity on the phone | TESTING |
 | MX-IR-P08-T01 | Last-Known-Good and atomic refresh | TESTING |
 | MX-IR-P09-T01 | Smart failover | TESTING |
-| MX-IR-P10-T01 | DNS resilience and endpoint scoring | NOT_STARTED |
+| MX-IR-P10-T01 | DNS resilience and endpoint scoring | TESTING |
 | MX-IR-P11-T01 | Iran intelligence | NOT_STARTED |
 | MX-IR-P12-T01 | AI layer | NOT_STARTED |
 | MX-IR-P13-T01 | Real-device validation (owner, on phones in Iran) | BLOCKED |
@@ -393,3 +393,26 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Known limitations: the backup plan is recorded and logged; the connect race still picks the replacement
   from live measurements, with the plan's ordering rules. Not tested on a real outage.
 - Security impact: none; only already-eligible configs are chosen.
+
+### MX-IR-P10-T01 DNS resilience and endpoint scoring
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `vpn/connectivity/DnsResilienceEngine.kt` (new: `DnsOutcome`, `DnsResilienceProfile`,
+  `DnsResilienceEngine`), `vpn/connectivity/EndpointScoringEngine.kt` (new), `vpn/EndpointResolver.kt`,
+  `vpn/RayVpnService.kt`, `RayApplication.kt`, `ui/panels/PanelManagerViewModel.kt`.
+- Architecture impact:
+  - Every real query made to look up a server name (the network's DNS and each DoH resolver) is recorded per
+    network: answer, block-page answer, no answer, timeout, error, and time. No ICMP.
+  - The DNS resilience profile for a network orders the DoH resolvers by success then speed, leaves out ones
+    that never answered there (always keeping at least three), and lists the names the network's DNS keeps
+    answering with a block page; those go straight to DoH without the 1.5 s grace wait. Samples expire after
+    24 h. Never a downgrade: GOD MODE names still never reach the network's DNS.
+  - Edge addresses get a per-network score from real exchanges with the config's own server (the clean-address
+    scan's WebSocket upgrade to the real origin, and recovery candidates tested through the proxy). Only
+    addresses that passed in the last 24 h and succeed at least half the time are handed to FIX BPB as
+    endpoint alternatives, still behind the recovery security gate.
+- Tests run: `DnsAndEndpointTest` (8).
+- Test result: pass in the JVM harness; full suite in CI.
+- Known limitations: the connect path's recovery (step 3a) reuses endpoints FIX BPB already proved; it does
+  not scan on its own. Resolver behaviour on Irancell / MCI is not measured from here.
+- Security impact: no secrets stored (server host names and resolver addresses only, on the phone); DoH stays
+  at pinned IP addresses with certificate checks.

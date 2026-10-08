@@ -71,6 +71,24 @@ class RayApplication : Application() {
         })
     }
 
+    /** Real DNS queries per network: resolver order and names this network's DNS blocks. */
+    val dnsResilience: com.example.vpn.connectivity.DnsResilienceEngine by lazy {
+        val prefs = getSharedPreferences("dns_resilience", MODE_PRIVATE)
+        com.example.vpn.connectivity.DnsResilienceEngine(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /** Edge addresses that completed real exchanges on each network; the validated ones feed recovery. */
+    val endpointScores: com.example.vpn.connectivity.EndpointScoringEngine by lazy {
+        val prefs = getSharedPreferences("endpoint_scores", MODE_PRIVATE)
+        com.example.vpn.connectivity.EndpointScoringEngine(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
     /** Fragmentation trials against the plain config, so fragmentation that makes things worse is reverted. */
     val fragmentProfiles: com.example.vpn.connectivity.FragmentProfileEngine by lazy {
         val prefs = getSharedPreferences("fragment_trials", MODE_PRIVATE)

@@ -952,13 +952,20 @@ class RayVpnService : VpnService() {
                 !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
         }
         var lastError: Exception? = null
+        // What earlier real queries on this network showed: resolver order, names its DNS blocks.
+        val dns = runCatching { com.example.RayApplication.instance.dnsResilience }.getOrNull()
+        val networkKey = runCatching { com.example.vpn.smart.NetworkKey.current(this) }.getOrNull()
+        val dnsProfile = dns?.profile(networkKey, EndpointResolver.DOH_ENDPOINTS)
         for (network in networks) {
             try {
                 val resolved = EndpointResolver.resolve(
                     hostName,
                     system = { network.getAllByName(it).toList() },
                     open = { url -> network.openConnection(url) as java.net.HttpURLConnection },
-                    private = privateServerLookup
+                    private = privateServerLookup,
+                    doh = dnsProfile?.resolverOrder ?: EndpointResolver.DOH_ENDPOINTS,
+                    skipSystem = dnsProfile?.skipSystemFor(hostName) == true,
+                    onOutcome = { resolver, outcome, ms -> dns?.record(networkKey, resolver, hostName, outcome, ms) }
                 )
                 dnsPoisoned = resolved.viaDoh ||
                     EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))

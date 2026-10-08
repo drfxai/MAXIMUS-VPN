@@ -340,6 +340,14 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         scannedProfile = profile
         scannedAt = android.os.SystemClock.elapsedRealtime()
         appendLog("[CF_SCANNER_DONE] clean candidates found=${edges.size}")
+        // Addresses that completed the WebSocket upgrade with this config's own server feed recovery.
+        runCatching {
+            val network = com.example.vpn.smart.NetworkKey.current(getApplication<android.app.Application>())
+            val now = System.currentTimeMillis()
+            RayApplication.instance.endpointScores.record(edges.filter { it.originVerified }.map {
+                com.example.vpn.connectivity.EndpointScoringEngine.Measurement(it.ip, network, now, true, it.medianMs)
+            })
+        }
         _state.value.copy(
             edges = edges,
             status = "Found ${edges.size} verified clean Cloudflare IPs for $region.",
@@ -667,9 +675,22 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
                 if (plain is com.example.xray.RealDelayProbe.Outcome.NotRun) {
                     return@withContext "FIX BPB could not test (${plain.reason}). Disconnect the VPN and tap FIX BPB again; nothing was changed."
                 }
-                val candidates = recovery.generate(sample, com.example.vpn.diagnostics.FailureStage.TLS_HANDSHAKE_FAILED, network)
+                // Edge addresses validated on this network (EndpointScoringEngine) become endpoint alternatives.
+                val endpoints = RayApplication.instance.endpointScores.validated(network)
+                val candidates = recovery.generate(sample, com.example.vpn.diagnostics.FailureStage.TLS_HANDSHAKE_FAILED, network, endpoints)
                 val tested = recovery.test(candidates) { ps -> com.example.xray.RealDelayProbe.measure(ps, 8).map(::asRecoveryResult) }
                 recordFragmentTrials(plain, tested, network)
+                // Endpoint alternatives that were tried through the proxy refine their own scores.
+                RayApplication.instance.endpointScores.record(tested.mapNotNull { c ->
+                    val ip = c.endpoint ?: return@mapNotNull null
+                    when (val t = c.test) {
+                        is com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed ->
+                            com.example.vpn.connectivity.EndpointScoringEngine.Measurement(ip, network, System.currentTimeMillis(), true, t.latencyMs)
+                        is com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Failed ->
+                            com.example.vpn.connectivity.EndpointScoringEngine.Measurement(ip, network, System.currentTimeMillis(), false, null)
+                        else -> null
+                    }
+                })
                 val fragments = RayApplication.instance.fragmentProfiles
                 val winner = tested.firstOrNull {
                     it.test is com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed &&
