@@ -126,6 +126,8 @@ class RayVpnService : VpnService() {
     private lateinit var serverRepository: ServerRepository
     private lateinit var settingsRepository: SettingsRepository
     private var activeProfile: VlessProfile? = null
+    /** The recovery candidate this session runs on, when a derived copy carried its traffic. */
+    @Volatile private var activeRecovery: com.example.vpn.connectivity.DerivedRecoveryCandidate? = null
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var settingsObserverJob: Job? = null
@@ -517,6 +519,7 @@ class RayVpnService : VpnService() {
                     }
                 }
             var raced = false
+            activeRecovery = null
             fun adopt(win: com.example.vpn.smart.ServerRace.Winner) {
                 com.example.vless.VlessValidator.validate(win.profile)
                 com.example.vpn.engine.RuntimeCapabilities.requireSupported(win.profile)
@@ -551,6 +554,30 @@ class RayVpnService : VpnService() {
                         raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder, retryDisguised = true)?.let { adopt(it) }
                     }
                     is com.example.xray.RealDelayProbe.Outcome.NotRun -> Unit
+                }
+            }
+
+            // 3a. A recovery candidate that carried traffic for this config on this network before (FIX BPB
+            // or earlier recovery): a derived copy, the saved config itself is unchanged. One request decides;
+            // a failure counts towards its rollback and the normal path search continues.
+            if (!raced) {
+                val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile) }.getOrNull()
+                if (recovery != null) {
+                    showForegroundNotification("Trying the recovered settings...")
+                    when (val outcome = com.example.xray.RealDelayProbe.measure(recovery.profile, timeouts.firstSec)) {
+                        is com.example.xray.RealDelayProbe.Outcome.Delay -> {
+                            profile = recovery.profile
+                            raced = true
+                            activeRecovery = recovery
+                            com.example.RayApplication.instance.bpbRecovery.recordOutcome(recovery, success = true)
+                            XrayLogManager.i("RECOVERY", "Recovered settings ${recovery.recoveryProfileKey} carried traffic (${outcome.latencyMs} ms).")
+                        }
+                        is com.example.xray.RealDelayProbe.Outcome.Failed -> {
+                            com.example.RayApplication.instance.bpbRecovery.recordOutcome(recovery, success = false)
+                            XrayLogManager.w("RECOVERY", "Recovered settings ${recovery.recoveryProfileKey} carried no traffic; trying other paths.")
+                        }
+                        is com.example.xray.RealDelayProbe.Outcome.NotRun -> Unit
+                    }
                 }
             }
 
@@ -843,6 +870,9 @@ class RayVpnService : VpnService() {
                 protectSocket = { socket -> safeProtectSocket(socket) },
                 tunnelProbe = { com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) },
                 onTriggerSwitch = { newProfile, reason ->
+                    // A recovered path that stopped carrying traffic counts towards its rollback.
+                    activeRecovery?.let { com.example.RayApplication.instance.bpbRecovery.recordOutcome(it, success = false) }
+                    activeRecovery = null
                     val degraded = requestedProfile.id
                     // The kind that just stopped carrying traffic goes last in the race.
                     networkMemory.recordFailure(

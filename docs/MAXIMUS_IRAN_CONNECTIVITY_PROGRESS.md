@@ -210,7 +210,7 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 | MX-IR-P01-T01 | Multi-probe engine and probe results | TESTING |
 | MX-IR-P02-T01 | Connection state correctness | TESTING |
 | MX-IR-P03-T01 | Connection score and candidate states | TESTING |
-| MX-IR-P04-T01 | BPB recovery engine | NOT_STARTED |
+| MX-IR-P04-T01 | BPB recovery engine | TESTING |
 | MX-IR-P05-T01 | TLS / ECH / fragmentation profiles | NOT_STARTED |
 | MX-IR-P06-T01 | Transport capability engine | NOT_STARTED |
 | MX-IR-P07-T01 | Top-30 diversity on the phone | NOT_STARTED |
@@ -283,3 +283,30 @@ HubManifest (Stage 11 must go through it), RuntimeHealth + EventLog + SecretReda
 - Test result: all pass in the JVM harness; full suite in CI.
 - Known limitations: the score is used by the selector and failover from Stages 7 and 9 on.
 - Security impact: security refusal now overrides any positive score by construction.
+
+### MX-IR-P04-T01 BPB recovery engine
+- Status: TESTING (local JVM tests pass; full Android CI pending)
+- Files changed: `vpn/connectivity/RecoveryProfile.kt` (model + 10 reviewed built-in profiles, expiring
+  every 120 days), `vpn/connectivity/RecoverySecurityGate.kt`, `vpn/connectivity/BpbRecoveryEngine.kt`
+  (`DerivedRecoveryCandidate`, `FieldChange`, `BpbRecoveryEngine`, `RecoveryLedger`), `RayApplication.kt`,
+  `vpn/RayVpnService.kt` (step 3a), `ui/panels/PanelManagerViewModel.kt` (FIX BPB).
+- Architecture impact: original → failure classification → strategies → derived copies (one recovery profile
+  each, only finalMask / fingerprint / ALPN / cipher list / ECH / endpoint address may change) → security
+  gate → real-request test → ledger by original config, profile, endpoint and network. Not attempted after a
+  refused certificate, failed login, proxy-protocol error or security refusal. Connect tries a candidate that
+  worked on this network first (one request), then the existing stealth/clean-IP search.
+  FIX BPB no longer overwrites saved configs: it tests derived copies, records the winner, and offers it to the
+  worker's other TLS configs. Rollback: 2 failures in a row after working withdraw a candidate; a profile that
+  failed 3 times on a network without working is not offered there again (until expiry). Configs changed by
+  earlier FIX BPB versions keep their saved settings.
+- Tests run: `BpbRecoveryEngineTest` (11): unrecoverable failures, bounded safe candidates with the original
+  untouched, blocked endpoint with validated IPv4/IPv6 alternatives, gate refusals (private endpoint,
+  allowInsecure, downgrade, SNI change, pin removal, unknown fingerprint, weak cipher, non-IP ECH resolver,
+  unbounded or unknown mask), refused candidates never tested, ECH candidate, success then rollback,
+  never-working profile retired, expiry, ledger persistence without credentials, identity fields locked.
+- Test result: 11/11 pass in the JVM harness; full suite in CI.
+- Known limitations: endpoint alternatives need locally validated addresses (Stage 10 supplies them; until
+  then the existing clean-IP scan in the connect path covers that case). Not tested against a real BPB worker
+  from Iran.
+- Security impact: tightens FIX BPB (no untested settings applied, no saved config rewritten). "unsafe"
+  fingerprint verified to keep certificate checks in Xray v26.9.9.

@@ -636,17 +636,18 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
                 else "Subscription could not be loaded yet: ${result.errorMessage.orEmpty()}"
             } else ""
             // Keep FIX BPB applied to newly imported configs once the user has turned it on.
-            val fixNote = if (hasBpbFix(host)) "FIX BPB kept on ${applyBpbFix(host)} configs." else ""
+            val fixNote = if (hasBpbFix(host)) "FIX BPB settings offered to ${applyBpbFix(host)} configs." else ""
             _state.value.copy(status = listOf("BPB profile imported and selected.", ping, subNote, fixNote)
                 .filter { it.isNotBlank() }.joinToString(" "))
         }
     }
 
     /**
-     * FIX BPB: stores a TLS fragment mask, the plain-TLS fingerprint, HTTP/1.1 ALPN and the
-     * cipher-suite list on every TLS config that belongs to this BPB worker (single profile and
-     * subscription). Each mask is first tried with a real request through one of the configs, and
-     * the first one that carries traffic is kept.
+     * FIX BPB: tests derived copies of one of this worker's TLS configs (TLS fragment masks, the plain
+     * Go TLS stack with its cipher list, other fingerprints) with real requests through the worker. The
+     * saved configs are never changed: the copy that carried traffic is recorded for this network, offered
+     * to the worker's other TLS configs, and tried first (one request) when they connect. A copy that
+     * stops working is withdrawn and the saved config is used again.
      */
     fun fixBpbProfiles(panel: ManagedPanel) {
         runJob("Testing FIX BPB settings through the worker…") {
@@ -658,54 +659,72 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
             }
             val sample = owned.filter { com.example.panels.BpbFix.canApply(it) }
                 .let { tls -> tls.firstOrNull { it.address.equals(host, ignoreCase = true) } ?: tls.firstOrNull() }
-            check(sample != null) { "This BPB panel has no TLS configs, which are the ones FIX BPB changes." }
-            val choice = withContext(Dispatchers.IO) { com.example.panels.BpbFix.choose(sample) }
-            appendLog("[BPB] FIX BPB test result: ${choice::class.simpleName}")
-            val reconnect = if (VpnController.connectionState.value.isTunnelUp) " Reconnect the VPN to use the new settings." else ""
-            val status = when (choice) {
-                is com.example.panels.BpbFix.Choice.Verified -> {
-                    val changed = applyBpbFix(host, choice.mask)
-                    "FIX BPB tested OK (${choice.latencyMs} ms through the worker) and applied to " +
-                        "$changed config${if (changed == 1) "" else "s"}.$reconnect"
+            check(sample != null) { "This BPB panel has no TLS configs, which are the ones FIX BPB tests." }
+            val network = com.example.vpn.smart.NetworkKey.current(getApplication<android.app.Application>())
+            val recovery = RayApplication.instance.bpbRecovery
+            val status = withContext(Dispatchers.IO) {
+                val plain = com.example.xray.RealDelayProbe.measure(sample, 8)
+                if (plain is com.example.xray.RealDelayProbe.Outcome.NotRun) {
+                    return@withContext "FIX BPB could not test (${plain.reason}). Disconnect the VPN and tap FIX BPB again; nothing was changed."
                 }
-                is com.example.panels.BpbFix.Choice.NotNeeded ->
-                    "These BPB configs already work without FIX BPB (${choice.latencyMs} ms through the worker) " +
-                        "and FIX BPB did not, so they were left unchanged."
-                is com.example.panels.BpbFix.Choice.NothingWorks ->
-                    "No request got through this BPB worker, with or without FIX BPB: ${choice.reason}. " +
+                val candidates = recovery.generate(sample, com.example.vpn.diagnostics.FailureStage.TLS_HANDSHAKE_FAILED, network)
+                val tested = recovery.test(candidates) { ps -> com.example.xray.RealDelayProbe.measure(ps, 8).map(::asRecoveryResult) }
+                val winner = tested.firstOrNull { it.test is com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed }
+                appendLog("[BPB] FIX BPB tested ${tested.size} derived settings: ${winner?.recoveryProfileKey ?: "none worked"}")
+                when {
+                    winner != null -> {
+                        val shared = adoptRecovery(host, winner, network)
+                        val ms = (winner.test as com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed).latencyMs
+                        val reconnect = if (VpnController.connectionState.value.isTunnelUp) " Reconnect the VPN to use them." else ""
+                        "FIX BPB found settings that work ($ms ms through the worker) and will use them for " +
+                            "${shared + 1} config${if (shared == 0) "" else "s"} on this network. Your saved configs are unchanged.$reconnect"
+                    }
+                    plain is com.example.xray.RealDelayProbe.Outcome.Delay ->
+                        "These BPB configs already work as they are (${plain.latencyMs} ms through the worker) and no " +
+                            "FIX BPB setting did, so nothing was added."
+                    else -> "No request got through this BPB worker, with or without FIX BPB: " +
+                        "${(plain as com.example.xray.RealDelayProbe.Outcome.Failed).reason}. " +
                         "Check the worker's UUID and proxy IP in the BPB panel; configs were left unchanged."
-                is com.example.panels.BpbFix.Choice.Untested -> {
-                    val changed = applyBpbFix(host, com.example.panels.BpbFix.FINAL_MASK_ORIGINAL)
-                    "FIX BPB applied to $changed config${if (changed == 1) "" else "s"} without a test " +
-                        "(${choice.reason}). Disconnect the VPN and tap FIX BPB again to test it.$reconnect"
                 }
             }
             _state.value.copy(status = status)
         }
     }
 
-    private suspend fun hasBpbFix(host: String): Boolean =
-        RayApplication.instance.serverRepository.getAllProfilesOnce()
-            .any { com.example.panels.BpbFix.belongsTo(it, host) && com.example.panels.BpbFix.wasApplied(it) }
+    private fun asRecoveryResult(o: com.example.xray.RealDelayProbe.Outcome) = when (o) {
+        is com.example.xray.RealDelayProbe.Outcome.Delay -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed(o.latencyMs)
+        is com.example.xray.RealDelayProbe.Outcome.Failed -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Failed(o.reason)
+        is com.example.xray.RealDelayProbe.Outcome.NotRun -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.NotRun(o.reason)
+    }
 
-    /** The mask this worker's configs use, so new configs get the same tested one. */
-    private suspend fun bpbFixMask(host: String): String =
-        RayApplication.instance.serverRepository.getAllProfilesOnce()
-            .firstOrNull { com.example.panels.BpbFix.belongsTo(it, host) && com.example.panels.BpbFix.isApplied(it) }
-            ?.finalMask ?: com.example.panels.BpbFix.FINAL_MASK_ORIGINAL
+    /** True when FIX BPB found working settings for one of this worker's configs on the current network. */
+    private suspend fun hasBpbFix(host: String): Boolean {
+        val network = com.example.vpn.smart.NetworkKey.current(getApplication<android.app.Application>())
+        return RayApplication.instance.serverRepository.getAllProfilesOnce()
+            .any { com.example.panels.BpbFix.belongsTo(it, host) && RayApplication.instance.bpbRecovery.active(it, network) != null }
+    }
 
-    /** Returns how many configs now carry the fix. */
-    private suspend fun applyBpbFix(host: String, mask: String? = null): Int {
-        val repo = RayApplication.instance.serverRepository
-        val chosen = mask ?: bpbFixMask(host)
+    /** Offers [winner]'s settings to the worker's other TLS configs; returns how many got them. */
+    private suspend fun adoptRecovery(host: String, winner: com.example.vpn.connectivity.DerivedRecoveryCandidate, network: String): Int {
         var count = 0
-        repo.getAllProfilesOnce()
+        RayApplication.instance.serverRepository.getAllProfilesOnce()
             .filter { com.example.panels.BpbFix.belongsTo(it, host) && com.example.panels.BpbFix.canApply(it) }
-            .forEach { profile ->
-                if (!com.example.panels.BpbFix.isApplied(profile, chosen)) repo.update(com.example.panels.BpbFix.apply(profile, chosen))
+            .filter { it.effectiveFingerprint != winner.parentFingerprint }
+            .forEach {
+                RayApplication.instance.recoveryLedger.adopt(it.effectiveFingerprint, winner.recoveryProfileKey, network,
+                    System.currentTimeMillis(), winner.expiresAt)
                 count++
             }
         return count
+    }
+
+    /** Offers this worker's working FIX BPB settings to newly imported configs; returns how many got them. */
+    private suspend fun applyBpbFix(host: String): Int {
+        val network = com.example.vpn.smart.NetworkKey.current(getApplication<android.app.Application>())
+        val winner = RayApplication.instance.serverRepository.getAllProfilesOnce()
+            .filter { com.example.panels.BpbFix.belongsTo(it, host) }
+            .firstNotNullOfOrNull { RayApplication.instance.bpbRecovery.active(it, network) } ?: return 0
+        return adoptRecovery(host, winner, network)
     }
 
     private suspend fun describePing(profile: com.example.data.model.VlessProfile): String =

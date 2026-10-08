@@ -55,6 +55,20 @@ class RayApplication : Application() {
         )
     }
 
+    /** What BPB recovery learned here: derived settings that worked, per original config and network. */
+    val recoveryLedger: com.example.vpn.connectivity.RecoveryLedger by lazy {
+        val prefs = getSharedPreferences("recovery_ledger", MODE_PRIVATE)
+        com.example.vpn.connectivity.RecoveryLedger(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /** Recovers degraded BPB / Cloudflare-fronted configs with derived copies; originals are never changed. */
+    val bpbRecovery: com.example.vpn.connectivity.BpbRecoveryEngine by lazy {
+        com.example.vpn.connectivity.BpbRecoveryEngine(ledger = recoveryLedger)
+    }
+
     /** This phone's measurements of free configs, kept apart from the list builder's global checks. */
     val freeConfigEvidence: com.example.vpn.hub.FreeConfigEvidenceStore by lazy {
         val prefs = getSharedPreferences("free_config_evidence", MODE_PRIVATE)
