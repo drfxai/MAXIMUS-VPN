@@ -257,7 +257,7 @@ class DiagnosticsViewModel(
         sb.appendLine("Configured Routing Mode: ${report.routingMode}")
         sb.appendLine("Configured DNS: ${report.dnsServer}")
         sb.appendLine("DoH Runtime Verification: ${report.dohWorking?.toString() ?: "Not measured"}")
-        sb.appendLine("DNS Leak Test: ${report.dnsLeakDetected?.toString() ?: "Not performed (external resolver observation required)"}")
+        sb.appendLine("External DNS Leak Test: ${report.dnsLeakDetected?.toString() ?: "NOT TESTED (needs an external resolver observation)"}")
         report.dnsPathTest?.let {
             sb.appendLine("Local VPN DNS Path Test: ${if (it.completed) "RESPONSE RECEIVED" else "INCONCLUSIVE"}; ${it.summary}")
             sb.appendLine("DNS Path Test Time: ${dateFormatForDns(it.testedAt)}; latency=${it.latencyMs?.let { ms -> "${ms}ms" } ?: "N/A"}")
@@ -274,6 +274,8 @@ class DiagnosticsViewModel(
         if (report.lastError != null) {
             sb.appendLine("Last Error Reported: ${report.lastError}")
         }
+        sb.appendLine("\n--- CONNECTION METRICS (since the app started) ---")
+        com.example.vpn.diagnostics.ConnectionMetrics.summary().forEach { sb.appendLine(it) }
         sb.appendLine("\n--- SANITIZED LOG TRACE (UUIDs & CREDENTIALS REDACTED) ---")
         if (report.sanitizedLogs.isEmpty()) {
             sb.appendLine("[No log entries available]")

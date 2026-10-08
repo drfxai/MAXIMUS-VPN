@@ -65,6 +65,8 @@ class RayVpnService : VpnService() {
         const val EXTRA_PROFILE_ID = "com.drfxai.maximusvpn.EXTRA_PROFILE_ID"
         const val EXTRA_SMART = "com.drfxai.maximusvpn.EXTRA_SMART"
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
+        /** Re-check interval for a connection whose last checks all passed. */
+        private const val PING_HEALTHY_MS = 30_000L
         /** How long a clean-address scan may take before the connect goes on without one. */
         private const val CLEAN_IP_SCAN_LIMIT_MS = 12_000L
         /** Requests through a new tunnel before it counts as unverified, and the pause between them. */
@@ -444,6 +446,8 @@ class RayVpnService : VpnService() {
             sessionId = sessionId, attemptId = attemptId, selectedProfileId = selectedId,
             attemptedProfileId = requestedProfile.id, networkGeneration = previous.networkGeneration
         )
+        val connectStartedAt = System.currentTimeMillis()
+        com.example.vpn.diagnostics.ConnectionMetrics.connectAttempts.incrementAndGet()
         try {
             supervisor.requestProtection()
             ensureBlockingInterface()
@@ -859,6 +863,9 @@ class RayVpnService : VpnService() {
             if (_vpnState.value.isConnected) {
                 showForegroundNotification("Connected to ${profile.name}")
                 XrayLogManager.i("VPN", "[DIAGNOSTICS] 10. Traffic verified through the tunnel (${check.first} ms). Final state: CONNECTED.")
+                val connectMs = System.currentTimeMillis() - connectStartedAt
+                com.example.vpn.diagnostics.ConnectionMetrics.recordConnectTime(connectMs)
+                XrayLogManager.i("VPN", "Time from connect to verified traffic: $connectMs ms.")
                 onTrafficVerified(requestedProfile, check.first)
             } else {
                 val stage = check.second ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN
@@ -891,6 +898,8 @@ class RayVpnService : VpnService() {
                 serverRepository = serverRepository,
                 protectSocket = { socket -> safeProtectSocket(socket) },
                 tunnelProbe = { com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) },
+                // Only the native core's own sockets carry the tunnel's data; other engines are always checked.
+                passive = if (activeEngine is NativeTunVpnEngine) com.example.vpn.smart.PassiveHealth() else null,
                 onTriggerSwitch = { newProfile, reason ->
                     // A recovered path that stopped carrying traffic counts towards its rollback.
                     activeRecovery?.let { com.example.RayApplication.instance.bpbRecovery.recordOutcome(it, success = false) }
@@ -902,6 +911,7 @@ class RayVpnService : VpnService() {
                         com.example.vpn.stealth.ConnectionKind.of(profile)
                     )
                     mutateState { com.example.data.model.ConnectionVerification.onSwitching(it) }
+                    com.example.vpn.diagnostics.ConnectionMetrics.failoverSwitches.incrementAndGet()
                     serviceScope.launch {
                         XrayLogManager.w("FAILOVER", "Executing auto-failover, '${newProfile.name}' first: $reason")
                         // Race the saved servers so the switch lands on one that carries traffic now.
@@ -1121,13 +1131,24 @@ class RayVpnService : VpnService() {
 
         pingJob?.cancel()
         val attemptId = _vpnState.value.attemptId
+        val passive = if (activeEngine is NativeTunVpnEngine) com.example.vpn.smart.PassiveHealth() else null
         pingJob = serviceScope.launch {
+            var okStreak = 0
             while (isActive && _vpnState.value.isTunnelUp && _vpnState.value.attemptId == attemptId) {
                 val wasConnected = _vpnState.value.isConnected
+                // A verified connection that is busy carrying data needs no extra request to prove it.
+                if (wasConnected && passive?.maySkipActiveCheck() == true) {
+                    com.example.vpn.diagnostics.ConnectionMetrics.passiveSkips.incrementAndGet()
+                    delay(PING_HEALTHY_MS)
+                    continue
+                }
                 try {
+                    com.example.vpn.diagnostics.ConnectionMetrics.activeTunnelChecks.incrementAndGet()
                     val sample = com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService)
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     if (_vpnState.value.attemptId == attemptId) passEvent("tunnel.recheck", sample.latencyMs)
+                    passive?.recordActiveSuccess()
+                    okStreak++
                     mutateState {
                         com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, true, sample.latencyMs, System.currentTimeMillis())
                             .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = sample.country) else s }
@@ -1141,6 +1162,7 @@ class RayVpnService : VpnService() {
                     throw e
                 } catch (e: Exception) {
                     val stage = com.example.vpn.diagnostics.FailureStage.of(e)
+                    okStreak = 0
                     mutateState {
                         com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, false, null, System.currentTimeMillis(), stage)
                             .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = null) else s }
@@ -1150,8 +1172,13 @@ class RayVpnService : VpnService() {
                         showForegroundNotification("Connection degraded (${stage.name})")
                     }
                 }
-                // An unverified tunnel is checked again sooner than a working one.
-                delay(if (_vpnState.value.isConnected) 10_000 else 4_000)
+                // An unverified tunnel is checked again soon; a steadily working one less often (the failover
+                // watchdog keeps its own faster cadence), so an idle phone is not woken every few seconds.
+                delay(when {
+                    !_vpnState.value.isConnected -> 4_000L
+                    okStreak >= 3 -> PING_HEALTHY_MS
+                    else -> 10_000L
+                })
             }
         }
     }

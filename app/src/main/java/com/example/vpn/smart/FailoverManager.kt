@@ -41,6 +41,8 @@ class FailoverManager(
     private val protectSocket: ((Socket) -> Boolean)? = null,
     /** Latency of a real request through the running tunnel; throws when nothing gets through. */
     private val tunnelProbe: (suspend () -> Long)? = null,
+    /** Passive evidence that lets a busy, recently verified connection skip a check (null: always check). */
+    private val passive: PassiveHealth? = null,
     private val onTriggerSwitch: (VlessProfile, String) -> Unit
 ) {
     enum class CascadeTier(val stageNumber: Int, val title: String, val badge: String) {
@@ -95,7 +97,12 @@ class FailoverManager(
                 // Every 12 s while healthy, every 3 s after a failed check (see WatchPolicy).
                 delay(WatchPolicy.nextCheckDelayMs(consecutiveFailures.get()))
 
-                val isHealthy = checkActiveTunnel(currentProfile, settings.failoverThresholdMs)
+                // While confirming a failure every check is a real request; otherwise data flowing through a
+                // recently verified tunnel stands in for one (PassiveHealth).
+                val isHealthy = if (consecutiveFailures.get() == 0 && passive?.maySkipActiveCheck() == true) {
+                    com.example.vpn.diagnostics.ConnectionMetrics.passiveSkips.incrementAndGet()
+                    true
+                } else checkActiveTunnel(currentProfile, settings.failoverThresholdMs)
                 // A blocking probe can outlive a switch or disconnect; its result is stale then.
                 if (!isActive) break
                 if (!isHealthy) {
@@ -189,7 +196,8 @@ class FailoverManager(
     private suspend fun checkActiveTunnel(profile: VlessProfile, latencyThreshold: Long): Boolean {
         val probe = tunnelProbe ?: return checkHealth(profile, latencyThreshold)
         return try {
-            probe() < maxOf(latencyThreshold, REAL_REQUEST_LATENCY_FLOOR_MS)
+            com.example.vpn.diagnostics.ConnectionMetrics.activeTunnelChecks.incrementAndGet()
+            (probe() < maxOf(latencyThreshold, REAL_REQUEST_LATENCY_FLOOR_MS)).also { if (it) passive?.recordActiveSuccess() }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

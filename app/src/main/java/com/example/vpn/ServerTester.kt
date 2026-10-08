@@ -87,6 +87,7 @@ object ServerTester {
         if (state.isConnected && ping != null && active != null && active.effectiveFingerprint == profile.effectiveFingerprint) {
             return ServerTestResult(profile.id, if (ping < REAL_DELAY_FAST_MS) ServerTestStatus.Available(ping) else ServerTestStatus.Slow(ping))
         }
+        com.example.vpn.diagnostics.ConnectionMetrics.notTestedWhileConnected.incrementAndGet()
         XrayLogManager.d("SERVER", "'${profile.name}' not tested while the VPN is on; disconnect to test it on this network.")
         return ServerTestResult(profile.id, ServerTestStatus.Idle)
     }

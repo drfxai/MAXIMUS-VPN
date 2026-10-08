@@ -111,6 +111,7 @@ class LabController(
         store.recordNetwork(ctx, if (measured == 0) null else working * 25, cap.observations().filter { !it.endsWith("not measured") }.joinToString(" · "))
         val plan = store.planFor(ctx.contextKey, policy)
         if (isNew) {
+            com.example.vpn.diagnostics.ConnectionMetrics.labSessions.incrementAndGet()
             XrayLogManager.i("LAB", "Network session ${ctx.sessionId} on ${NetworkKey.describe(key)} ($families).")
             if (!plan.explore && store.automation().mayExperiment && job?.isActive != true) {
                 job = scope.launch { runCatching { revalidate(ctx, plan.revalidate, userStarted = false) } }
