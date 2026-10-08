@@ -80,7 +80,10 @@ object OfficialSigning {
 
     private fun rawToDer(raw: ByteArray): ByteArray {
         fun int(bytes: ByteArray): ByteArray {
-            var v = bytes.dropWhile { it == 0.toByte() }.toByteArray().ifEmpty { byteArrayOf(0) }
+            // Minimal two's-complement INTEGER: no leading zeros (one byte stays), a zero added when the top bit is set.
+            var start = 0
+            while (start < bytes.size - 1 && bytes[start] == 0.toByte()) start++
+            var v: ByteArray = bytes.copyOfRange(start, bytes.size)
             if (v[0].toInt() and 0x80 != 0) v = byteArrayOf(0) + v
             return byteArrayOf(0x02, v.size.toByte()) + v
         }

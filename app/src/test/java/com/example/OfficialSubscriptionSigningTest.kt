@@ -122,6 +122,20 @@ class OfficialSubscriptionSigningTest {
         assertEquals(5, official().size)
     }
 
+    @Test fun whenEveryOriginIsDownTheLastKnownGoodServersStay() = runBlocking {
+        served["$primary${OfficialSigning.SUFFIX}"] = envelope(1..5, sequence = now)
+        manager().addAndSyncSubscription(OfficialSubscriptions.NAME, primary)
+        val before = official().map { it.id }.toSet()
+        inUse = setOf(before.first())
+
+        // The Worker and the mirror are both unreachable.
+        served.clear()
+        val result = manager().syncSubscription(subscriptions.getSubscriptionByUrl(primary)!!)
+        assertFalse(result.isSuccess)
+        assertEquals(before, official().map { it.id }.toSet())
+        assertEquals(now, sequences.last("official-sub"))
+    }
+
     @Test fun unsignedTamperedWrongIdAndExpiredCopiesAreRefused() {
         assertThrows(OfficialSigning.Refused::class.java) { OfficialSigning.verify(envelope(1..2, now, tamper = true), "official-sub", 0, publicKey, now) }
         assertThrows(OfficialSigning.Refused::class.java) { OfficialSigning.verify(envelope(1..2, now, id = "official-vip"), "official-sub", 0, publicKey, now) }
@@ -131,6 +145,29 @@ class OfficialSubscriptionSigningTest {
             KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair().public.encoded)
         assertThrows(OfficialSigning.Refused::class.java) { OfficialSigning.verify(envelope(1..2, now), "official-sub", 0, otherKey, now) }
         assertEquals(now, OfficialSigning.verify(envelope(1..2, now), "official-sub", now, publicKey, now).sequence)
+    }
+
+    /** DER SEQUENCE { INTEGER r, INTEGER s } to the 64-byte r||s form WebCrypto produces. */
+    private fun derToRaw(der: ByteArray): ByteArray {
+        fun fixed(value: ByteArray): ByteArray {
+            val v = if (value.size > 32) value.copyOfRange(value.size - 32, value.size) else value
+            return ByteArray(32 - v.size) + v
+        }
+        var i = 2 // SEQUENCE tag and length (always short form for P-256)
+        val rLen = der[i + 1].toInt(); val r = der.copyOfRange(i + 2, i + 2 + rLen); i += 2 + rLen
+        val sLen = der[i + 1].toInt(); val s = der.copyOfRange(i + 2, i + 2 + sLen)
+        return fixed(r) + fixed(s)
+    }
+
+    @Test fun aRawWebCryptoSignatureIsAcceptedToo() {
+        val signed = JSONObject(envelope(1..2, now))
+        val raw = derToRaw(java.util.Base64.getDecoder().decode(signed.getString("signature")))
+        assertEquals(64, raw.size)
+        signed.put("signature", java.util.Base64.getEncoder().encodeToString(raw))
+        assertEquals(now, OfficialSigning.verify(signed.toString(), "official-sub", 0, publicKey, now).sequence)
+        // The same raw signature over a changed manifest still fails.
+        signed.put("manifest", signed.getString("manifest").replace("official-sub", "official-vip"))
+        assertThrows(OfficialSigning.Refused::class.java) { OfficialSigning.verify(signed.toString(), "official-vip", 0, publicKey, now) }
     }
 
     @Test fun withoutAKeyInTheBuildThePlainListIsUsedAsBefore() = runBlocking {
