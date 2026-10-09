@@ -180,6 +180,11 @@ fun PanelManagerScreen(
     var selectedReviveTargetProfileId by remember { mutableStateOf<String?>(null) }
     var reviveAsClone by remember { mutableStateOf(true) }
     var cleanIpSortOption by remember { mutableIntStateOf(0) } // 0: Quality, 1: Latency, 2: Jitter
+    // Tunnel tab is UI-only for now. Nothing here is persisted, installed or executed.
+    var tunnelIranHost by remember { mutableStateOf("") }
+    var tunnelIranPort by remember { mutableStateOf("22") }
+    var tunnelIranPassword by remember { mutableStateOf("") }
+    var tunnelPasswordVisible by remember { mutableStateOf(false) }
 
     // Forms
     var host by remember { mutableStateOf("") }
@@ -248,7 +253,7 @@ fun PanelManagerScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Server + Cloudflare control center",
+                    text = "Server + Cloudflare + Tunnel control center",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -275,7 +280,7 @@ fun PanelManagerScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            val tabs = listOf("Servers", "Cloudflare", "Clean IP")
+            val tabs = listOf("Servers", "Cloudflare", "Clean IP", "Tunnel")
             tabs.forEachIndexed { index, title ->
                 val isSelected = (selectedPanelId != null && index == 0) || (selectedPanelId == null && selectedTab == index)
                 Surface(
@@ -347,8 +352,8 @@ fun PanelManagerScreen(
                     errorText = state.error
                 )
             } else {
-                // STAT CARDS (3 COLUMNS). The Cloudflare tab carries its own status header.
-                if (selectedTab != 1) Row(
+                // STAT CARDS (3 COLUMNS). Cloudflare carries its own header.
+                if (selectedTab == 0 || selectedTab == 2 || selectedTab == 3) Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -361,12 +366,17 @@ fun PanelManagerScreen(
                             StatCard(Icons.Default.Cloud, PanelColors.CyanAccent, workerCount.toString(), "Workers", Modifier.weight(1f))
                             StatCard(Icons.Default.Shield, if (totalActive > 0) PanelColors.SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant, if (totalActive > 0) "Online" else "Standby", "Status", Modifier.weight(1f))
                         }
-                        else -> {
+                        2 -> {
                             val scanningCount = if (state.busy) state.tested else 0
                             val cleanCount = state.edges.size
                             StatCard(Icons.Default.Language, PanelColors.CyanAccent, scanningCount.toString(), "Tested", Modifier.weight(1f))
                             StatCard(Icons.Default.Security, PanelColors.CyanAccent, state.reachable.toString(), "Reachable", Modifier.weight(1f))
                             StatCard(Icons.Default.CheckCircle, PanelColors.SuccessGreen, cleanCount.toString(), "Clean IPs", Modifier.weight(1f))
+                        }
+                        else -> {
+                            StatCard(Icons.Default.Router, PanelColors.CyanAccent, if (tunnelIranHost.isBlank()) "Not set" else "Ready", "Iran server", Modifier.weight(1f))
+                            StatCard(Icons.Default.Language, PanelColors.TextMuted, "Later", "Foreign server", Modifier.weight(1f))
+                            StatCard(Icons.Default.Link, PanelColors.TextMuted, "UI only", "Tunnel", Modifier.weight(1f))
                         }
                     }
                 }
@@ -776,6 +786,20 @@ fun PanelManagerScreen(
                             }
                         }
                     }
+                }
+
+                // TAB 3: TUNNEL — UI scaffold only. Real tunnel provisioning will be implemented later.
+                if (selectedTab == 3) {
+                    TunnelSetupCard(
+                        iranHost = tunnelIranHost,
+                        onIranHostChange = { tunnelIranHost = it.trim() },
+                        iranPort = tunnelIranPort,
+                        onIranPortChange = { tunnelIranPort = it.filter(Char::isDigit).take(5) },
+                        iranPassword = tunnelIranPassword,
+                        onIranPasswordChange = { tunnelIranPassword = it },
+                        passwordVisible = tunnelPasswordVisible,
+                        onTogglePasswordVisibility = { tunnelPasswordVisible = !tunnelPasswordVisible }
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
@@ -3414,3 +3438,264 @@ private fun outlinedColors() = OutlinedTextFieldDefaults.colors(
     unfocusedTextColor = Color.White
 )
 
+
+
+@Composable
+private fun TunnelSetupCard(
+    iranHost: String,
+    onIranHostChange: (String) -> Unit,
+    iranPort: String,
+    onIranPortChange: (String) -> Unit,
+    iranPassword: String,
+    onIranPasswordChange: (String) -> Unit,
+    passwordVisible: Boolean,
+    onTogglePasswordVisibility: () -> Unit
+) {
+    val portValue = iranPort.toIntOrNull()
+    val formReady = iranHost.isNotBlank() && portValue != null && portValue in 1..65535 && iranPassword.isNotBlank()
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            border = BorderStroke(1.dp, PanelColors.CyanAccent.copy(alpha = 0.45f))
+        ) {
+            Column(
+                modifier = Modifier
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                PanelColors.PrimaryBlue.copy(alpha = 0.18f),
+                                PanelColors.CyanAccent.copy(alpha = 0.06f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(42.dp),
+                        shape = RoundedCornerShape(13.dp),
+                        color = PanelColors.PrimaryBlue.copy(alpha = 0.18f),
+                        border = BorderStroke(1.dp, PanelColors.CyanAccent.copy(alpha = 0.4f))
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Link,
+                                contentDescription = null,
+                                tint = PanelColors.CyanAccent,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "Iran ↔ International Tunnel",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        )
+                        Text(
+                            text = "Prepare a secure two-server tunnel path",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = PanelColors.CyanAccent.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, PanelColors.CyanAccent.copy(alpha = 0.35f))
+                    ) {
+                        Text(
+                            text = "UI PREVIEW",
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            color = PanelColors.CyanAccent,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Enter the Iran server access details now. Tunnel protocol selection, foreign-server provisioning, SSH actions and real tunnel creation will be implemented later.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, if (formReady) PanelColors.SuccessGreen.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("🇮🇷  IRAN SERVER", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                if (iranHost.isBlank()) "Waiting for details" else iranHost,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = PanelColors.CyanAccent)
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("🌍  FOREIGN SERVER", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(3.dp))
+                            Text("Configured later", color = PanelColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Router, null, tint = PanelColors.CyanAccent, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        text = "Iran Server",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                OutlinedTextField(
+                    value = iranHost,
+                    onValueChange = onIranHostChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Iran Server IP / Host") },
+                    placeholder = { Text("e.g. 185.120.10.25") },
+                    leadingIcon = { Icon(Icons.Default.Dns, null) },
+                    singleLine = true,
+                    colors = outlinedColors()
+                )
+
+                OutlinedTextField(
+                    value = iranPort,
+                    onValueChange = onIranPortChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("SSH Port") },
+                    placeholder = { Text("22") },
+                    leadingIcon = { Icon(Icons.Default.Terminal, null) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    supportingText = {
+                        if (iranPort.isNotBlank() && (portValue == null || portValue !in 1..65535)) {
+                            Text("Enter a port from 1 to 65535.")
+                        }
+                    },
+                    colors = outlinedColors()
+                )
+
+                OutlinedTextField(
+                    value = iranPassword,
+                    onValueChange = onIranPasswordChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("SSH Password") },
+                    placeholder = { Text("Server password") },
+                    leadingIcon = { Icon(Icons.Default.Lock, null) },
+                    trailingIcon = {
+                        IconButton(onClick = onTogglePasswordVisibility) {
+                            Icon(
+                                if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                            )
+                        }
+                    },
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    colors = outlinedColors()
+                )
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Security, null, tint = PanelColors.CyanAccent, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "Tunnel engine not selected yet",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "No SSH login, package installation, server modification or network tunnel is performed by this screen.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 10.5.sp,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(Icons.Default.Bolt, null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("Create Tunnel — Coming soon", fontWeight = FontWeight.Bold)
+                }
+
+                Text(
+                    text = if (formReady)
+                        "Iran server details are ready in this screen. They are not stored or transmitted yet."
+                    else
+                        "Complete the Iran server IP/host, SSH port and password to preview the future workflow.",
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    color = if (formReady) PanelColors.SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.5.sp
+                )
+            }
+        }
+    }
+}
