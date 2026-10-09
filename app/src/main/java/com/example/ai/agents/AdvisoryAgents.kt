@@ -50,8 +50,40 @@ class LabAgent(private val ai: AiChat) {
         return parse(response.text, "${response.providerId}/${response.modelId}")
     }
 
+    /**
+     * LAB checkpoint: which of the offered method families to try first. The brief holds the network state
+     * and per-family pass/fail counts only. The answer is family names, checked again by the LAB
+     * (AiCheckpoint.validate) and used to reorder only; it can never start, change or verify anything.
+     */
+    suspend fun rankFamilies(brief: String, families: List<String>): List<String> {
+        val response = ai.chat(
+            AiConsumer.LAB_AGENT,
+            AiChatRequest(
+                task = AiTaskClass.NETWORK_ANALYSIS,
+                system = RANK_SYSTEM,
+                messages = listOf(AiMessage(AiMessage.Role.USER, AiPrivacyFilter.redact(brief).take(MAX_BRIEF) + "\nFamilies: " + families.joinToString(", "))),
+                temperature = 0.1,
+                maxOutputTokens = 200,
+                jsonOutput = true
+            )
+        )
+        return parseFamilies(response.text, families.toSet())
+    }
+
     companion object {
         const val MAX_BRIEF = 6_000
+
+        val RANK_SYSTEM = """
+            A VPN app's network lab is choosing which connection method families to test next on a censored network.
+            Pick at most 3 of the listed families, most promising first, from the measurements given. You never
+            decide that anything works; the lab tests it. Answer JSON only: {"families": ["NAME", ...]}
+        """.trimIndent()
+
+        /** Only names from [offered], at most three; anything else is dropped. */
+        fun parseFamilies(text: String, offered: Set<String>): List<String> {
+            val o = runCatching { JSONObject(text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()) }.getOrNull() ?: return emptyList()
+            return o.optJSONArray("families").strings().map { it.uppercase() }.filter { it in offered }.distinct().take(3)
+        }
         val FIELDS = setOf("fingerprint", "alpn", "finalMask", "echConfigList", "targetStrategy")
 
         val SYSTEM = """

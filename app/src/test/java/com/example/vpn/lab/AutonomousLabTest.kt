@@ -27,20 +27,30 @@ class AutonomousLabTest {
 
     // ------------------------------------------------------------ planner
 
-    @Test fun nationalNetworkPlansDnsTunnelsNotStop() {
+    @Test fun nationalNetworkPlansDiverseRecoveryNeverStop() {
         val dnsEgress = ExperimentPlanner.plan(reading(nin.copy(recursiveDnsEgress = true)), nin, 15)
-        assertEquals(ExperimentPlanner.Mode.DNS_TUNNEL_RECOVERY, dnsEgress.mode)
-        assertEquals(listOf(PathFamily.DNS_TUNNEL), dnsEgress.prefer)
+        assertEquals(ExperimentPlanner.Mode.EMERGENCY_RECOVERY, dnsEgress.mode)
+        assertEquals(PathFamily.DNS_TUNNEL, dnsEgress.prefer.first())
         assertTrue(dnsEgress.budget > 0)
         assertFalse(PathFamily.DNS_TUNNEL in dnsEgress.skip)
-        // Domestic only: ordinary mutations stop, DNS tunnel configs are still the measurement.
+        // Diversity: Psiphon, every Tor bridge kind, Mihomo and WireGuard-style UDP are all in the plan.
+        assertTrue(dnsEgress.prefer.containsAll(listOf(PathFamily.PSIPHON, PathFamily.TOR_WEBTUNNEL, PathFamily.TOR_OBFS4, PathFamily.TOR_SNOWFLAKE, PathFamily.MIHOMO, PathFamily.AMNEZIAWG)))
+        // Domestic only: ordinary configs are not skipped, only tried last with a low prior.
         val domestic = ExperimentPlanner.plan(reading(nin), nin, 15)
-        assertEquals(ExperimentPlanner.Mode.DNS_TUNNEL_RECOVERY, domestic.mode)
-        assertTrue(PathFamily.VLESS_REALITY in domestic.skip)
-        // Full isolation stops ordinary recovery.
+        assertEquals(ExperimentPlanner.Mode.EMERGENCY_RECOVERY, domestic.mode)
+        assertFalse(PathFamily.VLESS_REALITY in domestic.skip)
+        assertTrue(PathFamily.VLESS_REALITY in domestic.lowPrior)
+        // Nothing answers abroad or at home: still recovery, never a stop with a zero budget.
         val none = ExperimentPlanner.plan(reading(nin.copy(domesticReachable = false)), nin, 15)
-        assertEquals(ExperimentPlanner.Mode.STOP_NO_EGRESS, none.mode)
-        assertEquals(0, none.budget)
+        assertEquals(ExperimentPlanner.Mode.EMERGENCY_RECOVERY, none.mode)
+        assertEquals(15, none.budget)
+        // DNS and UDP dead: Psiphon and Tor go before the DNS tunnel; UDP families are left out.
+        val dead = nin.copy(dnsWorking = false, udpAvailable = false, domesticReachable = false)
+        val order = ExperimentPlanner.emergencyOrder(dead)
+        assertTrue(order.indexOf(PathFamily.PSIPHON) < order.indexOf(PathFamily.DNS_TUNNEL))
+        assertFalse(PathFamily.AMNEZIAWG in order)
+        // QUIC answering keeps UDP families in play even when direct UDP DNS failed.
+        assertTrue(PathFamily.AMNEZIAWG in ExperimentPlanner.emergencyOrder(dead.copy(quicStatus = "QUIC_AVAILABLE")))
     }
 
     @Test fun udpBlockedSkipsUdpFamiliesAndPrefersTcp() {
@@ -49,7 +59,10 @@ class AutonomousLabTest {
         assertTrue(PathFamily.HYSTERIA2 in p.skip && PathFamily.WIREGUARD in p.skip && PathFamily.TUIC in p.skip)
         assertEquals(PathFamily.VLESS_REALITY, p.prefer.first())
         // Engines go last.
-        assertEquals(listOf(PathFamily.PSIPHON, PathFamily.TOR), p.prefer.takeLast(2))
+        assertEquals(listOf(PathFamily.PSIPHON) + PathFamily.TOR_FAMILIES, p.prefer.takeLast(5))
+        // QUIC answering means UDP is not dead: UDP families are not skipped.
+        val quic = open.copy(udpAvailable = false, quicStatus = "QUIC_AVAILABLE")
+        assertFalse(PathFamily.HYSTERIA2 in ExperimentPlanner.plan(reading(quic), quic, 15).skip)
     }
 
     @Test fun budgetIsLargerForUserRunsAndSmallerOnBatteryOrMetered() {
@@ -114,7 +127,8 @@ class AutonomousLabTest {
             .associateBy { it.key.removePrefix("family-") }
         assertEquals(PathStatus.VERIFIED, rows.getValue("VLESS_TLS").status)
         assertEquals(PathStatus.FAILED, rows.getValue("WEBSOCKET").status)
-        assertEquals(PathStatus.BLOCKED, rows.getValue("HYSTERIA2").status)
+        // A skip is a planning choice, never shown as a measured block.
+        assertEquals(PathStatus.NOT_TESTED, rows.getValue("HYSTERIA2").status)
         assertEquals(PathStatus.NOT_TESTED, rows.getValue("GRPC").status)
     }
 
@@ -156,6 +170,10 @@ class AutonomousLabTest {
         assertTrue(EngineProbe.judge("tor", ready = true, outcome = RealDelayProbe.Outcome.NotRun("VPN running")).notTested)
         assertEquals(ConnectionStage.NOT_TESTED, EngineProbe.judge("tor", ready = false, outcome = null).stage)
         assertEquals(EngineProbe.DnsTunnelStage.ENGINE_UNAVAILABLE, EngineProbe.dnsTunnelStage(null))
+        // Outcomes follow the stage.
+        assertEquals(listOf(true), passed.outcomes)
+        assertEquals(listOf(false), ready.outcomes)
+        assertTrue(EngineProbe.judge("tor", ready = true, outcome = RealDelayProbe.Outcome.NotRun("VPN running")).outcomes.isEmpty())
     }
 
     // ------------------------------------------------------------ resolver intelligence

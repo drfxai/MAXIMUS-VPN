@@ -32,7 +32,9 @@ flowchart TD
   P -->|IPv4 fails, IPv6 TLS works| V4[IPV4_DEGRADED]
   D -->|yes + recursive DNS egress measured| N[NIN_WITH_DNS_EGRESS]
   D -->|yes, no egress measured| DO[DOMESTIC_ONLY_NO_VERIFIED_EGRESS]
-  D -->|no| FI[FULL_ISOLATION]
+  D -->|no, but DNS/UDP/DoH/DoT/QUIC answered| SF[SEVERE_FILTERING]
+  D -->|no, nothing answered| NV[NO_VERIFIED_EGRESS]
+  NV -.->|only after Full Analysis: every available recovery family tested and failed| TI2[TRUE_PHYSICAL_ISOLATION]
   P -->|some international| PA[PARTIAL_INTERNATIONAL_CONNECTIVITY]
   P -->|all international| Rz{Restrictions}
   Rz -->|none| NO[NORMAL]
@@ -108,10 +110,13 @@ Rollback is always "use the saved config unchanged". The recovery ledger's exist
 
 `ExperimentPlanner` reads the network state before LAB spends its probe budget:
 
-- Modes: FULL_ISOLATION → STOP (nothing can work). DOMESTIC_ONLY and NIN_WITH_DNS_EGRESS → DNS_TUNNEL_RECOVERY:
-  ordinary config mutations stop, and saved DNS tunnel configs are tested with real requests (the real request is
-  itself the measurement of DNS egress). Everything else → ORDINARY.
-- Automatic (background) experiments do not start in those three states; the message points to Full Analysis.
+- Modes (V5): NIN_WITH_DNS_EGRESS, DOMESTIC_ONLY, SEVERE_FILTERING and NO_VERIFIED_EGRESS → EMERGENCY_RECOVERY:
+  a diverse set of recovery families goes first (DNS tunnel, Psiphon, Tor WebTunnel/obfs4/Snowflake, Mihomo,
+  AmneziaWG/WireGuard when UDP is not dead), ordinary configs are tried last with a low prior, and no config
+  copies are made. Nothing stops the run before the recovery families were tried. Everything else → ORDINARY.
+- TRUE_PHYSICAL_ISOLATION is never produced by the classifier; only `EmergencyRecovery.conclude` after a full
+  analysis, from strong negative evidence across every available family (see docs/MAXIMUS_AUTONOMOUS_LAB_V5.md).
+- Automatic (background) experiments do not start in those states; the message points to Full Analysis.
 - UDP blocked skips UDP families; QUIC/UDP trouble or SNI/TLS interference puts REALITY, XHTTP and other TCP
   transports first. Engine families (Psiphon, Tor) go last.
 - Budget: 15 tests for a user-started run, 4 in the background; at most 10/3 on metered data; at most 4 under 20% battery when not charging.

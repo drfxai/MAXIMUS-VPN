@@ -22,7 +22,10 @@ import com.example.vpn.diagnostics.FailureStage
 import com.example.vpn.smart.NetworkCapabilityDetector
 import com.example.vpn.smart.NetworkCapabilityProfile
 import com.example.vpn.smart.NetworkKey
+import com.example.vpn.sidecar.MihomoSidecar
 import com.example.vpn.sidecar.Sidecars
+import com.example.vpn.sidecar.TorSidecar
+import com.example.BuildConfig
 import com.example.xray.RealDelayProbe
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The phone side of the LAB: watches network sessions, runs bounded experiments with the bundled core's real
@@ -67,6 +71,13 @@ class LabController(
     private val steps = mutableListOf<LabStep>()
     private val log = ArrayDeque<String>()
     @Volatile private var analysisRunning = false
+    @Volatile private var live: LiveAnalysis? = null
+
+    /**
+     * Optional AI checkpoint: given a sanitized brief and the family names on offer, returns family names in
+     * the order it would try them. Set by the app when an AI provider is configured; null means no AI.
+     */
+    @Volatile var familyAdvisor: (suspend (brief: String, families: List<String>) -> List<String>)? = null
     /** Raw failure text of the last Full Analysis test per config, for the failure classifier. */
     private val analysisFailures = mutableMapOf<String, String>()
 
@@ -75,6 +86,8 @@ class LabController(
     val state: StateFlow<LabSnapshot> = _state.asStateFlow()
 
     fun start() {
+        // Engine work folders hold generated configs and credentials; none may outlive a crash.
+        scope.launch(Dispatchers.IO) { EngineProbe.cleanupAll(context) }
         publish()
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return
         val request = NetworkRequest.Builder()
@@ -112,7 +125,9 @@ class LabController(
             publish(message = "No network outside the VPN right now.", networkState = null)
             return
         }
-        val key = NetworkKey.current(context)
+        // Identity V2: two Wi-Fi networks get different keys (salted fingerprint, no SSID), so one never
+        // inherits the other's history.
+        val key = com.example.vpn.smart.NetworkIdentity.current(context)
         val families = NetworkSessionTracker.families(cap.ipv4Available, cap.ipv6Available)
         val (ctx, isNew) = tracker.observe(key, families, labelOf(key))
         // Health counts only what was measured: an unmeasured check is neither a pass nor a fail.
@@ -166,16 +181,17 @@ class LabController(
      */
     fun fullAnalysis() = launchJob {
         analysisRunning = true
-        try { runFullAnalysis() } finally { analysisRunning = false; publish() }
+        try { runFullAnalysis() } finally { analysisRunning = false; live = null; publish() }
     }
 
     private suspend fun runFullAnalysis() {
         val startedAt = System.currentTimeMillis()
         analysisFailures.clear()
         steps.clear()
+        live = null
         ANALYSIS_STEPS.forEach { steps += LabStep(it, LabStep.State.PENDING) }
 
-        // 1-2. Identify the network and measure it twice: the state machine needs two readings to move.
+        // OBSERVE. Identify the network and measure it twice: the state machine needs two readings to move.
         step(STEP_A_IDENTIFY, LabStep.State.RUNNING)
         refreshNetwork(userStarted = true)
         val ctx = tracker.current ?: return fail(STEP_A_IDENTIFY, "No network outside the VPN.")
@@ -185,114 +201,264 @@ class LabController(
         if (!tracker.isCurrent(ctx.sessionId)) return fail(STEP_A_MEASURE, "The network changed during the analysis. Start it again.")
         val cap = NetworkCapabilityDetector.last
         val resolvers = measureResolvers(ctx)
+        val burst = measureBurst(resolvers)
         val intl = cap?.let { c -> c.internationalTried?.let { "international ${c.internationalOk ?: 0}/$it" } } ?: "international not measured"
         step(STEP_A_MEASURE, LabStep.State.DONE, "$intl · ${resolvers.count { it.usable }}/${resolvers.size} resolvers answer honestly")
 
-        // 3-4. Classify (observation and assessment kept apart) and name the failure domains.
+        // CLASSIFY and DIAGNOSE (observation and assessment kept apart).
         val reading = _state.value.networkState
         step(STEP_A_CLASSIFY, if (reading == null) LabStep.State.FAILED else LabStep.State.DONE,
             reading?.let { "${it.primary.title} · ${(it.confidence * 100).toInt()}%" } ?: "not measured")
         val domains = reading?.restrictions.orEmpty().map { it.title }
         step(STEP_A_DIAGNOSE, LabStep.State.DONE, domains.joinToString(", ").ifBlank { "no restriction measured" })
 
-        // 5. Plan from the state and the device budget.
+        // HYPOTHESES. Plan from the state and the device budget; fresh memory and an optional AI checkpoint only reorder.
         val device = deviceState(userStarted = true)
         val plan = ExperimentPlanner.plan(reading, cap, ExperimentPlanner.budget(
             ExperimentPlanner.Budget(true, device.batteryPercent, device.charging, device.metered)))
-        step(STEP_A_PLAN, LabStep.State.DONE, "${plan.mode.title} · up to ${plan.budget} tests")
-
         val profiles = loadAllProfiles()
-        val families = profiles.map { it to PathFamily.of(it, Sidecars.forProfile(it)?.id) }
+        val families = profiles.map { it to familyOf(it) }
+        val available = families.filter { !it.first.allowInsecure }.map { it.second }.toSet()
+        val now0 = System.currentTimeMillis()
+        val memory = LabEvidence.priors(store.evidenceFor(ctx.contextKey), ctx.contextKey, now0, BuildConfig.VERSION_CODE)
+        val lowBattery = device.charging != true && (device.batteryPercent ?: 100) < 20
+        val planner = AdaptivePlanner(plan, cap, AdaptivePlanner.Priors(memory = memory), AdaptivePlanner.Device(device.metered, lowBattery))
+        val aiFirst = aiCheckpoint("after classification", reading, plan, available, planner)
+        step(STEP_A_PLAN, LabStep.State.DONE, "${plan.mode.title} · up to ${plan.budget} tests" +
+            (if (memory.isNotEmpty()) " · fresh memory for ${memory.size} famil${if (memory.size == 1) "y" else "ies"}" else "") +
+            (if (aiFirst.isNotEmpty()) " · AI checkpoint: ${aiFirst.joinToString { it.title }} first (reorder only)" else ""))
+
         val notTested = mutableMapOf<PathFamily, String>()
-        val results = mutableListOf<RankedMethod>()
+        val rejected = mutableListOf<RankedMethod>()
+        val engineResults = mutableMapOf<String, EngineProbe.Result>()
         val vpnOn = device.vpnRunning
-        when {
-            plan.mode == ExperimentPlanner.Mode.STOP_NO_EGRESS -> {
-                listOf(STEP_A_EXPERIMENT, STEP_A_VERIFY, STEP_A_CONFIG).forEach { step(it, LabStep.State.SKIPPED, "nothing answers on this network") }
-            }
-            vpnOn -> {
-                families.forEach { (_, f) -> notTested[f] = "the VPN is on; methods are tested outside the VPN only while it is off" }
-                listOf(STEP_A_EXPERIMENT, STEP_A_VERIFY, STEP_A_CONFIG).forEach { step(it, LabStep.State.SKIPPED, "turn the VPN off to test methods") }
-            }
-            else -> {
-                // 6. Real requests, one config per family first.
-                val proven = store.verifiedProfiles().filter { it.contextKey == ctx.contextKey && it.state == PromotionState.VERIFIED }.map { it.parentFingerprint }.toSet()
-                val maxEngines = if (plan.mode == ExperimentPlanner.Mode.DNS_TUNNEL_RECOVERY) 3 else 2
-                var engines = 0
-                val picks = FullAnalysis.select(families, plan, proven).filter { !it.family.engine || engines++ < maxEngines }
-                step(STEP_A_EXPERIMENT, LabStep.State.RUNNING, "${picks.size} configs")
-                picks.filter { it.profile.allowInsecure }.forEach { pk ->
-                    results += RankedMethod(pk.profile.id, pk.profile.name, pk.family, PathStatus.SECURITY_REJECTED, ConnectionStage.NOT_TESTED, null, null,
-                        "certificate checks are off in this config; never recommended", 0, 0)
+        val proven = store.verifiedProfiles().filter { it.contextKey == ctx.contextKey && it.state == PromotionState.VERIFIED }.map { it.parentFingerprint }.toSet()
+        families.filter { it.first.allowInsecure }.forEach { (p, f) ->
+            rejected += RankedMethod(p.id, p.name, f, PathStatus.SECURITY_REJECTED, ConnectionStage.NOT_TESTED, null, null,
+                "certificate checks are off in this config; never recommended", 0, 0)
+        }
+        // The candidate pool: every family, one config each first, bounded; the planner picks the order live.
+        val pool = FullAnalysis.select(families.filter { !it.first.allowInsecure }, plan.copy(budget = MAX_POOL), proven)
+        val byId = pool.associateBy { it.profile.id }
+        planner.add(pool.map { pk ->
+            AdaptivePlanner.Candidate(pk.profile.id, pk.profile.name, pk.family,
+                ipv6 = pk.profile.address.contains(':'), provenHere = pk.profile.effectiveFingerprint in proven)
+        })
+        if (plan.mode == ExperimentPlanner.Mode.EMERGENCY_RECOVERY) {
+            ExperimentPlanner.emergencyOrder(cap).filter { f -> f !in available && f !in plan.skip }.forEach { f ->
+                notTested[f] = "no ${f.title} config is saved" + when (f) {
+                    PathFamily.DNS_TUNNEL -> "; add a dnstt config for your own server"
+                    PathFamily.PSIPHON -> "; Psiphon needs a config from Psiphon Inc."
+                    in PathFamily.TOR_FAMILIES -> "; add a Tor config with ${f.title.removePrefix("Tor ")} bridges"
+                    else -> ""
                 }
-                val safe = picks.filterNot { it.profile.allowInsecure }
-                val (enginePicks, xrayPicks) = safe.partition { it.family.engine }
-                if (xrayPicks.isNotEmpty()) {
-                    val outcomes = withContext(Dispatchers.IO) { RealDelayProbe.measure(xrayPicks.map { it.profile }, budget.probeTimeoutSec) }
-                    xrayPicks.zip(outcomes).forEach { (pk, o) -> results += methodOf(pk, o, cap) }
-                }
-                enginePicks.forEachIndexed { i, pk ->
-                    step(STEP_A_EXPERIMENT, LabStep.State.RUNNING, "${pk.family.title} engine ${i + 1}/${enginePicks.size}")
-                    val engine = Sidecars.forProfile(pk.profile)
-                    val r = if (engine == null) null else withContext(Dispatchers.IO) { EngineProbe.test(context, engine, pk.profile, ENGINE_TIMEOUT_SEC) }
-                    results += engineMethodOf(pk, r)
-                }
-                if (plan.mode == ExperimentPlanner.Mode.DNS_TUNNEL_RECOVERY && families.none { it.second == PathFamily.DNS_TUNNEL }) {
-                    notTested[PathFamily.DNS_TUNNEL] = "no DNS tunnel config is saved; add a dnstt config for your own server"
-                }
-                val passedNow = results.count { it.stage.carriesTraffic }
-                step(STEP_A_EXPERIMENT, LabStep.State.DONE, "$passedNow of ${results.size} passed a real request")
-
-                // 7. Stability: every Xray winner gets one more real request.
-                val winners = results.filter { it.stage.carriesTraffic && !it.family.engine }
-                if (winners.isEmpty()) step(STEP_A_VERIFY, LabStep.State.SKIPPED, "nothing to verify") else {
-                    step(STEP_A_VERIFY, LabStep.State.RUNNING, "${winners.size} winners")
-                    val again = withContext(Dispatchers.IO) { RealDelayProbe.measure(winners.mapNotNull { w -> xrayPicks.firstOrNull { it.profile.id == w.profileId }?.profile }, budget.probeTimeoutSec) }
-                    winners.zip(again).forEach { (w, o) ->
-                        val i = results.indexOf(w)
-                        results[i] = if (o is RealDelayProbe.Outcome.Delay) w.copy(stage = ConnectionStage.STABILITY_VERIFIED, status = PathStatus.VERIFIED, attempts = 2, passes = 2,
-                            latencyMs = minOf(w.latencyMs ?: o.latencyMs, o.latencyMs), confidence = FullAnalysis.confidence(2, 2), why = "two real requests passed")
-                        else w.copy(status = PathStatus.DEGRADED, attempts = 2, passes = 1, confidence = FullAnalysis.confidence(1, 2), why = "passed once, failed on the recheck")
-                    }
-                    step(STEP_A_VERIFY, LabStep.State.DONE, "${results.count { it.passes >= 2 }} stable")
-                }
-
-                // 9. Nothing passed on an ordinary network: safe derived copies of one failed config, through the usual experiment.
-                val failedParent = results.firstOrNull { it.status == PathStatus.FAILED && !it.family.engine }
-                if (plan.mode == ExperimentPlanner.Mode.ORDINARY && results.none { it.stage.carriesTraffic } && failedParent != null) {
-                    step(STEP_A_CONFIG, LabStep.State.RUNNING, failedParent.name)
-                    deriveFor(failedParent, cap, ctx)?.let { results += it }
-                    steps.removeAll { it.title !in ANALYSIS_STEPS }
-                    step(STEP_A_CONFIG, LabStep.State.DONE, results.lastOrNull { it.profileId == failedParent.profileId && it.name != failedParent.name }?.why ?: "no safe copy passed")
-                } else step(STEP_A_CONFIG, LabStep.State.SKIPPED, if (results.any { it.stage.carriesTraffic }) "a saved config already works" else "no ordinary config to derive from")
             }
         }
 
-        // 8. Score.
-        val ranked = FullAnalysis.rank(results, plan.prefer)
-        step(STEP_A_SCORE, LabStep.State.DONE, ranked.firstOrNull { it.stage.carriesTraffic }?.let { "best: ${it.name}" } ?: "no method passed")
+        var current: String? = null
+        fun publishLive(finished: Boolean = false, notRequired: Set<PathFamily> = emptySet()) {
+            val now = System.currentTimeMillis()
+            val rows = FullAnalysis.networkPaths(cap, now).map { it.copy(sessionId = ctx.sessionId) } +
+                listOfNotNull(FullAnalysis.resolverPath(resolvers), burst?.let { FullAnalysis.burstPath(it) }).map { it.copy(sessionId = ctx.sessionId) } +
+                FullAnalysis.liveFamilyRows(planner.tracks(), current, plan, notTested, ctx.sessionId, now, finished, planner.stopReason, notRequired)
+            fun pick(t: AdaptivePlanner.Track?) = t?.let { LabPick(it.candidate.id, it.candidate.name, it.candidate.family, it.status, it.bestLatency) }
+            live = LiveAnalysis(ctx.sessionId, ctx.label, reading?.primary?.title ?: "Unknown", planner.phase, planner.hypothesis(),
+                current?.let { id -> byId[id]?.let { "${it.family.title} · ${it.profile.name}" } }, rows,
+                pick(planner.firstWorking?.let { planner.track(it) }), pick(planner.best()), planner.spent, plan.budget, planner.events(), now)
+            publish()
+        }
 
-        // 10. Live paths.
+        var aiAfterWave = false
+        var announced = false
+        var stoppedBy: String? = null
+        if (vpnOn) {
+            families.forEach { (_, f) -> notTested[f] = "the VPN is on; methods are tested outside the VPN only while it is off" }
+            listOf(STEP_A_EXPERIMENT, STEP_A_VERIFY, STEP_A_CONFIG).forEach { step(it, LabStep.State.SKIPPED, "turn the VPN off to test methods") }
+            stoppedBy = "the VPN is on"
+        } else {
+            step(STEP_A_EXPERIMENT, LabStep.State.RUNNING, "${pool.size} candidate configs in ${pool.map { it.family }.distinct().size} families")
+            publishLive()
+            // EXECUTE → RECORD → RECLASSIFY → REPLAN, one test at a time so every row updates live.
+            loop@ while (true) {
+                if (!tracker.isCurrent(ctx.sessionId)) { stoppedBy = "the network changed; results stay with the earlier network"; break }
+                when (val d = planner.decide(System.currentTimeMillis())) {
+                    is AdaptivePlanner.Decision.Stop -> { stoppedBy = d.why; break@loop }
+                    is AdaptivePlanner.Decision.Wait -> { delay((d.untilMs - System.currentTimeMillis()).coerceIn(100, 5_000)); continue@loop }
+                    is AdaptivePlanner.Decision.Test -> {
+                        val pk = byId[d.candidate.id] ?: continue@loop
+                        current = pk.profile.id
+                        val phaseStep = if (planner.phase == AdaptivePlanner.Phase.FAST_RECOVERY) STEP_A_EXPERIMENT else STEP_A_VERIFY
+                        step(phaseStep, LabStep.State.RUNNING, "${pk.family.title} · ${if (d.recheck) "recheck" else "test"} ${planner.spent + 1}/${plan.budget} · ${d.why}")
+                        publishLive()
+                        val engine = Sidecars.forProfile(pk.profile)
+                        if (pk.family.engine || engine != null) {
+                            val r = if (engine == null) null else withContext(Dispatchers.IO) {
+                                EngineProbe.test(context, engine, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2)
+                            }
+                            when {
+                                r == null -> planner.notTested(pk.profile.id, "no engine in this build carries it")
+                                r.notTested -> planner.notTested(pk.profile.id, r.failure ?: "not measured")
+                                else -> {
+                                    engineResults[pk.profile.id] = r
+                                    planner.record(pk.profile.id, r.outcomes, r.latencyMs, System.currentTimeMillis(), r.failure ?: r.stage.title, r.spanMs)
+                                }
+                            }
+                        } else {
+                            when (val o = withContext(Dispatchers.IO) { RealDelayProbe.measure(listOf(pk.profile), budget.probeTimeoutSec).first() }) {
+                                is RealDelayProbe.Outcome.Delay -> planner.record(pk.profile.id, listOf(true), o.latencyMs, System.currentTimeMillis())
+                                is RealDelayProbe.Outcome.Failed -> {
+                                    analysisFailures[pk.profile.id] = o.reason
+                                    planner.record(pk.profile.id, listOf(false), null, System.currentTimeMillis(),
+                                        FailureClassifier.assess(categoryOf(o.reason, pk.profile, cap)).text)
+                                }
+                                is RealDelayProbe.Outcome.NotRun -> planner.notTested(pk.profile.id, o.reason)
+                            }
+                        }
+                        current = null
+                        if (!announced && planner.firstWorking != null) {
+                            announced = true
+                            step(STEP_A_EXPERIMENT, LabStep.State.DONE, "first working path: ${pk.profile.name} (${pk.family.title})")
+                            showMessage("First working path: ${pk.profile.name}. Still verifying and comparing; you can use it now.")
+                        }
+                        // AI checkpoint after the first wave, when nothing passed or the evidence conflicts.
+                        val conflict = ExperimentPlanner.udpDead(cap) && planner.tracks().any { it.candidate.family.udp && it.passes > 0 }
+                        if (!aiAfterWave && (planner.spent >= FIRST_WAVE && planner.firstWorking == null || conflict)) {
+                            aiAfterWave = true
+                            aiCheckpoint(if (conflict) "conflicting evidence" else "after the first wave", reading, plan, available, planner)
+                        }
+                        publishLive()
+                    }
+                }
+            }
+            if (planner.firstWorking == null) step(STEP_A_EXPERIMENT, LabStep.State.DONE, "no path passed in ${planner.spent} test(s)")
+            step(STEP_A_VERIFY, LabStep.State.DONE, "${planner.verifiedFamilies().size} verified famil${if (planner.verifiedFamilies().size == 1) "y" else "ies"} · stopped: ${stoppedBy ?: "done"}")
+        }
+
+        // Results from what this run measured, then safe copies when nothing ordinary passed on an ordinary network.
+        val results = mutableListOf<RankedMethod>()
+        results += rejected
+        planner.tracks().forEach { t ->
+            val pk = byId[t.candidate.id] ?: return@forEach
+            results += methodOf(pk, t, engineResults[t.candidate.id])
+        }
+        if (!vpnOn) {
+            val failedParent = results.firstOrNull { it.status == PathStatus.FAILED && !it.family.engine }
+            if (plan.mode == ExperimentPlanner.Mode.ORDINARY && results.none { it.stage.carriesTraffic } && failedParent != null && !planner.ordinaryMutationsStopped) {
+                step(STEP_A_CONFIG, LabStep.State.RUNNING, failedParent.name)
+                deriveFor(failedParent, cap, ctx)?.let { results += it }
+                steps.removeAll { it.title !in ANALYSIS_STEPS }
+                step(STEP_A_CONFIG, LabStep.State.DONE, results.lastOrNull { it.profileId == failedParent.profileId && it.name != failedParent.name }?.why ?: "no safe copy passed")
+            } else step(STEP_A_CONFIG, LabStep.State.SKIPPED, when {
+                plan.mode == ExperimentPlanner.Mode.EMERGENCY_RECOVERY -> "emergency recovery makes no config copies"
+                results.any { it.stage.carriesTraffic } -> "a saved config already works"
+                else -> "no ordinary config to derive from"
+            })
+        }
+
+        // RANK.
+        val ranked = FullAnalysis.rank(results, plan.prefer)
+        step(STEP_A_SCORE, LabStep.State.DONE, ranked.firstOrNull { it.stage.carriesTraffic }?.let { "best: ${it.name} (${it.status.title})" } ?: "no method passed")
+
+        // Isolation is concluded only from strong negative evidence across every available family.
+        val isolation = EmergencyRecovery.conclude(cap, planner.tracks(), available.filter { it !in plan.skip }.toSet())
+        val stateTitle = isolation?.title ?: reading?.primary?.title ?: "Unknown"
+        val notRequired = if (stoppedBy?.startsWith("three independent") == true)
+            planner.tracks().filter { it.outcomes.isEmpty() && it.notTested == null }.map { it.candidate.family }.toSet() - planner.tracks().filter { it.outcomes.isNotEmpty() }.map { it.candidate.family }.toSet()
+        else emptySet()
         val now = System.currentTimeMillis()
-        val paths = FullAnalysis.networkPaths(cap, now) + listOfNotNull(FullAnalysis.resolverPath(resolvers)) +
-            FullAnalysis.familyPaths(families.map { it.second }.toSet() + notTested.keys, ranked, plan, notTested, now)
+        planner.tracks().filter { it.outcomes.isEmpty() && it.notTested == null && it.candidate.family !in notRequired }.forEach { t ->
+            notTested.getOrPut(t.candidate.family) { "not reached: ${stoppedBy ?: "the run ended"}" }
+        }
+        val paths = (FullAnalysis.networkPaths(cap, now) + listOfNotNull(FullAnalysis.resolverPath(resolvers), burst?.let { FullAnalysis.burstPath(it) }) +
+            FullAnalysis.familyPaths(families.map { it.second }.toSet() + notTested.keys, ranked, plan, notTested, now, notRequired)).map { it.copy(sessionId = ctx.sessionId) }
         step(STEP_A_PATHS, LabStep.State.DONE, "${paths.count { it.status == PathStatus.VERIFIED || it.status == PathStatus.CANDIDATE || it.status == PathStatus.AVAILABLE }} open of ${paths.size}")
 
-        // 11-12. Memory and report.
+        // LEARN: one sanitized evidence record per tested config; history only reorders later runs.
+        val plainDns = paths.firstOrNull { it.key == "dns-plain" }?.status?.name
+        store.addEvidence(planner.tracks().filter { it.outcomes.isNotEmpty() }.mapNotNull { t ->
+            val pk = byId[t.candidate.id] ?: return@mapNotNull null
+            LabEvidence(ctx.contextKey, t.candidate.family, pk.profile.effectiveFingerprint, t.passes > 0,
+                engineResults[t.candidate.id]?.stage ?: if (t.passes > 0) ConnectionStage.APPLICATION_REQUEST_PASSED else ConnectionStage.NOT_TESTED,
+                t.bestLatency, t.passes, t.outcomes.size, plainDns, "passed", now, now + LabEvidence.TTL_MS, BuildConfig.VERSION_CODE)
+        })
+        val firstName = planner.firstWorking?.let { planner.track(it)?.candidate?.name }
+        val best = ranked.firstOrNull { it.stage.carriesTraffic }
         val note = when {
-            plan.mode == ExperimentPlanner.Mode.STOP_NO_EGRESS -> "Nothing answers on this network, at home or abroad. No software path can work until the network changes."
             vpnOn -> "The VPN is on, so methods were not tested. Turn it off and run the analysis again."
-            ranked.any { it.stage.carriesTraffic } -> "Use ${ranked.first().name}. It passed ${ranked.first().passes} real request(s) on ${ctx.label}."
-            plan.mode == ExperimentPlanner.Mode.DNS_TUNNEL_RECOVERY -> "No international path, and no DNS tunnel config got traffic through."
+            stoppedBy?.startsWith("the network changed") == true -> "The network changed during the analysis. Results stay with ${ctx.label}; run it again on the new network."
+            best != null && best.status == PathStatus.VERIFIED -> "Use ${best.name}. It passed ${best.passes} real requests on ${ctx.label} and is verified."
+            best != null -> "Use ${best.name} for now: it passed a real request on ${ctx.label} (${best.status.title.lowercase()})."
+            isolation != null -> "Every network check and every saved recovery method failed on ${ctx.label}. No software path can work here until the network changes."
+            plan.mode == ExperimentPlanner.Mode.EMERGENCY_RECOVERY -> "No path got traffic through on ${ctx.label}. " +
+                (EmergencyRecovery.whyNot(cap, planner.tracks(), available) ?: "Add recovery configs (DNS tunnel, Tor bridges, Psiphon) and try again.")
             else -> "No saved config got a real request through on ${ctx.label}."
         }
-        val report = AnalysisReport(ctx.sessionId, ctx.contextKey, ctx.label, startedAt, now, reading?.primary?.title ?: "Unknown", reading?.confidence ?: 0.0,
-            plan.mode.title, plan.reasons, domains, paths, ranked, FullAnalysis.untested(cap, reading), note)
+        val report = AnalysisReport(ctx.sessionId, ctx.contextKey, ctx.label, startedAt, now, stateTitle, reading?.confidence ?: 0.0,
+            plan.mode.title, plan.reasons, domains, paths, ranked, FullAnalysis.untested(cap, reading, burst != null), note,
+            firstWorking = firstName, events = planner.events(), stopReason = stoppedBy)
         store.saveReport(report)
         step(STEP_A_MEMORY, LabStep.State.DONE, "saved for ${ctx.label}; old results only reorder what is tried")
         step(STEP_A_REPORT, LabStep.State.DONE, note)
-        XrayLogManager.i("LAB", "Full analysis on ${ctx.label}: ${report.state}, ${ranked.count { it.stage.carriesTraffic }} method(s) passed.")
+        XrayLogManager.i("LAB", "Full analysis on ${ctx.label}: $stateTitle, ${ranked.count { it.stage.carriesTraffic }} method(s) passed, stopped: ${stoppedBy ?: "done"}.")
+        live = null
         publish(running = null, message = note)
+    }
+
+    /** The family of a saved config from its fields: Tor by its bridge transport, Mihomo by its proxy type. */
+    private fun familyOf(p: VlessProfile): PathFamily {
+        val engine = Sidecars.forProfile(p)?.id
+        val detail = when (engine) {
+            "tor" -> runCatching { TorSidecar.bridges(p).firstOrNull()?.substringBefore(' ') }.getOrNull() ?: "invalid"
+            "mihomo" -> MihomoSidecar.proxyOf(p)?.let { o ->
+                val type = o.optString("type").lowercase()
+                if (type == "wireguard" && o.has("amnezia-wg-option")) "wireguard+awg" else type
+            }
+            else -> null
+        }
+        return PathFamily.of(p, engine, detail)
+    }
+
+    /**
+     * Optional AI checkpoint: the advisor sees the state, the restrictions and family titles with this run's
+     * pass/fail counts only (no network key, address, config name or credential). Its answer passes a
+     * schema check (family names), a capability check (families with a saved, untested-or-tested config
+     * that the plan does not skip), and can only reorder; the experiments stay deterministic, and an AI
+     * failure or timeout changes nothing.
+     */
+    private suspend fun aiCheckpoint(
+        moment: String,
+        reading: NetworkStateReading?,
+        plan: ExperimentPlanner.Plan,
+        available: Set<PathFamily>,
+        planner: AdaptivePlanner
+    ): List<PathFamily> {
+        val advisor = familyAdvisor ?: return emptyList()
+        val offered = available.filter { it !in plan.skip }
+        if (offered.size < 2) return emptyList()
+        val brief = buildString {
+            appendLine("Checkpoint: $moment.")
+            appendLine("Network state: ${reading?.primary?.title ?: "Unknown"}; restrictions: ${reading?.restrictions.orEmpty().joinToString { it.title }.ifBlank { "none measured" }}.")
+            appendLine("Plan: ${plan.mode.title}.")
+            offered.forEach { f ->
+                val mine = planner.tracks().filter { it.candidate.family == f && it.outcomes.isNotEmpty() }
+                appendLine("- ${f.name}: " + if (mine.isEmpty()) "not tested yet" else "${mine.count { it.passes > 0 }}/${mine.size} configs passed")
+            }
+        }
+        val answer = withTimeoutOrNull(AI_TIMEOUT_MS) { runCatching { advisor(brief, offered.map { it.name }) }.getOrNull() } ?: return emptyList()
+        val valid = AiCheckpoint.validate(answer, offered.toSet())
+        if (valid.isNotEmpty()) {
+            planner.hint(valid)
+            XrayLogManager.i("LAB", "AI checkpoint ($moment): ${valid.joinToString { it.title }} first; order only.")
+        }
+        return valid
+    }
+
+    /** Loss, jitter and rate limiting from a short UDP DNS burst to the best honest resolver; null when none answers. */
+    private suspend fun measureBurst(resolvers: List<ResolverIntelligence.Result>): ResolverIntelligence.Burst? {
+        val best = resolvers.firstOrNull { it.usable && it.udp == true } ?: return null
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
+        val network = NetworkCapabilityDetector.physical(cm) ?: return null
+        return withContext(Dispatchers.IO) { runCatching { ResolverIntelligence.burst(network, best) }.getOrNull() }
     }
 
     /** Bounded resolver checks on the phone's own network, saved per network with an expiry. */
@@ -310,25 +476,25 @@ class LabController(
         return ResolverIntelligence.rank(results)
     }
 
-    private fun methodOf(pk: FullAnalysis.Pick, o: RealDelayProbe.Outcome, cap: NetworkCapabilityProfile?): RankedMethod = when (o) {
-        is RealDelayProbe.Outcome.Delay -> RankedMethod(pk.profile.id, pk.profile.name, pk.family, PathStatus.CANDIDATE, ConnectionStage.APPLICATION_REQUEST_PASSED,
-            o.latencyMs, FullAnalysis.confidence(1, 1), "real request passed", 1, 1)
-        is RealDelayProbe.Outcome.Failed -> {
-            analysisFailures[pk.profile.id] = o.reason
-            RankedMethod(pk.profile.id, pk.profile.name, pk.family, PathStatus.FAILED, ConnectionStage.NOT_TESTED, null,
-                FullAnalysis.confidence(0, 1), FailureClassifier.assess(categoryOf(o.reason, pk.profile, cap)).text, 1, 0)
+    /** One ranked row from what the planner recorded for a config (and the engine result, for engine configs). */
+    private fun methodOf(pk: FullAnalysis.Pick, t: AdaptivePlanner.Track, r: EngineProbe.Result?): RankedMethod {
+        val status = t.status
+        val attempts = t.outcomes.size
+        val stage = when {
+            status == PathStatus.VERIFIED -> ConnectionStage.STABILITY_VERIFIED
+            t.passes > 0 -> r?.stage?.takeIf { it.carriesTraffic }?.let { minOf(it, ConnectionStage.DNS_THROUGH_TUNNEL_PASSED) } ?: ConnectionStage.APPLICATION_REQUEST_PASSED
+            else -> r?.stage ?: ConnectionStage.NOT_TESTED
         }
-        is RealDelayProbe.Outcome.NotRun -> RankedMethod(pk.profile.id, pk.profile.name, pk.family, PathStatus.NOT_TESTED, ConnectionStage.NOT_TESTED, null, null,
-            "not tested: ${o.reason}", 0, 0)
-    }
-
-    private fun engineMethodOf(pk: FullAnalysis.Pick, r: EngineProbe.Result?): RankedMethod = when {
-        r == null -> RankedMethod(pk.profile.id, pk.profile.name, pk.family, PathStatus.UNSUPPORTED, ConnectionStage.NOT_TESTED, null, null, "no engine in this build carries it", 0, 0)
-        r.stage.carriesTraffic -> RankedMethod(pk.profile.id, pk.profile.name, pk.family, PathStatus.CANDIDATE, r.stage, r.latencyMs, FullAnalysis.confidence(1, 1),
-            "real request passed through the ${r.engineId} engine" + if (pk.family == PathFamily.DNS_TUNNEL) " (${EngineProbe.dnsTunnelStage(r).name.lowercase().replace('_', ' ')})" else "", 1, 1)
-        r.notTested -> RankedMethod(pk.profile.id, pk.profile.name, pk.family, PathStatus.NOT_TESTED, r.stage, null, null, "not tested: ${r.failure}", 0, 0)
-        else -> RankedMethod(pk.profile.id, pk.profile.name, pk.family, PathStatus.FAILED, r.stage, null, FullAnalysis.confidence(0, 1),
-            "${r.stage.title}; ${r.failure ?: "no traffic"}", 1, 0)
+        val via = if (r != null) " through the ${r.engineId} engine" + if (pk.family == PathFamily.DNS_TUNNEL) " (${EngineProbe.dnsTunnelStage(r).name.lowercase().replace('_', ' ')})" else "" else ""
+        val why = when (status) {
+            PathStatus.VERIFIED -> "${t.passes} real requests passed$via, ${FullAnalysis.STABLE_WINDOW_MS / 1000}s+ apart"
+            PathStatus.DEGRADED -> "passed$via, then failed its recheck"
+            PathStatus.CANDIDATE -> "one real request passed$via; not rechecked yet"
+            PathStatus.NOT_TESTED -> "not tested: ${t.notTested ?: "not reached"}"
+            else -> t.failure ?: "no real request passed"
+        }
+        return RankedMethod(pk.profile.id, pk.profile.name, pk.family, status, stage, t.bestLatency,
+            FullAnalysis.confidence(t.passes, attempts), why, attempts, t.passes)
     }
 
     /** Runs the ordinary experiment on one failed saved config and reports its best copy, if one passed. */
@@ -337,7 +503,7 @@ class LabController(
         val now = System.currentTimeMillis()
         val id = store.newExperimentId()
         val reason = categoryOf(analysisFailures[failed.profileId] ?: failed.why, parent, cap)
-        val builds = generator.generate(id, parent, reason, cap, endpoints = endpoints.validated(ctx.networkKey),
+        val builds = generator.generate(id, parent, reason, cap, endpoints = endpoints.validated(ctx.vpnKey),
             retired = store.retiredMutations(ctx.contextKey, parent.effectiveFingerprint), max = budget.maxCandidates)
         val copies = builds.mapNotNull { b -> b.profile?.let { b.candidate.candidateId to it } }.toMap()
         if (copies.isEmpty()) return null
@@ -446,7 +612,7 @@ class LabController(
         val id = store.newExperimentId()
         val builds = generator.generate(
             id, parent, category, cap,
-            endpoints = endpoints.validated(ctx.networkKey),
+            endpoints = endpoints.validated(ctx.vpnKey),
             retired = store.retiredMutations(ctx.contextKey, parent.effectiveFingerprint),
             max = budget.maxCandidates
         )
@@ -583,7 +749,7 @@ class LabController(
         val now = System.currentTimeMillis()
         val copy = rp.derive(parent, v.endpoint)
         val fields = copy?.let { BpbRecoveryEngine.diff(parent, it).map { c -> c.field } } ?: emptyList()
-        var tx = ConfigOptimizer.propose(store.newTransactionId(), parent.effectiveFingerprint, rp.key, ctx.networkKey, v.endpoint, fields,
+        var tx = ConfigOptimizer.propose(store.newTransactionId(), parent.effectiveFingerprint, rp.key, ctx.vpnKey, v.endpoint, fields,
             "${v.strategy} verified on ${v.networkLabel}: ${v.stats.successes}/${v.stats.attempts} real requests passed", now)
         val gate = copy?.let { RecoverySecurityGate.check(parent, it) }
         val refusal = when {
@@ -601,7 +767,7 @@ class LabController(
         }
         val candidate = DerivedRecoveryCandidate(
             BpbRecoveryEngine.idOf(parent.effectiveFingerprint, rp.key, v.endpoint), parent.effectiveFingerprint, parent.id, rp.key,
-            now, minOf(now + APPLY_TTL_MS, rp.expiresAt), ctx.networkKey, BpbRecoveryEngine.diff(parent, copy), copy, gate, v.endpoint,
+            now, minOf(now + APPLY_TTL_MS, rp.expiresAt), ctx.vpnKey, BpbRecoveryEngine.diff(parent, copy), copy, gate, v.endpoint,
             rollbackAfter = rp.rollbackPolicy
         )
         ledger.record(candidate, success = true, now = now)
@@ -647,8 +813,8 @@ class LabController(
     }
 
     private fun labelOf(key: String): String = when {
-        key == "wifi" -> "Wi-Fi"
-        key == "ethernet" -> "Ethernet"
+        key == "wifi" || key.startsWith("wifi:") -> com.example.vpn.smart.NetworkIdentity.label(key, "Wi-Fi")
+        key == "ethernet" || key.startsWith("ethernet:") -> com.example.vpn.smart.NetworkIdentity.label(key, "Ethernet")
         key.startsWith("cell") -> NetworkKey.describe(key).substringBefore(" (").let { if (it.startsWith("cell")) "Mobile data" else it }
         else -> "Other network"
     }
@@ -667,7 +833,7 @@ class LabController(
             experiments = store.experiments().sortedByDescending { it.startTime }, verified = store.verifiedProfiles(),
             discoveries = store.discoveries(), networks = store.networks(), plan = plan, message = message, log = log.toList(),
             networkState = networkState, transactions = store.transactions(),
-            analysis = (network ?: tracker.current)?.let { store.reportFor(it.contextKey) }, analysisRunning = analysisRunning
+            analysis = (network ?: tracker.current)?.let { store.reportFor(it.contextKey) }, analysisRunning = analysisRunning, live = live
         )
     }
 
@@ -686,14 +852,19 @@ class LabController(
         const val STEP_DONE = "Experiment completed"
         const val STEP_RECHECK = "Known network: rechecking what worked"
         const val ENGINE_TIMEOUT_SEC = 20
+        /** Configs in the candidate pool of one analysis; the planner tests only as many as the budget allows. */
+        const val MAX_POOL = 24
+        /** Tests after which, with nothing passed, the AI checkpoint is asked again. */
+        const val FIRST_WAVE = 3
+        const val AI_TIMEOUT_MS = 10_000L
 
         const val STEP_A_IDENTIFY = "1 · Identifying the network"
         const val STEP_A_MEASURE = "2 · Measuring the physical network"
         const val STEP_A_CLASSIFY = "3 · Classifying the network state"
         const val STEP_A_DIAGNOSE = "4 · Diagnosing failure domains"
-        const val STEP_A_PLAN = "5 · Planning experiments"
-        const val STEP_A_EXPERIMENT = "6 · Testing connection methods"
-        const val STEP_A_VERIFY = "7 · Verifying winners again"
+        const val STEP_A_PLAN = "5 · Hypotheses and plan"
+        const val STEP_A_EXPERIMENT = "6 · Fast recovery: first working path"
+        const val STEP_A_VERIFY = "7 · Deep optimization: verify and compare"
         const val STEP_A_SCORE = "8 · Scoring"
         const val STEP_A_CONFIG = "9 · Trying safe config copies"
         const val STEP_A_PATHS = "10 · Building live connectivity paths"

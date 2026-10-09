@@ -40,7 +40,7 @@ object CoreCapabilityRegistry {
         Capability("xhttp", "XHTTP", Support.YES, Support.YES, Support.YES, Support.YES, Support.YES, "VlessParser, XrayConfigBuilder xhttpSettings"),
         Capability("h2", "HTTP/2 transport", Support.YES, Support.YES, Support.YES, Support.YES, Support.YES, "VlessParser, XrayConfigBuilder"),
         Capability("h3", "HTTP/3 (XHTTP over QUIC)", Support.PARTIAL, Support.YES, Support.YES, Support.YES, Support.PARTIAL,
-            "VlessProfile.alpn=h3, TransportCapabilityEngine.h2Fallback", "Needs UDP; QUIC reachability is not probed yet."),
+            "VlessProfile.alpn=h3, TransportCapabilityEngine.h2Fallback", "Needs UDP. The LAB probes QUIC reachability (Version Negotiation) but not an HTTP/3 request."),
         Capability("masque", "MASQUE", Support.NO, Support.NO, Support.NO, Support.NO, Support.NO, "none",
             "Not implemented; never offered."),
         Capability("warp", "WARP", Support.NO, Support.PARTIAL, Support.YES, Support.YES, Support.YES,
@@ -52,7 +52,10 @@ object CoreCapabilityRegistry {
         Capability("hysteria2", "Hysteria2", Support.YES, Support.YES, Support.YES, Support.YES, Support.YES, "ProtocolLinks, XrayConfigBuilder"),
         Capability("wireguard", "WireGuard", Support.YES, Support.YES, Support.YES, Support.YES, Support.YES, "WireGuardConf, XrayConfigBuilder"),
         Capability("tuic", "TUIC", Support.YES, Support.YES, Support.NO, Support.NO, Support.NO, "RuntimeCapabilities",
-            "Parsed but refused at connect: the bundled Xray core has no TUIC client."),
+            "Share links are refused at connect: the bundled Xray core has no TUIC client. A TUIC proxy imported from a Clash file runs on Mihomo instead (see CapabilityMatrix)."),
+        Capability("amneziawg", "AmneziaWG", Support.PARTIAL, Support.YES, Support.YES, Support.PARTIAL, Support.PARTIAL,
+            "Mihomo v1.19.32 AmneziaWGOption (amnezia-wg-option); MihomoSidecar passes the proxy through",
+            "Only from Clash files on the bundled Mihomo. The Linux build of the same tag accepted AWG configs with -t; traffic is not verified."),
         Capability("vless-encryption", "VLESS Encryption (ML-KEM)", Support.YES, Support.YES, Support.YES, Support.YES, Support.PARTIAL,
             "RuntimeCapabilities.isVlessEncryption")
     )
@@ -83,4 +86,65 @@ object CoreUpdatePolicy {
         "Re-check every row of CoreCapabilityRegistry against the new core",
         "Run unit, regression and VPN security tests (DNS leak, IPv6 leak, kill switch, certificate checks)"
     )
+}
+
+/**
+ * Capability Registry V2: one row per engine or feature, one value per layer, so "parsed" is never read as
+ * "works". The layers go from code (PARSER, MODEL, BUILDER) through the runtime (present, accepts the config,
+ * carried traffic) to where it was exercised (UNIT tests, the censor SIMULATOR, an EMULATOR, a DEVICE, the
+ * FIELD). UNKNOWN means nobody has recorded it; it is never shown as working.
+ */
+object CapabilityMatrix {
+    enum class Layer(val title: String) {
+        PARSER("Parser"), MODEL("Model"), BUILDER("Builder"), RUNTIME_PRESENT("Runtime present"),
+        RUNTIME_CONFIG_ACCEPTED("Runtime accepts config"), RUNTIME_TRAFFIC_VERIFIED("Traffic verified"),
+        UNIT("Unit tests"), SIMULATOR("Simulator"), EMULATOR("Emulator"), DEVICE("Device"), FIELD("Field")
+    }
+
+    enum class Value { YES, NO, PARTIAL, UNKNOWN }
+
+    data class Row(val id: String, val title: String, val values: Map<Layer, Value>, val evidence: String) {
+        fun at(layer: Layer): Value = values[layer] ?: Value.UNKNOWN
+        /** Shown as working only with traffic verified at runtime on a device or in the field. */
+        val provenWorking: Boolean get() = at(Layer.RUNTIME_TRAFFIC_VERIFIED) == Value.YES && (at(Layer.DEVICE) == Value.YES || at(Layer.FIELD) == Value.YES)
+    }
+
+    private val Y = Value.YES
+    private val N = Value.NO
+    private val P = Value.PARTIAL
+    private val U = Value.UNKNOWN
+
+    private fun row(id: String, title: String, evidence: String, vararg v: Value): Row {
+        require(v.size == Layer.entries.size) { "one value per layer" }
+        return Row(id, title, Layer.entries.zip(v.toList()).toMap(), evidence)
+    }
+
+    // Order of values: PARSER, MODEL, BUILDER, RUNTIME_PRESENT, RUNTIME_CONFIG_ACCEPTED, RUNTIME_TRAFFIC_VERIFIED,
+    // UNIT, SIMULATOR, EMULATOR, DEVICE, FIELD. Device and field stay UNKNOWN until a run is recorded.
+    val ROWS: List<Row> = listOf(
+        row("xray", "Xray-core v26.9.9", "libXray (scripts/fetch-libxray-android.sh), XrayConfigBuilder, RealDelayProbe; config tests in CI",
+            Y, Y, Y, Y, P, U, Y, P, N, U, U),
+        row("mihomo", "Mihomo v1.19.32", "scripts/engines/mihomo.sh (source tag), MihomoSidecar; Linux build of the same tag accepted configs with -t",
+            P, Y, Y, Y, P, U, Y, N, N, U, U),
+        row("amneziawg", "AmneziaWG (on Mihomo)", "Mihomo AmneziaWGOption; jc/jmin/jmax/s1-s4/h1-h4 accepted and a bad jc rejected by -t (Linux build)",
+            P, Y, Y, Y, P, N, P, N, N, U, U),
+        row("psiphon", "Psiphon", "scripts/engines psiphon build; needs the PSIPHON_CONFIG secret from Psiphon Inc. at release time",
+            N, Y, Y, P, U, U, P, N, N, U, U),
+        row("tor", "Tor + lyrebird (obfs4, WebTunnel, Snowflake, meek)", "TorSidecar (bridges, torrc), lyrebird",
+            Y, Y, Y, Y, U, U, Y, N, N, U, U),
+        row("dnstt", "DNS tunnel (dnstt)", "DnsttSidecar; lifecycle in EngineProbe; needs the user's own dnstt server",
+            Y, Y, Y, Y, U, U, Y, P, N, U, U),
+        row("ech", "ECH", "VlessParser (ech), echConfigList/echSockopt, XrayConfigBuilder; no ECH handshake measured by the LAB",
+            Y, Y, Y, Y, U, U, Y, N, N, U, U),
+        row("warp", "WARP (WireGuard)", "vpn/warp/WarpProvider.kt; WARP over MASQUE is not supported",
+            N, P, Y, Y, U, U, P, N, N, U, U),
+        row("tuic", "TUIC", "Xray has no TUIC client (refused at connect); Mihomo runs TUIC from Clash files",
+            P, Y, P, P, U, U, P, N, N, U, U),
+        row("http3", "HTTP/3 (XHTTP over QUIC)", "alpn=h3 in XrayConfigBuilder; the LAB probes QUIC reachability only",
+            P, Y, Y, Y, U, U, P, P, N, U, U),
+        row("fragment", "Fragment / finalMask", "VlessProfile.finalMask, XrayConfigBuilder finalmask, curated FragmentProfileEngine profiles",
+            P, Y, Y, Y, U, U, Y, P, N, U, U)
+    )
+
+    fun byId(id: String): Row? = ROWS.firstOrNull { it.id == id }
 }
