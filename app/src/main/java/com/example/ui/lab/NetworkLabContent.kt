@@ -58,6 +58,7 @@ import com.example.ui.protocols.LabColors
 import com.example.ui.protocols.LabText
 import com.example.ui.protocols.labColors
 import com.example.vpn.lab.AutomationLevel
+import com.example.vpn.lab.ConfigTransaction
 import com.example.vpn.lab.ExperimentState
 import com.example.vpn.lab.LabDiscovery
 import com.example.vpn.lab.LabExperiment
@@ -157,6 +158,22 @@ private fun stabilityWord(health: Int?) = when {
     health >= 75 -> "Stable"
     health >= 50 -> "Degraded"
     else -> "Restricted"
+}
+
+private fun transactionWord(state: ConfigTransaction.State) = when (state) {
+    ConfigTransaction.State.PROPOSED -> "Proposed"
+    ConfigTransaction.State.REFUSED -> "Refused"
+    ConfigTransaction.State.STAGED -> "Staged"
+    ConfigTransaction.State.COMMITTED -> "In use"
+    ConfigTransaction.State.ROLLED_BACK -> "Rolled back"
+    ConfigTransaction.State.EXPIRED -> "Expired"
+}
+
+private fun transactionColor(c: LabColors, state: ConfigTransaction.State) = when (state) {
+    ConfigTransaction.State.COMMITTED -> c.good
+    ConfigTransaction.State.STAGED, ConfigTransaction.State.PROPOSED -> c.okay
+    ConfigTransaction.State.REFUSED, ConfigTransaction.State.ROLLED_BACK -> c.bad
+    ConfigTransaction.State.EXPIRED -> c.text3
 }
 
 private fun stateColor(c: LabColors, state: NetworkState) = when (state) {
@@ -270,6 +287,24 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
             Row(Modifier.padding(horizontal = Gutter, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 PrimaryButton(c, if (s.running != null) "Experiment running" else "Run experiment", Icons.Rounded.PlayArrow, Modifier.weight(1f), s.running == null) { actions.onPick(true) }
                 if (s.running != null) SecondaryButton(c, "Live", Icons.Rounded.MonitorHeart) { actions.onOpen(LabSection.LIVE) }
+            }
+        }
+        if (s.transactions.isNotEmpty()) {
+            item { GroupLabel(c, "Config changes") }
+            item {
+                Panel(c) {
+                    s.transactions.take(3).forEachIndexed { i, tx ->
+                        if (i > 0) Hairline(c)
+                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                LabText("${tx.id} · ${tx.profileKey.substringBefore('@')}", c.text, 14.sp, FontWeight.Medium, maxLines = 1)
+                                LabText(tx.note.ifBlank { tx.reason }, c.text3, 12.sp, maxLines = 2)
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Badge(transactionWord(tx.state), transactionColor(c, tx.state))
+                        }
+                    }
+                }
             }
         }
         item { GroupLabel(c, "Lab") }
