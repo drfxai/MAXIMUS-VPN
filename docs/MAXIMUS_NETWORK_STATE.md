@@ -1,4 +1,4 @@
-# Network state classification (LAB V4)
+# Network state classification (LAB V4, autonomous LAB update)
 
 ## Measurements (physical network only)
 
@@ -9,11 +9,14 @@ About ten small connections per measurement, made when the network changes or th
 |---|---|---|
 | `dnsWorking` / `dnsManipulated` | System DNS for www.google.com; block-page/private answers = tampered | lookup could not run |
 | `dohReachable` | One DoH question to 1.1.1.1 | could not run |
-| `internationalOk/Tried` | TLS to 1.1.1.1 (one.one.one.one) and 8.8.8.8 (dns.google) by IP literal, certificate verified | no reference could be tried |
+| `dotReachable` | Verified TLS to 1.1.1.1:853 (DNS over TLS) | could not run |
+| `recursiveDnsEgress` | Needs a nonce name under a foreign authoritative zone we control. **No such zone exists yet, so it is always null (NOT TESTED).** It is never inferred from UDP or DoH. | not tested |
+| `internationalOk/Tried` | TLS to 1.1.1.1, 8.8.8.8 and 9.9.9.9 (three operators) by IP literal, certificate verified; a quorum, so 1/3 is partial, not isolation | no reference could be tried |
+| `ipv6TlsOk` | Verified TLS to 2606:4700:4700::1111, only when the network has IPv6 | no IPv6 or could not run |
 | `domesticReachable` | TCP 443 to domestic references | none of their names resolved |
-| `sniFiltered` | Same address 1.1.1.1, neutral name vs a commonly filtered name; reset/timeout only on the filtered one | neutral handshake failed too, so nothing to compare |
-| `udpAvailable` | UDP DNS to 1.1.1.1:53 | could not run |
-| `quicAvailable` | One 1200-byte QUIC packet with a reserved version to 1.1.1.1:443; a Version Negotiation reply echoing our ID = QUIC passes (no handshake, no data) | could not run |
+| `sniFiltered`, `sniPairs`, `sniCut` | Two addresses (1.1.1.1, 8.8.8.8), each neutral name vs a commonly filtered name. Suspected only when at least two comparisons were possible and **every** one cut the filtered name. One differing pair is not enough. | nothing comparable, or mixed results |
+| `udpAvailable` | Direct UDP DNS to 1.1.1.1:53. This shows that UDP to one foreign resolver answers; it is **not** DNS egress. | could not run |
+| `quicStatus` | 1200-byte QUIC packets with a reserved version to 1.1.1.1:443 and 8.8.8.8:443, two attempts each; a Version Negotiation reply = that endpoint answers. AVAILABLE (all), DEGRADED (some), BLOCKED_SUSPECTED (two or more silent while UDP DNS and TLS abroad work), UNRESPONSIVE (otherwise), NOT_MEASURED | could not run |
 
 A certificate error on the filtered name counts as "the server answered", not as filtering.
 ECH, upload, packet loss and MTU are **not measured** and shown as such.
@@ -26,20 +29,22 @@ flowchart TD
   P -->|no international TLS| X{International TCP?}
   X -->|yes| TI[TLS_INTERFERED]
   X -->|no| D{Domestic reachable?}
-  D -->|yes + relay verified| R[NIN_WITH_DOMESTIC_RELAY_EGRESS]
-  D -->|yes + UDP/DoH abroad| N[NIN_WITH_DNS_EGRESS]
-  D -->|yes, no egress evidence| DO[DOMESTIC_ONLY_NO_VERIFIED_EGRESS]
+  P -->|IPv4 fails, IPv6 TLS works| V4[IPV4_DEGRADED]
+  D -->|yes + recursive DNS egress measured| N[NIN_WITH_DNS_EGRESS]
+  D -->|yes, no egress measured| DO[DOMESTIC_ONLY_NO_VERIFIED_EGRESS]
   D -->|no| FI[FULL_ISOLATION]
   P -->|some international| PA[PARTIAL_INTERNATIONAL_CONNECTIVITY]
   P -->|all international| Rz{Restrictions}
   Rz -->|none| NO[NORMAL]
-  Rz -->|one| ONE[DNS_MANIPULATED / SNI_FILTERED / UDP_BLOCKED / QUIC_BLOCKED / CDN_PATH_DEGRADED]
+  Rz -->|one| ONE[DNS_MANIPULATED / SNI_INTERFERENCE_SUSPECTED / UDP_BLOCKED / QUIC_BLOCKED suspected / QUIC_DEGRADED / IPV6_DEGRADED / CDN_PATH_DEGRADED]
   Rz -->|several| F[FILTERED]
 ```
 
 - The carrier code is metadata only; it never changes the state.
-- `NIN_WITH_DOMESTIC_RELAY_EGRESS` is produced only when relay egress was measured; no relay probe exists yet, so the app never shows it today.
-- `IPV4_DEGRADED`, `IPV6_DEGRADED` and `INTERNATIONAL_DEGRADED` are defined but not produced yet (no measurement supports them).
+- The relay-egress state was removed: domestic relays belong to the future Panels Tunnel feature, not to this LAB.
+- `NIN_WITH_DNS_EGRESS` needs `recursiveDnsEgress == true`. Since that probe has no infrastructure yet, the app shows DOMESTIC_ONLY today, and the planner still tries DNS tunnel configs in that state (see below).
+- SNI interference is only ever "suspected"; QUIC blocking only "suspected".
+- `UDP_DEGRADED` and `INTERNATIONAL_DEGRADED` are defined but not produced yet (no loss/latency measurement supports them).
 - Confidence = rule base × (0.5 + 0.5 × share of inputs measured). Unmeasured inputs are listed as "not tested".
 
 ## Hysteresis
@@ -70,11 +75,14 @@ UNSUPPORTED or CONTROL_PLANE_UNAVAILABLE: no config change can fix them, and cre
 | DoH | yes | — |
 | TCP / TLS international | yes | staged per config |
 | Domestic reach | yes | — |
-| SNI filtering | yes (comparison) | — |
+| DoT | yes (port 853) | — |
+| Recursive DNS egress | not tested (needs a controlled zone) | DNS tunnel real request |
+| Resolvers | per-network resolver checks (UDP, TCP, NXDOMAIN hijack, block page, EDNS) | — |
+| SNI filtering | yes (two-address comparison) | — |
 | UDP | UDP DNS only | — |
-| QUIC | version negotiation | — |
+| QUIC | version negotiation, two endpoints | — |
+| IPv6 | verified TLS over IPv6 | — |
 | ECH / MTU / upload / loss | not measured | not measured |
-| Relay egress | not measured | — |
 
 ## Config optimizer transactions
 
@@ -100,15 +108,19 @@ Rollback is always "use the saved config unchanged". The recovery ledger's exist
 
 `ExperimentPlanner` reads the network state before LAB spends its probe budget:
 
-- Automatic experiments do not start in FULL_ISOLATION, DOMESTIC_ONLY_NO_VERIFIED_EGRESS or NIN_WITH_DNS_EGRESS:
-  nothing abroad answers, so no config change can help. A user-started experiment still runs its one baseline
-  request, and the failure is classified NO_INTERNATIONAL_EGRESS, which generates no candidates.
+- Modes: FULL_ISOLATION → STOP (nothing can work). DOMESTIC_ONLY and NIN_WITH_DNS_EGRESS → DNS_TUNNEL_RECOVERY:
+  ordinary config mutations stop, and saved DNS tunnel configs are tested with real requests (the real request is
+  itself the measurement of DNS egress). Everything else → ORDINARY.
+- Automatic (background) experiments do not start in those three states; the message points to Full Analysis.
+- UDP blocked skips UDP families; QUIC/UDP trouble or SNI/TLS interference puts REALITY, XHTTP and other TCP
+  transports first. Engine families (Psiphon, Tor) go last.
+- Budget: 15 tests for a user-started run, 4 in the background; at most 10/3 on metered data; at most 4 under 20% battery when not charging.
 - Candidate order follows the evidence: SNI filtering or TLS cut while TCP passes puts fragment and ECH first;
   tampered DNS puts a validated edge address first; IPv6 candidates are dropped where IPv6 is absent.
 - It only orders and gates. Every candidate still passes the mutation policy and the security gate.
 
 ## Limitations
 
-- Unit-tested only. No emulator, device or field validation of these probes yet.
+- Unit-tested only. No emulator, device or field validation of these probes yet. Nothing here was tested in Iran.
 - The domestic and filtered-SNI references are fixed lists; they can go stale.
 - One phone's measurement never proves national filtering; states are worded as possibilities.

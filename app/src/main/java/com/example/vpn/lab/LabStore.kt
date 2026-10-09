@@ -26,6 +26,8 @@ class LabStore(
     private val discoveries = mutableListOf<LabDiscovery>()
     private val networks = linkedMapOf<String, NetworkSeen>()
     private val transactions = mutableListOf<ConfigTransaction>()
+    private val reports = linkedMapOf<String, AnalysisReport>()
+    private val resolvers = mutableListOf<ResolverIntelligence.Result>()
     private var automation = AutomationLevel.RECOMMEND
     private var nextProfileNumber = 1
     private var nextExperimentNumber = 1
@@ -60,6 +62,31 @@ class LabStore(
         transactions.replaceAll { tx -> update(tx).also { if (it != tx) changed += it } }
         if (changed.isNotEmpty()) persist()
         return changed
+    }
+
+    /** The last Full Analysis report of each network, newest first. */
+    @Synchronized fun reports(): List<AnalysisReport> = reports.values.sortedByDescending { it.finishedAt }
+    @Synchronized fun reportFor(contextKey: String): AnalysisReport? = reports[contextKey]
+
+    @Synchronized
+    fun saveReport(r: AnalysisReport) {
+        reports.remove(r.contextKey)
+        reports[r.contextKey] = r
+        while (reports.size > MAX_NETWORKS) reports.remove(reports.values.minByOrNull { it.finishedAt }!!.contextKey)
+        persist()
+    }
+
+    /** Resolver results of one network that have not expired; nothing measured elsewhere is returned. */
+    @Synchronized fun resolversFor(networkKey: String, now: Long = clock()): List<ResolverIntelligence.Result> =
+        ResolverIntelligence.rank(resolvers.filter { it.networkKey == networkKey && it.expiresAt > now })
+
+    @Synchronized
+    fun saveResolvers(networkKey: String, results: List<ResolverIntelligence.Result>) {
+        val now = clock()
+        resolvers.removeAll { it.networkKey == networkKey || it.expiresAt <= now }
+        resolvers += results
+        while (resolvers.size > MAX_RESOLVERS) resolvers.removeAt(0)
+        persist()
     }
 
     @Synchronized fun newExperimentId(): String = "EXP-%03d".format(nextExperimentNumber++).also { persist() }
@@ -165,6 +192,9 @@ class LabStore(
         }
     }
 
+    /** A short human name for a mutation id. */
+    fun strategyLabel(mutation: String): String = strategyName(mutation)
+
     private fun strategyName(mutation: String): String = when {
         mutation.startsWith("bpb-fragment") || mutation.startsWith("fragment") -> "Fragment"
         mutation.startsWith("fingerprint") -> "TLS fingerprint"
@@ -186,6 +216,8 @@ class LabStore(
             .put("d", JSONArray().apply { discoveries.forEach { put(it.toJson()) } })
             .put("n", JSONArray().apply { networks.values.forEach { put(it.toJson()) } })
             .put("tx", JSONArray().apply { transactions.forEach { put(it.toJson()) } })
+            .put("ar", JSONArray().apply { reports.values.forEach { put(it.toJson()) } })
+            .put("rs", JSONArray().apply { resolvers.forEach { put(it.toJson()) } })
         runCatching { save(root.toString()) }
     }
 
@@ -196,6 +228,8 @@ class LabStore(
         nextExperimentNumber = o.optInt("ne", 1).coerceAtLeast(1)
         nextTransactionNumber = o.optInt("nt", 1).coerceAtLeast(1)
         o.optJSONArray("tx")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let(ConfigTransaction::fromJson)?.let { transactions += it } }
+        o.optJSONArray("ar")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let(AnalysisReport::fromJson)?.let { reports[it.contextKey] = it } }
+        o.optJSONArray("rs")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let(ResolverIntelligence.Result::fromJson)?.let { resolvers += it } }
         o.optJSONArray("e")?.let { a ->
             for (i in 0 until a.length()) a.optJSONObject(i)?.let(LabExperiment::fromJson)?.let { e ->
                 experiments += if (e.state.terminal) e else e.copy(state = ExperimentState.CANCELLED, endTime = e.endTime ?: clock(), note = "Interrupted (the app was closed).")
@@ -212,6 +246,7 @@ class LabStore(
         const val MAX_DISCOVERIES = 40
         const val MAX_NETWORKS = 12
         const val MAX_TRANSACTIONS = 40
+        const val MAX_RESOLVERS = 60
     }
 }
 

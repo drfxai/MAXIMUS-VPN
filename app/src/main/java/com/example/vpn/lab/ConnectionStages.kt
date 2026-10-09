@@ -1,0 +1,109 @@
+package com.example.vpn.lab
+
+import com.example.data.model.ProtocolType
+import com.example.data.model.VlessProfile
+
+/**
+ * How far a connection method got. Only [APPLICATION_REQUEST_PASSED] or later means traffic really went
+ * through the intended path; a started process, an open local port or a TLS handshake never does.
+ */
+enum class ConnectionStage(val title: String) {
+    NOT_TESTED("Not tested"),
+    ENGINE_READY("Engine ready"),
+    LOCAL_PROXY_READY("Local proxy ready"),
+    TCP_REACHED("TCP reached"),
+    TLS_NEGOTIATED("TLS negotiated"),
+    PROTOCOL_AUTHENTICATED("Protocol authenticated"),
+    TUNNEL_ESTABLISHED("Tunnel established"),
+    REMOTE_EGRESS_CONFIRMED("Remote egress confirmed"),
+    APPLICATION_REQUEST_PASSED("Real request passed"),
+    DNS_THROUGH_TUNNEL_PASSED("DNS through tunnel passed"),
+    STABILITY_VERIFIED("Stable"),
+    VERIFIED("Verified");
+
+    /** Real application traffic went through the path. */
+    val carriesTraffic: Boolean get() = this >= APPLICATION_REQUEST_PASSED
+}
+
+/** Status words the LAB shows; never a vague "works". */
+enum class PathStatus(val title: String) {
+    NOT_TESTED("Not tested"),
+    QUEUED("Queued"),
+    TESTING("Testing"),
+    SUPPORTED("Supported"),
+    EXPERIMENTAL("Experimental"),
+    CANDIDATE("Candidate"),
+    VERIFIED("Verified"),
+    DEGRADED("Degraded"),
+    FAILED("Failed"),
+    BLOCKED("Blocked"),
+    UNSUPPORTED("Unsupported"),
+    SECURITY_REJECTED("Security rejected"),
+    EXPIRED("Expired"),
+    AVAILABLE("Available")
+}
+
+/**
+ * Connection method families the LAB reasons about. [udp] marks families that need UDP to the server,
+ * [engine] the families carried by their own engine program rather than the Xray core.
+ */
+enum class PathFamily(val title: String, val udp: Boolean = false, val engine: Boolean = false) {
+    VLESS_REALITY("VLESS REALITY"),
+    VLESS_TLS("VLESS TLS"),
+    XHTTP("XHTTP"),
+    WEBSOCKET("WebSocket"),
+    GRPC("gRPC"),
+    HTTP2("HTTP/2"),
+    TROJAN("Trojan"),
+    VMESS("VMess"),
+    SHADOWSOCKS("Shadowsocks"),
+    PLAIN("Unencrypted proxy"),
+    HYSTERIA2("Hysteria2", udp = true),
+    TUIC("TUIC", udp = true),
+    WIREGUARD("WireGuard", udp = true),
+    PSIPHON("Psiphon", engine = true),
+    TOR("Tor", engine = true),
+    DNS_TUNNEL("DNS tunnel", engine = true),
+    MIHOMO("Mihomo config", engine = true),
+    OTHER("Other");
+
+    companion object {
+        /** The family of a saved config, from its fields only (never its name). */
+        fun of(p: VlessProfile, engineId: String? = null): PathFamily = when {
+            engineId == "psiphon" -> PSIPHON
+            engineId == "tor" -> TOR
+            engineId == "dns-tunnel" -> DNS_TUNNEL
+            engineId != null -> MIHOMO
+            p.protocolType == ProtocolType.HYSTERIA2 -> HYSTERIA2
+            p.protocolType == ProtocolType.TUIC -> TUIC
+            p.protocolType == ProtocolType.WIREGUARD -> WIREGUARD
+            p.protocolType == ProtocolType.TROJAN -> TROJAN
+            p.protocolType == ProtocolType.VMESS -> VMESS
+            p.protocolType == ProtocolType.SHADOWSOCKS -> SHADOWSOCKS
+            p.protocolType in setOf(ProtocolType.HTTP, ProtocolType.SOCKS5, ProtocolType.MIXED) -> PLAIN
+            p.security.equals("reality", true) -> VLESS_REALITY
+            p.transport.equals("xhttp", true) || p.transport.equals("splithttp", true) -> XHTTP
+            p.transport.equals("ws", true) -> WEBSOCKET
+            p.transport.equals("grpc", true) -> GRPC
+            p.transport.equals("h2", true) || p.transport.equals("http", true) -> HTTP2
+            p.security.equals("tls", true) -> VLESS_TLS
+            else -> OTHER
+        }
+    }
+}
+
+/** One row of LIVE CONNECTIVITY PATHS. Unknown values stay null; nothing is filled in by guess. */
+data class LivePath(
+    val key: String,
+    val title: String,
+    val status: PathStatus,
+    val stage: ConnectionStage = ConnectionStage.NOT_TESTED,
+    val confidence: Double? = null,
+    val latencyMs: Long? = null,
+    val checkedAt: Long? = null,
+    /** Why it has this status: what was measured, or why it was not tested. */
+    val reason: String = "",
+    /** How many saved configs of this family were tried, and how many passed a real request. */
+    val tried: Int = 0,
+    val passed: Int = 0
+)

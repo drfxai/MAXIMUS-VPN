@@ -38,7 +38,21 @@ data class NetworkCapabilityProfile(
      * TLS to the same address passed with a neutral SNI and was reset or silenced with a commonly filtered
      * one. Null when either handshake could not be compared (for example the neutral one failed too).
      */
-    val sniFiltered: Boolean? = null
+    val sniFiltered: Boolean? = null,
+    /** QUIC result in words (see NetworkCapabilityDetector.QuicStatus); [quicAvailable] is its yes/no/unknown form. */
+    val quicStatus: String? = null,
+    /** DNS-over-TLS to an IP-literal resolver completed a verified handshake. */
+    val dotReachable: Boolean? = null,
+    /**
+     * A recursive resolver on this network forwarded a never-seen name to a foreign authoritative server
+     * we control (nonce observed). Null = NOT TESTED; it is never inferred from a direct UDP answer.
+     */
+    val recursiveDnsEgress: Boolean? = null,
+    /** SNI comparisons that could be made (neutral name passed) and how many of them cut the filtered name. */
+    val sniPairs: Int? = null,
+    val sniCut: Int? = null,
+    /** International TLS over IPv6 (only measured when the network has IPv6). */
+    val ipv6TlsOk: Boolean? = null
 ) {
     /** True when at least one international reference completed TLS; false only when all were tried and failed. */
     val internationalReachable: Boolean? get() = when {
@@ -63,13 +77,14 @@ data class NetworkCapabilityProfile(
 
     /** Readable observations, one per measured capability; unmeasured ones are said to be unmeasured. */
     fun observations(): List<String> = listOf(
-        "IPv4" to ipv4Available, "IPv6" to ipv6Available, "UDP" to udpAvailable, "TCP" to tcpAvailable,
+        "IPv4" to ipv4Available, "IPv6" to ipv6Available, "UDP (direct DNS abroad)" to udpAvailable, "TCP" to tcpAvailable,
         "TLS" to tlsAvailable, "HTTP/2" to http2Available, "QUIC" to quicAvailable,
         "Cloudflare reachable" to cloudflareReachable, "ECH" to echCapable, "DNS" to dnsWorking,
         "Upload constrained" to uploadConstrained, "Metered" to meteredNetwork,
         "DNS answers tampered" to dnsManipulated, "Encrypted DNS (DoH) reachable" to dohReachable,
         "International TLS" to internationalReachable, "Domestic sites reachable" to domesticReachable,
-        "SNI filtering" to sniFiltered
+        "SNI interference (suspected)" to sniFiltered, "DNS over TLS reachable" to dotReachable,
+        "Recursive DNS reaches abroad" to recursiveDnsEgress, "IPv6 international TLS" to ipv6TlsOk
     ).map { (name, value) ->
         when (value) {
             true -> "$name: yes"
@@ -101,6 +116,12 @@ data class NetworkCapabilityProfile(
         put("internationalTried", internationalTried ?: JSONObject.NULL)
         opt("domesticReachable", domesticReachable)
         opt("sniFiltered", sniFiltered)
+        put("quicStatus", quicStatus ?: JSONObject.NULL)
+        opt("dotReachable", dotReachable)
+        opt("recursiveDnsEgress", recursiveDnsEgress)
+        put("sniPairs", sniPairs ?: JSONObject.NULL)
+        put("sniCut", sniCut ?: JSONObject.NULL)
+        opt("ipv6TlsOk", ipv6TlsOk)
     }
 
     companion object {
@@ -108,6 +129,7 @@ data class NetworkCapabilityProfile(
 
         fun fromJson(o: JSONObject): NetworkCapabilityProfile {
             fun b(name: String): Boolean? = if (!o.has(name) || o.isNull(name)) null else o.optBoolean(name)
+            fun i(name: String): Int? = if (!o.has(name) || o.isNull(name)) null else o.optInt(name)
             return NetworkCapabilityProfile(
                 transport = o.optString("transport", "other"),
                 ipv4Available = b("ipv4Available"), ipv6Available = b("ipv6Available"),
@@ -121,7 +143,10 @@ data class NetworkCapabilityProfile(
                 dnsManipulated = b("dnsManipulated"), dohReachable = b("dohReachable"),
                 internationalOk = if (!o.has("internationalOk") || o.isNull("internationalOk")) null else o.optInt("internationalOk"),
                 internationalTried = if (!o.has("internationalTried") || o.isNull("internationalTried")) null else o.optInt("internationalTried"),
-                domesticReachable = b("domesticReachable"), sniFiltered = b("sniFiltered")
+                domesticReachable = b("domesticReachable"), sniFiltered = b("sniFiltered"),
+                quicStatus = if (!o.has("quicStatus") || o.isNull("quicStatus")) null else o.optString("quicStatus"),
+                dotReachable = b("dotReachable"), recursiveDnsEgress = b("recursiveDnsEgress"),
+                sniPairs = i("sniPairs"), sniCut = i("sniCut"), ipv6TlsOk = b("ipv6TlsOk")
             )
         }
     }

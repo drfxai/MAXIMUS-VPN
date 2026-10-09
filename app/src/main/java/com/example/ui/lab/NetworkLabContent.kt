@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.protocols.LabColors
 import com.example.ui.protocols.LabText
 import com.example.ui.protocols.labColors
+import com.example.vpn.lab.AnalysisReport
 import com.example.vpn.lab.AutomationLevel
 import com.example.vpn.lab.ConfigTransaction
 import com.example.vpn.lab.ExperimentState
@@ -66,11 +68,15 @@ import com.example.vpn.lab.LabSnapshot
 import com.example.vpn.lab.NetworkState
 import com.example.vpn.lab.LabStep
 import com.example.vpn.lab.LabStore
+import com.example.vpn.lab.LivePath
+import com.example.vpn.lab.PathStatus
+import com.example.vpn.lab.RankedMethod
 import com.example.vpn.lab.PromotionState
 import com.example.vpn.lab.VerifiedNetworkProfile
 
 /** The LAB's pages: a minimal home and five detail sections (spec sections 40-46), plus Research. */
 enum class LabSection(val title: String, val icon: ImageVector) {
+    REPORT("Analysis report", Icons.Rounded.Insights),
     NETWORKS("Networks", Icons.Rounded.CellTower),
     LIVE("Live Tests", Icons.Rounded.MonitorHeart),
     EXPERIMENTS("Experiments", Icons.Rounded.Science),
@@ -106,6 +112,7 @@ class NetworkLabActions(
     val onOpen: (LabSection?) -> Unit = {},
     val onPick: (Boolean) -> Unit = {},
     val onRun: (String) -> Unit = {},
+    val onFullAnalysis: () -> Unit = {},
     val onCancel: () -> Unit = {},
     val onAutomation: (AutomationLevel) -> Unit = {},
     val onRefreshNetwork: () -> Unit = {},
@@ -127,6 +134,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
             else -> Column(Modifier.fillMaxSize()) {
                 TitleBar(c, s.title, sectionSubtitle(s, state), Icons.AutoMirrored.Rounded.ArrowBack, { actions.onOpen(null) })
                 when (s) {
+                    LabSection.REPORT -> ReportPage(c, state, relativeTime)
                     LabSection.NETWORKS -> NetworksPage(c, state.snapshot, relativeTime)
                     LabSection.LIVE -> LivePage(c, state, actions)
                     LabSection.EXPERIMENTS -> ExperimentsPage(c, state.snapshot.experiments, relativeTime)
@@ -141,8 +149,10 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
 }
 
 private fun sectionSubtitle(s: LabSection, state: NetworkLabUiState): String = when (s) {
+    LabSection.REPORT -> state.snapshot.analysis?.let { "${it.networkLabel} · ${it.state}" } ?: "No full analysis on this network yet"
     LabSection.NETWORKS -> "Only the current network is measured live"
-    LabSection.LIVE -> state.snapshot.running?.let { "${it.experimentId} · ${it.networkLabel}" } ?: "No experiment running"
+    LabSection.LIVE -> state.snapshot.running?.let { "${it.experimentId} · ${it.networkLabel}" }
+        ?: if (state.snapshot.analysisRunning) "Full analysis running" else "No experiment running"
     LabSection.EXPERIMENTS -> "${state.snapshot.experiments.size} recorded on this phone"
     LabSection.DISCOVERIES -> "Measurements and AI readings, labelled"
     LabSection.VERIFIED -> "Strategies measured to work, per network"
@@ -181,6 +191,14 @@ private fun stateColor(c: LabColors, state: NetworkState) = when (state) {
     NetworkState.UNKNOWN -> c.text3
     NetworkState.FULL_ISOLATION, NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, NetworkState.TLS_INTERFERED -> c.bad
     else -> c.okay
+}
+
+private fun pathColor(c: LabColors, s: PathStatus) = when (s) {
+    PathStatus.VERIFIED, PathStatus.AVAILABLE, PathStatus.SUPPORTED -> c.good
+    PathStatus.CANDIDATE, PathStatus.DEGRADED, PathStatus.EXPERIMENTAL -> c.okay
+    PathStatus.TESTING, PathStatus.QUEUED -> c.accent
+    PathStatus.FAILED, PathStatus.BLOCKED, PathStatus.SECURITY_REJECTED -> c.bad
+    PathStatus.NOT_TESTED, PathStatus.UNSUPPORTED, PathStatus.EXPIRED -> c.text3
 }
 
 private fun stabilityColor(c: LabColors, health: Int?) = when {
@@ -285,8 +303,27 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
         }
         item {
             Row(Modifier.padding(horizontal = Gutter, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                PrimaryButton(c, if (s.running != null) "Experiment running" else "Run experiment", Icons.Rounded.PlayArrow, Modifier.weight(1f), s.running == null) { actions.onPick(true) }
-                if (s.running != null) SecondaryButton(c, "Live", Icons.Rounded.MonitorHeart) { actions.onOpen(LabSection.LIVE) }
+                val busy = s.running != null || s.analysisRunning
+                PrimaryButton(c, if (s.analysisRunning) "Analysing…" else "Start full analysis", Icons.Rounded.Insights, Modifier.weight(1f), !busy, onClick = actions.onFullAnalysis)
+                if (busy) SecondaryButton(c, "Live", Icons.Rounded.MonitorHeart) { actions.onOpen(LabSection.LIVE) }
+                else SecondaryButton(c, "One config", Icons.Rounded.PlayArrow) { actions.onPick(true) }
+            }
+        }
+        s.analysis?.let { report ->
+            item { GroupLabel(c, "Live connectivity paths", "Full report") { actions.onOpen(LabSection.REPORT) } }
+            item {
+                Panel(c) {
+                    ReportHeadline(c, report, relativeTime)
+                    report.paths.sortedBy { it.status.ordinal }.filter { it.status != PathStatus.NOT_TESTED }.take(6).forEach { p ->
+                        Hairline(c)
+                        PathRow(c, p)
+                    }
+                    val untested = report.paths.count { it.status == PathStatus.NOT_TESTED }
+                    if (untested > 0) {
+                        Hairline(c)
+                        LabText("$untested paths not tested · see the full report", c.text3, 12.sp, modifier = Modifier.padding(14.dp), maxLines = 1)
+                    }
+                }
             }
         }
         if (s.transactions.isNotEmpty()) {
@@ -440,9 +477,9 @@ private fun LivePage(c: LabColors, state: NetworkLabUiState, actions: NetworkLab
                 }
             }
         }
-        if (s.running != null) item {
+        if (s.running != null || s.analysisRunning) item {
             Row(Modifier.padding(horizontal = Gutter, vertical = 12.dp)) {
-                SecondaryButton(c, "Stop experiment", Icons.Rounded.Stop, Modifier.fillMaxWidth(), color = c.bad, onClick = actions.onCancel)
+                SecondaryButton(c, if (s.analysisRunning) "Stop analysis" else "Stop experiment", Icons.Rounded.Stop, Modifier.fillMaxWidth(), color = c.bad, onClick = actions.onCancel)
             }
         }
         s.message?.let { m -> item { Notice(c, m, actions.onDismissMessage) } }
@@ -485,6 +522,92 @@ private fun StepRow(c: LabColors, step: LabStep, first: Boolean, last: Boolean) 
             }
             if (step.detail.isNotBlank()) LabText(step.detail, c.text2, 12.sp, maxLines = 2, lineHeight = 16.sp)
         }
+    }
+}
+
+// ---------------------------------------------------------------- full analysis
+
+@Composable
+private fun ReportHeadline(c: LabColors, r: AnalysisReport, relativeTime: (Long) -> String) {
+    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LabText(r.state, c.text, 15.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
+            r.best?.let { Badge(it.status.title, pathColor(c, it.status)) } ?: Badge("No path", c.bad)
+        }
+        LabText(r.note, c.text2, 12.5.sp, maxLines = 3, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+        LabText("${r.mode} · ${relativeTime(r.finishedAt)}", c.text3, 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+@Composable
+private fun PathRow(c: LabColors, p: LivePath) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+        Dot(pathColor(c, p.status))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            LabText(p.title + (p.latencyMs?.let { " · $it ms" } ?: ""), c.text, 13.5.sp, FontWeight.Medium, maxLines = 1)
+            if (p.reason.isNotBlank()) LabText(p.reason, c.text3, 12.sp, maxLines = 2, lineHeight = 16.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        Badge(p.status.title, pathColor(c, p.status))
+    }
+}
+
+@Composable
+private fun MethodRow(c: LabColors, rank: Int, m: RankedMethod) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+        LabText("$rank", c.text3, 13.sp, FontWeight.SemiBold, Modifier.width(22.dp), maxLines = 1)
+        Column(Modifier.weight(1f)) {
+            LabText(m.name, c.text, 13.5.sp, FontWeight.Medium, maxLines = 1)
+            LabText(listOfNotNull(m.family.title, m.latencyMs?.let { "$it ms" }, "${m.passes}/${m.attempts} passed".takeIf { m.attempts > 0 }, m.why).joinToString(" · "),
+                c.text3, 12.sp, maxLines = 2, lineHeight = 16.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        Badge(m.status.title, pathColor(c, m.status))
+    }
+}
+
+@Composable
+private fun ReportPage(c: LabColors, state: NetworkLabUiState, relativeTime: (Long) -> String) {
+    val r = state.snapshot.analysis
+    LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)) {
+        if (r == null) {
+            item { Empty(c, "No analysis yet", "Tap Start full analysis on the LAB home. It measures this network, tests your saved configs outside the VPN and ranks what works.") }
+            return@LazyColumn
+        }
+        item { Panel(c) { ReportHeadline(c, r, relativeTime) } }
+        item { GroupLabel(c, "Why this plan") }
+        item {
+            Panel(c) {
+                Column(Modifier.padding(14.dp)) {
+                    (r.restrictions.takeIf { it.isNotEmpty() }?.let { listOf("Measured: " + it.joinToString(", ")) } ?: emptyList<String>())
+                        .plus(r.planReasons).forEach { LabText("• $it", c.text2, 12.5.sp, maxLines = 4, lineHeight = 17.sp) }
+                }
+            }
+        }
+        item { GroupLabel(c, "Live connectivity paths") }
+        item {
+            Panel(c) {
+                r.paths.sortedBy { it.status.ordinal }.forEachIndexed { i, p -> if (i > 0) Hairline(c); PathRow(c, p) }
+            }
+        }
+        item { GroupLabel(c, "Ranked methods") }
+        item {
+            Panel(c) {
+                if (r.ranked.isEmpty()) LabText("No saved config was tested in this run.", c.text3, 12.5.sp, modifier = Modifier.padding(14.dp))
+                r.ranked.forEachIndexed { i, m -> if (i > 0) Hairline(c); MethodRow(c, i + 1, m) }
+            }
+        }
+        item { GroupLabel(c, "Not tested in this run") }
+        item {
+            Panel(c) {
+                Column(Modifier.padding(14.dp)) {
+                    r.untested.forEach { LabText("• $it", c.text3, 12.sp, maxLines = 3, lineHeight = 16.sp) }
+                }
+            }
+        }
+        if (!state.aiReady) item { Footnote(c, "AI analysis unavailable: no AI provider is set up. Every result above comes from measurements on this phone.") }
+        item { Footnote(c, "Saved configs are never changed. Old results only change what is tried first; every status above was measured in this run or says it was not tested.") }
     }
 }
 
