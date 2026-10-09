@@ -111,6 +111,6 @@ class FreeConfigEvidenceTest {
         assertEquals("cellular:v4=1,v6=0,udp=?,tls=1,cf=0,dns=1", p.key())
         assertFalse(p.key().contains("43211"))
         assertEquals(p, NetworkCapabilityProfile.fromJson(JSONObject(p.toJson().toString())))
-        assertTrue(p.observations().contains("UDP: not measured"))
+        assertTrue(p.observations().contains("UDP (direct DNS abroad): not measured"))
     }
 }
