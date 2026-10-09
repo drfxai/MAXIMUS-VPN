@@ -366,21 +366,47 @@ class LabController(
         publish(running = null, message = result.note)
     }
 
-    /** AUTO_APPLY: only reviewed recovery profiles, through the ledger the VPN already uses with its rollback. */
+    /**
+     * AUTO_APPLY: only reviewed recovery profiles, through the ledger the VPN already uses with its rollback.
+     * Every attempt is a [ConfigTransaction]: refused ones are kept with their reason, staged ones are later
+     * committed or rolled back from what the ledger saw in real use.
+     */
     private fun apply(v: VerifiedNetworkProfile, parent: VlessProfile, ctx: NetworkContext) {
         val rp = RecoveryProfiles.BUILT_IN.firstOrNull { it.key == v.mutationProfileId } ?: return
         val now = System.currentTimeMillis()
-        if (rp.isExpired(now)) return
-        val copy = rp.derive(parent, v.endpoint) ?: return
-        val gate = RecoverySecurityGate.check(parent, copy)
-        if (!gate.passed || !CandidateMutationPolicy.check(parent, copy).allowed) return
+        val copy = rp.derive(parent, v.endpoint)
+        val fields = copy?.let { BpbRecoveryEngine.diff(parent, it).map { c -> c.field } } ?: emptyList()
+        var tx = ConfigOptimizer.propose(store.newTransactionId(), parent.effectiveFingerprint, rp.key, ctx.networkKey, v.endpoint, fields,
+            "${v.strategy} verified on ${v.networkLabel}: ${v.stats.successes}/${v.stats.attempts} real requests passed", now)
+        val gate = copy?.let { RecoverySecurityGate.check(parent, it) }
+        val refusal = when {
+            rp.isExpired(now) -> "The recovery profile has expired."
+            copy == null -> "The recovery profile does not apply to this config."
+            gate?.passed != true -> "Refused by the security gate."
+            !CandidateMutationPolicy.check(parent, copy).allowed -> "Refused by the mutation policy."
+            else -> null
+        }
+        tx = ConfigOptimizer.validate(tx, refusal, now)
+        store.saveTransaction(tx)
+        if (tx.state != ConfigTransaction.State.STAGED || copy == null || gate == null) {
+            XrayLogManager.i("LAB", "${tx.id} refused for ${parent.name}: ${tx.note}")
+            return
+        }
         val candidate = DerivedRecoveryCandidate(
             BpbRecoveryEngine.idOf(parent.effectiveFingerprint, rp.key, v.endpoint), parent.effectiveFingerprint, parent.id, rp.key,
             now, minOf(now + APPLY_TTL_MS, rp.expiresAt), ctx.networkKey, BpbRecoveryEngine.diff(parent, copy), copy, gate, v.endpoint,
             rollbackAfter = rp.rollbackPolicy
         )
         ledger.record(candidate, success = true, now = now)
-        XrayLogManager.i("LAB", "${v.profileId} will be tried first for ${parent.name} on ${v.networkLabel}; it rolls back on failure.")
+        XrayLogManager.i("LAB", "${tx.id}: ${v.profileId} will be tried first for ${parent.name} on ${v.networkLabel}; it rolls back on failure.")
+    }
+
+    /** Commits, rolls back or expires staged transactions from what the recovery ledger saw in real use. */
+    private fun reconcileTransactions() {
+        val now = System.currentTimeMillis()
+        val entries = ledger.entries()
+        store.reconcileTransactions { tx -> ConfigOptimizer.reconcile(tx, entries.firstOrNull { ConfigOptimizer.matches(tx, it) }, now) }
+            .forEach { XrayLogManager.i("LAB", "${it.id} ${it.state.name.lowercase().replace('_', ' ')}: ${it.note}") }
     }
 
     private fun refusal(userStarted: Boolean, fingerprint: String, now: Long): String? {
@@ -428,11 +454,12 @@ class LabController(
         message: String? = _state.value.message,
         networkState: NetworkStateReading? = _state.value.networkState
     ) {
+        reconcileTransactions()
         _state.value = LabSnapshot(
             network = network ?: tracker.current, capability = capability, automation = store.automation(), running = running, steps = steps.toList(),
             experiments = store.experiments().sortedByDescending { it.startTime }, verified = store.verifiedProfiles(),
             discoveries = store.discoveries(), networks = store.networks(), plan = plan, message = message, log = log.toList(),
-            networkState = networkState
+            networkState = networkState, transactions = store.transactions()
         )
     }
 

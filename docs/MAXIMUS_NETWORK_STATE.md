@@ -74,6 +74,26 @@ UNSUPPORTED or CONTROL_PLANE_UNAVAILABLE: no config change can fix them, and cre
 | QUIC / ECH / MTU / upload / loss | not measured | not measured |
 | Relay egress | not measured | — |
 
+## Config optimizer transactions
+
+Auto apply never edits a saved config. Each attempt to try a verified copy first is a `ConfigTransaction`
+stored in `LabStore` (bounded to 40, names of changed fields only, never their values):
+
+```mermaid
+stateDiagram-v2
+  [*] --> PROPOSED
+  PROPOSED --> REFUSED: security gate or mutation policy says no
+  PROPOSED --> STAGED: all checks pass; ledger tries it first
+  STAGED --> COMMITTED: real traffic after staging
+  STAGED --> ROLLED_BACK: ledger withdrew it
+  COMMITTED --> ROLLED_BACK: failed again after working
+  STAGED --> EXPIRED
+  COMMITTED --> EXPIRED
+```
+
+Rollback is always "use the saved config unchanged". The recovery ledger's existing rule decides when
+(failures in a row after working); the transaction records it with the reason.
+
 ## Limitations
 
 - Unit-tested only. No emulator, device or field validation of these probes yet.

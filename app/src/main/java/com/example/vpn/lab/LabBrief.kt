@@ -10,6 +10,7 @@ object LabBrief {
         appendLine("Network kind: ${n?.let { kindOf(it.networkKey) } ?: "none"}; address families: ${n?.families ?: "unknown"}.")
         s.capability?.observations()?.let { appendLine("Measured: " + it.joinToString("; ")) }
         s.networkState?.let { appendLine("Network state (rule-based, not proof): " + it.summary()) }
+        if (s.transactions.isNotEmpty()) appendLine("Config changes: " + s.transactions.groupingBy { it.state.name }.eachCount().entries.joinToString { "${it.value} ${it.key.lowercase()}" } + ".")
         val here = s.experiments.filter { it.contextKey == n?.contextKey }.sortedByDescending { it.startTime }.take(6)
         if (here.isEmpty()) appendLine("No experiments on this network yet.")
         here.forEach { e ->

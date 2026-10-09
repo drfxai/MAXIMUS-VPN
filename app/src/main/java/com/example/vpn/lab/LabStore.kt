@@ -25,9 +25,11 @@ class LabStore(
     private val verified = mutableListOf<VerifiedNetworkProfile>()
     private val discoveries = mutableListOf<LabDiscovery>()
     private val networks = linkedMapOf<String, NetworkSeen>()
+    private val transactions = mutableListOf<ConfigTransaction>()
     private var automation = AutomationLevel.RECOMMEND
     private var nextProfileNumber = 1
     private var nextExperimentNumber = 1
+    private var nextTransactionNumber = 1
 
     init { parse(load()) }
 
@@ -38,6 +40,27 @@ class LabStore(
     @Synchronized fun verifiedProfiles(): List<VerifiedNetworkProfile> = verified.toList()
     @Synchronized fun discoveries(): List<LabDiscovery> = discoveries.sortedByDescending { it.at }
     @Synchronized fun networks(): List<NetworkSeen> = networks.values.sortedByDescending { it.lastMeasuredAt }
+    @Synchronized fun transactions(): List<ConfigTransaction> = transactions.sortedByDescending { it.updatedAt }
+
+    @Synchronized fun newTransactionId(): String = "TX-%03d".format(nextTransactionNumber++).also { persist() }
+
+    /** Stores a transaction, replacing an earlier state of the same one. */
+    @Synchronized
+    fun saveTransaction(tx: ConfigTransaction) {
+        transactions.removeAll { it.id == tx.id }
+        transactions += tx
+        while (transactions.size > MAX_TRANSACTIONS) transactions.remove(transactions.minByOrNull { it.updatedAt }!!)
+        persist()
+    }
+
+    /** Applies [update] to every open transaction; persists only when something changed. Returns the changed ones. */
+    @Synchronized
+    fun reconcileTransactions(update: (ConfigTransaction) -> ConfigTransaction): List<ConfigTransaction> {
+        val changed = mutableListOf<ConfigTransaction>()
+        transactions.replaceAll { tx -> update(tx).also { if (it != tx) changed += it } }
+        if (changed.isNotEmpty()) persist()
+        return changed
+    }
 
     @Synchronized fun newExperimentId(): String = "EXP-%03d".format(nextExperimentNumber++).also { persist() }
 
@@ -157,11 +180,12 @@ class LabStore(
 
     private fun persist() {
         val root = JSONObject()
-            .put("v", 1).put("auto", automation.name).put("np", nextProfileNumber).put("ne", nextExperimentNumber)
+            .put("v", 1).put("auto", automation.name).put("np", nextProfileNumber).put("ne", nextExperimentNumber).put("nt", nextTransactionNumber)
             .put("e", JSONArray().apply { experiments.forEach { put(it.toJson()) } })
             .put("p", JSONArray().apply { verified.forEach { put(it.toJson()) } })
             .put("d", JSONArray().apply { discoveries.forEach { put(it.toJson()) } })
             .put("n", JSONArray().apply { networks.values.forEach { put(it.toJson()) } })
+            .put("tx", JSONArray().apply { transactions.forEach { put(it.toJson()) } })
         runCatching { save(root.toString()) }
     }
 
@@ -170,6 +194,8 @@ class LabStore(
         automation = runCatching { AutomationLevel.valueOf(o.optString("auto")) }.getOrDefault(AutomationLevel.RECOMMEND)
         nextProfileNumber = o.optInt("np", 1).coerceAtLeast(1)
         nextExperimentNumber = o.optInt("ne", 1).coerceAtLeast(1)
+        nextTransactionNumber = o.optInt("nt", 1).coerceAtLeast(1)
+        o.optJSONArray("tx")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let(ConfigTransaction::fromJson)?.let { transactions += it } }
         o.optJSONArray("e")?.let { a ->
             for (i in 0 until a.length()) a.optJSONObject(i)?.let(LabExperiment::fromJson)?.let { e ->
                 experiments += if (e.state.terminal) e else e.copy(state = ExperimentState.CANCELLED, endTime = e.endTime ?: clock(), note = "Interrupted (the app was closed).")
@@ -185,6 +211,7 @@ class LabStore(
         const val MAX_PROFILES = 60
         const val MAX_DISCOVERIES = 40
         const val MAX_NETWORKS = 12
+        const val MAX_TRANSACTIONS = 40
     }
 }
 
