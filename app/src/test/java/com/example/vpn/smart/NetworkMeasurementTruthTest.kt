@@ -39,3 +39,26 @@ class NetworkMeasurementTruthTest {
         assertEquals(true, back.internationalReachable)
     }
 }
+
+class QuicProbeTest {
+    private val scid = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+    private val dcid = byteArrayOf(9, 9, 9, 9, 9, 9, 9, 9)
+
+    @org.junit.Test fun probeIsAPaddedLongHeaderWithAReservedVersion() {
+        val p = NetworkCapabilityDetector.quicVersionProbe(dcid, scid)
+        org.junit.Assert.assertEquals(1200, p.size)
+        org.junit.Assert.assertEquals(0xC0.toByte(), p[0])
+        org.junit.Assert.assertArrayEquals(byteArrayOf(0x1a, 0x2a, 0x3a, 0x4a), p.copyOfRange(1, 5))
+        org.junit.Assert.assertEquals(8.toByte(), p[5])
+    }
+
+    @org.junit.Test fun onlyAVersionNegotiationEchoingOurIdCounts() {
+        val vn = byteArrayOf(0x80.toByte(), 0, 0, 0, 0, 8) + scid + byteArrayOf(8) + dcid + byteArrayOf(0, 0, 0, 1)
+        org.junit.Assert.assertTrue(NetworkCapabilityDetector.isVersionNegotiation(vn, vn.size, scid))
+        val wrongId = vn.copyOf().also { it[6] = 42 }
+        org.junit.Assert.assertFalse(NetworkCapabilityDetector.isVersionNegotiation(wrongId, wrongId.size, scid))
+        val notVn = vn.copyOf().also { it[4] = 1 }
+        org.junit.Assert.assertFalse(NetworkCapabilityDetector.isVersionNegotiation(notVn, notVn.size, scid))
+        org.junit.Assert.assertFalse(NetworkCapabilityDetector.isVersionNegotiation(vn, 5, scid))
+    }
+}

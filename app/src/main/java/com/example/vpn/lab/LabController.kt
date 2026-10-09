@@ -116,7 +116,7 @@ class LabController(
         if (isNew) {
             com.example.vpn.diagnostics.ConnectionMetrics.labSessions.incrementAndGet()
             XrayLogManager.i("LAB", "Network session ${ctx.sessionId} on ${NetworkKey.describe(key)} ($families).")
-            if (!plan.explore && store.automation().mayExperiment && job?.isActive != true) {
+            if (!plan.explore && store.automation().mayExperiment && job?.isActive != true && ExperimentPlanner.automaticRefusal(reading) == null) {
                 job = scope.launch { runCatching { revalidate(ctx, plan.revalidate, userStarted = false) } }
             }
         }
@@ -217,7 +217,9 @@ class LabController(
         refreshNetwork(userStarted)
         val ctx = tracker.current ?: return fail(STEP_BASELINE, "No network outside the VPN.")
         val cap = NetworkCapabilityDetector.last
-        step(STEP_BASELINE, LabStep.State.DONE, "${ctx.label} · ${ctx.families}")
+        val reading = _state.value.networkState
+        if (!userStarted) ExperimentPlanner.automaticRefusal(reading)?.let { return fail(STEP_BASELINE, it) }
+        step(STEP_BASELINE, LabStep.State.DONE, "${ctx.label} · ${ctx.families}" + (reading?.let { " · ${it.primary.title}" } ?: ""))
         step(STEP_DNS, cap?.dnsWorking.asStep(), measuredWord(cap?.dnsWorking))
         step(STEP_IPV6, cap?.ipv6Available.asStep(), measuredWord(cap?.ipv6Available))
         step(STEP_TLS, cap?.tlsAvailable.asStep(), measuredWord(cap?.tlsAvailable))

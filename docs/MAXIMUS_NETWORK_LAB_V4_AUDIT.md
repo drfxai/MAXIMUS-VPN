@@ -83,4 +83,6 @@ flowchart LR
 | P1 | Failure taxonomy (DNS_TAMPERED, SNI_INTERFERENCE_SUSPECTED, NO_INTERNATIONAL_EGRESS, AUTHENTICATION_FAILED, …) | Done |
 | P1 | Capability profile: DoH, international, domestic, SNI | Done |
 | P1 | Config optimizer transactions + rollback | Done (ConfigTransaction over the recovery ledger) |
-| P2+ | QUIC/ECH/MTU/upload probes, relay egress, experiment planner by state, research pipeline | Not started |
+| P2 | QUIC reachability probe | Done (version negotiation) |
+| P2 | Experiment planner by network state | Done (gating + candidate order) |
+| P2+ | ECH/MTU/upload/loss probes, relay egress, research pipeline on state | Not started |

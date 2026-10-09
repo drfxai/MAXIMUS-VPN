@@ -42,7 +42,7 @@ class CandidateGenerator(
                 out += Hypothesis("endpoint", "a validated edge address may avoid an address block")
             }
         }
-        return out
+        return ExperimentPlanner.order(out, net)
     }
 
     private fun strategiesFor(h: Hypothesis): Set<RecoveryProfile.Strategy> = when (h.strategy) {

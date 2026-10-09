@@ -25,7 +25,8 @@ import javax.net.ssl.SSLSocketFactory
  * ("not measured") rather than guessing. QUIC, ECH and upload limits are not probed here.
  *
  * About ten small connections per measurement, made when the network changes or the user asks; never on
- * a timer. International references are addressed by IP literal with their own certificate name, so
+ * a timer. QUIC is checked with a version-negotiation exchange (no handshake, no data) with 1.1.1.1:443.
+ * International references are addressed by IP literal with their own certificate name, so
  * they measure the path abroad even when the network's DNS is tampered with.
  */
 object NetworkCapabilityDetector {
@@ -75,6 +76,7 @@ object NetworkCapabilityDetector {
             val tcp = async { probe { tcpConnect(network, InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)), 443) } }
             val tls = async { tlsProbe(network, "www.cloudflare.com") }
             val udp = async { probe { udpDns(network) } }
+            val quic = async { probe { quicProbe(network) } }
             val intl = INTERNATIONAL.map { (ip, name) -> async { literalTls(network, InetAddress.getByAddress(ip), name) } }
             val sensitive = async { literalTls(network, InetAddress.getByAddress(INTERNATIONAL.first().first), FILTERED_SNI) }
             val domestic = async { domesticProbe(network) }
@@ -91,7 +93,7 @@ object NetworkCapabilityDetector {
                 tcpAvailable = tcp.await(),
                 tlsAvailable = tlsResult?.first,
                 http2Available = tlsResult?.second,
-                quicAvailable = null,
+                quicAvailable = quic.await(),
                 cloudflareReachable = tlsResult?.first,
                 echCapable = null,
                 uploadConstrained = null,
@@ -254,5 +256,46 @@ object NetworkCapabilityDetector {
             socket.receive(answer)
             return answer.length > 12 && buffer[0] == 0x12.toByte() && buffer[1] == 0x34.toByte()
         }
+    }
+
+    /**
+     * QUIC reachability without a QUIC stack: a 1200-byte long-header packet with a reserved version makes
+     * any QUIC server answer with a Version Negotiation packet (RFC 9000 section 6). An answer means QUIC
+     * passes this network; silence means it was dropped (or UDP to 443 is blocked).
+     */
+    private fun quicProbe(network: Network): Boolean {
+        val random = java.security.SecureRandom()
+        val dcid = ByteArray(8).also(random::nextBytes)
+        val scid = ByteArray(8).also(random::nextBytes)
+        val packet = quicVersionProbe(dcid, scid)
+        java.net.DatagramSocket().use { socket ->
+            network.bindSocket(socket)
+            socket.soTimeout = TIMEOUT_MS
+            socket.send(DatagramPacket(packet, packet.size, InetAddress.getByAddress(INTERNATIONAL.first().first), 443))
+            val buffer = ByteArray(1500)
+            val answer = DatagramPacket(buffer, buffer.size)
+            socket.receive(answer)
+            return isVersionNegotiation(buffer, answer.length, scid)
+        }
+    }
+
+    /** Reserved version 0x?a?a?a?a: servers must not accept it, so they reply with Version Negotiation. */
+    internal fun quicVersionProbe(dcid: ByteArray, scid: ByteArray): ByteArray {
+        val out = ByteArray(1200)
+        var i = 0
+        out[i++] = 0xC0.toByte()
+        byteArrayOf(0x1a, 0x2a, 0x3a, 0x4a).forEach { out[i++] = it }
+        out[i++] = dcid.size.toByte(); dcid.forEach { out[i++] = it }
+        out[i++] = scid.size.toByte(); scid.forEach { out[i++] = it }
+        return out
+    }
+
+    /** A Version Negotiation packet: long header, version 0, and our source connection ID echoed as its destination. */
+    internal fun isVersionNegotiation(data: ByteArray, length: Int, scid: ByteArray): Boolean {
+        if (length < 7 + scid.size || (data[0].toInt() and 0x80) == 0) return false
+        if ((1..4).any { data[it].toInt() != 0 }) return false
+        val dcidLen = data[5].toInt() and 0xff
+        if (dcidLen != scid.size || length < 6 + dcidLen) return false
+        return (0 until dcidLen).all { data[6 + it] == scid[it] }
     }
 }

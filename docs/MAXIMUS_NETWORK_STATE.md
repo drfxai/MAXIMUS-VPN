@@ -13,9 +13,10 @@ About ten small connections per measurement, made when the network changes or th
 | `domesticReachable` | TCP 443 to domestic references | none of their names resolved |
 | `sniFiltered` | Same address 1.1.1.1, neutral name vs a commonly filtered name; reset/timeout only on the filtered one | neutral handshake failed too, so nothing to compare |
 | `udpAvailable` | UDP DNS to 1.1.1.1:53 | could not run |
+| `quicAvailable` | One 1200-byte QUIC packet with a reserved version to 1.1.1.1:443; a Version Negotiation reply echoing our ID = QUIC passes (no handshake, no data) | could not run |
 
 A certificate error on the filtered name counts as "the server answered", not as filtering.
-QUIC, ECH, upload, packet loss and MTU are **not measured** and shown as such.
+ECH, upload, packet loss and MTU are **not measured** and shown as such.
 
 ## States
 
@@ -71,7 +72,8 @@ UNSUPPORTED or CONTROL_PLANE_UNAVAILABLE: no config change can fix them, and cre
 | Domestic reach | yes | — |
 | SNI filtering | yes (comparison) | — |
 | UDP | UDP DNS only | — |
-| QUIC / ECH / MTU / upload / loss | not measured | not measured |
+| QUIC | version negotiation | — |
+| ECH / MTU / upload / loss | not measured | not measured |
 | Relay egress | not measured | — |
 
 ## Config optimizer transactions
@@ -93,6 +95,17 @@ stateDiagram-v2
 
 Rollback is always "use the saved config unchanged". The recovery ledger's existing rule decides when
 (failures in a row after working); the transaction records it with the reason.
+
+## Experiment planner
+
+`ExperimentPlanner` reads the network state before LAB spends its probe budget:
+
+- Automatic experiments do not start in FULL_ISOLATION, DOMESTIC_ONLY_NO_VERIFIED_EGRESS or NIN_WITH_DNS_EGRESS:
+  nothing abroad answers, so no config change can help. A user-started experiment still runs its one baseline
+  request, and the failure is classified NO_INTERNATIONAL_EGRESS, which generates no candidates.
+- Candidate order follows the evidence: SNI filtering or TLS cut while TCP passes puts fragment and ECH first;
+  tampered DNS puts a validated edge address first; IPv6 candidates are dropped where IPv6 is absent.
+- It only orders and gates. Every candidate still passes the mutation policy and the security gate.
 
 ## Limitations
 
