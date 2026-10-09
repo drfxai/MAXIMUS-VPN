@@ -54,6 +54,21 @@ class RealDelayProbeTest {
     }
 
     @Test
+    fun probeConfigsCarryNoSocketMark() {
+        // An app cannot set SO_MARK (EPERM): left in, every probe dial fails on a phone.
+        assertTrue(XrayConfigBuilder.buildJson(bpb, com.example.data.model.AppSettings()).contains("\"mark\""))
+        var sent = ""
+        RealDelayProbe.invoker = { request -> sent = request; results(JSONObject().put("success", true).put("delay", 300)) }
+        RealDelayProbe.measure(bpb, 8)
+        val config = JSONObject(sent).getJSONObject("payload").getJSONArray("configs").getJSONObject(0).getString("xrayJson")
+        val outbounds = JSONObject(config).getJSONArray("outbounds")
+        (0 until outbounds.length()).forEach { i ->
+            val sockopt = outbounds.getJSONObject(i).optJSONObject("streamSettings")?.optJSONObject("sockopt")
+            assertTrue("outbound $i still sets a mark", sockopt?.has("mark") != true)
+        }
+    }
+
+    @Test
     fun batchesFiveConfigsPerCall() {
         val sizes = mutableListOf<Int>()
         RealDelayProbe.invoker = { request ->

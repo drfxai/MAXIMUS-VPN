@@ -60,7 +60,11 @@ object RealDelayProbe {
         val external = profiles.map { com.example.vpn.sidecar.Sidecars.forProfile(it) != null }
         val configs = profiles.mapIndexed { index, profile ->
             if (external[index]) null
-            else runCatching { XrayConfigBuilder.buildJson(endpointResolver(profile), AppSettings()) }
+            else runCatching {
+                // The tunnel strips SO_MARK the same way (XrayEngine); left in, every probe dial fails
+                // with EPERM on a phone and each server reads as a timeout.
+                XrayConfigBuilder.stripSocketMarks(JSONObject(XrayConfigBuilder.buildJson(endpointResolver(profile), AppSettings()))).toString()
+            }
         }
         val runnable = configs.mapIndexedNotNull { index, config -> config?.getOrNull()?.let { index to it } }
         val results = arrayOfNulls<Outcome>(profiles.size)

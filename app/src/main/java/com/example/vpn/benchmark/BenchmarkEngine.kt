@@ -76,6 +76,7 @@ class BenchmarkEngine(
             val concurrency = mode.concurrency.coerceIn(2, 8)
             var completedCount = 0
             var failedCount = 0
+            var skippedCount = 0
             val lock = Any()
 
             val workers = (1..concurrency).map { workerId ->
@@ -94,6 +95,17 @@ class BenchmarkEngine(
                         }
 
                         val result = executeSingleBenchmark(profile, mode, scoringProfile)
+                        if (result == null) {
+                            // Not measurable now (the VPN is on); its last result stays as it was.
+                            synchronized(lock) {
+                                completedCount++
+                                skippedCount++
+                                val updatedProgress = _progressFlow.value.copy(completed = completedCount, isRunning = completedCount < total)
+                                _progressFlow.value = updatedProgress
+                                onProgressUpdate?.invoke(updatedProgress)
+                            }
+                            continue
+                        }
 
                         synchronized(lock) {
                             completedCount++
@@ -131,7 +143,9 @@ class BenchmarkEngine(
                 isPaused = false,
                 currentServerName = "Benchmark Finished"
             )
-            XrayLogManager.i("BENCHMARK", "Benchmark completed: $completedCount tested, $failedCount failed.")
+            val tested = completedCount - skippedCount
+            XrayLogManager.i("BENCHMARK", "Benchmark completed: $tested tested, $failedCount failed" +
+                if (skippedCount > 0) ", $skippedCount not tested while the VPN is on." else ".")
         }
     }
 
@@ -159,7 +173,7 @@ class BenchmarkEngine(
         profile: VlessProfile,
         mode: BenchmarkMode,
         scoringProfile: ScoringProfile
-    ): BenchmarkStageResult = withContext(Dispatchers.IO) {
+    ): BenchmarkStageResult? = withContext(Dispatchers.IO) {
         measureTransportBenchmark(profile, mode, scoringProfile)
     }
 }
@@ -170,7 +184,7 @@ internal suspend fun measureTransportBenchmark(
     mode: BenchmarkMode,
     scoringProfile: ScoringProfile,
     probe: suspend (VlessProfile) -> com.example.data.model.ServerTestResult = { com.example.vpn.ServerTester.testServer(it) }
-): BenchmarkStageResult {
+): BenchmarkStageResult? {
     val attempts = when (mode) {
         BenchmarkMode.QUICK -> 3
         BenchmarkMode.BALANCED -> 5
@@ -193,6 +207,8 @@ internal suspend fun measureTransportBenchmark(
             is com.example.data.model.ServerTestStatus.Slow -> samples.add(status.latencyMs)
             is com.example.data.model.ServerTestStatus.Unavailable -> lastError = status.reason
             is com.example.data.model.ServerTestStatus.InvalidConfig -> lastError = status.error
+            // Not measured (the VPN is on): asking again changes nothing, and it is not a failure.
+            com.example.data.model.ServerTestStatus.Idle -> if (samples.isEmpty()) return null
             else -> lastError = "Transport probe did not complete"
         }
         if (it < attempts - 1) delay(40)

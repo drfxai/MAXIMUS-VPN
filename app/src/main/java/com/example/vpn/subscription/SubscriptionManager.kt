@@ -145,6 +145,20 @@ class SubscriptionManager(
             return false
         }
 
+        /**
+         * A placeholder from the tunnel's FakeDNS pool (XrayConfigBuilder.applyFakeDns: 198.18.0.0/15,
+         * fc00::/18). While the VPN runs the phone's DNS answers with these; they are not the server's
+         * address, so the lookup falls through to DNS-over-HTTPS instead of failing as "restricted".
+         */
+        internal fun isFakeDnsAddress(address: java.net.InetAddress): Boolean {
+            val raw = address.address
+            return when (raw.size) {
+                4 -> (raw[0].toInt() and 0xFF) == 198 && (raw[1].toInt() and 0xFF) in 18..19
+                16 -> (raw[0].toInt() and 0xFF) == 0xFC && (raw[1].toInt() and 0xC0) == 0
+                else -> false
+            }
+        }
+
         fun isBlockedHost(host: String): Boolean {
             val lower = host.trim().lowercase()
             if (lower == "localhost" || lower == "127.0.0.1" || lower == "::1" || lower == "0.0.0.0" || lower == "::") return true
@@ -171,7 +185,7 @@ class SubscriptionManager(
             }
             val result = com.example.vpn.EndpointResolver.resolve(
                 hostname,
-                system = { okhttp3.Dns.SYSTEM.lookup(it) },
+                system = { okhttp3.Dns.SYSTEM.lookup(it).filterNot(::isFakeDnsAddress) },
                 open = { it.openConnection() as java.net.HttpURLConnection }
             )
             val address = java.net.InetAddress.getByName(result.address)

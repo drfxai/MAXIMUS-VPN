@@ -139,11 +139,7 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
             config.remove("metrics")
             config.remove("api")
             // Android VpnService.protect is the loop prevention mechanism; SO_MARK is Linux-root only.
-            val outbounds = config.optJSONArray("outbounds") ?: org.json.JSONArray()
-            (0 until outbounds.length()).forEach { index ->
-                val stream = outbounds.optJSONObject(index)?.optJSONObject("streamSettings")
-                stream?.optJSONObject("sockopt")?.remove("mark")
-            }
+            XrayConfigBuilder.stripSocketMarks(config)
             val nativeConfig = config.toString()
             XrayLogManager.appendLog("Native Xray configuration prepared with Android TUN fd $tunFd.", "ENGINE")
 
