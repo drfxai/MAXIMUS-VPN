@@ -35,7 +35,7 @@ class LabCoreTest {
 
     @Test fun failureCategoriesAreRefinedByMeasurements() {
         assertEquals(LabFailureCategory.TLS_HANDSHAKE_FAILED, FailureClassifier.classify(FailureStage.TLS_HANDSHAKE_FAILED))
-        assertEquals(LabFailureCategory.PROTOCOL_HANDSHAKE_FAILED, FailureClassifier.classify(FailureStage.PROXY_AUTH_FAILED))
+        assertEquals(LabFailureCategory.AUTHENTICATION_FAILED, FailureClassifier.classify(FailureStage.PROXY_AUTH_FAILED))
         assertEquals(LabFailureCategory.IPV6_PATH_FAILED, FailureClassifier.classify(FailureStage.TCP_CONNECT_FAILED, net, endpointFamily = "ipv6"))
         assertEquals(LabFailureCategory.UDP_UNAVAILABLE, FailureClassifier.classify(FailureStage.TIMEOUT, net.copy(udpAvailable = false), udpTransport = true))
         assertEquals(LabFailureCategory.QUIC_UNAVAILABLE, FailureClassifier.classify(FailureStage.TIMEOUT, net.copy(quicAvailable = false), usesQuic = true))

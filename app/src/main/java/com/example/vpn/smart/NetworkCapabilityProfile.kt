@@ -24,8 +24,29 @@ data class NetworkCapabilityProfile(
     val meteredNetwork: Boolean? = null,
     /** Diagnostic only (MCC+MNC of the carrier, no name, no number); never used to choose a route. */
     val carrierCode: String? = null,
-    val measuredAt: Long = 0L
+    val measuredAt: Long = 0L,
+    /** The network's DNS answered a foreign name with a block-page or private address. */
+    val dnsManipulated: Boolean? = null,
+    /** A DNS-over-HTTPS resolver at an IP literal answered over this network. */
+    val dohReachable: Boolean? = null,
+    /** How many of the international TLS references completed a handshake, out of [internationalTried]. */
+    val internationalOk: Int? = null,
+    val internationalTried: Int? = null,
+    /** A domestic reference host accepted a TCP connection (it says nothing about leaving the country). */
+    val domesticReachable: Boolean? = null,
+    /**
+     * TLS to the same address passed with a neutral SNI and was reset or silenced with a commonly filtered
+     * one. Null when either handshake could not be compared (for example the neutral one failed too).
+     */
+    val sniFiltered: Boolean? = null
 ) {
+    /** True when at least one international reference completed TLS; false only when all were tried and failed. */
+    val internationalReachable: Boolean? get() = when {
+        internationalTried == null || internationalTried == 0 -> null
+        (internationalOk ?: 0) > 0 -> true
+        else -> false
+    }
+
     /**
      * An anonymous bucket for grouping measurements: the transport plus the capabilities that change
      * which servers can work. Two phones on the same kind of network share it.
@@ -45,7 +66,10 @@ data class NetworkCapabilityProfile(
         "IPv4" to ipv4Available, "IPv6" to ipv6Available, "UDP" to udpAvailable, "TCP" to tcpAvailable,
         "TLS" to tlsAvailable, "HTTP/2" to http2Available, "QUIC" to quicAvailable,
         "Cloudflare reachable" to cloudflareReachable, "ECH" to echCapable, "DNS" to dnsWorking,
-        "Upload constrained" to uploadConstrained, "Metered" to meteredNetwork
+        "Upload constrained" to uploadConstrained, "Metered" to meteredNetwork,
+        "DNS answers tampered" to dnsManipulated, "Encrypted DNS (DoH) reachable" to dohReachable,
+        "International TLS" to internationalReachable, "Domestic sites reachable" to domesticReachable,
+        "SNI filtering" to sniFiltered
     ).map { (name, value) ->
         when (value) {
             true -> "$name: yes"
@@ -71,6 +95,12 @@ data class NetworkCapabilityProfile(
         opt("meteredNetwork", meteredNetwork)
         put("carrierCode", carrierCode ?: JSONObject.NULL)
         put("measuredAt", measuredAt)
+        opt("dnsManipulated", dnsManipulated)
+        opt("dohReachable", dohReachable)
+        put("internationalOk", internationalOk ?: JSONObject.NULL)
+        put("internationalTried", internationalTried ?: JSONObject.NULL)
+        opt("domesticReachable", domesticReachable)
+        opt("sniFiltered", sniFiltered)
     }
 
     companion object {
@@ -87,7 +117,11 @@ data class NetworkCapabilityProfile(
                 uploadConstrained = b("uploadConstrained"), dnsWorking = b("dnsWorking"),
                 meteredNetwork = b("meteredNetwork"),
                 carrierCode = if (o.isNull("carrierCode")) null else o.optString("carrierCode").ifBlank { null },
-                measuredAt = o.optLong("measuredAt")
+                measuredAt = o.optLong("measuredAt"),
+                dnsManipulated = b("dnsManipulated"), dohReachable = b("dohReachable"),
+                internationalOk = if (!o.has("internationalOk") || o.isNull("internationalOk")) null else o.optInt("internationalOk"),
+                internationalTried = if (!o.has("internationalTried") || o.isNull("internationalTried")) null else o.optInt("internationalTried"),
+                domesticReachable = b("domesticReachable"), sniFiltered = b("sniFiltered")
             )
         }
     }

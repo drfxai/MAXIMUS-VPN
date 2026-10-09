@@ -11,6 +11,8 @@ data class LabStep(val title: String, val state: State, val detail: String = "")
 data class LabSnapshot(
     val network: NetworkContext? = null,
     val capability: NetworkCapabilityProfile? = null,
+    /** The classified state of the phone's own network (with hysteresis); null until first measured. */
+    val networkState: NetworkStateReading? = null,
     val automation: AutomationLevel = AutomationLevel.RECOMMEND,
     val running: LabExperiment? = null,
     val steps: List<LabStep> = emptyList(),
@@ -19,6 +21,8 @@ data class LabSnapshot(
     val discoveries: List<LabDiscovery> = emptyList(),
     val networks: List<LabStore.NetworkSeen> = emptyList(),
     val plan: LabStore.ReturnPlan? = null,
+    /** Config optimizer transactions, newest first (staged, committed, rolled back, refused). */
+    val transactions: List<ConfigTransaction> = emptyList(),
     val message: String? = null,
     /** Raw LAB log lines for the Advanced view; redacted like every other log. */
     val log: List<String> = emptyList()

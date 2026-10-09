@@ -14,8 +14,30 @@ import org.json.JSONObject
 /** The LAB's failure taxonomy (spec section 23). Measurements produce these; AI never does. */
 enum class LabFailureCategory {
     DNS_RESOLUTION_FAILED, DNS_RESPONSE_INVALID, TCP_CONNECT_FAILED, TLS_HANDSHAKE_FAILED, CERTIFICATE_VALIDATION_FAILED,
-    PROTOCOL_HANDSHAKE_FAILED, ENGINE_START_FAILED, TUN_ESTABLISH_FAILED, HTTP_CONNECTIVITY_FAILED, DNS_TUNNEL_FAILED,
-    IPV4_PATH_FAILED, IPV6_PATH_FAILED, UDP_UNAVAILABLE, QUIC_UNAVAILABLE, NETWORK_CHANGED, TIMEOUT, SECURITY_REJECTED, UNKNOWN
+    PROTOCOL_HANDSHAKE_FAILED, ENGINE_START_FAILED, TUN_ESTABLISH_FAILED, HTTP_CONNECTIVITY_FAILED,
+    /** Older records only: meant what [DNS_THROUGH_TUNNEL_FAILED] means now. Kept so stored results still load. */
+    DNS_TUNNEL_FAILED,
+    IPV4_PATH_FAILED, IPV6_PATH_FAILED, UDP_UNAVAILABLE, QUIC_UNAVAILABLE, NETWORK_CHANGED, TIMEOUT, SECURITY_REJECTED,
+    /** The network's resolver answered with block-page or private addresses. */
+    DNS_TAMPERED,
+    /** Encrypted DNS (DoH) could not be reached on the physical network. */
+    DOH_UNAVAILABLE,
+    /** The server answered TLS but its certificate did not match the expected name. */
+    TLS_IDENTITY_FAILED,
+    /** TLS was cut on a network where a filtered name is cut and a neutral one passes to the same address. */
+    SNI_INTERFERENCE_SUSPECTED,
+    /** The proxy refused the credential (UUID, password, key). */
+    AUTHENTICATION_FAILED,
+    /** Traffic passes the tunnel but names do not resolve through it. */
+    DNS_THROUGH_TUNNEL_FAILED,
+    UPLOAD_CONSTRAINED, PACKET_LOSS_HIGH, MTU_PROBLEM,
+    /** A subscription, update or other control service could not be reached; the tunnel itself may be fine. */
+    CONTROL_PLANE_UNAVAILABLE,
+    /** No international reference answered on the physical network; config changes cannot fix this. */
+    NO_INTERNATIONAL_EGRESS,
+    /** The installed engine cannot run this config at all. */
+    UNSUPPORTED,
+    UNKNOWN
 }
 
 /** What was measured. Never interpreted. */

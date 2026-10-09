@@ -58,10 +58,12 @@ import com.example.ui.protocols.LabColors
 import com.example.ui.protocols.LabText
 import com.example.ui.protocols.labColors
 import com.example.vpn.lab.AutomationLevel
+import com.example.vpn.lab.ConfigTransaction
 import com.example.vpn.lab.ExperimentState
 import com.example.vpn.lab.LabDiscovery
 import com.example.vpn.lab.LabExperiment
 import com.example.vpn.lab.LabSnapshot
+import com.example.vpn.lab.NetworkState
 import com.example.vpn.lab.LabStep
 import com.example.vpn.lab.LabStore
 import com.example.vpn.lab.PromotionState
@@ -158,6 +160,29 @@ private fun stabilityWord(health: Int?) = when {
     else -> "Restricted"
 }
 
+private fun transactionWord(state: ConfigTransaction.State) = when (state) {
+    ConfigTransaction.State.PROPOSED -> "Proposed"
+    ConfigTransaction.State.REFUSED -> "Refused"
+    ConfigTransaction.State.STAGED -> "Staged"
+    ConfigTransaction.State.COMMITTED -> "In use"
+    ConfigTransaction.State.ROLLED_BACK -> "Rolled back"
+    ConfigTransaction.State.EXPIRED -> "Expired"
+}
+
+private fun transactionColor(c: LabColors, state: ConfigTransaction.State) = when (state) {
+    ConfigTransaction.State.COMMITTED -> c.good
+    ConfigTransaction.State.STAGED, ConfigTransaction.State.PROPOSED -> c.okay
+    ConfigTransaction.State.REFUSED, ConfigTransaction.State.ROLLED_BACK -> c.bad
+    ConfigTransaction.State.EXPIRED -> c.text3
+}
+
+private fun stateColor(c: LabColors, state: NetworkState) = when (state) {
+    NetworkState.NORMAL -> c.good
+    NetworkState.UNKNOWN -> c.text3
+    NetworkState.FULL_ISOLATION, NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, NetworkState.TLS_INTERFERED -> c.bad
+    else -> c.okay
+}
+
 private fun stabilityColor(c: LabColors, health: Int?) = when {
     health == null -> c.text3
     health >= 75 -> c.good
@@ -217,6 +242,21 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                     val verified = s.verified.count { it.state == PromotionState.VERIFIED && !it.disabled }
                     Metric(c, "Verified", if (verified == 1) "1 profile" else "$verified profiles")
                 }
+                s.networkState?.let { st ->
+                    Hairline(c)
+                    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            LabText("Network state", c.text2, 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                            Badge(st.primary.title, stateColor(c, st.primary))
+                        }
+                        val extra = st.restrictions - st.primary
+                        LabText(if (extra.isEmpty()) st.primary.detail else extra.joinToString(" · ") { it.title }, c.text, 13.sp, maxLines = 2,
+                            modifier = Modifier.padding(top = 6.dp))
+                        val confidence = if (st.primary == NetworkState.UNKNOWN) "" else "${(st.confidence * 100).toInt()}% confidence · "
+                        LabText(confidence + if (st.notTested.isEmpty()) "every check measured" else "${st.notTested.size} checks not tested", c.text3, 12.sp, maxLines = 1,
+                            modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
             }
         }
         item { GroupLabel(c, "Best verified strategy", if (s.verified.isNotEmpty()) "View all" else null) { actions.onOpen(LabSection.VERIFIED) } }
@@ -247,6 +287,24 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
             Row(Modifier.padding(horizontal = Gutter, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 PrimaryButton(c, if (s.running != null) "Experiment running" else "Run experiment", Icons.Rounded.PlayArrow, Modifier.weight(1f), s.running == null) { actions.onPick(true) }
                 if (s.running != null) SecondaryButton(c, "Live", Icons.Rounded.MonitorHeart) { actions.onOpen(LabSection.LIVE) }
+            }
+        }
+        if (s.transactions.isNotEmpty()) {
+            item { GroupLabel(c, "Config changes") }
+            item {
+                Panel(c) {
+                    s.transactions.take(3).forEachIndexed { i, tx ->
+                        if (i > 0) Hairline(c)
+                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                LabText("${tx.id} · ${tx.profileKey.substringBefore('@')}", c.text, 14.sp, FontWeight.Medium, maxLines = 1)
+                                LabText(tx.note.ifBlank { tx.reason }, c.text3, 12.sp, maxLines = 2)
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Badge(transactionWord(tx.state), transactionColor(c, tx.state))
+                        }
+                    }
+                }
             }
         }
         item { GroupLabel(c, "Lab") }

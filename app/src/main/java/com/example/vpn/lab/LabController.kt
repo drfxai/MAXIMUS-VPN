@@ -62,6 +62,7 @@ class LabController(
     private val steps = mutableListOf<LabStep>()
     private val log = ArrayDeque<String>()
 
+    private val stateTracker = NetworkStateTracker()
     private val _state = MutableStateFlow(LabSnapshot())
     val state: StateFlow<LabSnapshot> = _state.asStateFlow()
 
@@ -100,24 +101,26 @@ class LabController(
         val cap = runCatching { NetworkCapabilityDetector.detect(context) }.getOrNull()
         if (cap == null) {
             tracker.lost()
-            publish(message = "No network outside the VPN right now.")
+            publish(message = "No network outside the VPN right now.", networkState = null)
             return
         }
         val key = NetworkKey.current(context)
         val families = NetworkSessionTracker.families(cap.ipv4Available, cap.ipv6Available)
         val (ctx, isNew) = tracker.observe(key, families, labelOf(key))
-        val measured = cap.observations().count { !it.endsWith("not measured") }
-        val working = listOf(cap.dnsWorking, cap.tcpAvailable, cap.tlsAvailable, cap.cloudflareReachable).count { it == true }
-        store.recordNetwork(ctx, if (measured == 0) null else working * 25, cap.observations().filter { !it.endsWith("not measured") }.joinToString(" · "))
+        // Health counts only what was measured: an unmeasured check is neither a pass nor a fail.
+        val core = listOf(cap.dnsWorking, cap.tcpAvailable, cap.tlsAvailable, cap.cloudflareReachable, cap.internationalReachable).filterNotNull()
+        store.recordNetwork(ctx, if (core.isEmpty()) null else core.count { it } * 100 / core.size, cap.observations().filter { !it.endsWith("not measured") }.joinToString(" · "))
+        val reading = stateTracker.update(ctx.sessionId, NetworkStateClassifier.classify(cap))
+        XrayLogManager.i("LAB", "Network state: ${reading.summary()}.")
         val plan = store.planFor(ctx.contextKey, policy)
         if (isNew) {
             com.example.vpn.diagnostics.ConnectionMetrics.labSessions.incrementAndGet()
             XrayLogManager.i("LAB", "Network session ${ctx.sessionId} on ${NetworkKey.describe(key)} ($families).")
-            if (!plan.explore && store.automation().mayExperiment && job?.isActive != true) {
+            if (!plan.explore && store.automation().mayExperiment && job?.isActive != true && ExperimentPlanner.automaticRefusal(reading) == null) {
                 job = scope.launch { runCatching { revalidate(ctx, plan.revalidate, userStarted = false) } }
             }
         }
-        publish(network = ctx, capability = cap, plan = plan)
+        publish(network = ctx, capability = cap, plan = plan, networkState = reading)
     }
 
     fun setAutomation(level: AutomationLevel) {
@@ -214,7 +217,9 @@ class LabController(
         refreshNetwork(userStarted)
         val ctx = tracker.current ?: return fail(STEP_BASELINE, "No network outside the VPN.")
         val cap = NetworkCapabilityDetector.last
-        step(STEP_BASELINE, LabStep.State.DONE, "${ctx.label} · ${ctx.families}")
+        val reading = _state.value.networkState
+        if (!userStarted) ExperimentPlanner.automaticRefusal(reading)?.let { return fail(STEP_BASELINE, it) }
+        step(STEP_BASELINE, LabStep.State.DONE, "${ctx.label} · ${ctx.families}" + (reading?.let { " · ${it.primary.title}" } ?: ""))
         step(STEP_DNS, cap?.dnsWorking.asStep(), measuredWord(cap?.dnsWorking))
         step(STEP_IPV6, cap?.ipv6Available.asStep(), measuredWord(cap?.ipv6Available))
         step(STEP_TLS, cap?.tlsAvailable.asStep(), measuredWord(cap?.tlsAvailable))
@@ -363,21 +368,47 @@ class LabController(
         publish(running = null, message = result.note)
     }
 
-    /** AUTO_APPLY: only reviewed recovery profiles, through the ledger the VPN already uses with its rollback. */
+    /**
+     * AUTO_APPLY: only reviewed recovery profiles, through the ledger the VPN already uses with its rollback.
+     * Every attempt is a [ConfigTransaction]: refused ones are kept with their reason, staged ones are later
+     * committed or rolled back from what the ledger saw in real use.
+     */
     private fun apply(v: VerifiedNetworkProfile, parent: VlessProfile, ctx: NetworkContext) {
         val rp = RecoveryProfiles.BUILT_IN.firstOrNull { it.key == v.mutationProfileId } ?: return
         val now = System.currentTimeMillis()
-        if (rp.isExpired(now)) return
-        val copy = rp.derive(parent, v.endpoint) ?: return
-        val gate = RecoverySecurityGate.check(parent, copy)
-        if (!gate.passed || !CandidateMutationPolicy.check(parent, copy).allowed) return
+        val copy = rp.derive(parent, v.endpoint)
+        val fields = copy?.let { BpbRecoveryEngine.diff(parent, it).map { c -> c.field } } ?: emptyList()
+        var tx = ConfigOptimizer.propose(store.newTransactionId(), parent.effectiveFingerprint, rp.key, ctx.networkKey, v.endpoint, fields,
+            "${v.strategy} verified on ${v.networkLabel}: ${v.stats.successes}/${v.stats.attempts} real requests passed", now)
+        val gate = copy?.let { RecoverySecurityGate.check(parent, it) }
+        val refusal = when {
+            rp.isExpired(now) -> "The recovery profile has expired."
+            copy == null -> "The recovery profile does not apply to this config."
+            gate?.passed != true -> "Refused by the security gate."
+            !CandidateMutationPolicy.check(parent, copy).allowed -> "Refused by the mutation policy."
+            else -> null
+        }
+        tx = ConfigOptimizer.validate(tx, refusal, now)
+        store.saveTransaction(tx)
+        if (tx.state != ConfigTransaction.State.STAGED || copy == null || gate == null) {
+            XrayLogManager.i("LAB", "${tx.id} refused for ${parent.name}: ${tx.note}")
+            return
+        }
         val candidate = DerivedRecoveryCandidate(
             BpbRecoveryEngine.idOf(parent.effectiveFingerprint, rp.key, v.endpoint), parent.effectiveFingerprint, parent.id, rp.key,
             now, minOf(now + APPLY_TTL_MS, rp.expiresAt), ctx.networkKey, BpbRecoveryEngine.diff(parent, copy), copy, gate, v.endpoint,
             rollbackAfter = rp.rollbackPolicy
         )
         ledger.record(candidate, success = true, now = now)
-        XrayLogManager.i("LAB", "${v.profileId} will be tried first for ${parent.name} on ${v.networkLabel}; it rolls back on failure.")
+        XrayLogManager.i("LAB", "${tx.id}: ${v.profileId} will be tried first for ${parent.name} on ${v.networkLabel}; it rolls back on failure.")
+    }
+
+    /** Commits, rolls back or expires staged transactions from what the recovery ledger saw in real use. */
+    private fun reconcileTransactions() {
+        val now = System.currentTimeMillis()
+        val entries = ledger.entries()
+        store.reconcileTransactions { tx -> ConfigOptimizer.reconcile(tx, entries.firstOrNull { ConfigOptimizer.matches(tx, it) }, now) }
+            .forEach { XrayLogManager.i("LAB", "${it.id} ${it.state.name.lowercase().replace('_', ' ')}: ${it.note}") }
     }
 
     private fun refusal(userStarted: Boolean, fingerprint: String, now: Long): String? {
@@ -422,12 +453,15 @@ class LabController(
         capability: NetworkCapabilityProfile? = _state.value.capability,
         running: LabExperiment? = _state.value.running,
         plan: LabStore.ReturnPlan? = _state.value.plan,
-        message: String? = _state.value.message
+        message: String? = _state.value.message,
+        networkState: NetworkStateReading? = _state.value.networkState
     ) {
+        reconcileTransactions()
         _state.value = LabSnapshot(
             network = network ?: tracker.current, capability = capability, automation = store.automation(), running = running, steps = steps.toList(),
             experiments = store.experiments().sortedByDescending { it.startTime }, verified = store.verifiedProfiles(),
-            discoveries = store.discoveries(), networks = store.networks(), plan = plan, message = message, log = log.toList()
+            discoveries = store.discoveries(), networks = store.networks(), plan = plan, message = message, log = log.toList(),
+            networkState = networkState, transactions = store.transactions()
         )
     }
 
