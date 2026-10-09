@@ -82,6 +82,12 @@ data class NetworkContext(
     val label: String
 ) {
     val contextKey: String get() = "$networkKey|$families"
+
+    /**
+     * The key the VPN side (recovery ledger, endpoint scores) uses: Wi-Fi and Ethernet without the LAB's
+     * fingerprint, since the VPN does not fingerprint links. Mobile keys are the same on both sides.
+     */
+    val vpnKey: String get() = if (networkKey.startsWith("wifi:") || networkKey.startsWith("ethernet:")) networkKey.substringBefore(':') else networkKey
 }
 
 /** Counts for one candidate across the rounds of an experiment. */

@@ -28,6 +28,9 @@ data class RankedMethod(
     val attempts: Int,
     val passes: Int
 ) {
+    /** A saved config as it is (not a derived copy, which keeps its parent's id): safe to select directly. */
+    val savedConfig: Boolean get() = !why.startsWith("safe copy")
+
     fun toJson(): JSONObject = JSONObject().put("p", profileId).put("n", name).put("f", family.name).put("s", status.name).put("g", stage.name)
         .put("l", latencyMs ?: JSONObject.NULL).put("c", confidence ?: JSONObject.NULL).put("w", why).put("a", attempts).put("o", passes)
 
@@ -55,7 +58,13 @@ data class AnalysisReport(
     val paths: List<LivePath>,
     val ranked: List<RankedMethod>,
     val untested: List<String>,
-    val note: String
+    val note: String,
+    /** The first config that passed a real request in this run (Fast Recovery). */
+    val firstWorking: String? = null,
+    /** How the plan changed during the run, in order. */
+    val events: List<String> = emptyList(),
+    /** Why the run stopped. */
+    val stopReason: String? = null
 ) {
     val best: RankedMethod? get() = ranked.firstOrNull { it.stage.carriesTraffic }
 
@@ -66,6 +75,7 @@ data class AnalysisReport(
                 .put("l", p.latencyMs ?: JSONObject.NULL).put("at", p.checkedAt ?: JSONObject.NULL).put("r", p.reason).put("tr", p.tried).put("ps", p.passed))
         } })
         .put("rk", JSONArray().apply { ranked.forEach { put(it.toJson()) } }).put("u", JSONArray(untested)).put("n", note)
+        .put("fw", firstWorking ?: JSONObject.NULL).put("ev", JSONArray(events)).put("sr", stopReason ?: JSONObject.NULL)
 
     companion object {
         private fun strings(a: JSONArray?) = a?.let { (0 until it.length()).map { i -> it.optString(i) } } ?: emptyList()
@@ -82,7 +92,9 @@ data class AnalysisReport(
             AnalysisReport(o.getString("s"), o.getString("k"), o.optString("l"), o.getLong("t0"), o.getLong("t1"), o.optString("st"), o.optDouble("c", 0.0),
                 o.optString("m"), strings(o.optJSONArray("pr")), strings(o.optJSONArray("r")), paths,
                 o.optJSONArray("rk")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(RankedMethod::fromJson) } } ?: emptyList(),
-                strings(o.optJSONArray("u")), o.optString("n"))
+                strings(o.optJSONArray("u")), o.optString("n"),
+                if (o.isNull("fw") || !o.has("fw")) null else o.optString("fw"), strings(o.optJSONArray("ev")),
+                if (o.isNull("sr") || !o.has("sr")) null else o.optString("sr"))
         }.getOrNull()
     }
 }
@@ -106,7 +118,9 @@ object FullAnalysis {
         val byFamily = profiles.filter { (_, f) -> f !in plan.skip }
             .groupBy({ it.second }, { it.first })
             .mapValues { (_, list) -> list.sortedByDescending { it.effectiveFingerprint in provenHere } }
-        val order = (plan.prefer.filter { it in byFamily } + byFamily.keys.filter { it !in plan.prefer }.sortedBy { it.engine })
+        val order = plan.prefer.filter { it in byFamily && it !in plan.lowPrior } +
+            byFamily.keys.filter { it !in plan.prefer && it !in plan.lowPrior }.sortedBy { it.engine } +
+            byFamily.keys.filter { it in plan.lowPrior }
         val picks = mutableListOf<Pick>()
         var round = 0
         while (picks.size < plan.budget) {
@@ -130,10 +144,31 @@ object FullAnalysis {
     fun rank(methods: List<RankedMethod>, prefer: List<PathFamily>): List<RankedMethod> =
         methods.sortedWith(
             compareByDescending<RankedMethod> { it.stage.carriesTraffic }
+                .thenBy { it.status == PathStatus.DEGRADED }
+                .thenByDescending { it.status == PathStatus.VERIFIED }
                 .thenByDescending { it.passes }
                 .thenBy { prefer.indexOf(it.family).let { i -> if (i < 0) Int.MAX_VALUE else i } }
                 .thenBy { it.latencyMs ?: Long.MAX_VALUE }
         )
+
+    /**
+     * Verification verdict from the real requests of one method, in order. Two passes at least
+     * [STABLE_WINDOW_MS] apart with no failure after the first pass: VERIFIED. A pass followed by a failed
+     * recheck: DEGRADED. One pass (or two too close together): CANDIDATE. Only failures: FAILED.
+     */
+    fun verdict(outcomes: List<Boolean>, spanMs: Long): PathStatus {
+        val first = outcomes.indexOf(true)
+        return when {
+            outcomes.isEmpty() -> PathStatus.NOT_TESTED
+            first < 0 -> PathStatus.FAILED
+            outcomes.drop(first).any { !it } -> PathStatus.DEGRADED
+            outcomes.count { it } >= 2 && spanMs >= STABLE_WINDOW_MS -> PathStatus.VERIFIED
+            else -> PathStatus.CANDIDATE
+        }
+    }
+
+    /** The least time between the first and the last pass for a path to count as stable. */
+    const val STABLE_WINDOW_MS = 3_000L
 
     /** Confidence from what was measured only: passes over attempts, capped below certainty. */
     fun confidence(passes: Int, attempts: Int): Double? = when {
@@ -155,14 +190,16 @@ object FullAnalysis {
         val quic = when (p.quicStatus) {
             "QUIC_AVAILABLE" -> PathStatus.AVAILABLE
             "QUIC_DEGRADED" -> PathStatus.DEGRADED
-            "QUIC_BLOCKED_SUSPECTED" -> PathStatus.BLOCKED
+            // Suspected is never shown as blocked: silence alone does not prove a block.
+            "QUIC_BLOCKED_SUSPECTED" -> PathStatus.BLOCKED_SUSPECTED
+            "QUIC_UNRESPONSIVE" -> PathStatus.UNRESPONSIVE
             else -> PathStatus.NOT_TESTED
         }
         return listOf(
             plainDns,
-            row("dns-doh", "Encrypted DNS (DoH)", p.dohReachable, PathStatus.AVAILABLE, PathStatus.BLOCKED, "one question to an IP-literal DoH resolver"),
-            row("dns-dot", "DNS over TLS", p.dotReachable, PathStatus.AVAILABLE, PathStatus.BLOCKED, "verified TLS to port 853"),
-            LivePath("dns-egress", "Recursive DNS abroad", when (p.recursiveDnsEgress) { true -> PathStatus.AVAILABLE; false -> PathStatus.BLOCKED; null -> PathStatus.NOT_TESTED },
+            row("dns-doh", "Encrypted DNS (DoH)", p.dohReachable, PathStatus.AVAILABLE, PathStatus.BLOCKED_SUSPECTED, "one question to an IP-literal DoH resolver"),
+            row("dns-dot", "DNS over TLS", p.dotReachable, PathStatus.AVAILABLE, PathStatus.BLOCKED_SUSPECTED, "verified TLS to port 853"),
+            LivePath("dns-egress", "Recursive DNS abroad", when (p.recursiveDnsEgress) { true -> PathStatus.AVAILABLE; false -> PathStatus.FAILED; null -> PathStatus.NOT_TESTED },
                 reason = if (p.recursiveDnsEgress == null) "needs a foreign authoritative test zone; not inferred" else "nonce observed"),
             LivePath("quic", "QUIC / HTTP/3", quic, checkedAt = if (quic == PathStatus.NOT_TESTED) null else p.measuredAt,
                 reason = p.quicStatus?.lowercase()?.replace('_', ' ') ?: "not measured"),
@@ -189,16 +226,19 @@ object FullAnalysis {
         results: List<RankedMethod>,
         plan: ExperimentPlanner.Plan,
         notTestedReason: Map<PathFamily, String>,
-        now: Long
+        now: Long,
+        notRequired: Set<PathFamily> = emptySet()
     ): List<LivePath> = families.sortedBy { it.ordinal }.map { f ->
         val mine = results.filter { it.family == f }
         val passed = mine.filter { it.stage.carriesTraffic }
         val best = passed.minByOrNull { it.latencyMs ?: Long.MAX_VALUE }
         when {
-            best != null -> LivePath("family-${f.name}", f.title, if (best.passes >= 2) PathStatus.VERIFIED else PathStatus.CANDIDATE, best.stage,
-                best.confidence, best.latencyMs, now, "real request passed through ${best.name}", mine.size, passed.size)
-            plan.skip[f] != null -> LivePath("family-${f.name}", f.title, if (plan.mode == ExperimentPlanner.Mode.ORDINARY) PathStatus.BLOCKED else PathStatus.NOT_TESTED,
-                reason = "skipped: ${plan.skip[f]}")
+            best != null -> LivePath("family-${f.name}", f.title,
+                passed.firstOrNull { it.status == PathStatus.VERIFIED }?.status ?: passed.firstOrNull { it.status == PathStatus.CANDIDATE }?.status ?: best.status,
+                best.stage, best.confidence, best.latencyMs, now, "real request passed through ${best.name}", mine.size, passed.size)
+            f in notRequired -> LivePath("family-${f.name}", f.title, PathStatus.NOT_REQUIRED, reason = notTestedReason[f] ?: "enough verified paths already")
+            // A skip is a planning choice from other measurements, never proof that the family is blocked.
+            plan.skip[f] != null -> LivePath("family-${f.name}", f.title, PathStatus.NOT_TESTED, reason = "skipped: ${plan.skip[f]}")
             mine.any { !it.status.equals(PathStatus.NOT_TESTED) } -> LivePath("family-${f.name}", f.title,
                 if (mine.all { it.status == PathStatus.UNSUPPORTED }) PathStatus.UNSUPPORTED else PathStatus.FAILED,
                 mine.maxOf { it.stage }, null, null, now, mine.first { it.status != PathStatus.NOT_TESTED }.why, mine.size, 0)
@@ -206,13 +246,74 @@ object FullAnalysis {
         }
     }
 
+    /**
+     * The family rows of the live view while the analysis runs: QUEUED until a config of the family is
+     * tested, TESTING while one is, then its verdict. [finished] turns the leftover queue into NOT_TESTED
+     * (or NOT_REQUIRED) with the reason. Pure.
+     */
+    fun liveFamilyRows(
+        tracks: List<AdaptivePlanner.Track>,
+        current: String?,
+        plan: ExperimentPlanner.Plan,
+        notTestedReason: Map<PathFamily, String>,
+        sessionId: String,
+        now: Long,
+        finished: Boolean = false,
+        stopReason: String? = null,
+        notRequired: Set<PathFamily> = emptySet()
+    ): List<LivePath> {
+        val byFamily = tracks.groupBy { it.candidate.family }
+        return (byFamily.keys + notTestedReason.keys).distinct().sortedBy { it.ordinal }.map { f ->
+            val mine = byFamily[f].orEmpty()
+            val tested = mine.filter { it.outcomes.isNotEmpty() }
+            val working = tested.filter { it.status == PathStatus.VERIFIED || it.status == PathStatus.CANDIDATE || it.status == PathStatus.DEGRADED }
+            val best = working.sortedWith(compareByDescending<AdaptivePlanner.Track> { it.status == PathStatus.VERIFIED }
+                .thenBy { it.status == PathStatus.DEGRADED }.thenBy { it.bestLatency ?: Long.MAX_VALUE }).firstOrNull()
+            val testing = mine.firstOrNull { it.candidate.id == current }
+            val attempts = tested.sumOf { it.outcomes.size }
+            val base = LivePath("family-${f.name}", f.title, PathStatus.NOT_TESTED, tried = tested.size, passed = working.size, attempts = attempts, sessionId = sessionId)
+            when {
+                testing != null -> base.copy(status = PathStatus.TESTING, latencyMs = best?.bestLatency, checkedAt = now,
+                    reason = "testing ${testing.candidate.name}" + if (testing.outcomes.isNotEmpty()) " again (stability)" else "")
+                best != null -> base.copy(status = best.status, stage = if (best.status == PathStatus.VERIFIED) ConnectionStage.STABILITY_VERIFIED else ConnectionStage.APPLICATION_REQUEST_PASSED,
+                    confidence = confidence(best.passes, best.outcomes.size), latencyMs = best.bestLatency, checkedAt = best.lastPassAt ?: now,
+                    reason = when (best.status) {
+                        PathStatus.VERIFIED -> "${best.passes} real requests passed through ${best.candidate.name}, ${STABLE_WINDOW_MS / 1000}s+ apart"
+                        PathStatus.DEGRADED -> "${best.candidate.name} passed, then failed its recheck"
+                        else -> "one real request passed through ${best.candidate.name}; recheck pending"
+                    })
+                tested.isNotEmpty() -> base.copy(status = PathStatus.FAILED, confidence = 0.0, checkedAt = now,
+                    reason = tested.firstNotNullOfOrNull { it.failure } ?: "no real request passed")
+                f in notRequired -> base.copy(status = PathStatus.NOT_REQUIRED, reason = "not needed: ${stopReason ?: "enough verified paths"}")
+                plan.skip[f] != null -> base.copy(reason = "skipped: ${plan.skip[f]}")
+                !finished && mine.any { it.notTested == null } -> base.copy(status = PathStatus.QUEUED, reason = "waiting for its turn")
+                else -> base.copy(reason = notTestedReason[f] ?: mine.firstNotNullOfOrNull { it.notTested }?.let { "not tested: $it" }
+                    ?: stopReason?.let { "not reached: $it" } ?: "not reached within this run's test budget")
+            }
+        }
+    }
+
     /** What this run did not measure, said plainly. */
-    fun untested(p: NetworkCapabilityProfile?, reading: NetworkStateReading?): List<String> =
+    fun untested(p: NetworkCapabilityProfile?, reading: NetworkStateReading?, burstMeasured: Boolean = false): List<String> =
         reading?.notTested.orEmpty() + listOf(
             "ECH handshake (no ECH-capable measurement on this phone yet)",
             "MTU / path MTU",
-            "Packet loss and jitter",
-            "Upload / download asymmetry",
-            "External DNS leak test"
-        ) + if (p?.recursiveDnsEgress == null) listOf("Recursive DNS egress (needs a controlled foreign DNS zone)") else emptyList()
+            "Upload / download throughput and asymmetry",
+            "External DNS leak test",
+            "Multi-vantage quorum (needs a signed probe manifest; design only)"
+        ) + (if (!burstMeasured) listOf("Packet loss and jitter") else emptyList()) +
+            if (p?.recursiveDnsEgress == null) listOf("Recursive DNS egress (needs a controlled foreign DNS zone)") else emptyList()
+
+    /** The packet loss / jitter row, from a small UDP DNS burst to the best resolver. */
+    fun burstPath(b: ResolverIntelligence.Burst): LivePath {
+        val loss = b.lossPercent
+        val status = when {
+            b.answered == 0 -> PathStatus.FAILED
+            loss >= 30 || b.rateLimited -> PathStatus.DEGRADED
+            else -> PathStatus.AVAILABLE
+        }
+        return LivePath("udp-burst", "Packet loss / jitter (UDP)", status, checkedAt = b.measuredAt, latencyMs = b.medianMs, attempts = b.sent,
+            reason = "${b.sent} DNS queries to ${b.label}: $loss% lost" + (b.jitterMs?.let { ", jitter $it ms" } ?: "") +
+                if (b.rateLimited) ", answers stopped part-way (rate limiting suspected)" else "")
+    }
 }

@@ -31,7 +31,9 @@ object LabBrief {
     }.trim()
 
     private fun kindOf(key: String) = when {
-        key == "wifi" -> "Wi-Fi"
+        // Never the fingerprint: the AI sees the kind of link only.
+        key.startsWith("wifi") -> "Wi-Fi"
+        key.startsWith("ethernet") -> "Ethernet"
         key.startsWith("cell") -> "mobile data"
         else -> key.substringBefore(':')
     }

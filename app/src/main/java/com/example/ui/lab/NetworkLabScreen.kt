@@ -72,8 +72,22 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     fun open(section: LabSection?) { local.value = local.value.copy(section = section) }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }
-    fun fullAnalysis() { open(LabSection.LIVE); lab.fullAnalysis() }
+    fun fullAnalysis() {
+        open(LabSection.LIVE)
+        // Optional AI checkpoint inside the loop; without a configured provider the LAB runs exactly the same.
+        lab.familyAdvisor = if (gateway.isConfigured()) { brief, families -> LabAgent(chat).rankFamilies(brief, families) } else null
+        lab.fullAnalysis()
+    }
     fun refreshNetwork() = viewModelScope.launch { lab.refreshNetwork(userStarted = true) }
+
+    /**
+     * USE RECOMMENDED: selects the saved config the LAB measured best, as if the user picked it on the
+     * Servers screen. Nothing is changed in the config, and nothing connects until the user taps Connect.
+     */
+    fun useRecommended(profileId: String, name: String) {
+        RayApplication.instance.settingsRepository.setSelectedProfileId(profileId)
+        lab.showMessage("Selected $name. Connect to use it; the config itself is unchanged.")
+    }
 
     /** Advisory only: the answer becomes an unverified discovery and a list of changes the user may choose to test. */
     fun askAgent() {
@@ -137,7 +151,8 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onOpen = viewModel::open, onPick = viewModel::pick, onRun = viewModel::run, onFullAnalysis = viewModel::fullAnalysis, onCancel = lab::cancel,
                 onAutomation = lab::setAutomation, onRefreshNetwork = { viewModel.refreshNetwork() }, onRetest = { viewModel.open(LabSection.LIVE); lab.retest(it) },
                 onDisable = lab::setDisabled, onRetire = lab::retire, onDismissMessage = lab::dismissMessage,
-                onResearchRefresh = { viewModel.refreshResearch() }, onAskAgent = viewModel::askAgent, onTestSuggestion = viewModel::testSuggestion
+                onResearchRefresh = { viewModel.refreshResearch() }, onAskAgent = viewModel::askAgent, onTestSuggestion = viewModel::testSuggestion,
+                onUseRecommended = viewModel::useRecommended
             )
         },
         relativeTime = ::relative

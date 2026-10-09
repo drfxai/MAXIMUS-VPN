@@ -64,6 +64,8 @@ import com.example.vpn.lab.ConfigTransaction
 import com.example.vpn.lab.ExperimentState
 import com.example.vpn.lab.LabDiscovery
 import com.example.vpn.lab.LabExperiment
+import com.example.vpn.lab.LabPick
+import com.example.vpn.lab.LiveAnalysis
 import com.example.vpn.lab.LabSnapshot
 import com.example.vpn.lab.NetworkState
 import com.example.vpn.lab.LabStep
@@ -122,7 +124,9 @@ class NetworkLabActions(
     val onDismissMessage: () -> Unit = {},
     val onResearchRefresh: () -> Unit = {},
     val onAskAgent: () -> Unit = {},
-    val onTestSuggestion: (LabSuggestionUi) -> Unit = {}
+    val onTestSuggestion: (LabSuggestionUi) -> Unit = {},
+    /** Selects a saved config (id, name) as the one to connect with. */
+    val onUseRecommended: (String, String) -> Unit = { _, _ -> }
 )
 
 @Composable
@@ -134,7 +138,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
             else -> Column(Modifier.fillMaxSize()) {
                 TitleBar(c, s.title, sectionSubtitle(s, state), Icons.AutoMirrored.Rounded.ArrowBack, { actions.onOpen(null) })
                 when (s) {
-                    LabSection.REPORT -> ReportPage(c, state, relativeTime)
+                    LabSection.REPORT -> ReportPage(c, state, actions, relativeTime)
                     LabSection.NETWORKS -> NetworksPage(c, state.snapshot, relativeTime)
                     LabSection.LIVE -> LivePage(c, state, actions)
                     LabSection.EXPERIMENTS -> ExperimentsPage(c, state.snapshot.experiments, relativeTime)
@@ -189,16 +193,17 @@ private fun transactionColor(c: LabColors, state: ConfigTransaction.State) = whe
 private fun stateColor(c: LabColors, state: NetworkState) = when (state) {
     NetworkState.NORMAL -> c.good
     NetworkState.UNKNOWN -> c.text3
-    NetworkState.FULL_ISOLATION, NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, NetworkState.TLS_INTERFERED -> c.bad
+    NetworkState.TRUE_PHYSICAL_ISOLATION, NetworkState.NO_VERIFIED_EGRESS, NetworkState.SEVERE_FILTERING,
+    NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, NetworkState.TLS_INTERFERED -> c.bad
     else -> c.okay
 }
 
 private fun pathColor(c: LabColors, s: PathStatus) = when (s) {
     PathStatus.VERIFIED, PathStatus.AVAILABLE, PathStatus.SUPPORTED -> c.good
-    PathStatus.CANDIDATE, PathStatus.DEGRADED, PathStatus.EXPERIMENTAL -> c.okay
+    PathStatus.CANDIDATE, PathStatus.DEGRADED, PathStatus.EXPERIMENTAL, PathStatus.BLOCKED_SUSPECTED, PathStatus.UNRESPONSIVE -> c.okay
     PathStatus.TESTING, PathStatus.QUEUED -> c.accent
     PathStatus.FAILED, PathStatus.BLOCKED, PathStatus.SECURITY_REJECTED -> c.bad
-    PathStatus.NOT_TESTED, PathStatus.UNSUPPORTED, PathStatus.EXPIRED -> c.text3
+    PathStatus.NOT_TESTED, PathStatus.UNSUPPORTED, PathStatus.EXPIRED, PathStatus.NOT_REQUIRED -> c.text3
 }
 
 private fun stabilityColor(c: LabColors, health: Int?) = when {
@@ -240,7 +245,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
             Panel(c) {
                 Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).background(c.cardAlt), contentAlignment = Alignment.Center) {
-                        Icon(if (s.network?.networkKey == "wifi") Icons.Rounded.Wifi else Icons.Rounded.CellTower, null, tint = c.text2, modifier = Modifier.size(19.dp))
+                        Icon(if (s.network?.networkKey?.startsWith("wifi") == true) Icons.Rounded.Wifi else Icons.Rounded.CellTower, null, tint = c.text2, modifier = Modifier.size(19.dp))
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
@@ -309,6 +314,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                 else SecondaryButton(c, "One config", Icons.Rounded.PlayArrow) { actions.onPick(true) }
             }
         }
+        bestNow(s)?.let { b -> item { BestConnectionCard(c, b, actions) } }
         s.analysis?.let { report ->
             item { GroupLabel(c, "Live connectivity paths", "Full report") { actions.onOpen(LabSection.REPORT) } }
             item {
@@ -468,7 +474,19 @@ private fun NetworkRow(c: LabColors, n: LabStore.NetworkSeen, current: Boolean, 
 private fun LivePage(c: LabColors, state: NetworkLabUiState, actions: NetworkLabActions) {
     val s = state.snapshot
     var advanced by remember { mutableStateOf(false) }
+    var technical by remember { mutableStateOf(false) }
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)) {
+        s.live?.let { live ->
+            bestNow(s)?.let { b -> item { BestConnectionCard(c, b, actions) } }
+            item { LiveSummary(c, live) }
+            item { GroupLabel(c, "Live connectivity paths", if (technical) "Simple view" else "Technical view") { technical = !technical } }
+            item {
+                Panel(c) {
+                    val rows = if (technical) live.paths else live.paths.filter { it.key.startsWith("family-") }
+                    rows.forEachIndexed { i, p -> if (i > 0) Hairline(c); PathRow(c, p, technical) }
+                }
+            }
+        }
         if (s.steps.isEmpty()) item { Empty(c, "Nothing running", "Run an experiment from the LAB home to follow it here.") }
         else item {
             Panel(c) {
@@ -527,6 +545,64 @@ private fun StepRow(c: LabColors, step: LabStep, first: Boolean, last: Boolean) 
 
 // ---------------------------------------------------------------- full analysis
 
+/** BEST CONNECTION NOW: the running analysis's best path, else the last report's, saved configs only. */
+private data class BestNow(val pick: LabPick?, val status: PathStatus, val reason: String, val running: Boolean)
+
+private fun bestNow(s: LabSnapshot): BestNow? {
+    s.live?.let { live ->
+        val b = live.best ?: return BestNow(null, PathStatus.TESTING, live.hypothesis, true)
+        return BestNow(b, b.status, when (b.status) {
+            PathStatus.VERIFIED -> "Verified by repeated real requests on ${live.networkLabel}."
+            PathStatus.DEGRADED -> "Passed once, then failed a recheck; still looking for better."
+            else -> "Passed one real request; checking stability and alternatives."
+        }, true)
+    }
+    val r = s.analysis ?: return null
+    if (s.network?.contextKey != r.contextKey) return null
+    val m = r.ranked.firstOrNull { it.stage.carriesTraffic && it.savedConfig }
+        ?: return BestNow(null, PathStatus.FAILED, r.note, false)
+    return BestNow(LabPick(m.profileId, m.name, m.family, m.status, m.latencyMs), m.status, m.why, false)
+}
+
+@Composable
+private fun BestConnectionCard(c: LabColors, b: BestNow, actions: NetworkLabActions) {
+    Panel(c) {
+        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+            LabText("BEST CONNECTION NOW", c.text3, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                LabText(b.pick?.name ?: if (b.running) "Searching…" else "No working path", c.text, 16.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
+                Badge(b.status.title, pathColor(c, b.status))
+            }
+            b.pick?.let { p -> LabText(listOfNotNull(p.family.title, p.latencyMs?.let { "$it ms" }).joinToString(" · "), c.text2, 12.5.sp, maxLines = 1) }
+            LabText(b.reason, c.text3, 12.sp, maxLines = 3, lineHeight = 16.sp, modifier = Modifier.padding(top = 2.dp))
+            b.pick?.let { p ->
+                PrimaryButton(c, "Use recommended", Icons.Rounded.CheckCircle, Modifier.fillMaxWidth().padding(top = 10.dp)) { actions.onUseRecommended(p.profileId, p.name) }
+            }
+        }
+    }
+}
+
+/** Current network, state, phase, progress, hypothesis and the test running now. */
+@Composable
+private fun LiveSummary(c: LabColors, live: LiveAnalysis) {
+    Panel(c) {
+        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LabText("${live.networkLabel} · ${live.state}", c.text, 14.5.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
+                LabText("${live.testsDone}/${live.budget} tests", c.text3, 12.sp, maxLines = 1)
+            }
+            Box(Modifier.fillMaxWidth().padding(top = 8.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.divider)) {
+                Box(Modifier.fillMaxWidth((live.testsDone.toFloat() / live.budget.coerceAtLeast(1)).coerceIn(0f, 1f)).height(4.dp).background(c.accent))
+            }
+            LabText(live.phase.title, c.text2, 12.5.sp, FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(top = 8.dp))
+            LabText(live.hypothesis, c.text2, 12.5.sp, maxLines = 3, lineHeight = 17.sp)
+            live.currentTest?.let { LabText("Testing now: $it", c.accent, 12.5.sp, FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(top = 4.dp)) }
+            live.firstWorking?.let { LabText("First working path: ${it.name} (${it.family.title})", c.good, 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp)) }
+            live.events.takeLast(3).forEach { LabText("• $it", c.text3, 11.5.sp, maxLines = 2, lineHeight = 15.sp) }
+        }
+    }
+}
+
 @Composable
 private fun ReportHeadline(c: LabColors, r: AnalysisReport, relativeTime: (Long) -> String) {
     Column(Modifier.fillMaxWidth().padding(14.dp)) {
@@ -540,13 +616,20 @@ private fun ReportHeadline(c: LabColors, r: AnalysisReport, relativeTime: (Long)
 }
 
 @Composable
-private fun PathRow(c: LabColors, p: LivePath) {
+private fun PathRow(c: LabColors, p: LivePath, technical: Boolean = false) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
         Dot(pathColor(c, p.status))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             LabText(p.title + (p.latencyMs?.let { " · $it ms" } ?: ""), c.text, 13.5.sp, FontWeight.Medium, maxLines = 1)
             if (p.reason.isNotBlank()) LabText(p.reason, c.text3, 12.sp, maxLines = 2, lineHeight = 16.sp)
+            if (technical) LabText(listOfNotNull(
+                p.stage.title.takeIf { p.stage != com.example.vpn.lab.ConnectionStage.NOT_TESTED },
+                p.confidence?.let { "confidence ${pct(it)}" },
+                "${p.attempts} request(s)".takeIf { p.attempts > 0 },
+                "${p.passed}/${p.tried} configs passed".takeIf { p.tried > 0 },
+                p.sessionId?.let { "session ${it.takeLast(6)}" }
+            ).joinToString(" · "), c.text3, 11.sp, maxLines = 2, lineHeight = 15.sp)
         }
         Spacer(Modifier.width(8.dp))
         Badge(p.status.title, pathColor(c, p.status))
@@ -568,7 +651,7 @@ private fun MethodRow(c: LabColors, rank: Int, m: RankedMethod) {
 }
 
 @Composable
-private fun ReportPage(c: LabColors, state: NetworkLabUiState, relativeTime: (Long) -> String) {
+private fun ReportPage(c: LabColors, state: NetworkLabUiState, actions: NetworkLabActions, relativeTime: (Long) -> String) {
     val r = state.snapshot.analysis
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)) {
         if (r == null) {
@@ -576,6 +659,7 @@ private fun ReportPage(c: LabColors, state: NetworkLabUiState, relativeTime: (Lo
             return@LazyColumn
         }
         item { Panel(c) { ReportHeadline(c, r, relativeTime) } }
+        bestNow(state.snapshot)?.let { b -> item { BestConnectionCard(c, b, actions) } }
         item { GroupLabel(c, "Why this plan") }
         item {
             Panel(c) {
@@ -585,10 +669,21 @@ private fun ReportPage(c: LabColors, state: NetworkLabUiState, relativeTime: (Lo
                 }
             }
         }
+        if (r.events.isNotEmpty() || r.firstWorking != null || r.stopReason != null) {
+            item { GroupLabel(c, "How the plan changed") }
+            item {
+                Panel(c) {
+                    Column(Modifier.padding(14.dp)) {
+                        (r.events + listOfNotNull(r.firstWorking?.let { "First working path: $it." }, r.stopReason?.let { "Stopped: $it." }))
+                            .forEach { LabText("• $it", c.text2, 12.5.sp, maxLines = 4, lineHeight = 17.sp) }
+                    }
+                }
+            }
+        }
         item { GroupLabel(c, "Live connectivity paths") }
         item {
             Panel(c) {
-                r.paths.sortedBy { it.status.ordinal }.forEachIndexed { i, p -> if (i > 0) Hairline(c); PathRow(c, p) }
+                r.paths.sortedBy { it.status.ordinal }.forEachIndexed { i, p -> if (i > 0) Hairline(c); PathRow(c, p, technical = true) }
             }
         }
         item { GroupLabel(c, "Ranked methods") }

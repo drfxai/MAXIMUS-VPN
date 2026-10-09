@@ -57,7 +57,7 @@ Changed: `NetworkCapabilityDetector/Profile`, `NetworkStateClassifier`, `Experim
 | 2 | Measure | Second measurement (hysteresis needs two) + bounded resolver checks |
 | 3 | Classify | State with confidence; evidence and "not tested" lists kept apart |
 | 4 | Diagnose | Restrictions named (DNS, SNI suspected, UDP, QUIC, IPv6, CDN) |
-| 5 | Plan | Mode (ORDINARY / DNS_TUNNEL_RECOVERY / STOP), family order, skips, budget |
+| 5 | Plan | Mode (ORDINARY / EMERGENCY_RECOVERY since V5), family order, skips, budget |
 | 6 | Experiment | Real requests: Xray families in batches of ≤5, engines one at a time (≤2, ≤3 in DNS mode) |
 | 7 | Verify | Each Xray winner gets a second real request (stability) |
 | 8 | Score | Real traffic > two passes > preferred family > latency; security is a gate, not a score |
@@ -73,7 +73,7 @@ test core cannot run beside the VPN's, and the LAB never disturbs a running tunn
 
 See `docs/MAXIMUS_NETWORK_STATE.md` (updated). Key changes:
 
-- **NIN fix:** FULL_ISOLATION → stop. DOMESTIC_ONLY and NIN_WITH_DNS_EGRESS → `DNS_TUNNEL_RECOVERY`: ordinary
+- **NIN fix (superseded by V5, see MAXIMUS_AUTONOMOUS_LAB_V5.md):** FULL_ISOLATION → stop. DOMESTIC_ONLY and NIN_WITH_DNS_EGRESS → `DNS_TUNNEL_RECOVERY`: ordinary
   mutations stop, saved DNS tunnel configs are tested. Background runs still refuse and point to Full Analysis.
 - **True DNS egress:** `DIRECT_FOREIGN_DNS_REACHABILITY` (udpAvailable), `DOH`, `DOT` and
   `RECURSIVE_FOREIGN_DNS_EGRESS` are separate fields. Recursive egress needs a nonce under a foreign authoritative

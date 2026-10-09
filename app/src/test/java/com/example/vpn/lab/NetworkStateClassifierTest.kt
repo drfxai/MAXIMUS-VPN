@@ -75,7 +75,12 @@ class NetworkStateClassifierTest {
         assertNotEquals(NetworkState.NIN_WITH_DNS_EGRESS, state(nin.copy(udpAvailable = true, dohReachable = true, dotReachable = true)).primary)
         // Only a measured recursive egress makes it a national network with DNS egress.
         assertEquals(NetworkState.NIN_WITH_DNS_EGRESS, state(nin.copy(recursiveDnsEgress = true)).primary)
-        assertEquals(NetworkState.FULL_ISOLATION, state(nin.copy(domesticReachable = false, udpAvailable = false, dohReachable = false)).primary)
+        // Nothing answers abroad or at home, but DNS still does: filtering, never isolation.
+        assertEquals(NetworkState.SEVERE_FILTERING, state(nin.copy(domesticReachable = false, udpAvailable = false, dohReachable = false)).primary)
+        // No sign of life at all: still only "no verified egress"; isolation needs the recovery families to fail too.
+        val dead = nin.copy(domesticReachable = false, udpAvailable = false, dohReachable = false, dnsWorking = false)
+        assertEquals(NetworkState.NO_VERIFIED_EGRESS, state(dead).primary)
+        assertNotEquals(NetworkState.TRUE_PHYSICAL_ISOLATION, state(dead).primary)
     }
 
     @Test fun carrierNameNeverChangesTheState() {
@@ -92,7 +97,7 @@ class NetworkStateClassifierTest {
         // A new network session starts fresh.
         assertEquals(NetworkState.NORMAL, t.update("NS-2", normal).primary)
         // A confident reading changes it at once.
-        assertEquals(NetworkState.FULL_ISOLATION, t.update("NS-2", normal.copy(primary = NetworkState.FULL_ISOLATION, confidence = 0.95)).primary)
+        assertEquals(NetworkState.NO_VERIFIED_EGRESS, t.update("NS-2", normal.copy(primary = NetworkState.NO_VERIFIED_EGRESS, confidence = 0.95)).primary)
     }
 
     @Test fun failuresAreRefinedByTheNetworkState() {

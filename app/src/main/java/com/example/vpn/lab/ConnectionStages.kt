@@ -36,11 +36,17 @@ enum class PathStatus(val title: String) {
     VERIFIED("Verified"),
     DEGRADED("Degraded"),
     FAILED("Failed"),
+    /** Silence or resets that point to blocking, without the repeated evidence that would prove it. */
+    BLOCKED_SUSPECTED("Blocked (suspected)"),
+    /** No answer, and nothing shows whether that is blocking or an endpoint problem. */
+    UNRESPONSIVE("Unresponsive"),
     BLOCKED("Blocked"),
     UNSUPPORTED("Unsupported"),
     SECURITY_REJECTED("Security rejected"),
     EXPIRED("Expired"),
-    AVAILABLE("Available")
+    AVAILABLE("Available"),
+    /** Not tested because a verified path already makes it unnecessary (for example DNS tunnels on an open network). */
+    NOT_REQUIRED("Not required")
 }
 
 /**
@@ -61,19 +67,43 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
     HYSTERIA2("Hysteria2", udp = true),
     TUIC("TUIC", udp = true),
     WIREGUARD("WireGuard", udp = true),
+    /** AmneziaWG through the bundled Mihomo (amnezia-wg-option). */
+    AMNEZIAWG("AmneziaWG", udp = true, engine = true),
     PSIPHON("Psiphon", engine = true),
+    TOR_WEBTUNNEL("Tor WebTunnel", engine = true),
+    TOR_OBFS4("Tor obfs4", engine = true),
+    TOR_SNOWFLAKE("Tor Snowflake", engine = true),
+    /** Tor with other bridges (meek). */
     TOR("Tor", engine = true),
     DNS_TUNNEL("DNS tunnel", engine = true),
     MIHOMO("Mihomo config", engine = true),
     OTHER("Other");
 
     companion object {
-        /** The family of a saved config, from its fields only (never its name). */
-        fun of(p: VlessProfile, engineId: String? = null): PathFamily = when {
+        /** Tor families, most likely to pass first: these are the order emergency recovery tries them in. */
+        val TOR_FAMILIES = listOf(TOR_WEBTUNNEL, TOR_OBFS4, TOR_SNOWFLAKE, TOR)
+
+        /**
+         * The family of a saved config, from its fields only (never its name). [detail] refines an engine
+         * profile: the first Tor bridge transport ("webtunnel"), or the Mihomo proxy type ("wireguard",
+         * "wireguard+awg", "hysteria2"...).
+         */
+        fun of(p: VlessProfile, engineId: String? = null, detail: String? = null): PathFamily = when {
             engineId == "psiphon" -> PSIPHON
-            engineId == "tor" -> TOR
+            engineId == "tor" -> when (detail) {
+                "webtunnel" -> TOR_WEBTUNNEL
+                "obfs4" -> TOR_OBFS4
+                "snowflake", null -> TOR_SNOWFLAKE
+                else -> TOR
+            }
             engineId == "dns-tunnel" -> DNS_TUNNEL
-            engineId != null -> MIHOMO
+            engineId != null -> when (detail) {
+                "wireguard+awg" -> AMNEZIAWG
+                "wireguard" -> WIREGUARD
+                "hysteria2" -> HYSTERIA2
+                "tuic" -> TUIC
+                else -> MIHOMO
+            }
             p.protocolType == ProtocolType.HYSTERIA2 -> HYSTERIA2
             p.protocolType == ProtocolType.TUIC -> TUIC
             p.protocolType == ProtocolType.WIREGUARD -> WIREGUARD
@@ -105,5 +135,9 @@ data class LivePath(
     val reason: String = "",
     /** How many saved configs of this family were tried, and how many passed a real request. */
     val tried: Int = 0,
-    val passed: Int = 0
+    val passed: Int = 0,
+    /** Real requests sent for this row in this run. */
+    val attempts: Int = 0,
+    /** The network session the row belongs to; rows of another session are never shown as current. */
+    val sessionId: String? = null
 )

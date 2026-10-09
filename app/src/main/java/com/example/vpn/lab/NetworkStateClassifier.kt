@@ -22,10 +22,24 @@ enum class NetworkState(val title: String, val detail: String) {
     IPV6_DEGRADED("IPv6 degraded", "The network offers IPv6 but international TLS over it fails"),
     CDN_PATH_DEGRADED("CDN path degraded", "A major CDN fails while other international sites answer"),
     INTERNATIONAL_DEGRADED("International degraded", "International sites answer slowly or unreliably"),
-    PARTIAL_INTERNATIONAL_CONNECTIVITY("Partial international", "Some international references answer and some do not"),
+    PARTIAL_INTERNATIONAL_CONNECTIVITY("Partial egress", "Some international references answer and some do not"),
     NIN_WITH_DNS_EGRESS("National network, DNS egress", "Only domestic sites answer, but recursive DNS was verified to reach abroad"),
     DOMESTIC_ONLY_NO_VERIFIED_EGRESS("Domestic only", "Only domestic sites answer and no way out was verified"),
-    FULL_ISOLATION("No connectivity", "Neither domestic nor international references answer")
+    /**
+     * Nothing ordinary answers abroad and DNS, UDP, DoH, DoT or QUIC still showed some life. Recovery
+     * families (DNS tunnel, Psiphon, Tor bridges, Mihomo transports) are worth trying.
+     */
+    SEVERE_FILTERING("Severe filtering", "No international site answers, but some kinds of traffic still get a reply"),
+    /**
+     * No reference answered, at home or abroad. This is not isolation: it only says no egress was verified,
+     * and recovery families are still tried.
+     */
+    NO_VERIFIED_EGRESS("No verified egress", "No reference answered; recovery methods have not ruled out a way out"),
+    /**
+     * Only after a full analysis: every network-level check failed, and every available recovery family
+     * was tested and failed. Never produced from the network profile alone.
+     */
+    TRUE_PHYSICAL_ISOLATION("No connectivity (verified)", "Every check and every available recovery method failed on this network")
 }
 
 /**
@@ -98,9 +112,14 @@ object NetworkStateClassifier {
                 // UDP answer from a foreign resolver is a different property and never counts here.
                 true -> if (p.recursiveDnsEgress == true) reading(NetworkState.NIN_WITH_DNS_EGRESS, 0.75)
                 else reading(NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, 0.7)
-                false -> reading(NetworkState.FULL_ISOLATION, 0.8)
+                // Nothing ordinary answers. Any sign of life (a DNS answer, a UDP reply, DoH, DoT, a QUIC
+                // endpoint) means traffic is filtered rather than absent. Neither case is isolation: that
+                // needs every recovery family to fail too (see EmergencyRecovery.conclude).
+                false -> if (anyLife(p)) reading(NetworkState.SEVERE_FILTERING, 0.6)
+                else reading(NetworkState.NO_VERIFIED_EGRESS, 0.7)
                 // Domestic names did not resolve: no evidence either way about domestic reach.
-                null -> if (p.dnsWorking == false) reading(NetworkState.FULL_ISOLATION, 0.5) else reading(NetworkState.UNKNOWN, 0.3)
+                null -> if (anyLife(p)) reading(NetworkState.SEVERE_FILTERING, 0.4)
+                else if (p.dnsWorking == false) reading(NetworkState.NO_VERIFIED_EGRESS, 0.4) else reading(NetworkState.UNKNOWN, 0.3)
             }
         }
 
@@ -128,6 +147,17 @@ object NetworkStateClassifier {
             else -> reading(NetworkState.FILTERED, 0.75, restrictions)
         }
     }
+
+    /** True when some traffic still got an answer, so filtering (not a dead link) is the better reading. */
+    private fun anyLife(p: NetworkCapabilityProfile): Boolean =
+        p.dnsWorking == true || p.udpAvailable == true || p.dohReachable == true || p.dotReachable == true ||
+            p.quicStatus == "QUIC_AVAILABLE" || p.quicStatus == "QUIC_DEGRADED"
+
+    /** States where no ordinary international path exists and recovery families are the plan. */
+    val EMERGENCY = setOf(
+        NetworkState.NIN_WITH_DNS_EGRESS, NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS,
+        NetworkState.SEVERE_FILTERING, NetworkState.NO_VERIFIED_EGRESS
+    )
 }
 
 /**
@@ -167,4 +197,39 @@ class NetworkStateTracker {
     fun current(): NetworkStateReading? = shown
 
     companion object { const val IMMEDIATE = 0.9 }
+}
+
+/**
+ * The only way to TRUE_PHYSICAL_ISOLATION: after a full analysis, every network-level check was negative
+ * (no international or domestic answer, no DNS, UDP, DoH, DoT or QUIC reply), every family with a saved
+ * config was really tested (not merely skipped) and none passed, and at least one recovery engine family
+ * was among them. Anything less stays NO_VERIFIED_EGRESS (or what the classifier said). Pure.
+ */
+object EmergencyRecovery {
+
+    fun conclude(net: NetworkCapabilityProfile?, tracks: List<AdaptivePlanner.Track>, available: Set<PathFamily>): NetworkState? {
+        if (net == null) return null
+        val networkDead = net.internationalReachable == false && net.domesticReachable != true && net.dnsWorking != true &&
+            net.udpAvailable != true && net.dohReachable != true && net.dotReachable != true &&
+            net.quicStatus != "QUIC_AVAILABLE" && net.quicStatus != "QUIC_DEGRADED"
+        if (!networkDead) return null
+        val tested = tracks.filter { it.outcomes.isNotEmpty() }
+        if (tested.isEmpty() || tested.any { it.passes > 0 }) return null
+        val testedFamilies = tested.map { it.candidate.family }.toSet()
+        if (!testedFamilies.containsAll(available)) return null
+        if (testedFamilies.none { it.engine }) return null
+        return NetworkState.TRUE_PHYSICAL_ISOLATION
+    }
+
+    /** Why isolation was not concluded, in words, so the report never implies more than was shown. */
+    fun whyNot(net: NetworkCapabilityProfile?, tracks: List<AdaptivePlanner.Track>, available: Set<PathFamily>): String? {
+        if (conclude(net, tracks, available) != null) return null
+        val untested = available - tracks.filter { it.outcomes.isNotEmpty() }.map { it.candidate.family }.toSet()
+        return when {
+            tracks.any { it.passes > 0 } -> null
+            untested.isNotEmpty() -> "Not every recovery family was tested (${untested.joinToString { it.title }}), so isolation is not concluded."
+            available.none { it.engine } -> "No recovery engine config (DNS tunnel, Psiphon, Tor, Mihomo) is saved, so isolation cannot be concluded."
+            else -> "Some network-level checks still got an answer, so this is filtering, not isolation."
+        }
+    }
 }

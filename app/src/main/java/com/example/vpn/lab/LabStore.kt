@@ -28,6 +28,7 @@ class LabStore(
     private val transactions = mutableListOf<ConfigTransaction>()
     private val reports = linkedMapOf<String, AnalysisReport>()
     private val resolvers = mutableListOf<ResolverIntelligence.Result>()
+    private val evidence = mutableListOf<LabEvidence>()
     private var automation = AutomationLevel.RECOMMEND
     private var nextProfileNumber = 1
     private var nextExperimentNumber = 1
@@ -86,6 +87,20 @@ class LabStore(
         resolvers.removeAll { it.networkKey == networkKey || it.expiresAt <= now }
         resolvers += results
         while (resolvers.size > MAX_RESOLVERS) resolvers.removeAt(0)
+        persist()
+    }
+
+    /** Evidence records of one network (any freshness; callers judge freshness). */
+    @Synchronized fun evidenceFor(network: String): List<LabEvidence> = evidence.filter { it.network == network }
+
+    /** Adds records, dropping expired ones and keeping the store bounded (oldest go first). */
+    @Synchronized
+    fun addEvidence(records: List<LabEvidence>) {
+        if (records.isEmpty()) return
+        val now = clock()
+        evidence.removeAll { it.expiresAt <= now }
+        evidence += records
+        while (evidence.size > MAX_EVIDENCE) evidence.remove(evidence.minByOrNull { it.at }!!)
         persist()
     }
 
@@ -218,6 +233,7 @@ class LabStore(
             .put("tx", JSONArray().apply { transactions.forEach { put(it.toJson()) } })
             .put("ar", JSONArray().apply { reports.values.forEach { put(it.toJson()) } })
             .put("rs", JSONArray().apply { resolvers.forEach { put(it.toJson()) } })
+            .put("ev", JSONArray().apply { evidence.forEach { put(it.toJson()) } })
         runCatching { save(root.toString()) }
     }
 
@@ -229,6 +245,7 @@ class LabStore(
         nextTransactionNumber = o.optInt("nt", 1).coerceAtLeast(1)
         o.optJSONArray("tx")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let(ConfigTransaction::fromJson)?.let { transactions += it } }
         o.optJSONArray("ar")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let(AnalysisReport::fromJson)?.let { reports[it.contextKey] = it } }
+        o.optJSONArray("ev")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let(LabEvidence::fromJson)?.let { evidence += it } }
         o.optJSONArray("rs")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let(ResolverIntelligence.Result::fromJson)?.let { resolvers += it } }
         o.optJSONArray("e")?.let { a ->
             for (i in 0 until a.length()) a.optJSONObject(i)?.let(LabExperiment::fromJson)?.let { e ->
@@ -247,6 +264,7 @@ class LabStore(
         const val MAX_NETWORKS = 12
         const val MAX_TRANSACTIONS = 40
         const val MAX_RESOLVERS = 60
+        const val MAX_EVIDENCE = 300
     }
 }
 
