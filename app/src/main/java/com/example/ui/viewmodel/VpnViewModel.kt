@@ -146,6 +146,22 @@ class VpnViewModel(
         }
     }
 
+    /**
+     * The user's explicit "Connect anyway" after a connect stopped because the selected server carried no
+     * real traffic. Never called automatically.
+     */
+    fun connectAnyway(context: Context, onRequestPermission: ((Intent) -> Unit)? = null) {
+        val profile = selectedProfile.value ?: return
+        val prepareIntent = VpnController.prepareVpn(context)
+        if (prepareIntent != null) {
+            prepareConnect(profile)
+            onRequestPermission?.invoke(prepareIntent)
+            return
+        }
+        XrayLogManager.i("VPN", "User chose Connect anyway for '${profile.name}'.")
+        VpnController.startVpn(context, profile, force = true)
+    }
+
     fun connectSmart(context: Context, onRequestPermission: ((Intent) -> Unit)? = null) {
         val smartProfile = smartRecommendation.value?.profile
         if (smartProfile != null) {

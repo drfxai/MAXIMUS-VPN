@@ -434,12 +434,22 @@ fun HomeScreen(
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = connectionState.errorMessage ?: "Connection failed",
-                        color = AppTheme.colors.statusError,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = connectionState.errorMessage ?: "Connection failed",
+                            color = AppTheme.colors.statusError,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                        // Only by the user's explicit choice: the server failed its real test here.
+                        if (connectionState.canConnectAnyway && selectedProfile != null) {
+                            TextButton(
+                                onClick = { vpnViewModel.connectAnyway(context) { onRequestVpnPermission() } }
+                            ) {
+                                Text("Connect anyway", color = AppTheme.colors.statusError, fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             }
         }

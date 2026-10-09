@@ -118,7 +118,7 @@ class StealthPathFinder(
             return win
         }
 
-        log("No working path found for '${SecretRedactor.redact(requested.name)}'; connecting as saved.")
+        log("No working path found for '${SecretRedactor.redact(requested.name)}'; other servers and methods are tried next, and it is not started blind.")
         return asSaved
     }
 
