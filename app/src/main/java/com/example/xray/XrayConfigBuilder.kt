@@ -16,6 +16,19 @@ object XrayConfigBuilder {
     const val DNS_TIMEOUT_MS = 10000
 
     /**
+     * Removes SO_MARK from every outbound. Setting it needs root (CAP_NET_ADMIN); an app gets EPERM and
+     * Xray then fails every dial on that outbound. Android apps keep sockets off the VPN with
+     * VpnService.protect (the dialer controller) instead.
+     */
+    fun stripSocketMarks(config: JSONObject): JSONObject {
+        val outbounds = config.optJSONArray("outbounds") ?: return config
+        (0 until outbounds.length()).forEach { index ->
+            outbounds.optJSONObject(index)?.optJSONObject("streamSettings")?.optJSONObject("sockopt")?.remove("mark")
+        }
+        return config
+    }
+
+    /**
      * Builds a complete, valid Xray-core JSON configuration object from a VlessProfile and AppSettings.
      * If the profile has a raw JSON config, it sanitizes and preserves it directly.
      */

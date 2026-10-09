@@ -12,7 +12,7 @@ class TransportBenchmarkTest {
     @Test fun rejectedWebSocketIsAFailedBenchmark() = runBlocking {
         val result = measureTransportBenchmark(profile, BenchmarkMode.QUICK, ScoringProfile.BALANCED) {
             ServerTestResult(it.id, ServerTestStatus.Unavailable("WebSocket HTTP 404"))
-        }
+        }!!
         assertFalse(result.isSuccess)
         assertEquals(ServerCategory.OFFLINE, result.category)
         assertEquals(100.0, result.packetLossPercent, 0.0)
@@ -23,7 +23,7 @@ class TransportBenchmarkTest {
     @Test fun slowSuccessDoesNotInventBandwidth() = runBlocking {
         val result = measureTransportBenchmark(profile, BenchmarkMode.QUICK, ScoringProfile.BALANCED) {
             ServerTestResult(it.id, ServerTestStatus.Slow(1500))
-        }
+        }!!
         assertTrue(result.isSuccess)
         assertEquals(1500L, result.pingMs)
         assertEquals(100.0, result.successRatePercent, 0.0)
@@ -35,9 +35,19 @@ class TransportBenchmarkTest {
         var calls = 0
         val result = measureTransportBenchmark(profile, BenchmarkMode.QUICK, ScoringProfile.BALANCED) {
             ServerTestResult(it.id, if (calls++ == 0) ServerTestStatus.Unavailable("timeout") else ServerTestStatus.Available(100))
-        }
+        }!!
         assertEquals(3, calls)
         assertEquals(100.0 / 3, result.packetLossPercent, 0.01)
+    }
+
+    @Test fun serverNotMeasuredWhileTheVpnRunsIsSkippedNotFailed() = runBlocking {
+        var calls = 0
+        val result = measureTransportBenchmark(profile, BenchmarkMode.BALANCED, ScoringProfile.BALANCED) {
+            calls++
+            ServerTestResult(it.id, ServerTestStatus.Idle)
+        }
+        assertNull(result)
+        assertEquals("asked once, not once per attempt", 1, calls)
     }
 
     @Test fun cancellationPropagates() {
