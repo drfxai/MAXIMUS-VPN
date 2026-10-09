@@ -64,6 +64,8 @@ class RayVpnService : VpnService() {
         const val ACTION_RECONNECT = "com.drfxai.maximusvpn.ACTION_RECONNECT"
         const val EXTRA_PROFILE_ID = "com.drfxai.maximusvpn.EXTRA_PROFILE_ID"
         const val EXTRA_SMART = "com.drfxai.maximusvpn.EXTRA_SMART"
+        /** "Connect anyway": start the selected server even though its real pre-flight failed. */
+        const val EXTRA_FORCE = "com.drfxai.maximusvpn.EXTRA_FORCE"
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
         /** Re-check interval for a connection whose last checks all passed. */
         private const val PING_HEALTHY_MS = 30_000L
@@ -222,6 +224,7 @@ class RayVpnService : VpnService() {
         }
         val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
         val smart = intent?.getBooleanExtra(EXTRA_SMART, false) == true
+        val force = intent?.getBooleanExtra(EXTRA_FORCE, false) == true
 
         when (action) {
             ACTION_CONNECT -> {
@@ -247,7 +250,7 @@ class RayVpnService : VpnService() {
                         ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
                     if (targetProfile != null) {
-                        connect(targetProfile, smart = smart, startedByUser = true)
+                        connect(targetProfile, smart = smart, startedByUser = true, force = force)
                     } else {
                         val err = "No valid server profile found to connect."
                         XrayLogManager.e("VPN", err)
@@ -309,8 +312,10 @@ class RayVpnService : VpnService() {
         smart: Boolean = false,
         exclude: Set<String> = emptySet(),
         /** The user pressed Connect (not failover, reconnect or Always-on); see FailClosedPolicy. */
-        startedByUser: Boolean = false
-    ): Unit = connectionMutex.withLock { connectLocked(profile, smart, exclude, startedByUser) }
+        startedByUser: Boolean = false,
+        /** The user chose "Connect anyway" for a server whose real pre-flight failed (see PathGate). */
+        force: Boolean = false
+    ): Unit = connectionMutex.withLock { connectLocked(profile, smart, exclude, startedByUser, force) }
 
     /** What worked on each carrier or Wi-Fi: stealth alternates, kinds of connection, probe time limits. */
     private val networkMemory by lazy {
@@ -428,7 +433,8 @@ class RayVpnService : VpnService() {
         userProfile: VlessProfile,
         smart: Boolean = false,
         exclude: Set<String> = emptySet(),
-        startedByUser: Boolean = false
+        startedByUser: Boolean = false,
+        force: Boolean = false
     ): Unit = withContext(Dispatchers.IO) {
         // The saved profile the connection belongs to; a same-server switch below can change it.
         var requestedProfile = userProfile
@@ -547,6 +553,10 @@ class RayVpnService : VpnService() {
                     }
                 }
             var raced = false
+            // What the pre-flight proved (PathGate): a real request failed on the selected path, or an
+            // engine that can only be judged after it starts was chosen.
+            var provenDead = false
+            var engineAdopted = false
             activeRecovery = null
             fun adopt(win: com.example.vpn.smart.ServerRace.Winner) {
                 com.example.vless.VlessValidator.validate(win.profile)
@@ -558,6 +568,17 @@ class RayVpnService : VpnService() {
                 win.variantKey?.let { networkMemory.variants(network)[win.owner.id] = it }
                 networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(win.profile), win.latencyMs)
                 mutateState { it.copy(activeProfile = win.owner, attemptedProfileId = win.owner.id) }
+            }
+            // A recovery engine (Psiphon, Tor) cannot be measured before it starts: it is chosen, not
+            // counted as a success; the traffic check after start decides.
+            fun adoptEngine(engine: VlessProfile) {
+                com.example.vless.VlessValidator.validate(engine)
+                com.example.vpn.engine.RuntimeCapabilities.requireSupported(engine)
+                requestedProfile = engine
+                activeProfile = engine
+                profile = engine
+                engineAdopted = true
+                mutateState { it.copy(activeProfile = engine, attemptedProfileId = engine.id) }
             }
             val finder = com.example.vpn.stealth.StealthPathFinder(
                 memory = networkMemory.variants(network),
@@ -578,6 +599,7 @@ class RayVpnService : VpnService() {
                     }
                     is com.example.xray.RealDelayProbe.Outcome.Failed -> {
                         firstFailed = true
+                        provenDead = true
                         networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(first.profile))
                         raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder, retryDisguised = true)?.let { adopt(it) }
                     }
@@ -635,8 +657,10 @@ class RayVpnService : VpnService() {
                 }
                 profile = choice.profile
                 choice.latencyMs?.let {
+                    raced = true
                     networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(choice.profile), it)
                 }
+                if (choice.nothingWorked) provenDead = true
                 // Nothing on this server carried traffic: try the other saved servers now rather than
                 // starting a dead connection and waiting for the watchdog.
                 if (choice.nothingWorked) networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(requestedProfile))
@@ -657,19 +681,57 @@ class RayVpnService : VpnService() {
                     // Psiphon finds its own servers. It cannot be measured before it starts, so it is
                     // only taken when this build carries it; if it finds nothing, traffic stays blocked.
                     val psiphon = com.example.vpn.sidecar.PsiphonSidecar.profile()
-                    if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(psiphon) == null) {
-                        XrayLogManager.i("SMART", "Nothing else carried traffic; starting Psiphon.")
-                        adopt(com.example.vpn.smart.ServerRace.Winner(psiphon, psiphon, 0))
+                    val missing = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(psiphon)
+                    if (missing == null) {
+                        XrayLogManager.i("SMART", "Nothing else carried traffic; starting Psiphon (verified with a real request once it runs).")
+                        adoptEngine(psiphon)
+                    } else {
+                        XrayLogManager.i("SMART", "Psiphon not tried: not configured ($missing). Not a failure: nothing was tested.")
                     }
                 }
                 if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
                     // Last of all, Tor over Snowflake: slow, but it needs nothing of the user's.
                     val tor = com.example.vpn.sidecar.TorSidecar.profile()
-                    if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(tor) == null) {
-                        XrayLogManager.i("SMART", "Nothing else carried traffic; starting Tor over Snowflake.")
-                        adopt(com.example.vpn.smart.ServerRace.Winner(tor, tor, 0))
+                    val missing = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(tor)
+                    if (missing == null) {
+                        XrayLogManager.i("SMART", "Nothing else carried traffic; starting Tor over Snowflake (verified with a real request once it runs).")
+                        adoptEngine(tor)
+                    } else {
+                        XrayLogManager.i("SMART", "Tor not tried: not configured ($missing). Not a failure: nothing was tested.")
                     }
                 }
+            }
+
+            // No blind connections: a server whose real request just failed here, with nothing verified in
+            // its place, is not started (PathGate). The user can still choose "Connect anyway".
+            val gate = com.example.vpn.smart.PathGate.decide(verified = raced, provenDead = provenDead,
+                engineAdopted = engineAdopted, forced = force)
+            if (!com.example.vpn.smart.PathGate.mayStart(gate)) {
+                val name = com.example.core.SecretRedactor.redact(requestedProfile.name)
+                XrayLogManager.w("SMART", "No verified path: '$name' carried no real traffic on this network and no alternative did. " +
+                    "The tunnel was not started with it.")
+                // Same rule as an unusable profile: a user's DAILY connect releases the block; an automatic
+                // connect or GOD MODE keeps traffic blocked until the user disconnects.
+                val release = com.example.vpn.safety.FailClosedPolicy.mayReleaseBlock(
+                    com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE, startedByUser, settingsRepository.getSettings().operationalMode)
+                if (release) supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.INVALID_PROFILE_BY_USER)
+                disconnectResources()
+                updateState(fresh(
+                    ConnectionStatus.FAILED,
+                    "No verified path: $name carried no traffic on this network, and no other server or method did." +
+                        if (release) "" else " Traffic stays blocked; disconnect to use the network without the VPN.",
+                    com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED
+                ).copy(canConnectAnyway = true))
+                if (release) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                } else {
+                    showForegroundNotification("Traffic blocked: no server carried traffic")
+                }
+                return@withContext
+            }
+            if (gate == com.example.vpn.smart.PathGate.Decision.FORCED) {
+                XrayLogManager.w("SMART", "Connect anyway: starting '${com.example.core.SecretRedactor.redact(requestedProfile.name)}' although it failed its real test.")
             }
 
             // 4. Diagnostic step 4 & 5: Configure and establish Android VpnService TUN interface

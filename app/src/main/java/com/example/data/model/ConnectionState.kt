@@ -68,7 +68,9 @@ data class ConnectionState(
     /** Checks through the tunnel that failed in a row (two in a row turn CONNECTED into DEGRADED). */
     val probeFailures: Int = 0,
     /** Bumped when the phone's own network changes: results measured before it no longer hold. */
-    val networkGeneration: Int = 0
+    val networkGeneration: Int = 0,
+    /** The last connect stopped because the server failed its real test; "Connect anyway" may override. */
+    val canConnectAnyway: Boolean = false
 ) {
     val isConnected: Boolean get() = status == ConnectionStatus.CONNECTED
 

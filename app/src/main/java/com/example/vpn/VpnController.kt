@@ -31,12 +31,14 @@ object VpnController {
     /**
      * Initiates VPN connection with a specific VLESS profile.
      */
-    fun startVpn(context: Context, profile: VlessProfile, smart: Boolean = false) {
+    fun startVpn(context: Context, profile: VlessProfile, smart: Boolean = false, force: Boolean = false) {
         val intent = Intent(context, RayVpnService::class.java).apply {
             action = RayVpnService.ACTION_CONNECT
             putExtra(RayVpnService.EXTRA_PROFILE_ID, profile.id)
             // Smart Connect: race the saved servers with real requests, [profile] first.
             putExtra(RayVpnService.EXTRA_SMART, smart)
+            // "Connect anyway": start [profile] even though its real pre-flight failed.
+            putExtra(RayVpnService.EXTRA_FORCE, force)
         }
         ContextCompat.startForegroundService(context, intent)
     }
