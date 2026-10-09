@@ -17,11 +17,12 @@ object FailureClassifier {
         FailureStage.TCP_CONNECT_FAILED -> LabFailureCategory.TCP_CONNECT_FAILED
         FailureStage.TLS_HANDSHAKE_FAILED -> LabFailureCategory.TLS_HANDSHAKE_FAILED
         FailureStage.CERTIFICATE_VALIDATION_FAILED -> LabFailureCategory.CERTIFICATE_VALIDATION_FAILED
-        FailureStage.PROXY_HANDSHAKE_FAILED, FailureStage.PROXY_AUTH_FAILED -> LabFailureCategory.PROTOCOL_HANDSHAKE_FAILED
+        FailureStage.PROXY_HANDSHAKE_FAILED -> LabFailureCategory.PROTOCOL_HANDSHAKE_FAILED
+        FailureStage.PROXY_AUTH_FAILED -> LabFailureCategory.AUTHENTICATION_FAILED
         FailureStage.ENGINE_START_FAILED -> LabFailureCategory.ENGINE_START_FAILED
         FailureStage.TUN_ESTABLISH_FAILED -> LabFailureCategory.TUN_ESTABLISH_FAILED
         FailureStage.HTTP_REQUEST_FAILED, FailureStage.HTTP_STATUS_INVALID -> LabFailureCategory.HTTP_CONNECTIVITY_FAILED
-        FailureStage.DNS_TUNNEL_FAILED -> LabFailureCategory.DNS_TUNNEL_FAILED
+        FailureStage.DNS_TUNNEL_FAILED -> LabFailureCategory.DNS_THROUGH_TUNNEL_FAILED
         FailureStage.NETWORK_CHANGED -> LabFailureCategory.NETWORK_CHANGED
         FailureStage.TIMEOUT -> LabFailureCategory.TIMEOUT
         FailureStage.SECURITY_REJECTED -> LabFailureCategory.SECURITY_REJECTED
@@ -31,7 +32,11 @@ object FailureClassifier {
     /**
      * The category of a failed probe, refined by what else was measured: a TCP or timeout failure on an IPv6
      * endpoint while IPv6 measured unavailable is an IPv6 path failure; a UDP config on a network where UDP
-     * or QUIC measured blocked is UDP/QUIC unavailability rather than a dead server.
+     * or QUIC measured blocked is UDP/QUIC unavailability rather than a dead server. When the physical network
+     * reached no international reference at all, a path failure is [LabFailureCategory.NO_INTERNATIONAL_EGRESS]:
+     * no server would have answered. DNS failures on a network whose resolver measured tampered become
+     * [LabFailureCategory.DNS_TAMPERED]; TLS failures where SNI filtering was measured become
+     * [LabFailureCategory.SNI_INTERFERENCE_SUSPECTED] (a suspicion, never proof for this server).
      */
     fun classify(
         stage: FailureStage?,
@@ -41,14 +46,18 @@ object FailureClassifier {
         usesQuic: Boolean = false
     ): LabFailureCategory {
         val base = of(stage)
+        if (base in DNS_LEVEL && network?.dnsManipulated == true) return LabFailureCategory.DNS_TAMPERED
         if (base !in PATH_LEVEL) return base
+        if (network?.internationalReachable == false) return LabFailureCategory.NO_INTERNATIONAL_EGRESS
         if (udpTransport && network?.udpAvailable == false) return LabFailureCategory.UDP_UNAVAILABLE
         if (usesQuic && network?.quicAvailable == false) return LabFailureCategory.QUIC_UNAVAILABLE
         if (endpointFamily == "ipv6" && network?.ipv6Available == false) return LabFailureCategory.IPV6_PATH_FAILED
         if (endpointFamily == "ipv4" && network?.ipv4Available == false) return LabFailureCategory.IPV4_PATH_FAILED
+        if (base == LabFailureCategory.TLS_HANDSHAKE_FAILED && network?.sniFiltered == true) return LabFailureCategory.SNI_INTERFERENCE_SUSPECTED
         return base
     }
 
+    private val DNS_LEVEL = setOf(LabFailureCategory.DNS_RESOLUTION_FAILED, LabFailureCategory.DNS_RESPONSE_INVALID)
     private val PATH_LEVEL = setOf(LabFailureCategory.TCP_CONNECT_FAILED, LabFailureCategory.TIMEOUT, LabFailureCategory.TLS_HANDSHAKE_FAILED, LabFailureCategory.UNKNOWN)
 
     fun observe(report: HealthReport, now: Long, network: NetworkCapabilityProfile? = null, endpointFamily: String? = null): Observation =
@@ -64,7 +73,7 @@ object FailureClassifier {
         LabFailureCategory.CERTIFICATE_VALIDATION_FAILED -> Assessment("The certificate was refused. This is never worked around; check the config or the server.", Assessment.Source.DETERMINISTIC_RULE, 0.8)
         LabFailureCategory.PROTOCOL_HANDSHAKE_FAILED -> Assessment("The proxy protocol failed after the connection opened: a wrong credential or a dead backend.", Assessment.Source.DETERMINISTIC_RULE, 0.6)
         LabFailureCategory.HTTP_CONNECTIVITY_FAILED -> Assessment("The tunnel came up but requests did not get through it.", Assessment.Source.DETERMINISTIC_RULE, 0.5)
-        LabFailureCategory.DNS_TUNNEL_FAILED -> Assessment("Requests pass but names do not resolve through the tunnel.", Assessment.Source.DETERMINISTIC_RULE, 0.6)
+        LabFailureCategory.DNS_TUNNEL_FAILED, LabFailureCategory.DNS_THROUGH_TUNNEL_FAILED -> Assessment("Requests pass but names do not resolve through the tunnel.", Assessment.Source.DETERMINISTIC_RULE, 0.6)
         LabFailureCategory.IPV4_PATH_FAILED -> Assessment("IPv4 paths fail on this network; IPv6 endpoints may work.", Assessment.Source.DETERMINISTIC_RULE, 0.6)
         LabFailureCategory.IPV6_PATH_FAILED -> Assessment("This network has no working IPv6; IPv6 endpoints are skipped.", Assessment.Source.DETERMINISTIC_RULE, 0.8)
         LabFailureCategory.UDP_UNAVAILABLE -> Assessment("UDP is blocked on this network; UDP-based configs cannot work here.", Assessment.Source.DETERMINISTIC_RULE, 0.8)
@@ -74,6 +83,17 @@ object FailureClassifier {
         LabFailureCategory.SECURITY_REJECTED -> Assessment("Refused by the security gate; not tried on the network.", Assessment.Source.DETERMINISTIC_RULE, 1.0)
         LabFailureCategory.ENGINE_START_FAILED, LabFailureCategory.TUN_ESTABLISH_FAILED ->
             Assessment("The phone could not start the tunnel; this is local, not the network.", Assessment.Source.DETERMINISTIC_RULE, 0.7)
+        LabFailureCategory.DNS_TAMPERED -> Assessment("This network's resolver returned block-page or private addresses; names must be resolved over encrypted DNS.", Assessment.Source.DETERMINISTIC_RULE, 0.8)
+        LabFailureCategory.DOH_UNAVAILABLE -> Assessment("Encrypted DNS could not be reached from this network.", Assessment.Source.DETERMINISTIC_RULE, 0.6)
+        LabFailureCategory.TLS_IDENTITY_FAILED -> Assessment("The server's certificate did not match its name. This is never worked around.", Assessment.Source.DETERMINISTIC_RULE, 0.8)
+        LabFailureCategory.SNI_INTERFERENCE_SUSPECTED -> Assessment("TLS was cut, and this network cuts filtered names to the same address: possible SNI filtering. Fragment and ECH candidates may help.", Assessment.Source.DETERMINISTIC_RULE, 0.6)
+        LabFailureCategory.AUTHENTICATION_FAILED -> Assessment("The server refused the credential; the config needs a valid one from its owner.", Assessment.Source.DETERMINISTIC_RULE, 0.7)
+        LabFailureCategory.UPLOAD_CONSTRAINED -> Assessment("Uploads are much slower than downloads on this path.", Assessment.Source.DETERMINISTIC_RULE, 0.5)
+        LabFailureCategory.PACKET_LOSS_HIGH -> Assessment("Many packets were lost on this path.", Assessment.Source.DETERMINISTIC_RULE, 0.5)
+        LabFailureCategory.MTU_PROBLEM -> Assessment("Large packets failed where small ones passed: possible MTU problem.", Assessment.Source.DETERMINISTIC_RULE, 0.5)
+        LabFailureCategory.CONTROL_PLANE_UNAVAILABLE -> Assessment("A subscription or update service could not be reached; saved configs may still work.", Assessment.Source.DETERMINISTIC_RULE, 0.6)
+        LabFailureCategory.NO_INTERNATIONAL_EGRESS -> Assessment("No international reference answered from this network; no config change can fix this.", Assessment.Source.DETERMINISTIC_RULE, 0.7)
+        LabFailureCategory.UNSUPPORTED -> Assessment("The installed engine cannot run this config.", Assessment.Source.DETERMINISTIC_RULE, 0.9)
         LabFailureCategory.UNKNOWN -> Assessment("The cause is not known from these measurements.", Assessment.Source.DETERMINISTIC_RULE, 0.2)
     }
 
@@ -81,6 +101,8 @@ object FailureClassifier {
     fun allowsCandidates(category: LabFailureCategory?): Boolean = category !in setOf(
         LabFailureCategory.CERTIFICATE_VALIDATION_FAILED, LabFailureCategory.PROTOCOL_HANDSHAKE_FAILED, LabFailureCategory.SECURITY_REJECTED,
         LabFailureCategory.NETWORK_CHANGED, LabFailureCategory.ENGINE_START_FAILED, LabFailureCategory.TUN_ESTABLISH_FAILED,
-        LabFailureCategory.UDP_UNAVAILABLE, LabFailureCategory.IPV6_PATH_FAILED
+        LabFailureCategory.UDP_UNAVAILABLE, LabFailureCategory.IPV6_PATH_FAILED,
+        LabFailureCategory.AUTHENTICATION_FAILED, LabFailureCategory.TLS_IDENTITY_FAILED, LabFailureCategory.NO_INTERNATIONAL_EGRESS,
+        LabFailureCategory.UNSUPPORTED, LabFailureCategory.CONTROL_PLANE_UNAVAILABLE
     )
 }

@@ -9,6 +9,7 @@ object LabBrief {
         val n = s.network
         appendLine("Network kind: ${n?.let { kindOf(it.networkKey) } ?: "none"}; address families: ${n?.families ?: "unknown"}.")
         s.capability?.observations()?.let { appendLine("Measured: " + it.joinToString("; ")) }
+        s.networkState?.let { appendLine("Network state (rule-based, not proof): " + it.summary()) }
         val here = s.experiments.filter { it.contextKey == n?.contextKey }.sortedByDescending { it.startTime }.take(6)
         if (here.isEmpty()) appendLine("No experiments on this network yet.")
         here.forEach { e ->

@@ -11,6 +11,8 @@ data class LabStep(val title: String, val state: State, val detail: String = "")
 data class LabSnapshot(
     val network: NetworkContext? = null,
     val capability: NetworkCapabilityProfile? = null,
+    /** The classified state of the phone's own network (with hysteresis); null until first measured. */
+    val networkState: NetworkStateReading? = null,
     val automation: AutomationLevel = AutomationLevel.RECOMMEND,
     val running: LabExperiment? = null,
     val steps: List<LabStep> = emptyList(),

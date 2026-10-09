@@ -28,7 +28,7 @@ class CandidateGenerator(
         if (!FailureClassifier.allowsCandidates(category)) return emptyList()
         val out = mutableListOf<Hypothesis>()
         when (category) {
-            LabFailureCategory.DNS_RESOLUTION_FAILED, LabFailureCategory.DNS_RESPONSE_INVALID, LabFailureCategory.TCP_CONNECT_FAILED,
+            LabFailureCategory.DNS_RESOLUTION_FAILED, LabFailureCategory.DNS_RESPONSE_INVALID, LabFailureCategory.DNS_TAMPERED, LabFailureCategory.TCP_CONNECT_FAILED,
             LabFailureCategory.IPV4_PATH_FAILED -> {
                 out += Hypothesis("endpoint", "the server's usual address may be blocked; a locally validated edge address may not be")
                 if (net?.ipv6Available != false) out += Hypothesis("address-family", "IPv6 paths may pass where IPv4 ones are filtered")

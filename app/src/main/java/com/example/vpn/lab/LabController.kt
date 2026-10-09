@@ -62,6 +62,7 @@ class LabController(
     private val steps = mutableListOf<LabStep>()
     private val log = ArrayDeque<String>()
 
+    private val stateTracker = NetworkStateTracker()
     private val _state = MutableStateFlow(LabSnapshot())
     val state: StateFlow<LabSnapshot> = _state.asStateFlow()
 
@@ -100,15 +101,17 @@ class LabController(
         val cap = runCatching { NetworkCapabilityDetector.detect(context) }.getOrNull()
         if (cap == null) {
             tracker.lost()
-            publish(message = "No network outside the VPN right now.")
+            publish(message = "No network outside the VPN right now.", networkState = null)
             return
         }
         val key = NetworkKey.current(context)
         val families = NetworkSessionTracker.families(cap.ipv4Available, cap.ipv6Available)
         val (ctx, isNew) = tracker.observe(key, families, labelOf(key))
-        val measured = cap.observations().count { !it.endsWith("not measured") }
-        val working = listOf(cap.dnsWorking, cap.tcpAvailable, cap.tlsAvailable, cap.cloudflareReachable).count { it == true }
-        store.recordNetwork(ctx, if (measured == 0) null else working * 25, cap.observations().filter { !it.endsWith("not measured") }.joinToString(" · "))
+        // Health counts only what was measured: an unmeasured check is neither a pass nor a fail.
+        val core = listOf(cap.dnsWorking, cap.tcpAvailable, cap.tlsAvailable, cap.cloudflareReachable, cap.internationalReachable).filterNotNull()
+        store.recordNetwork(ctx, if (core.isEmpty()) null else core.count { it } * 100 / core.size, cap.observations().filter { !it.endsWith("not measured") }.joinToString(" · "))
+        val reading = stateTracker.update(ctx.sessionId, NetworkStateClassifier.classify(cap))
+        XrayLogManager.i("LAB", "Network state: ${reading.summary()}.")
         val plan = store.planFor(ctx.contextKey, policy)
         if (isNew) {
             com.example.vpn.diagnostics.ConnectionMetrics.labSessions.incrementAndGet()
@@ -117,7 +120,7 @@ class LabController(
                 job = scope.launch { runCatching { revalidate(ctx, plan.revalidate, userStarted = false) } }
             }
         }
-        publish(network = ctx, capability = cap, plan = plan)
+        publish(network = ctx, capability = cap, plan = plan, networkState = reading)
     }
 
     fun setAutomation(level: AutomationLevel) {
@@ -422,12 +425,14 @@ class LabController(
         capability: NetworkCapabilityProfile? = _state.value.capability,
         running: LabExperiment? = _state.value.running,
         plan: LabStore.ReturnPlan? = _state.value.plan,
-        message: String? = _state.value.message
+        message: String? = _state.value.message,
+        networkState: NetworkStateReading? = _state.value.networkState
     ) {
         _state.value = LabSnapshot(
             network = network ?: tracker.current, capability = capability, automation = store.automation(), running = running, steps = steps.toList(),
             experiments = store.experiments().sortedByDescending { it.startTime }, verified = store.verifiedProfiles(),
-            discoveries = store.discoveries(), networks = store.networks(), plan = plan, message = message, log = log.toList()
+            discoveries = store.discoveries(), networks = store.networks(), plan = plan, message = message, log = log.toList(),
+            networkState = networkState
         )
     }
 
