@@ -25,21 +25,34 @@ import javax.net.ssl.SSLSocketFactory
  * ("not measured") rather than guessing. QUIC, ECH and upload limits are not probed here.
  *
  * About ten small connections per measurement, made when the network changes or the user asks; never on
- * a timer. QUIC is checked with a version-negotiation exchange (no handshake, no data) with 1.1.1.1:443.
+ * a timer. QUIC is checked with a version-negotiation exchange (no handshake, no data) with two operators.
  * International references are addressed by IP literal with their own certificate name, so
  * they measure the path abroad even when the network's DNS is tampered with.
  */
 object NetworkCapabilityDetector {
     private const val TIMEOUT_MS = 4000
 
-    /** International TLS references: (IP literal, a name its certificate covers). No DNS needed. */
-    internal val INTERNATIONAL = listOf(byteArrayOf(1, 1, 1, 1) to "one.one.one.one", byteArrayOf(8, 8, 8, 8) to "dns.google")
+    /**
+     * International TLS references from three independent operators: (IP literal, a name its certificate
+     * covers). No DNS needed. A state is decided by quorum over them, never by one endpoint.
+     */
+    internal val INTERNATIONAL = listOf(
+        byteArrayOf(1, 1, 1, 1) to "one.one.one.one",
+        byteArrayOf(8, 8, 8, 8) to "dns.google",
+        byteArrayOf(9, 9, 9, 9) to "dns.quad9.net"
+    )
 
-    /** Domestic references (Iran); a TCP connection only, no request. Reachable says nothing about leaving the country. */
-    internal val DOMESTIC = listOf("www.aparat.com", "www.digikala.com")
+    /** IPv6 reference (Cloudflare's resolver), tried only when the network has IPv6. */
+    private val INTERNATIONAL_V6 = byteArrayOf(0x26, 0x06, 0x47, 0x00, 0x47, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0x11, 0x11) to "one.one.one.one"
 
-    /** A name commonly filtered by SNI, offered to the same address as a neutral name to compare the two. */
-    internal const val FILTERED_SNI = "www.youtube.com"
+    /** Domestic references (Iran), independent sites; a TCP connection only. Reachable says nothing about leaving the country. */
+    internal val DOMESTIC = listOf("www.aparat.com", "www.digikala.com", "divar.ir", "www.varzesh3.com")
+
+    /**
+     * SNI comparisons: on each address, a neutral name (its own) against a commonly filtered name. A cut
+     * counts only when the neutral handshake on the same address completed.
+     */
+    internal val SNI_PAIRS = listOf(0 to "www.youtube.com", 1 to "twitter.com")
 
     /** A foreign name whose system-DNS answer shows whether the network's resolver tampers with answers. */
     private const val DNS_REFERENCE = "www.google.com"
@@ -48,7 +61,8 @@ object NetworkCapabilityDetector {
         private set
 
     @Suppress("DEPRECATION")
-    private fun physical(cm: ConnectivityManager): Network? = cm.allNetworks.firstOrNull { n ->
+    /** The phone's own network (not a VPN), or null. */
+    fun physical(cm: ConnectivityManager): Network? = cm.allNetworks.firstOrNull { n ->
         cm.getNetworkCapabilities(n)?.let {
             it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
         } == true
@@ -76,24 +90,30 @@ object NetworkCapabilityDetector {
             val tcp = async { probe { tcpConnect(network, InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)), 443) } }
             val tls = async { tlsProbe(network, "www.cloudflare.com") }
             val udp = async { probe { udpDns(network) } }
-            val quic = async { probe { quicProbe(network) } }
+            val quic = QUIC_TARGETS.map { ip -> async { quicAnswered(network, ip) } }
             val intl = INTERNATIONAL.map { (ip, name) -> async { literalTls(network, InetAddress.getByAddress(ip), name) } }
-            val sensitive = async { literalTls(network, InetAddress.getByAddress(INTERNATIONAL.first().first), FILTERED_SNI) }
+            val sensitive = SNI_PAIRS.map { (i, name) -> async { literalTls(network, InetAddress.getByAddress(INTERNATIONAL[i].first), name) } }
             val domestic = async { domesticProbe(network) }
             val doh = async { probe { dohProbe(network) } }
+            val dot = async { literalTls(network, InetAddress.getByAddress(INTERNATIONAL.first().first), INTERNATIONAL.first().second, 853) }
+            val hasV6 = addresses.any { it is Inet6Address && !it.isLinkLocalAddress && !it.isSiteLocalAddress }
+            val v6 = if (hasV6) async { literalTls(network, InetAddress.getByAddress(INTERNATIONAL_V6.first), INTERNATIONAL_V6.second) } else null
             val tlsResult = tls.await()
             val dnsResult = dns.await()
             val intlResults = intl.map { it.await() }
             val measuredIntl = intlResults.filter { it != TlsOutcome.NOT_RUN }
+            val sni = sniEvidence(SNI_PAIRS.mapIndexed { k, (i, _) -> intlResults[i] to sensitive[k].await() })
+            val udpResult = udp.await()
+            val quicStatus = quicStatus(quic.map { it.await() }, udpResult, measuredIntl.any { it == TlsOutcome.COMPLETED })
             NetworkCapabilityProfile(
                 transport = transport,
                 ipv4Available = addresses.any { it is Inet4Address },
                 ipv6Available = addresses.any { it is Inet6Address && !it.isLinkLocalAddress && !it.isSiteLocalAddress },
-                udpAvailable = udp.await(),
+                udpAvailable = udpResult,
                 tcpAvailable = tcp.await(),
                 tlsAvailable = tlsResult?.first,
                 http2Available = tlsResult?.second,
-                quicAvailable = quic.await(),
+                quicAvailable = quicStatus.available,
                 cloudflareReachable = tlsResult?.first,
                 echCapable = null,
                 uploadConstrained = null,
@@ -106,7 +126,14 @@ object NetworkCapabilityDetector {
                 internationalOk = measuredIntl.count { it == TlsOutcome.COMPLETED }.takeIf { measuredIntl.isNotEmpty() },
                 internationalTried = measuredIntl.size.takeIf { it > 0 },
                 domesticReachable = domestic.await(),
-                sniFiltered = sniFiltered(intlResults.first(), sensitive.await())
+                sniFiltered = sni.suspected,
+                quicStatus = quicStatus.name,
+                dotReachable = when (dot.await()) { TlsOutcome.COMPLETED -> true; TlsOutcome.NOT_RUN -> null; else -> false },
+                // Needs a foreign authoritative zone we control (nonce observation); not available yet.
+                recursiveDnsEgress = null,
+                sniPairs = sni.pairs,
+                sniCut = sni.cut,
+                ipv6TlsOk = v6?.await()?.let { if (it == TlsOutcome.NOT_RUN) null else it == TlsOutcome.COMPLETED }
             ).also { last = it }
         }
     }
@@ -137,16 +164,16 @@ object NetworkCapabilityDetector {
      */
     internal enum class TlsOutcome { COMPLETED, SERVER_ANSWERED, INTERFERED, NOT_RUN }
 
-    private fun literalTls(network: Network, address: InetAddress, sni: String): TlsOutcome {
+    private fun literalTls(network: Network, address: InetAddress, sni: String, port: Int = 443): TlsOutcome {
         val raw = try {
-            network.socketFactory.createSocket().also { it.connect(InetSocketAddress(address, 443), TIMEOUT_MS) }
+            network.socketFactory.createSocket().also { it.connect(InetSocketAddress(address, port), TIMEOUT_MS) }
         } catch (_: SecurityException) {
             return TlsOutcome.NOT_RUN
         } catch (_: Exception) {
             return TlsOutcome.INTERFERED
         }
         return try {
-            val ssl = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, sni, 443, true) as SSLSocket
+            val ssl = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, sni, port, true) as SSLSocket
             ssl.use {
                 it.soTimeout = TIMEOUT_MS
                 val params = it.sslParameters
@@ -180,6 +207,24 @@ object NetworkCapabilityDetector {
         neutral != TlsOutcome.COMPLETED || sensitive == TlsOutcome.NOT_RUN -> null
         sensitive == TlsOutcome.INTERFERED -> true
         else -> false
+    }
+
+    internal data class SniEvidence(val pairs: Int, val cut: Int) {
+        /**
+         * Suspected only when at least two comparisons on different addresses could be made and every one
+         * of them cut the filtered name; one differing pair is not enough. Null when nothing was comparable.
+         */
+        val suspected: Boolean? get() = when {
+            pairs == 0 -> null
+            pairs >= 2 && cut == pairs -> true
+            cut == 0 -> false
+            else -> null
+        }
+    }
+
+    internal fun sniEvidence(results: List<Pair<TlsOutcome, TlsOutcome>>): SniEvidence {
+        val compared = results.mapNotNull { (neutral, sensitive) -> sniFiltered(neutral, sensitive) }
+        return SniEvidence(compared.size, compared.count { it })
     }
 
     /** True if any domestic reference accepts TCP; null when none of their names resolved (no evidence either way). */
@@ -258,20 +303,63 @@ object NetworkCapabilityDetector {
         }
     }
 
+    /** QUIC references (Cloudflare and Google both serve HTTP/3 on these addresses). */
+    private val QUIC_TARGETS = listOf(byteArrayOf(1, 1, 1, 1), byteArrayOf(8, 8, 8, 8))
+
+    /**
+     * What the QUIC checks showed. Silence from one endpoint is never "blocked": it takes silence from
+     * every target after a retry, while UDP DNS and TCP/TLS abroad worked (the control probes), to
+     * suspect a block.
+     */
+    internal enum class QuicStatus(val available: Boolean?) {
+        QUIC_AVAILABLE(true),
+        QUIC_DEGRADED(true),
+        QUIC_BLOCKED_SUSPECTED(false),
+        QUIC_UNRESPONSIVE(null),
+        QUIC_NOT_MEASURED(null)
+    }
+
+    internal fun quicStatus(answers: List<Boolean?>, udpWorked: Boolean?, tlsAbroadWorked: Boolean): QuicStatus {
+        val measured = answers.filterNotNull()
+        return when {
+            measured.isEmpty() -> QuicStatus.QUIC_NOT_MEASURED
+            measured.all { it } -> QuicStatus.QUIC_AVAILABLE
+            measured.any { it } -> QuicStatus.QUIC_DEGRADED
+            measured.size >= 2 && udpWorked == true && tlsAbroadWorked -> QuicStatus.QUIC_BLOCKED_SUSPECTED
+            else -> QuicStatus.QUIC_UNRESPONSIVE
+        }
+    }
+
     /**
      * QUIC reachability without a QUIC stack: a 1200-byte long-header packet with a reserved version makes
-     * any QUIC server answer with a Version Negotiation packet (RFC 9000 section 6). An answer means QUIC
-     * passes this network; silence means it was dropped (or UDP to 443 is blocked).
+     * any QUIC server answer with a Version Negotiation packet (RFC 9000 section 6). True on an answer,
+     * false after two silent attempts, null when the probe could not run.
      */
-    private fun quicProbe(network: Network): Boolean {
+    private fun quicAnswered(network: Network, target: ByteArray): Boolean? {
+        repeat(2) {
+            val answered = try {
+                quicOnce(network, InetAddress.getByAddress(target))
+            } catch (_: java.net.SocketTimeoutException) {
+                false
+            } catch (_: SecurityException) {
+                return null
+            } catch (_: Exception) {
+                false
+            }
+            if (answered) return true
+        }
+        return false
+    }
+
+    private fun quicOnce(network: Network, target: InetAddress): Boolean {
         val random = java.security.SecureRandom()
         val dcid = ByteArray(8).also(random::nextBytes)
         val scid = ByteArray(8).also(random::nextBytes)
         val packet = quicVersionProbe(dcid, scid)
         java.net.DatagramSocket().use { socket ->
             network.bindSocket(socket)
-            socket.soTimeout = TIMEOUT_MS
-            socket.send(DatagramPacket(packet, packet.size, InetAddress.getByAddress(INTERNATIONAL.first().first), 443))
+            socket.soTimeout = TIMEOUT_MS / 2
+            socket.send(DatagramPacket(packet, packet.size, target, 443))
             val buffer = ByteArray(1500)
             val answer = DatagramPacket(buffer, buffer.size)
             socket.receive(answer)

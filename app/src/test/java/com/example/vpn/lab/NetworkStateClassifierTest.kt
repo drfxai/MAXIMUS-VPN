@@ -14,7 +14,7 @@ class NetworkStateClassifierTest {
         cloudflareReachable = true, dnsWorking = true, dnsManipulated = false, dohReachable = true,
         internationalOk = 2, internationalTried = 2, domesticReachable = true, sniFiltered = false
     )
-    private fun state(p: NetworkCapabilityProfile?, relay: Boolean = false) = NetworkStateClassifier.classify(p, relay, now = 1L)
+    private fun state(p: NetworkCapabilityProfile?) = NetworkStateClassifier.classify(p, now = 1L)
 
     @Test fun nothingMeasuredIsUnknownNotFailed() {
         assertEquals(NetworkState.UNKNOWN, state(null).primary)
@@ -39,12 +39,28 @@ class NetworkStateClassifierTest {
     @Test fun severalRestrictionsAreFiltered() {
         val r = state(open.copy(dnsManipulated = true, sniFiltered = true, udpAvailable = false))
         assertEquals(NetworkState.FILTERED, r.primary)
-        assertEquals(setOf(NetworkState.DNS_MANIPULATED, NetworkState.SNI_FILTERED, NetworkState.UDP_BLOCKED), r.restrictions)
-        assertTrue(r.summary().startsWith("Filtered (DNS tampered, SNI filtered, UDP blocked)"))
+        assertEquals(setOf(NetworkState.DNS_MANIPULATED, NetworkState.SNI_INTERFERENCE_SUSPECTED, NetworkState.UDP_BLOCKED), r.restrictions)
+        assertTrue(r.summary().startsWith("Filtered (DNS tampered, SNI interference suspected, UDP blocked)"))
     }
 
     @Test fun partialInternationalReach() {
         assertEquals(NetworkState.PARTIAL_INTERNATIONAL_CONNECTIVITY, state(open.copy(internationalOk = 1)).primary)
+        // Multi-vantage quorum: one of four answering is partial reach, not isolation.
+        assertEquals(NetworkState.PARTIAL_INTERNATIONAL_CONNECTIVITY, state(open.copy(internationalOk = 1, internationalTried = 4)).primary)
+    }
+
+    @Test fun quicStatesAreHonest() {
+        assertEquals(NetworkState.QUIC_BLOCKED, state(open.copy(quicStatus = "QUIC_BLOCKED_SUSPECTED")).primary)
+        assertEquals(NetworkState.QUIC_DEGRADED, state(open.copy(quicStatus = "QUIC_DEGRADED")).primary)
+        // An unresponsive QUIC endpoint is not a restriction.
+        assertEquals(NetworkState.NORMAL, state(open.copy(quicStatus = "QUIC_UNRESPONSIVE")).primary)
+        assertFalse(state(open.copy(quicStatus = "QUIC_AVAILABLE")).notTested.contains("QUIC"))
+    }
+
+    @Test fun ipv6FailingAloneIsIpv6Degraded() {
+        assertEquals(NetworkState.IPV6_DEGRADED, state(open.copy(ipv6Available = true, ipv6TlsOk = false)).primary)
+        // IPv4 cut while IPv6 works.
+        assertEquals(NetworkState.IPV4_DEGRADED, state(open.copy(internationalOk = 0, ipv6Available = true, ipv6TlsOk = true)).primary)
     }
 
     @Test fun tcpPassingWithTlsCutIsTlsInterference() {
@@ -53,11 +69,12 @@ class NetworkStateClassifierTest {
 
     @Test fun nationalNetworkStatesNeedEvidence() {
         val nin = open.copy(internationalOk = 0, tcpAvailable = false, tlsAvailable = false, cloudflareReachable = false)
-        assertEquals(NetworkState.NIN_WITH_DNS_EGRESS, state(nin).primary)
-        assertEquals(NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, state(nin.copy(udpAvailable = false, dohReachable = false)).primary)
-        // Relay egress is never claimed without relay evidence.
-        assertNotEquals(NetworkState.NIN_WITH_DOMESTIC_RELAY_EGRESS, state(nin).primary)
-        assertEquals(NetworkState.NIN_WITH_DOMESTIC_RELAY_EGRESS, state(nin, relay = true).primary)
+        // A direct UDP answer from a foreign resolver (and DoH) is not proof of DNS egress.
+        assertEquals(NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, state(nin).primary)
+        assertTrue(state(nin).notTested.contains("Recursive DNS egress (nonce)"))
+        assertNotEquals(NetworkState.NIN_WITH_DNS_EGRESS, state(nin.copy(udpAvailable = true, dohReachable = true, dotReachable = true)).primary)
+        // Only a measured recursive egress makes it a national network with DNS egress.
+        assertEquals(NetworkState.NIN_WITH_DNS_EGRESS, state(nin.copy(recursiveDnsEgress = true)).primary)
         assertEquals(NetworkState.FULL_ISOLATION, state(nin.copy(domesticReachable = false, udpAvailable = false, dohReachable = false)).primary)
     }
 
