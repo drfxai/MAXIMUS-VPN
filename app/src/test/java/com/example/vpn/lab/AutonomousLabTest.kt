@@ -54,7 +54,8 @@ class AutonomousLabTest {
     }
 
     @Test fun udpBlockedSkipsUdpFamiliesAndPrefersTcp() {
-        val p = ExperimentPlanner.plan(reading(open.copy(udpAvailable = false)), open, 15)
+        val noUdp = open.copy(udpAvailable = false)
+        val p = ExperimentPlanner.plan(reading(noUdp), noUdp, 15)
         assertEquals(ExperimentPlanner.Mode.ORDINARY, p.mode)
         assertTrue(PathFamily.HYSTERIA2 in p.skip && PathFamily.WIREGUARD in p.skip && PathFamily.TUIC in p.skip)
         assertEquals(PathFamily.VLESS_REALITY, p.prefer.first())
