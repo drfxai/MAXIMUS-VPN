@@ -23,6 +23,10 @@ data class LabSnapshot(
     val plan: LabStore.ReturnPlan? = null,
     /** Config optimizer transactions, newest first (staged, committed, rolled back, refused). */
     val transactions: List<ConfigTransaction> = emptyList(),
+    /** The last Full Analysis of the current network (null until one ran here). */
+    val analysis: AnalysisReport? = null,
+    /** True while a Full Analysis runs. */
+    val analysisRunning: Boolean = false,
     val message: String? = null,
     /** Raw LAB log lines for the Advanced view; redacted like every other log. */
     val log: List<String> = emptyList()

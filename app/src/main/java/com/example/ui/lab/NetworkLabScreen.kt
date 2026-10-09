@@ -72,6 +72,7 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     fun open(section: LabSection?) { local.value = local.value.copy(section = section) }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }
+    fun fullAnalysis() { open(LabSection.LIVE); lab.fullAnalysis() }
     fun refreshNetwork() = viewModelScope.launch { lab.refreshNetwork(userStarted = true) }
 
     /** Advisory only: the answer becomes an unverified discovery and a list of changes the user may choose to test. */
@@ -133,7 +134,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
         state = state,
         actions = remember(viewModel) {
             NetworkLabActions(
-                onOpen = viewModel::open, onPick = viewModel::pick, onRun = viewModel::run, onCancel = lab::cancel,
+                onOpen = viewModel::open, onPick = viewModel::pick, onRun = viewModel::run, onFullAnalysis = viewModel::fullAnalysis, onCancel = lab::cancel,
                 onAutomation = lab::setAutomation, onRefreshNetwork = { viewModel.refreshNetwork() }, onRetest = { viewModel.open(LabSection.LIVE); lab.retest(it) },
                 onDisable = lab::setDisabled, onRetire = lab::retire, onDismissMessage = lab::dismissMessage,
                 onResearchRefresh = { viewModel.refreshResearch() }, onAskAgent = viewModel::askAgent, onTestSuggestion = viewModel::testSuggestion

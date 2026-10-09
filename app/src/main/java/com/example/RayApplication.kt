@@ -115,7 +115,8 @@ class RayApplication : Application() {
             store = com.example.vpn.lab.LabStore(load = { prefs.getString("v1", null) }, save = { prefs.edit().putString("v1", it).apply() }),
             ledger = recoveryLedger,
             endpoints = endpointScores,
-            loadProfile = { id -> serverRepository.getProfileById(id) }
+            loadProfile = { id -> serverRepository.getProfileById(id) },
+            loadAllProfiles = { serverRepository.getAllProfilesOnce() }
         ).also { it.start() }
     }
 
