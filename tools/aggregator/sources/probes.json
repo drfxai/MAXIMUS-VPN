@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "version": 1,
+  "ttlMs": 1209600000,
+  "targets": [
+    {"id": "google-204", "url": "https://www.gstatic.com/generate_204", "failureDomain": "google", "addressFamily": "ANY", "expected": "HTTPS response after a verified TLS handshake", "maxResponseBytes": 0, "timeoutSec": 0},
+    {"id": "cloudflare-204", "url": "https://cp.cloudflare.com/generate_204", "failureDomain": "cloudflare", "addressFamily": "ANY", "expected": "HTTPS response after a verified TLS handshake", "maxResponseBytes": 0, "timeoutSec": 0},
+    {"id": "apple-captive", "url": "https://captive.apple.com/hotspot-detect.html", "failureDomain": "apple", "addressFamily": "ANY", "expected": "HTTPS response after a verified TLS handshake", "maxResponseBytes": 0, "timeoutSec": 0},
+    {"id": "mozilla-portal", "url": "https://detectportal.firefox.com/success.txt", "failureDomain": "mozilla", "addressFamily": "ANY", "expected": "HTTPS response after a verified TLS handshake", "maxResponseBytes": 0, "timeoutSec": 0}
+  ]
+}

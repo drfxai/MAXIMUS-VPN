@@ -1,5 +1,7 @@
 import base64
+import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -150,6 +152,33 @@ class BuildTests(unittest.TestCase):
         public.verify(base64.b64decode(signature), payload, ec.ECDSA(hashes.SHA256()))
         with self.assertRaises(Exception):
             public.verify(base64.b64decode(signature), payload + b" ", ec.ECDSA(hashes.SHA256()))
+
+
+class ProbeManifestTests(unittest.TestCase):
+    def test_probe_targets_are_published_under_the_signed_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "output"
+            src = Path(tmp) / "sources.json"
+            src.write_text(json.dumps({"version": 1, "sources": []}))
+            shutil.copy(Path(__file__).resolve().parents[1] / "sources" / "probes.json", Path(tmp) / "probes.json")
+            manifest = aggregate.build(out, src, fetcher=lambda url: "")
+            body = (out / "probes.json").read_bytes()
+            self.assertEqual(hashlib.sha256(body).hexdigest(), manifest["files"]["probes.json"]["sha256"])
+            probes = json.loads(body)
+            self.assertEqual(1, probes["schema"])
+            self.assertTrue(probes["createdAt"] > 0)
+            urls = [t["url"] for t in probes["targets"]]
+            self.assertTrue(all(u.startswith("https://") for u in urls))
+            # Independent failure domains: one provider's outage never decides a verdict.
+            self.assertGreaterEqual(len({t["failureDomain"] for t in probes["targets"]}), 3)
+
+    def test_without_a_probe_file_the_manifest_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "output"
+            src = Path(tmp) / "sources.json"
+            src.write_text(json.dumps({"version": 1, "sources": []}))
+            manifest = aggregate.build(out, src, fetcher=lambda url: "")
+            self.assertNotIn("probes.json", manifest["files"])
 
 
 class DictMissing(dict):

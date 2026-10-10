@@ -39,8 +39,8 @@ class NetworkStateClassifierTest {
     @Test fun severalRestrictionsAreFiltered() {
         val r = state(open.copy(dnsManipulated = true, sniFiltered = true, udpAvailable = false))
         assertEquals(NetworkState.FILTERED, r.primary)
-        assertEquals(setOf(NetworkState.DNS_MANIPULATED, NetworkState.SNI_INTERFERENCE_SUSPECTED, NetworkState.UDP_BLOCKED), r.restrictions)
-        assertTrue(r.summary().startsWith("Filtered (DNS tampered, SNI interference suspected, UDP blocked)"))
+        assertEquals(setOf(NetworkState.DNS_MANIPULATED, NetworkState.SNI_INTERFERENCE_SUSPECTED, NetworkState.UDP_BLOCKED_SUSPECTED), r.restrictions)
+        assertTrue(r.summary().startsWith("Filtered (DNS tampered, SNI interference suspected, UDP blocked (suspected))"))
     }
 
     @Test fun partialInternationalReach() {
@@ -50,7 +50,7 @@ class NetworkStateClassifierTest {
     }
 
     @Test fun quicStatesAreHonest() {
-        assertEquals(NetworkState.QUIC_BLOCKED, state(open.copy(quicStatus = "QUIC_BLOCKED_SUSPECTED")).primary)
+        assertEquals(NetworkState.QUIC_BLOCKED_SUSPECTED, state(open.copy(quicStatus = "QUIC_BLOCKED_SUSPECTED")).primary)
         assertEquals(NetworkState.QUIC_DEGRADED, state(open.copy(quicStatus = "QUIC_DEGRADED")).primary)
         // An unresponsive QUIC endpoint is not a restriction.
         assertEquals(NetworkState.NORMAL, state(open.copy(quicStatus = "QUIC_UNRESPONSIVE")).primary)
@@ -64,13 +64,13 @@ class NetworkStateClassifierTest {
     }
 
     @Test fun tcpPassingWithTlsCutIsTlsInterference() {
-        assertEquals(NetworkState.TLS_INTERFERED, state(open.copy(internationalOk = 0, tlsAvailable = false)).primary)
+        assertEquals(NetworkState.TLS_PATH_FAILURE, state(open.copy(internationalOk = 0, tlsAvailable = false)).primary)
     }
 
     @Test fun nationalNetworkStatesNeedEvidence() {
         val nin = open.copy(internationalOk = 0, tcpAvailable = false, tlsAvailable = false, cloudflareReachable = false)
         // A direct UDP answer from a foreign resolver (and DoH) is not proof of DNS egress.
-        assertEquals(NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, state(nin).primary)
+        assertEquals(NetworkState.DOMESTIC_ONLY, state(nin).primary)
         assertTrue(state(nin).notTested.contains("Recursive DNS egress (nonce)"))
         assertNotEquals(NetworkState.NIN_WITH_DNS_EGRESS, state(nin.copy(udpAvailable = true, dohReachable = true, dotReachable = true)).primary)
         // Only a measured recursive egress makes it a national network with DNS egress.
@@ -80,7 +80,7 @@ class NetworkStateClassifierTest {
         // No sign of life at all: still only "no verified egress"; isolation needs the recovery families to fail too.
         val dead = nin.copy(domesticReachable = false, udpAvailable = false, dohReachable = false, dnsWorking = false)
         assertEquals(NetworkState.NO_VERIFIED_EGRESS, state(dead).primary)
-        assertNotEquals(NetworkState.TRUE_PHYSICAL_ISOLATION, state(dead).primary)
+        assertNotEquals(NetworkState.NO_VERIFIED_EGRESS_AFTER_RECOVERY, state(dead).primary)
     }
 
     @Test fun carrierNameNeverChangesTheState() {

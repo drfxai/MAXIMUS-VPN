@@ -193,8 +193,8 @@ private fun transactionColor(c: LabColors, state: ConfigTransaction.State) = whe
 private fun stateColor(c: LabColors, state: NetworkState) = when (state) {
     NetworkState.NORMAL -> c.good
     NetworkState.UNKNOWN -> c.text3
-    NetworkState.TRUE_PHYSICAL_ISOLATION, NetworkState.NO_VERIFIED_EGRESS, NetworkState.SEVERE_FILTERING,
-    NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, NetworkState.TLS_INTERFERED -> c.bad
+    NetworkState.NO_VERIFIED_EGRESS_AFTER_RECOVERY, NetworkState.NO_VERIFIED_EGRESS, NetworkState.SEVERE_FILTERING,
+    NetworkState.DOMESTIC_ONLY, NetworkState.TLS_PATH_FAILURE -> c.bad
     else -> c.okay
 }
 
@@ -202,8 +202,8 @@ private fun pathColor(c: LabColors, s: PathStatus) = when (s) {
     PathStatus.VERIFIED, PathStatus.AVAILABLE, PathStatus.SUPPORTED -> c.good
     PathStatus.CANDIDATE, PathStatus.DEGRADED, PathStatus.EXPERIMENTAL, PathStatus.BLOCKED_SUSPECTED, PathStatus.UNRESPONSIVE -> c.okay
     PathStatus.TESTING, PathStatus.QUEUED -> c.accent
-    PathStatus.FAILED, PathStatus.BLOCKED, PathStatus.SECURITY_REJECTED -> c.bad
-    PathStatus.NOT_TESTED, PathStatus.UNSUPPORTED, PathStatus.EXPIRED, PathStatus.NOT_REQUIRED -> c.text3
+    PathStatus.FAILED, PathStatus.BLOCKED, PathStatus.SECURITY_REJECTED, PathStatus.RECENTLY_FAILED -> c.bad
+    PathStatus.NOT_TESTED, PathStatus.UNSUPPORTED, PathStatus.EXPIRED, PathStatus.NOT_REQUIRED, PathStatus.NOT_CONFIGURED -> c.text3
 }
 
 private fun stabilityColor(c: LabColors, health: Int?) = when {

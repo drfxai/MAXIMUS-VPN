@@ -69,7 +69,7 @@ object FailureClassifier {
         LabFailureCategory.DNS_RESOLUTION_FAILED, LabFailureCategory.DNS_RESPONSE_INVALID ->
             Assessment("Names did not resolve properly on this network: possible DNS filtering or an unreachable resolver.", Assessment.Source.DETERMINISTIC_RULE, 0.6)
         LabFailureCategory.TCP_CONNECT_FAILED -> Assessment("The server address refused or dropped connections: possible address blocking or a dead server.", Assessment.Source.DETERMINISTIC_RULE, 0.5)
-        LabFailureCategory.TLS_HANDSHAKE_FAILED -> Assessment("TLS did not complete: possible SNI or fingerprint filtering. Fragment, fingerprint and ECH candidates may help.", Assessment.Source.DETERMINISTIC_RULE, 0.5)
+        LabFailureCategory.TLS_HANDSHAKE_FAILED -> Assessment("TLS path failure: the TLS handshake did not complete. The cause is not known from this alone (the address, port, handshake or name); no SNI comparison showed name-based filtering. Other configs, fingerprints and ECH may still help.", Assessment.Source.DETERMINISTIC_RULE, 0.5)
         LabFailureCategory.CERTIFICATE_VALIDATION_FAILED -> Assessment("The certificate was refused. This is never worked around; check the config or the server.", Assessment.Source.DETERMINISTIC_RULE, 0.8)
         LabFailureCategory.PROTOCOL_HANDSHAKE_FAILED -> Assessment("The proxy protocol failed after the connection opened: a wrong credential or a dead backend.", Assessment.Source.DETERMINISTIC_RULE, 0.6)
         LabFailureCategory.HTTP_CONNECTIVITY_FAILED -> Assessment("The tunnel came up but requests did not get through it.", Assessment.Source.DETERMINISTIC_RULE, 0.5)

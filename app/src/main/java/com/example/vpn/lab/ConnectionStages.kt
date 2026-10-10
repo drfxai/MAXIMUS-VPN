@@ -46,7 +46,11 @@ enum class PathStatus(val title: String) {
     EXPIRED("Expired"),
     AVAILABLE("Available"),
     /** Not tested because a verified path already makes it unnecessary (for example DNS tunnels on an open network). */
-    NOT_REQUIRED("Not required")
+    NOT_REQUIRED("Not required"),
+    /** No config of this family is saved: nothing could be tested. Never shown as FAILED. */
+    NOT_CONFIGURED("Not configured"),
+    /** Failed a real request on this network session moments ago; not started or retested automatically. */
+    RECENTLY_FAILED("Recently failed")
 }
 
 /**

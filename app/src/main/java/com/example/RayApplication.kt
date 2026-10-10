@@ -200,11 +200,21 @@ class RayApplication : Application() {
                 val usesTls = profile.security.equals("tls", true) || profile.security.equals("reality", true)
                 profile.copy(
                     address = resolved.address,
+                    canonicalFingerprint = profile.effectiveFingerprint,
                     sni = if (usesTls && profile.sni.isBlank()) host else profile.sni,
                     host = profile.host.ifBlank { if (profile.transport.lowercase() in setOf("ws", "httpupgrade", "xhttp", "splithttp", "h2", "http")) host else "" }
                 )
             }.getOrDefault(profile)
         }
+
+        // One connectivity brain: every real test feeds the current network session's evidence, which the LAB,
+        // Smart Connect and failover all read (see ConnectivityBrain).
+        com.example.vpn.connectivity.ConnectivityBrain.networkKey = {
+            runCatching { com.example.vpn.smart.NetworkIdentity.current(this) }.getOrNull()
+        }
+        com.example.xray.RealDelayProbe.observer = com.example.vpn.connectivity.ConnectivityBrain::onProbe
+        // Probe targets: the last valid signed manifest, else the built-in list; refreshed in the background.
+        com.example.vpn.connectivity.ProbeManifestStore.install(this)
 
         try {
             database = AppDatabase.getInstance(this)

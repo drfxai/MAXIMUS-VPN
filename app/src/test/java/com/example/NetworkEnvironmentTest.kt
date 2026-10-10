@@ -30,9 +30,18 @@ class NetworkEnvironmentTest {
         assertTrue(NetworkEnvironment.suggestsGodMode(heavy))
     }
 
-    @Test fun whenEverythingThatWorkedNowFailsItIsABlackout() {
+    @Test fun whenEverythingThatWorkedNowFailsThereIsNoVerifiedEgress() {
         val r = classify(validated = false, failed = setOf("REALITY", "CDN"), working = listOf("REALITY", "CDN"))
-        assertEquals(Level.BLACKOUT, r.level)
-        assertTrue(r.describe().startsWith("Irancell (cell:43235): blackout"))
+        assertEquals(Level.NO_VERIFIED_EGRESS, r.level)
+        assertTrue(r.describe().startsWith("Irancell (cell:43235): no_verified_egress"))
+    }
+
+    @Test fun aTlsFailureIsNeverCalledSniWithoutAControlledComparison() {
+        val r = classify(failed = setOf("REALITY", "TLS"), working = listOf("CDN"))
+        assertTrue(Signal.TLS_PATH_FAILURE in r.signals)
+        assertFalse(Signal.SNI_INTERFERENCE_SUSPECTED in r.signals)
+        val compared = NetworkEnvironment.classify("cell:43235", true, metered = true, roaming = false, dnsPoisoned = false,
+            failedKinds = setOf("TLS"), workingKinds = listOf("CDN"), sniComparisonCut = true)
+        assertTrue(Signal.SNI_INTERFERENCE_SUSPECTED in compared.signals)
     }
 }

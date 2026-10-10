@@ -519,8 +519,16 @@ def build(output_dir: Path, sources_file: Path, fetcher=fetch, now=None, key_pem
     (output_dir / "history.json").write_text(pipeline.dumps(updated))
     # Rejected entries stay with the run (a workflow artifact), not in the published list.
     (output_dir / "quarantine.json").write_text(pipeline.dumps(state.get("quarantine", [])))
+    # Probe targets for the app's multi-target verification, signed with the list (sources/probes.json).
+    probes = sources_file.parent / "probes.json"
+    names = ["free.txt", "free-base64.txt", "configs.json", "history.json"]
+    if probes.exists():
+        body = json.loads(probes.read_text())
+        body["createdAt"] = int((now or datetime.now(timezone.utc)).timestamp() * 1000)
+        (output_dir / "probes.json").write_text(json.dumps(body, sort_keys=True, separators=(",", ":")))
+        names.append("probes.json")
     files = {}
-    for name in ("free.txt", "free-base64.txt", "configs.json", "history.json"):
+    for name in names:
         data = (output_dir / name).read_bytes()
         files[name] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
     manifest = {

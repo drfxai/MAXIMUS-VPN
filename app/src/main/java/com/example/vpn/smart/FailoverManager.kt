@@ -88,7 +88,7 @@ class FailoverManager(
             runCatching {
                 // Backups with recent real-traffic evidence first; the label says what is actually known.
                 val plan = SmartFailoverPolicy.plan(currentProfile,
-                    eligibleFallbacks(serverRepository.allProfiles.first(), currentProfile), { com.example.vpn.connectivity.BackupEvidence.rank(it) })
+                    byFreshEvidence(eligibleFallbacks(serverRepository.allProfiles.first(), currentProfile)), { com.example.vpn.connectivity.BackupEvidence.rank(it) })
                 _backupPlan.value = plan
                 fun label(b: SmartFailoverPolicy.Backup?, none: String) =
                     b?.let { "${it.kind} on ${it.failureDomain} (${com.example.vpn.connectivity.BackupEvidence.describe(it.profile)})" } ?: none
@@ -290,7 +290,13 @@ class FailoverManager(
         // Off the failed config's CDN or network, and not one that was just left after failing.
         val otherDomains = policy.withoutPenalized(SmartFailoverPolicy.preferOtherDomains(otherFamilies, degradedProfile))
         val scoredCandidates = otherDomains.filter { it.overallScore > 0 }
-        val candidateProfiles = if (scoredCandidates.isNotEmpty()) scoredCandidates else otherDomains
+        // Fresh evidence of this network decides first: verified here just now, then passed once here, then
+        // untested, then verified earlier. A config that failed a real request here moments ago is never chosen.
+        val candidateProfiles = freshestTier(byFreshEvidence(if (scoredCandidates.isNotEmpty()) scoredCandidates else otherDomains)
+            .ifEmpty { byFreshEvidence(otherDomains) })
+        if (candidateProfiles.isEmpty() && otherDomains.isNotEmpty()) {
+            XrayLogManager.w("FAILOVER", "Every other saved server failed a real request on this network moments ago; none is started blindly.")
+        }
 
         // --- GOD MODE CASCADE LADDER ---
         if (settings.operationalMode == OperationalMode.GOD_MODE) {
@@ -368,6 +374,19 @@ class FailoverManager(
         /** Candidates of a kind not in [failed]; all candidates when every kind has failed. */
         internal fun preferUntriedFamilies(candidates: List<VlessProfile>, failed: Set<String>): List<VlessProfile> =
             candidates.filter { protocolFamily(it) !in failed }.ifEmpty { candidates }
+
+        private val book get() = com.example.vpn.connectivity.ConnectivityBrain.book
+        private fun ref(p: VlessProfile) = com.example.vpn.connectivity.PathRef.of(p)
+
+        /** [profiles] in fresh-evidence order with RECENTLY_FAILED left out (ConnectivityBrain). */
+        internal fun byFreshEvidence(profiles: List<VlessProfile>): List<VlessProfile> = book.eligibleInOrder(profiles) { ref(it) }
+
+        /** Only the best fresh class when one exists (fresh verified or fresh candidate); otherwise all of [ordered]. */
+        internal fun freshestTier(ordered: List<VlessProfile>): List<VlessProfile> {
+            val top = ordered.firstOrNull()?.let { book.eligibility(ref(it)) } ?: return ordered
+            return if (top == com.example.vpn.connectivity.PathEligibility.FRESH_VERIFIED || top == com.example.vpn.connectivity.PathEligibility.FRESH_CANDIDATE)
+                ordered.filter { book.eligibility(ref(it)) == top } else ordered
+        }
 
         internal fun eligibleFallbacks(profiles: List<VlessProfile>, current: VlessProfile): List<VlessProfile> = profiles.filter {
             com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null &&
