@@ -1,0 +1,161 @@
+diff -ruN a/dnstt-server/domains_test.go b/dnstt-server/domains_test.go
+--- a/dnstt-server/domains_test.go
++++ b/dnstt-server/domains_test.go
+@@ -0,0 +1,37 @@
++package main
++
++import (
++	"testing"
++
++	"www.bamsoftware.com/git/dnstt.git/dns"
++)
++
++func TestAnswersEveryTunnelDomain(t *testing.T) {
++	var domains []dns.Name
++	for _, s := range []string{"t.example.com", "u.example.net"} {
++		d, _ := dns.ParseName(s)
++		domains = append(domains, d)
++	}
++	for _, tc := range []struct {
++		name  string
++		rcode uint16
++	}{
++		{"aaaaaaaaaaaaaaaa.t.example.com", dns.RcodeNoError},
++		{"aaaaaaaaaaaaaaaa.u.example.net", dns.RcodeNoError},
++		{"aaaaaaaaaaaaaaaa.example.org", dns.RcodeNameError},
++	} {
++		name, err := dns.ParseName(tc.name)
++		if err != nil {
++			t.Fatal(err)
++		}
++		query := &dns.Message{
++			Flags:      0x0100,
++			Question:   []dns.Question{{Name: name, Type: dns.RRTypeTXT, Class: dns.ClassIN}},
++			Additional: []dns.RR{{Type: dns.RRTypeOPT, Class: 4096}},
++		}
++		resp, _ := responseFor(query, domains)
++		if resp == nil || resp.Flags&0x000f != tc.rcode {
++			t.Fatalf("%s: got %v, want rcode %d", tc.name, resp, tc.rcode)
++		}
++	}
++}
+diff -ruN a/dnstt-server/main.go b/dnstt-server/main.go
+--- a/dnstt-server/main.go
++++ b/dnstt-server/main.go
+@@ -50,6 +50,7 @@
+ 	"log"
+ 	"net"
+ 	"os"
++	"strings"
+ 	"sync"
+ 	"time"
+ 
+@@ -358,7 +359,7 @@
+ // the returned dns.Message is nil, it means that there should be no response to
+ // this query. If the returned dns.Message has an Rcode() of dns.RcodeNoError,
+ // the message is a candidate for for carrying downstream data in a TXT record.
+-func responseFor(query *dns.Message, domain dns.Name) (*dns.Message, []byte) {
++func responseFor(query *dns.Message, domains []dns.Name) (*dns.Message, []byte) {
+ 	resp := &dns.Message{
+ 		ID:       query.ID,
+ 		Flags:    0x8000, // QR = 1, RCODE = no error
+@@ -432,7 +433,13 @@
+ 	// all that comes before the domain if it does. If it does not, we will
+ 	// return RcodeNameError below, but prefer to return RcodeFormatError
+ 	// for payload size if that applies as well.
+-	prefix, ok := question.Name.TrimSuffix(domain)
++	var prefix [][]byte
++	ok := false
++	for _, domain := range domains {
++		if prefix, ok = question.Name.TrimSuffix(domain); ok {
++			break
++		}
++	}
+ 	if !ok {
+ 		// Not a name we are authoritative for.
+ 		resp.Flags |= dns.RcodeNameError
+@@ -500,7 +507,7 @@
+ // the incoming DNS queries, and puts them on ttConn's incoming queue. Whenever
+ // a query calls for a response, constructs a partial response and passes it to
+ // sendLoop over ch.
+-func recvLoop(domain dns.Name, dnsConn net.PacketConn, ttConn *turbotunnel.QueuePacketConn, ch chan<- *record) error {
++func recvLoop(domains []dns.Name, dnsConn net.PacketConn, ttConn *turbotunnel.QueuePacketConn, ch chan<- *record) error {
+ 	for {
+ 		var buf [4096]byte
+ 		n, addr, err := dnsConn.ReadFrom(buf[:])
+@@ -515,7 +522,7 @@
+ 			continue
+ 		}
+ 
+-		resp, payload := responseFor(&query, domain)
++		resp, payload := responseFor(&query, domains)
+ 		// Extract the ClientID from the payload.
+ 		var clientID turbotunnel.ClientID
+ 		n = copy(clientID[:], payload)
+@@ -741,7 +748,7 @@
+ 			},
+ 		},
+ 	}
+-	resp, _ := responseFor(query, dns.Name([][]byte{}))
++	resp, _ := responseFor(query, []dns.Name{dns.Name([][]byte{})})
+ 	// As in sendLoop.
+ 	resp.Answer = []dns.RR{
+ 		{
+@@ -774,7 +781,7 @@
+ 	return low
+ }
+ 
+-func run(privkey []byte, domain dns.Name, upstream string, dnsConn net.PacketConn) error {
++func run(privkey []byte, domains []dns.Name, upstream string, dnsConn net.PacketConn) error {
+ 	defer dnsConn.Close()
+ 
+ 	log.Printf("pubkey %x", noise.PubkeyFromPrivkey(privkey))
+@@ -835,7 +842,7 @@
+ 
+ 	go func() {
+ 		defer done()
+-		err := recvLoop(domain, dnsConn, ttConn, ch)
++		err := recvLoop(domains, dnsConn, ttConn, ch)
+ 		if err != nil {
+ 			log.Printf("recvLoop: %v", err)
+ 		}
+@@ -858,7 +865,7 @@
+ 	flag.Usage = func() {
+ 		fmt.Fprintf(flag.CommandLine.Output(), `Usage:
+   %[1]s -gen-key -privkey-file PRIVKEYFILE -pubkey-file PUBKEYFILE
+-  %[1]s -udp ADDR -privkey-file PRIVKEYFILE DOMAIN UPSTREAMADDR
++  %[1]s -udp ADDR -privkey-file PRIVKEYFILE DOMAIN[,DOMAIN...] UPSTREAMADDR
+ 
+ Example:
+   %[1]s -gen-key -privkey-file server.key -pubkey-file server.pub
+@@ -893,10 +900,17 @@
+ 			flag.Usage()
+ 			os.Exit(1)
+ 		}
+-		domain, err := dns.ParseName(flag.Arg(0))
+-		if err != nil {
+-			fmt.Fprintf(os.Stderr, "invalid domain %+q: %v\n", flag.Arg(0), err)
+-			os.Exit(1)
++		// DOMAIN may list several tunnel domains, comma-separated, all
++		// delegated to this server: clients move to a backup domain when
++		// one is blocked, and the session carries on.
++		var domains []dns.Name
++		for _, s := range strings.Split(flag.Arg(0), ",") {
++			domain, err := dns.ParseName(strings.TrimSpace(s))
++			if err != nil {
++				fmt.Fprintf(os.Stderr, "invalid domain %+q: %v\n", s, err)
++				os.Exit(1)
++			}
++			domains = append(domains, domain)
+ 		}
+ 		upstream := flag.Arg(1)
+ 		// We keep upstream as a string in order to eventually pass it
+@@ -973,7 +987,7 @@
+ 			}
+ 		}
+ 
+-		err = run(privkey, domain, upstream, dnsConn)
++		err = run(privkey, domains, upstream, dnsConn)
+ 		if err != nil {
+ 			log.Fatal(err)
+ 		}

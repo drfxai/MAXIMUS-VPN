@@ -12,6 +12,9 @@ object ToolProfiles {
     const val DNSTT_LABEL = "label"
     const val DNSTT_PUBKEY = "pubkey"
     const val DNSTT_PORT = "dnsPort"
+    /** Backup base domains as typed, and the backup tunnel names under them, comma-separated. */
+    const val DNSTT_BACKUP_BASES = "backupBases"
+    const val DNSTT_BACKUPS = "backupDomains"
     const val SOCKS_PORT = "socksPort"
     const val HY_AUTH = "auth"
     const val HY_OBFS = "obfs"
@@ -19,15 +22,22 @@ object ToolProfiles {
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
+    fun backupBases(tool: InstalledTool): List<String> = split(tool.settings[DNSTT_BACKUP_BASES])
+    fun backupDomains(tool: InstalledTool): List<String> = split(tool.settings[DNSTT_BACKUPS])
+    private fun split(v: String?) = v.orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
     fun dnsttProfile(server: ManagedServer, tool: InstalledTool): VlessProfile =
         DnsttSidecar.profile(
             pubkey = tool.settings[DNSTT_PUBKEY].orEmpty(),
             domain = tool.settings[DNSTT_DOMAIN].orEmpty(),
-            name = "DNS tunnel · ${server.displayName}"
+            name = "DNS tunnel · ${server.displayName}",
+            backupDomains = backupDomains(tool)
         )
 
     fun dnsttLink(server: ManagedServer, tool: InstalledTool): String =
-        "dnstt://${tool.settings[DNSTT_PUBKEY]}@${tool.settings[DNSTT_DOMAIN]}?doh=${enc(DnsttSidecar.DEFAULT_DOH)}#${enc("DNS tunnel · ${server.displayName}")}"
+        "dnstt://${tool.settings[DNSTT_PUBKEY]}@${tool.settings[DNSTT_DOMAIN]}?doh=${enc(DnsttSidecar.DEFAULT_DOH)}" +
+            backupDomains(tool).takeIf { it.isNotEmpty() }?.let { "&domains=${enc(it.joinToString(","))}" }.orEmpty() +
+            "#${enc("DNS tunnel · ${server.displayName}")}"
 
     fun hysteriaLink(server: ManagedServer, tool: InstalledTool): String {
         val host = server.host

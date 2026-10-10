@@ -86,7 +86,7 @@ class DnsttSidecarTest {
         assertTrue(refused("dnstt://abcd@t.example.com").contains("64 hex"))
         assertTrue(refused("dnstt://$key@localhost").contains("domain"))
         assertTrue(refused("dnstt://t.example.com?doh=https://1.1.1.1/dns-query").contains("@"))
-        assertTrue(refused("dnstt://$key@t.example.com?doh=https://1.1.1.1/dns-query&udp=1.1.1.1").contains("only one"))
+        assertTrue(refused("dnstt://$key@t.example.com?doh=https://1.1.1.1/dns-query&doh=https://1.1.1.1/dns-query").contains("twice"))
         assertTrue(refused("vless://x@y:1").contains("dnstt://"))
         assertNull(DnsttSidecar.parseOrNull("dnstt://$key@t.example.com?utls=a;b"))
     }
@@ -120,5 +120,72 @@ class DnsttSidecarTest {
         assertTrue(engine.handles(broken))
         assertNotNull(engine.problem(broken))
         assertFalse(engine.handles(VlessProfile(name = "v", address = "example.com", port = 443, uuid = "x")))
+    }
+
+    @Test
+    fun severalResolversAreUsedInOrderWithOneRateLimitByDefault() {
+        val link = "dnstt://$key@t.example.com?doh=https://1.1.1.1/dns-query&udp=8.8.8.8&dot=9.9.9.9&qps=3"
+        val s = DnsttSidecar.settings(DnsttSidecar.parse(link))
+        assertEquals(
+            listOf(ResolverKind.DOH to "https://1.1.1.1/dns-query", ResolverKind.UDP to "8.8.8.8:53", ResolverKind.DOT to "9.9.9.9:853"),
+            s.resolvers.map { it.kind to it.address }
+        )
+        assertFalse(s.perResolver)
+        assertEquals(3, s.totalQps)
+        assertEquals(
+            listOf("x", "-doh", "https://1.1.1.1/dns-query", "-udp", "8.8.8.8:53", "-dot", "9.9.9.9:853", "-pubkey", key, "-qps", "3",
+                "t.example.com", "127.0.0.1:1"),
+            DnsttSidecar.command(s, "x", 1)
+        )
+        // Older builds read the first resolver from the single-resolver keys.
+        val extras = ProfileExtras.read(DnsttSidecar.parse(link))
+        assertEquals("doh", extras.getString(DnsttSidecar.KEY_RESOLVER_KIND))
+        assertEquals("https://1.1.1.1/dns-query", extras.getString(DnsttSidecar.KEY_RESOLVER))
+        val again = DnsttSidecar.parse(DnsttSidecar.toLink(DnsttSidecar.parse(link)))
+        assertEquals(s, DnsttSidecar.settings(again))
+    }
+
+    @Test
+    fun perResolverLimitIsOptInAndNeedsTwoResolvers() {
+        val two = DnsttSidecar.settings(DnsttSidecar.parse("dnstt://$key@t.example.com?udp=8.8.8.8&udp=1.1.1.1&qps=2&perresolver=1"))
+        assertTrue(two.perResolver)
+        assertEquals(4, two.totalQps)
+        assertTrue(DnsttSidecar.command(two, "x", 1).contains("-qps-per-resolver"))
+        val one = DnsttSidecar.settings(DnsttSidecar.parse("dnstt://$key@t.example.com?udp=8.8.8.8&perresolver=1"))
+        assertFalse(one.perResolver)
+        assertFalse(DnsttSidecar.command(one, "x", 1).contains("-qps-per-resolver"))
+        val many = (1..7).joinToString("&") { "udp=10.0.0.$it" }
+        assertTrue(refused("dnstt://$key@t.example.com?$many").contains("up to"))
+    }
+
+    @Test
+    fun backupDomainsGoToTheClientAndRoundTrip() {
+        val link = "dnstt://$key@t.example.com?doh=https://1.1.1.1/dns-query&domains=t.example.net,T.Example.org."
+        val s = DnsttSidecar.settings(DnsttSidecar.parse(link))
+        assertEquals(listOf("t.example.net", "t.example.org"), s.backupDomains)
+        val cmd = DnsttSidecar.command(s, "x", 1)
+        assertEquals("t.example.net,t.example.org", cmd[cmd.indexOf("-domains") + 1])
+        assertEquals("t.example.com", cmd[cmd.size - 2])
+        assertEquals(s, DnsttSidecar.settings(DnsttSidecar.parse(DnsttSidecar.toLink(DnsttSidecar.parse(link)))))
+        assertTrue(refused("dnstt://$key@t.example.com?domains=t.example.com").contains("repeats"))
+        assertTrue(refused("dnstt://$key@t.example.com?domains=localhost").contains("not a valid"))
+        assertTrue(refused("dnstt://$key@t.example.com?domains=a.example.net,b.example.net,c.example.net,d.example.net").contains("up to"))
+    }
+
+    @Test
+    fun editingKeepsOtherExtrasAndOldProfilesStillWork() {
+        val base = ProfileExtras.with(DnsttSidecar.parse("dnstt://$key@t.example.com?udp=8.8.8.8"), "note", "keep")
+        val s = DnsttSidecar.validate(key, "t.example.com", listOf(ResolverKind.UDP to "8.8.8.8", ResolverKind.UDP to "1.1.1.1"), "", "2",
+            listOf("t.example.net"), perResolver = true)
+        val edited = DnsttSidecar.withSettings(base, s)
+        assertEquals("keep", ProfileExtras.read(edited).optString("note"))
+        assertEquals(s, DnsttSidecar.settings(edited))
+        assertEquals(base.id, edited.id)
+        // Going back to one resolver and no backups drops the extra keys.
+        val single = DnsttSidecar.withSettings(edited, DnsttSidecar.validate(key, "t.example.com", ResolverKind.UDP, "8.8.8.8", ""))
+        val extras = ProfileExtras.read(single)
+        assertFalse(extras.has(DnsttSidecar.KEY_RESOLVERS))
+        assertFalse(extras.has(DnsttSidecar.KEY_BACKUP_DOMAINS))
+        assertFalse(extras.has(DnsttSidecar.KEY_PER_RESOLVER))
     }
 }
