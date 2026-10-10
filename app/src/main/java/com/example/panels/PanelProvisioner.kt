@@ -68,7 +68,7 @@ class PanelProvisioner(
     ): ManagedPanel {
         require(request.host.isNotBlank()) { "Server IP/host is required" }
         require(request.username.isNotBlank()) { "SSH username is required" }
-        require(request.password.isNotBlank()) { "SSH password is required" }
+        require(request.password.isNotBlank() || request.privateKey.isNotBlank()) { "SSH password is required" }
         require(request.sshPort in 1..65535) { "Invalid SSH port" }
 
         val storedFingerprint = runCatching {
@@ -93,7 +93,7 @@ class PanelProvisioner(
 
         try {
             check(pinRepo.observedFingerprint.isNotBlank()) { "SSH host key was not presented" }
-            onLog("[SSH] Host key verified and password accepted: ${pinRepo.observedFingerprint}")
+            onLog("[SSH] Host key verified and ${if (request.privateKey.isNotBlank()) "key" else "password"} accepted: ${pinRepo.observedFingerprint}")
 
             onLog("[3X-UI] Installing signed release $XUI_VERSION in unattended mode")
             val output = exec(session, buildInstallCommand(host), 15 * 60_000L) { line ->
@@ -220,11 +220,13 @@ class PanelProvisioner(
             } else {
                 Thread.sleep(minOf(1_000L, retryDelayMs.coerceAtLeast(0L)))
             }
-            val session = JSch().apply { hostKeyRepository = pinRepo }
+            val jsch = JSch().apply { hostKeyRepository = pinRepo }
+            if (request.privateKey.isNotBlank()) jsch.addIdentity("maximus-phone", request.privateKey.toByteArray(), null, null)
+            val session = jsch
                 .getSession(request.username.trim(), request.host.trim(), request.sshPort).apply {
-                    setPassword(request.password)
+                    if (request.privateKey.isBlank()) setPassword(request.password)
                     setConfig("StrictHostKeyChecking", "yes")
-                    setConfig("PreferredAuthentications", "password,keyboard-interactive")
+                    setConfig("PreferredAuthentications", if (request.privateKey.isNotBlank()) "publickey" else "password,keyboard-interactive")
                     if (attempt.slimKex) {
                         setConfig(
                             "kex",
@@ -774,7 +776,7 @@ class PanelProvisioner(
         return buildString(n) { repeat(n) { append(chars[random.nextInt(chars.length)]) } }
     }
 
-    private class DiscoveryHostKeyRepository : HostKeyRepository {
+    internal class DiscoveryHostKeyRepository : HostKeyRepository {
         @Volatile var observedFingerprint: String = ""
             private set
 
@@ -796,7 +798,7 @@ class PanelProvisioner(
         override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
     }
 
-    private class PinningHostKeyRepository(expected: String) : HostKeyRepository {
+    internal class PinningHostKeyRepository(expected: String) : HostKeyRepository {
         private val expectedNormalized = expected.removePrefix("SHA256:").trim()
         @Volatile var observedFingerprint: String = ""
             private set
