@@ -99,7 +99,12 @@ class RayApplication : Application() {
                     try {
                         c.connectTimeout = 5000; c.readTimeout = 5000
                         c.setRequestProperty("Accept", "application/dns-message")
-                        if (c.responseCode == 200) c.inputStream.use { it.readNBytes(4096) } else null
+                        // readNBytes is API 33; the app supports 24, so read a bounded amount by hand.
+                        if (c.responseCode == 200) c.inputStream.use { s ->
+                            val buf = ByteArray(4096); var n = 0
+                            while (n < buf.size) { val r = s.read(buf, n, buf.size - n); if (r < 0) break; n += r }
+                            buf.copyOf(n)
+                        } else null
                     } finally { c.disconnect() }
                 }
             },
