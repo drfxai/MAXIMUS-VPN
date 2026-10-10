@@ -54,9 +54,19 @@ The Tunnel tab links one server in Iran to one server abroad:
 phone → Iran server → server abroad → internet. It needs both servers in My Servers, signed in.
 
 - The phone connects to the Iran server with VLESS + REALITY + Vision on one TCP port.
-- The Iran server reaches the server abroad three ways at once: REALITY, XHTTP over REALITY and
+- The Iran server reaches the server abroad three ways at once (plus the reverse way below): REALITY, XHTTP over REALITY and
   Hysteria2. Xray probes each one every 30 seconds and uses the fastest that answers
   (`leastPing`), so a blocked path is skipped without the phone noticing.
+- **Reverse way.** The server abroad can also connect *to* the Iran server: it signs in on the
+  phone's port with its own id (VLESS + REALITY, checked against the Iran server's public key) and
+  keeps connections open, and the Iran server sends traffic back through them (Xray's VLESS
+  `reverse`). This works when the Iran server cannot open connections abroad, and with only the
+  reverse way on, the server abroad needs no open port at all. Xray refuses that id for anything
+  but the reverse link.
+- **Automatic choice.** The check tries a TCP connection in both directions (to each server's SSH
+  port) and turns on every way that can work: direct ways when the Iran server reaches abroad, the
+  reverse way when the server abroad reaches Iran. If neither direction connects, setup stops and
+  says so. The tunnel page shows the reverse way's round trip from the open connections.
 - REALITY and XHTTP ports move on a schedule (off, 6, 12 or 24 hours). Both servers work out the
   next port themselves from a shared seed with a systemd timer, so the phone is not needed; the
   previous period's port keeps working for one more period. "Move now" picks a new seed.

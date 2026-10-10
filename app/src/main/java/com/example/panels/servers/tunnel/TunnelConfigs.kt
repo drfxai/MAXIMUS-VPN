@@ -44,8 +44,33 @@ object TunnelConfigs {
             .put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
             .put(JSONObject().put("tag", "block").put("protocol", "blackhole")))
         // IPIfNonMatch resolves names, so a name pointing at 127.0.0.1 or a private network is blocked too.
-        .put("routing", JSONObject().put("domainStrategy", "IPIfNonMatch").put("rules", JSONArray().put(blockPrivate())))
+        // The last rule names "direct" because the reverse link's outbound (a later file) would otherwise become the default.
+        .put("routing", JSONObject().put("domainStrategy", "IPIfNonMatch").put("rules", JSONArray().put(blockPrivate())
+            .put(JSONObject().put("network", "tcp,udp").put("outboundTag", "direct"))))
         .text()
+
+    /** File name of [abroadReverse] on the server abroad. */
+    const val REVERSE_FILE = "40-rv.json"
+    /** Tag of the traffic that arrives back over the reverse link on the server abroad. */
+    const val REVERSE_IN = "rv-in"
+
+    /**
+     * The reverse link: the server abroad keeps connections open to the Iran server's phone port
+     * (VLESS + REALITY, checked against the Iran server's public key), and the Iran server sends
+     * traffic back through them. What arrives goes through the same routing as every other path,
+     * so private networks stay blocked.
+     */
+    fun abroadReverse(spec: TunnelSpec, iranHost: String): String {
+        require(spec.entryPublicKey.isNotEmpty()) { "Set up the Iran server first" }
+        val outbound = JSONObject().put("tag", "rv-link").put("protocol", "vless")
+            .put("settings", JSONObject().put("address", iranHost).put("port", spec.entryPort)
+                .put("id", spec.reverseUuid).put("flow", "xtls-rprx-vision").put("encryption", "none")
+                .put("reverse", JSONObject().put("tag", REVERSE_IN)))
+            .put("streamSettings", JSONObject().put("network", "raw").put("security", "reality").put("realitySettings", JSONObject()
+                .put("serverName", spec.entrySni).put("fingerprint", "chrome")
+                .put("publicKey", spec.entryPublicKey).put("shortId", spec.entryShortId)))
+        return JSONObject().put("outbounds", JSONArray().put(outbound)).toString(2)
+    }
 
     /** One exit inbound for [t] (REALITY or XHTTP); the port and tag are filled in on the server. */
     fun abroadTemplate(spec: TunnelSpec, t: TunnelTransport): String {
@@ -80,8 +105,13 @@ object TunnelConfigs {
      * Iran server directly; see [iranDefaultBlock].
      */
     fun iranBase(spec: TunnelSpec): String {
+        val clients = JSONArray().put(JSONObject().put("id", spec.entryUuid).put("flow", "xtls-rprx-vision"))
+        // The server abroad signs in on the same port; Xray turns its connections into the outbound
+        // "t-rv" for the balancer and refuses any other use of this id.
+        if (TunnelTransport.REVERSE in spec.transports) clients.put(JSONObject().put("id", spec.reverseUuid).put("flow", "xtls-rprx-vision")
+            .put("reverse", JSONObject().put("tag", TunnelTransport.REVERSE.tagPrefix)))
         val inbound = JSONObject().put("tag", "entry").put("port", spec.entryPort).put("protocol", "vless")
-            .put("settings", JSONObject().put("clients", JSONArray().put(JSONObject().put("id", spec.entryUuid).put("flow", "xtls-rprx-vision"))).put("decryption", "none"))
+            .put("settings", JSONObject().put("clients", clients).put("decryption", "none"))
             .put("streamSettings", JSONObject().put("network", "raw").put("security", "reality")
                 .put("realitySettings", reality(spec.entrySni, spec.entryShortId)))
             .put("sniffing", JSONObject().put("enabled", true).put("destOverride", JSONArray().put("http").put("tls").put("quic")).put("routeOnly", true))
@@ -110,7 +140,7 @@ object TunnelConfigs {
 
     /** The tag the balancer uses before the first health probe finishes. */
     fun fallbackTag(spec: TunnelSpec): String = when (val t = spec.fallbackTransport) {
-        TunnelTransport.HYSTERIA2 -> t.tagPrefix
+        TunnelTransport.HYSTERIA2, TunnelTransport.REVERSE -> t.tagPrefix
         else -> "${t.tagPrefix}-now"
     }
 

@@ -12,15 +12,32 @@ import javax.crypto.spec.SecretKeySpec
 enum class TunnelTransport(val id: String, val title: String, val detail: String, val udp: Boolean) {
     REALITY("reality", "REALITY", "TCP · VLESS Vision, looks like a visit to a big website", false),
     XHTTP("xhttp", "XHTTP", "TCP · HTTP requests over REALITY, survives stricter filters", false),
-    HYSTERIA2("hy2", "Hysteria2", "UDP · QUIC with Salamander, fastest on lossy links", true);
+    HYSTERIA2("hy2", "Hysteria2", "UDP · QUIC with Salamander, fastest on lossy links", true),
+    /** The server abroad connects to the Iran server's phone port and the Iran server sends traffic back through it. */
+    REVERSE("rv", "Reverse", "TCP · the server abroad connects to Iran, no open port abroad", false);
 
     /** Xray outbound tags on the Iran server start with this; the balancer selects by the prefix. */
     val tagPrefix: String get() = "t-$id"
 
     companion object {
         fun byId(id: String): TunnelTransport? = entries.firstOrNull { it.id == id }
-        /** The transports whose port moves with rotation (Hysteria2 keeps one UDP port). */
+        /** The transports whose port moves with rotation (Hysteria2 keeps one UDP port, Reverse uses the phone's port). */
         val ROTATING = listOf(REALITY, XHTTP)
+        /** The transports where the Iran server connects to the server abroad. */
+        val FORWARD = listOf(REALITY, XHTTP, HYSTERIA2)
+
+        /**
+         * The ways to use, from what the check found: every way that can work, so the balancer has
+         * the most paths to pick from. null means that direction could not be tested; it counts as open.
+         */
+        fun recommended(iranReachesAbroad: Boolean?, abroadReachesIran: Boolean?): Set<TunnelTransport> {
+            val forward = iranReachesAbroad != false
+            val reverse = abroadReachesIran != false
+            return buildSet {
+                if (forward) addAll(FORWARD)
+                if (reverse) add(REVERSE)
+            }.ifEmpty { entries.toSet() }
+        }
     }
 }
 
@@ -60,6 +77,8 @@ data class TunnelSpec(
     val hyCertPem: String = "",
     /** Loopback SOCKS port of the Hysteria2 client on the Iran server. */
     val hyLocalPort: Int,
+    /** Id the server abroad signs in with for [TunnelTransport.REVERSE]; Xray lets it only carry reverse traffic. */
+    val reverseUuid: String = "",
     val createdAt: Long = System.currentTimeMillis()
 ) {
     val fallbackTransport: TunnelTransport get() = TunnelTransport.entries.first { it in transports }
@@ -77,7 +96,7 @@ data class TunnelSpec(
         put("exitPublicKey", exitPublicKey); put("exitShortId", exitShortId)
         put("xhttpPath", xhttpPath)
         put("hyPort", hyPort.toString()); put("hyAuth", hyAuth); put("hyObfs", hyObfs); put("hyCertPem", hyCertPem)
-        put("hyLocalPort", hyLocalPort.toString()); put("createdAt", createdAt.toString())
+        put("hyLocalPort", hyLocalPort.toString()); put("reverseUuid", reverseUuid); put("createdAt", createdAt.toString())
     }
 
     companion object {
@@ -105,6 +124,7 @@ data class TunnelSpec(
                 exitShortId = s.getValue("exitShortId"), xhttpPath = s.getValue("xhttpPath"),
                 hyPort = i("hyPort"), hyAuth = s.getValue("hyAuth"), hyObfs = s.getValue("hyObfs"),
                 hyCertPem = s["hyCertPem"].orEmpty(), hyLocalPort = i("hyLocalPort"),
+                reverseUuid = s["reverseUuid"].orEmpty(),
                 createdAt = s["createdAt"]?.toLongOrNull() ?: 0L
             ).takeIf { it.transports.isNotEmpty() }
         }.getOrNull()

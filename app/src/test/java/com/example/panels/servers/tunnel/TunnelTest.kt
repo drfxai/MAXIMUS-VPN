@@ -28,7 +28,7 @@ class TunnelTest {
         linkUuid = "66666666-7777-4888-9999-000000000000", exitSni = "www.microsoft.com",
         exitPublicKey = "l1IYwESWpLc7k1N7CzQ9a6gW_amt-Q8nNOXWZLDXT3Y", exitShortId = "0f0e0d0c",
         xhttpPath = "/a1b2c3d4e5f6", hyPort = 45000, hyAuth = "A".repeat(24), hyObfs = "b".repeat(24),
-        hyCertPem = cert, hyLocalPort = 15000
+        hyCertPem = cert, hyLocalPort = 15000, reverseUuid = "77777777-8888-4999-aaaa-bbbbbbbbbbbb"
     )
 
     /** Values computed with `openssl dgst -sha256 -hmac`, exactly as the rotate script on the servers does. */
@@ -108,14 +108,17 @@ class TunnelTest {
     }
 
     private fun allScripts() = listOf(
-        TunnelScripts.check(TunnelScripts.IRAN_SNI),
+        TunnelScripts.check(TunnelScripts.IRAN_SNI, abroad.host, 22),
         TunnelScripts.abroadInstall(spec(), "amd64", abroad.host, renewKeys = false),
         TunnelScripts.abroadInstall(spec(rotation = 0, transports = setOf(TunnelTransport.REALITY)), "arm64", "exit.example.com", renewKeys = true),
         TunnelScripts.iranInstall(spec(), "amd64", abroad.host, renewKeys = false, oldEntryPort = 40000),
         TunnelScripts.iranInstall(spec(rotation = 6, transports = setOf(TunnelTransport.XHTTP)), "arm64", abroad.host, renewKeys = true, oldEntryPort = null),
         TunnelScripts.iranStatus(), TunnelScripts.reseed("ffeeddccbbaa99887766554433221100"),
         TunnelScripts.uninstall(TunnelSpec.ROLE_ABROAD, null, 45000), TunnelScripts.uninstall(TunnelSpec.ROLE_IRAN, 42001, null),
-        TunnelScripts.restart(), TunnelScripts.logs()
+        TunnelScripts.restart(), TunnelScripts.logs(),
+        TunnelScripts.abroadInstall(spec(transports = setOf(TunnelTransport.REVERSE)), "amd64", abroad.host, renewKeys = false),
+        TunnelScripts.iranInstall(spec(transports = setOf(TunnelTransport.REVERSE)), "amd64", abroad.host, renewKeys = false, oldEntryPort = null),
+        TunnelScripts.abroadReverse(spec(), iran.host)
     )
 
     @Test fun scriptsAreValidShellWithPinnedPrograms() {
@@ -158,8 +161,50 @@ class TunnelTest {
             { TunnelScripts.iranInstall(spec().copy(exitPublicKey = ""), "amd64", abroad.host, false, null) },
             { TunnelScripts.iranInstall(spec().copy(hyCertPem = "EOF_CERT\nreboot"), "amd64", abroad.host, false, null) },
             { TunnelScripts.abroadInstall(spec(), "amd64", "1.2.3.4'", false) },
-            { TunnelScripts.reseed("zz") }
+            { TunnelScripts.reseed("zz") },
+            { TunnelScripts.validate(spec().copy(reverseUuid = "")) },
+            { TunnelScripts.validate(spec().copy(reverseUuid = spec().entryUuid)) },
+            { TunnelScripts.abroadReverse(spec(transports = setOf(TunnelTransport.REALITY)), iran.host) },
+            { TunnelScripts.abroadReverse(spec(), "1.2.3.4; reboot") },
+            { TunnelScripts.check(TunnelScripts.IRAN_SNI, "x\nreboot", 22) }
         )
         bad.forEachIndexed { i, f -> assertNotNull("case $i", runCatching(f).exceptionOrNull()) }
+    }
+
+    @Test fun reverseWayLinksBackThroughThePhonePort() {
+        val s = spec()
+        // The Iran server accepts the server abroad's id on the phone's port and turns it into "t-rv".
+        val clients = JSONObject(TunnelConfigs.iranBase(s)).getJSONArray("inbounds").getJSONObject(0)
+            .getJSONObject("settings").getJSONArray("clients")
+        assertEquals(2, clients.length())
+        assertEquals(s.reverseUuid, clients.getJSONObject(1).getString("id"))
+        assertEquals("t-rv", clients.getJSONObject(1).getJSONObject("reverse").getString("tag"))
+        assertEquals(1, JSONObject(TunnelConfigs.iranBase(s.copy(transports = setOf(TunnelTransport.REALITY))))
+            .getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings").getJSONArray("clients").length())
+        // The server abroad dials the Iran server with REALITY, checked against the Iran server's key.
+        val out = JSONObject(TunnelConfigs.abroadReverse(s, iran.host)).getJSONArray("outbounds").getJSONObject(0)
+        val set = out.getJSONObject("settings")
+        assertEquals(iran.host, set.getString("address"))
+        assertEquals(s.entryPort, set.getInt("port"))
+        assertEquals(TunnelConfigs.REVERSE_IN, set.getJSONObject("reverse").getString("tag"))
+        assertEquals(s.entryPublicKey, out.getJSONObject("streamSettings").getJSONObject("realitySettings").getString("publicKey"))
+        assertFalse(out.toString().contains("insecure", ignoreCase = true))
+        // Its outbound (a later file) would become the default; the last rule keeps "direct" the default.
+        val rules = JSONObject(TunnelConfigs.abroadBase()).getJSONObject("routing").getJSONArray("rules")
+        assertEquals("block", rules.getJSONObject(0).getString("outboundTag"))
+        assertEquals("direct", rules.getJSONObject(rules.length() - 1).getString("outboundTag"))
+        assertEquals("t-rv", TunnelConfigs.fallbackTag(spec(transports = setOf(TunnelTransport.REVERSE))))
+        val abroadOnlyReverse = TunnelScripts.abroadInstall(spec(transports = setOf(TunnelTransport.REVERSE)), "amd64", abroad.host, false).text
+        assertFalse(abroadOnlyReverse.contains("EOF_TPL"))
+        assertTrue(TunnelScripts.iranInstall(s, "amd64", abroad.host, false, null).text.contains("RV_FROM=203.0.113.7\nRV_PORT=42001"))
+    }
+
+    @Test fun checkPicksEveryWayThatCanConnect() {
+        val all = TunnelTransport.entries.toSet()
+        assertEquals(all, TunnelTransport.recommended(true, true))
+        assertEquals(all, TunnelTransport.recommended(null, null))
+        assertEquals(setOf(TunnelTransport.REVERSE), TunnelTransport.recommended(false, true))
+        assertEquals(TunnelTransport.FORWARD.toSet(), TunnelTransport.recommended(true, false))
+        assertEquals(all, TunnelTransport.recommended(false, false))
     }
 }

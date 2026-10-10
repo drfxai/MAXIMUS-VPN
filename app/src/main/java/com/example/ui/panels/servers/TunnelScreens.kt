@@ -133,7 +133,9 @@ data class TunnelSetupUi(
     val testing: Boolean = false,
     val testResult: String? = null,
     val testOk: Boolean? = null,
-    val error: String = ""
+    val error: String = "",
+    /** The ways the check found usable; null before the check. */
+    val recommended: Set<TunnelTransport>? = null
 ) {
     val iran: ServerRowUi? get() = iranRows.firstOrNull { it.id == iranId }
     val abroad: ServerRowUi? get() = abroadRows.firstOrNull { it.id == abroadId }
@@ -187,6 +189,7 @@ internal fun transportShort(t: TunnelTransport) = when (t) {
     TunnelTransport.REALITY -> "REALITY"
     TunnelTransport.XHTTP -> "XHTTP"
     TunnelTransport.HYSTERIA2 -> "Hysteria2"
+    TunnelTransport.REVERSE -> "Reverse"
 }
 
 internal fun rotationLabel(hours: Int) = if (hours <= 0) "Fixed ports" else "Ports change every $hours h"
@@ -302,7 +305,7 @@ private fun TunnelIntro(ui: TunnelTabUi, actions: TunnelActions) {
             }
         }
         RowDivider(0.dp)
-        FeatureRow(Icons.Rounded.Route, "Three ways across", "REALITY, XHTTP and Hysteria2 run side by side")
+        FeatureRow(Icons.Rounded.Route, "Four ways across", "REALITY, XHTTP, Hysteria2 and Reverse run side by side")
         RowDivider(50.dp)
         FeatureRow(Icons.Rounded.Autorenew, "Switches by itself", "The fastest open path is used; a blocked one is skipped")
         RowDivider(50.dp)
@@ -469,8 +472,10 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
     GroupCard {
         Rows(TunnelTransport.entries.toList(), dividerStart = 14.dp) { t ->
             val on = t in ui.transports
+            val unusable = ui.recommended != null && t !in ui.recommended
             ListRow(
-                transportShort(t), subtitle = t.detail,
+                transportShort(t),
+                subtitle = if (unusable) "Not reachable in the check" else t.detail,
                 trailing = {
                     Switch(on, { v ->
                         val next = if (v) ui.transports + t else ui.transports - t
@@ -480,27 +485,36 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
             )
         }
     }
-    Text("Keep all three: the tunnel uses the fastest one that is open and moves on when one is blocked.",
-        color = Sv.Dim, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 2.dp))
+    Text(
+        if (ui.recommended != null && !ui.update) "Turned on from the check: every way that can connect these two servers. " +
+            "The tunnel uses the fastest open one and moves on when one stops working."
+        else "Keep them all on: the tunnel uses the fastest one that is open and moves on when one stops working.",
+        color = Sv.Dim, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 2.dp)
+    )
 
-    SectionLabel("Port rotation")
-    GroupCard {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Segmented(TunnelSpec.ROTATION_CHOICES, ui.rotationHours, { if (it == 0) "Off" else "$it h" }) { actions.onChange(ui.copy(rotationHours = it)) }
-            Text(
-                if (ui.rotationHours == 0) "Ports stay the same until you move them by hand."
-                else "Every ${ui.rotationHours} h both servers switch REALITY and XHTTP to new ports on their own. " +
-                    "The old ports keep working for one more period, so nothing drops.",
-                color = Sv.Muted, fontSize = 12.sp, lineHeight = 17.sp
-            )
+    val forwardTcp = TunnelTransport.ROTATING.any { it in ui.transports }
+    if (forwardTcp) {
+        SectionLabel("Port rotation")
+        GroupCard {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Segmented(TunnelSpec.ROTATION_CHOICES, ui.rotationHours, { if (it == 0) "Off" else "$it h" }) { actions.onChange(ui.copy(rotationHours = it)) }
+                Text(
+                    if (ui.rotationHours == 0) "Ports stay the same until you move them by hand."
+                    else "Every ${ui.rotationHours} h both servers switch REALITY and XHTTP to new ports on their own. " +
+                        "The old ports keep working for one more period, so nothing drops.",
+                    color = Sv.Muted, fontSize = 12.sp, lineHeight = 17.sp
+                )
+            }
         }
     }
 
     SectionLabel("Camouflage sites")
     GroupCard {
         SniPicker("Phone → Iran server", ui.entrySni, ui.iranSites) { actions.onChange(ui.copy(entrySni = it)) }
-        RowDivider(0.dp)
-        SniPicker("Iran server → abroad", ui.exitSni, ui.abroadSites) { actions.onChange(ui.copy(exitSni = it)) }
+        if (forwardTcp) {
+            RowDivider(0.dp)
+            SniPicker("Iran server → abroad", ui.exitSni, ui.abroadSites) { actions.onChange(ui.copy(exitSni = it)) }
+        }
     }
 
     if (ui.update) {
@@ -516,9 +530,19 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
     SectionLabel("What changes on the servers")
     GroupCard {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val hy = TunnelTransport.HYSTERIA2 in ui.transports
+            val rotating = TunnelTransport.ROTATING.any { it in ui.transports }
+            val reverse = TunnelTransport.REVERSE in ui.transports
+            val opened = listOfNotNull(
+                if (rotating) (if (ui.rotationHours > 0) "rotating TCP ports" else "fixed TCP ports") else null,
+                if (hy) "one UDP port" else null
+            )
+            val abroadLine = "Xray${if (hy) " and Hysteria2" else ""} under a locked user, new keys made on the server, " +
+                (if (opened.isEmpty()) "no port opened" else opened.joinToString(" and ") + " opened") +
+                (if (reverse) "; it also connects out to the Iran server for the reverse way" else "")
             listOf(
-                ServerLocation.ABROAD to "Xray${if (TunnelTransport.HYSTERIA2 in ui.transports) " and Hysteria2" else ""} under a locked user, new keys made on the server, ${if (ui.rotationHours > 0) "rotating TCP ports" else "two fixed TCP ports"}${if (TunnelTransport.HYSTERIA2 in ui.transports) " and one UDP port" else ""} opened",
-                ServerLocation.IRAN to "Xray under a locked user with one TCP port for your phone; it only forwards abroad, never to the internet directly",
+                ServerLocation.ABROAD to abroadLine,
+                ServerLocation.IRAN to "Xray under a locked user with one TCP port for your phone${if (reverse) " and the reverse link" else ""}; it only forwards abroad, never to the internet directly",
                 null to "Programs are the pinned builds from this app's own releases; a failed first setup is undone"
             ).forEach { (loc, line) ->
                 Row {
@@ -532,7 +556,12 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
             }
         }
     }
-    Notice("If the server abroad has a cloud firewall, allow TCP 20000–59999${if (TunnelTransport.HYSTERIA2 in ui.transports) " and the Hysteria2 UDP port" else ""} there too.")
+    val abroadPorts = listOfNotNull(
+        if (TunnelTransport.ROTATING.any { it in ui.transports }) "TCP 20000–59999" else null,
+        if (TunnelTransport.HYSTERIA2 in ui.transports) "the Hysteria2 UDP port" else null
+    )
+    if (abroadPorts.isNotEmpty()) Notice("If the server abroad has a cloud firewall, allow ${abroadPorts.joinToString(" and ")} there too.")
+    else Notice("Only the reverse way is on, so the server abroad needs no open port; the Iran server's cloud firewall must allow the phone's port.")
 }
 
 @Composable
@@ -666,6 +695,7 @@ private fun PathsCard(paths: List<TunnelPathUi>) {
                 transportShort(p.transport) + if (p.previous) " · previous port" else "",
                 subtitle = when (p.transport) {
                     TunnelTransport.HYSTERIA2 -> "UDP ${p.port ?: "—"}"
+                    TunnelTransport.REVERSE -> "TCP ${p.port ?: "—"} · from abroad"
                     else -> "TCP ${p.port ?: "—"}"
                 },
                 subtitleMono = true,
@@ -675,6 +705,7 @@ private fun PathsCard(paths: List<TunnelPathUi>) {
                     when {
                         !p.tested -> Text("—", color = Sv.Dim, fontSize = 12.sp)
                         p.latencyMs != null -> HealthLabel(Health.ONLINE, p.latencyMs)
+                        p.transport == TunnelTransport.REVERSE -> Badge("Not linked", Tone.BAD, dot = true)
                         else -> Badge("Blocked", Tone.BAD, dot = true)
                     }
                 }

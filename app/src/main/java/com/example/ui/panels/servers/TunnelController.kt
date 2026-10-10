@@ -119,8 +119,9 @@ class TunnelController(
         val now = System.currentTimeMillis()
         val best = status?.best
         return TunnelTransport.entries.filter { it in spec.transports }.flatMap { t ->
-            if (t == TunnelTransport.HYSTERIA2) {
-                listOf(TunnelPathUi(t, spec.hyPort, false, status?.paths?.get(t.tagPrefix), status != null && t.tagPrefix in status.paths, best == t.tagPrefix))
+            if (t !in TunnelTransport.ROTATING) {
+                val port = if (t == TunnelTransport.HYSTERIA2) spec.hyPort else spec.entryPort
+                listOf(TunnelPathUi(t, port, false, status?.paths?.get(t.tagPrefix), status != null && t.tagPrefix in status.paths, best == t.tagPrefix))
             } else {
                 val ports = TunnelPorts.current(spec, t, now)
                 ports.mapIndexed { i, port ->
@@ -286,6 +287,9 @@ class TunnelController(
                             st.copy(setup = st.setup?.let { s ->
                                 s.copy(
                                     checks = c.items + taken,
+                                    // A new tunnel starts with every way the check found open; an update keeps its choice.
+                                    transports = if (s.update) s.transports else c.recommended,
+                                    recommended = c.recommended,
                                     iranSites = c.iranSites, abroadSites = c.abroadSites,
                                     entrySni = s.entrySni.ifBlank { c.iranSites.firstOrNull() ?: TunnelScripts.IRAN_SNI.first() },
                                     exitSni = s.exitSni.ifBlank { c.abroadSites.firstOrNull() ?: TunnelScripts.ABROAD_SNI.first() }
