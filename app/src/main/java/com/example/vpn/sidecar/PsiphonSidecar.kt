@@ -51,7 +51,7 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
         problem(profile)?.let { throw IllegalStateException(it) }
         val dataDir = File(context.workDir, DATA_DIR).apply { mkdirs() }
-        val config = buildConfig(networkSettings()!!, region(profile), context.socksPort, dataDir)
+        val config = buildConfig(networkSettings()!!, region(profile), context.socksPort, dataDir, context.upstreamSocks)
         val configFile = File(context.workDir, CONFIG_FILE)
         configFile.writeText(config.toString())
         // The settings are not secret in the cryptographic sense, but no other app needs to read them.
@@ -159,7 +159,7 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
             (settings.opt(key) as? JSONArray)?.length()?.let { it > 0 } == true
 
         /** The config file ConsoleClient reads: the build's settings plus what this connection needs. */
-        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File): JSONObject {
+        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null): JSONObject {
             val config = JSONObject(networkSettings.toString())
             LOCAL_FIELDS.forEach { config.remove(it) }
             config.put("LocalSocksProxyPort", socksPort)
@@ -172,6 +172,8 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
             if (!config.has("DNSResolverAlternateServers")) {
                 config.put("DNSResolverAlternateServers", JSONArray(DEFAULT_DNS_SERVERS))
             }
+            // Chain hop: Psiphon reaches its own servers through the next hop toward the exit.
+            if (upstreamSocks != null) config.put("UpstreamProxyURL", "socks5://127.0.0.1:$upstreamSocks")
             if (!config.has("ClientPlatform")) config.put("ClientPlatform", "Android")
             if (!config.has("EmitDiagnosticNotices")) config.put("EmitDiagnosticNotices", false)
             return config
