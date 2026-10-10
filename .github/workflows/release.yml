@@ -59,7 +59,7 @@ jobs:
 
       - name: Fetch verified native Xray runtime
         run: bash scripts/fetch-libxray-android.sh
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.24'
           cache: false
