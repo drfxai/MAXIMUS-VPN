@@ -132,6 +132,7 @@ class ServerToolsTest {
             { ToolScripts.dnsttInstall("t.example.com; reboot", "amd64", 34567, 45678, false) },
             { ToolScripts.dnsttInstall("t.example.com", "mips", 34567, 45678, false) },
             { ToolScripts.dnsttInstall("t.example.com", "amd64", 53, 45678, false) },
+            { ToolScripts.dnsttInstall("t.example.com", "amd64", 34567, 45678, false, listOf("t.example.net \$(reboot)")) },
             { ToolScripts.hysteriaInstall("amd64", "1.2.3.4'", 443, "A".repeat(24), "b".repeat(24), false) },
             { ToolScripts.hysteriaInstall("amd64", "1.2.3.4", 443, "short", "b".repeat(24), false) },
             { ToolScripts.hysteriaInstall("amd64", "1.2.3.4", 70000, "A".repeat(24), "b".repeat(24), false) },
@@ -309,5 +310,42 @@ class ServerToolsTest {
         val off = manager.setPasswordLogin(keyed, true, noProgress())
         assertTrue(off.passwordLoginOff)
         assertEquals("", off.password)
+    }
+
+    @Test fun dnsTunnelBackupDomainsReachTheServerTheRecordsAndTheProfile() {
+        val dnstt = ToolScripts.dnsttInstall("t.example.com", "amd64", 34567, 45678, newKey = false,
+            backups = listOf("t.example.net", "T.Example.org")).text
+        assertTrue(dnstt.contains("server.key t.example.com,t.example.net,t.example.org 127.0.0.1:45678"))
+        assertEquals(listOf("example.net", "example.org"), DnsDelegation.parseBackups(" Example.net,\nexample.org example.net"))
+        assertNull(DnsDelegation.backupProblem("example.com", listOf("example.net")))
+        assertNotNull(DnsDelegation.backupProblem("example.com", listOf("example.com")))
+        assertNotNull(DnsDelegation.backupProblem("example.com", listOf("a.net", "b.net", "c.net", "d.net")))
+        assertNotNull(DnsDelegation.backupProblem("example.com", listOf("bad")))
+        val records = DnsDelegation.records("example.com", "t", "203.0.113.7", listOf("example.net"))
+        assertEquals(listOf("ns.example.com", "t.example.com", "ns.example.net", "t.example.net"), records.map { it.name })
+        assertEquals("ns.example.net", records[3].value)
+
+        val tool = InstalledTool(ServerToolCatalog.DNSTT, port = 53, settings = mapOf(
+            ToolProfiles.DNSTT_DOMAIN to "t.example.com", ToolProfiles.DNSTT_PUBKEY to "a".repeat(64),
+            ToolProfiles.DNSTT_BACKUP_BASES to "example.net", ToolProfiles.DNSTT_BACKUPS to "t.example.net"))
+        val server = ManagedServer(name = "de", host = "203.0.113.7", location = ServerLocation.ABROAD)
+        val profile = ToolProfiles.dnsttProfile(server, tool)
+        assertEquals(listOf("t.example.net"), com.example.vpn.sidecar.DnsttSidecar.settings(profile).backupDomains)
+        val link = ToolProfiles.dnsttLink(server, tool)
+        assertEquals(listOf("t.example.net"),
+            com.example.vpn.sidecar.DnsttSidecar.settings(com.example.vpn.sidecar.DnsttSidecar.parse(link)).backupDomains)
+        assertEquals(listOf("example.net"), ToolProfiles.backupBases(tool))
+    }
+
+    @Test fun reinstallingADnsTunnelKeepsThePhonesResolversAndRate() {
+        val sidecar = com.example.vpn.sidecar.DnsttSidecar
+        val old = sidecar.parse("dnstt://${"a".repeat(64)}@t.example.com?udp=8.8.8.8&udp=1.1.1.1&qps=2&perresolver=1")
+        val fresh = sidecar.profile("b".repeat(64), "t.example.com", backupDomains = listOf("t.example.net"))
+        val merged = sidecar.settings(sidecar.carryOver(old, fresh))
+        assertEquals("b".repeat(64), merged.pubkey)
+        assertEquals(listOf("t.example.net"), merged.backupDomains)
+        assertEquals(listOf("8.8.8.8:53", "1.1.1.1:53"), merged.resolvers.map { it.address })
+        assertEquals(2, merged.qps)
+        assertTrue(merged.perResolver)
     }
 }

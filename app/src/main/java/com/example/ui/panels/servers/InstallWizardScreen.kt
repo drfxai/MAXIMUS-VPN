@@ -72,6 +72,8 @@ data class WizardUi(
     val reinstall: Boolean = false,
     val baseDomain: String = "",
     val tunnelLabel: String = "t",
+    /** DNS tunnel backup domains as typed (comma, space or line separated). */
+    val backupDomains: String = "",
     val port: String = "",
     val renew: Boolean = false,
     val records: List<DnsDelegation.Record> = emptyList(),
@@ -89,9 +91,11 @@ data class WizardUi(
     val error: String = ""
 ) {
     val server: ServerRowUi? get() = servers.firstOrNull { it.id == serverId }
+    val backups: List<String> get() = DnsDelegation.parseBackups(backupDomains)
     val checksPass: Boolean get() = checks != null && checks.none { it.blocking }
     val settingsValid: Boolean get() = when (tool.id) {
-        ServerToolCatalog.DNSTT -> DnsDelegation.problem(baseDomain, tunnelLabel) == null
+        ServerToolCatalog.DNSTT -> DnsDelegation.problem(baseDomain, tunnelLabel) == null &&
+            DnsDelegation.backupProblem(baseDomain, backups) == null
         ServerToolCatalog.HYSTERIA2 -> port.isBlank() || port.toIntOrNull() in 1..65535
         else -> true
     }
@@ -254,6 +258,12 @@ private fun SettingsStage(ui: WizardUi, actions: WizardActions) {
                 supporting = "Any domain you own. The tunnel uses one name under it.")
             SvField(ui.tunnelLabel, { actions.onChange(ui.copy(tunnelLabel = it.trim().lowercase().take(22), dnsChecks = null)) },
                 "Tunnel name", mono = true, supporting = "Short is faster: every DNS query carries it.")
+            SectionLabel("Backup domains")
+            val backupProblem = DnsDelegation.backupProblem(ui.baseDomain, ui.backups)
+            SvField(ui.backupDomains, { actions.onChange(ui.copy(backupDomains = it.take(300), dnsChecks = null)) }, "Backup domains (optional)",
+                placeholder = "example.net, example.org", keyboard = KeyboardType.Uri, mono = true,
+                supporting = backupProblem ?: "Other domains you own, up to ${DnsDelegation.MAX_BACKUPS}. If the main one is blocked, " +
+                    "the app moves to the next without dropping the connection.")
             if (ui.records.isNotEmpty()) DnsRecordsCard(ui, actions)
         }
         ServerToolCatalog.HYSTERIA2 -> {
@@ -477,7 +487,7 @@ private fun DoneStage(ui: WizardUi, actions: WizardActions) {
         }
     }
     if (ui.tool.id == ServerToolCatalog.DNSTT && ui.records.isNotEmpty()) {
-        Notice("The tunnel works once your two DNS records are live. The first test can fail while DNS updates.")
+        Notice("The tunnel works once your DNS records are live. The first test can fail while DNS updates.")
     }
     if (ui.log.isNotEmpty()) LogCard(ui.log)
 }

@@ -20,14 +20,34 @@ object DnsDelegation {
         else -> null
     }
 
+    /** The most backup domains a tunnel may have (the client's limit too). */
+    const val MAX_BACKUPS = 3
+
+    /** Backup domains typed as a list: one per line, or separated by commas or spaces. */
+    fun parseBackups(input: String): List<String> =
+        input.split(',', ' ', '\n', '\t').map { normalizeBase(it) }.filter { it.isNotEmpty() }.distinct()
+
+    /** A user-facing problem with the backup domains, or null. Each is a base domain like the main one. */
+    fun backupProblem(main: String, backups: List<String>): String? = when {
+        backups.size > MAX_BACKUPS -> "Up to $MAX_BACKUPS backup domains"
+        backups.any { !BASE.matches(it) } -> "Backup domains must be domains you own, like example.net"
+        normalizeBase(main) in backups -> "A backup domain repeats your main domain"
+        else -> null
+    }
+
     fun tunnelDomain(base: String, label: String) = "$label.${normalizeBase(base)}"
     fun nameServer(base: String) = "ns.${normalizeBase(base)}"
 
-    fun records(base: String, label: String, serverIp: String): List<Record> = listOf(
-        Record(nameServer(base), if (serverIp.contains(':')) "AAAA" else "A", serverIp,
-            "Your server. On Cloudflare keep it \"DNS only\" (grey cloud)."),
-        Record(tunnelDomain(base, label), "NS", nameServer(base), "Hands the tunnel name to your server.")
-    )
+    /** Two records per domain, the main domain first: the name server's address, then the delegation. */
+    fun records(base: String, label: String, serverIp: String, backups: List<String> = emptyList()): List<Record> =
+        (listOf(base) + backups).flatMapIndexed { i, b ->
+            listOf(
+                Record(nameServer(b), if (serverIp.contains(':')) "AAAA" else "A", serverIp,
+                    if (i == 0) "Your server. On Cloudflare keep it \"DNS only\" (grey cloud)." else "Backup domain: your server again."),
+                Record(tunnelDomain(b, label), "NS", nameServer(b),
+                    if (i == 0) "Hands the tunnel name to your server." else "Used when the main name is blocked.")
+            )
+        }
 
     enum class Status { OK, WRONG, MISSING, UNKNOWN }
     data class Check(val record: Record, val status: Status, val detail: String)

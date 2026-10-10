@@ -1,0 +1,844 @@
+diff -ruN a/dnstt-client/dns.go b/dnstt-client/dns.go
+--- a/dnstt-client/dns.go
++++ b/dnstt-client/dns.go
+@@ -8,7 +8,6 @@
+ 	"fmt"
+ 	"io"
+ 	"log"
+-	"net"
+ 	"time"
+ 
+ 	"www.bamsoftware.com/git/dnstt.git/dns"
+@@ -58,40 +57,41 @@
+ // receiving a response, we ignore the ID.
+ type DNSPacketConn struct {
+ 	clientID turbotunnel.ClientID
+-	domain   dns.Name
++	// pool picks the resolver and the tunnel domain of every query.
++	pool *pool
+ 	// Sending on pollChan permits sendLoop to send an empty polling query.
+ 	// sendLoop also does its own polling according to a time schedule.
+ 	pollChan chan struct{}
+-	// pacer keeps the query rate under maxQueriesPerSecond.
+-	pacer *queryPacer
+ 	// QueuePacketConn is the direct receiver of ReadFrom and WriteTo calls.
+ 	// recvLoop and sendLoop take the messages out of the receive and send
+ 	// queues and actually put them on the network.
+ 	*turbotunnel.QueuePacketConn
+ }
+ 
+-// NewDNSPacketConn creates a new DNSPacketConn. transport, through its WriteTo
+-// and ReadFrom methods, handles the actual sending and receiving the DNS
+-// messages encoded by DNSPacketConn. addr is the address to be passed to
+-// transport.WriteTo whenever a message needs to be sent.
+-func NewDNSPacketConn(transport net.PacketConn, addr net.Addr, domain dns.Name) *DNSPacketConn {
++// NewDNSPacketConn creates a new DNSPacketConn. Each resolver in pool, through
++// its transport's WriteTo and ReadFrom methods, handles the actual sending and
++// receiving of the DNS messages encoded by DNSPacketConn. Every query goes
++// through one resolver, under one tunnel domain, as pool picks them.
++func NewDNSPacketConn(pool *pool) *DNSPacketConn {
+ 	// Generate a new random ClientID.
+ 	clientID := turbotunnel.NewClientID()
+ 	c := &DNSPacketConn{
+ 		clientID:        clientID,
+-		domain:          domain,
++		pool:            pool,
+ 		pollChan:        make(chan struct{}, pollLimit),
+-		pacer:           newQueryPacer(maxQueriesPerSecond),
+ 		QueuePacketConn: turbotunnel.NewQueuePacketConn(clientID, 0),
+ 	}
++	for _, r := range pool.resolvers {
++		r := r
++		go func() {
++			err := c.recvLoop(r)
++			if err != nil {
++				log.Printf("recvLoop %s: %v", r.name, err)
++			}
++		}()
++	}
+ 	go func() {
+-		err := c.recvLoop(transport)
+-		if err != nil {
+-			log.Printf("recvLoop: %v", err)
+-		}
+-	}()
+-	go func() {
+-		err := c.sendLoop(transport, addr)
++		err := c.sendLoop()
+ 		if err != nil {
+ 			log.Printf("sendLoop: %v", err)
+ 		}
+@@ -99,39 +99,49 @@
+ 	return c
+ }
+ 
++// Close closes the resolvers' transports as well.
++func (c *DNSPacketConn) Close() error {
++	for _, r := range c.pool.resolvers {
++		r.transport.Close()
++	}
++	return c.QueuePacketConn.Close()
++}
++
+ // dnsResponsePayload extracts the downstream payload of a DNS response, encoded
+-// into the RDATA of a TXT RR. It returns nil if the message doesn't pass format
+-// checks, or if the name in its Question entry is not a subdomain of domain.
+-func dnsResponsePayload(resp *dns.Message, domain dns.Name) []byte {
++// into the RDATA of a TXT RR, and the index of the tunnel domain it answers. ok
++// is false if the message doesn't pass format checks, or if the name in its
++// answer is not under one of the tunnel domains. nameError is true for a
++// "name does not exist" (NXDOMAIN) answer.
++func dnsResponsePayload(resp *dns.Message, p *pool) (payload []byte, domain int, ok bool, nameError bool) {
+ 	if resp.Flags&0x8000 != 0x8000 {
+ 		// QR != 1, this is not a response.
+-		return nil
++		return nil, -1, false, false
+ 	}
+-	if resp.Flags&0x000f != dns.RcodeNoError {
+-		return nil
++	if rcode := resp.Flags & 0x000f; rcode != dns.RcodeNoError {
++		return nil, -1, false, rcode == dns.RcodeNameError
+ 	}
+ 
+ 	if len(resp.Answer) != 1 {
+-		return nil
++		return nil, -1, false, false
+ 	}
+ 	answer := resp.Answer[0]
+ 
+-	_, ok := answer.Name.TrimSuffix(domain)
+-	if !ok {
++	domain = p.domainIndex(answer.Name)
++	if domain < 0 {
+ 		// Not the name we are expecting.
+-		return nil
++		return nil, -1, false, false
+ 	}
+ 
+ 	if answer.Type != dns.RRTypeTXT {
+ 		// We only support TYPE == TXT.
+-		return nil
++		return nil, -1, false, false
+ 	}
+ 	payload, err := dns.DecodeRDataTXT(answer.Data)
+ 	if err != nil {
+-		return nil
++		return nil, -1, false, false
+ 	}
+ 
+-	return payload
++	return payload, domain, true, false
+ }
+ 
+ // nextPacket reads the next length-prefixed packet from r. It returns a nil
+@@ -185,10 +195,10 @@
+ // response comes back without data, or if a query or response is dropped by the
+ // network, then we don't poll again, which decreases the effective in-flight
+ // window.
+-func (c *DNSPacketConn) recvLoop(transport net.PacketConn) error {
++func (c *DNSPacketConn) recvLoop(r *resolver) error {
+ 	for {
+ 		var buf [4096]byte
+-		n, addr, err := transport.ReadFrom(buf[:])
++		n, _, err := r.transport.ReadFrom(buf[:])
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -200,7 +210,14 @@
+ 			continue
+ 		}
+ 
+-		payload := dnsResponsePayload(&resp, c.domain)
++		payload, domain, ok, nameError := dnsResponsePayload(&resp, c.pool)
++		if nameError {
++			c.pool.nameError(r)
++		}
++		if !ok {
++			continue
++		}
++		c.pool.good(r, domain)
+ 
+ 		// Pull out the packets contained in the payload.
+ 		r := bytes.NewReader(payload)
+@@ -211,7 +228,7 @@
+ 				break
+ 			}
+ 			any = true
+-			c.QueuePacketConn.QueueIncoming(p, addr)
++			c.QueuePacketConn.QueueIncoming(p, turbotunnel.DummyAddr{})
+ 		}
+ 
+ 		// If the payload contained one or more packets, permit sendLoop
+@@ -255,30 +272,30 @@
+ //
+ //  0. Start with the raw packet contents.
+ //
+-//	supercalifragilisticexpialidocious
++//     supercalifragilisticexpialidocious
+ //
+ //  1. Length-prefix the packet and add random padding. A length prefix L < 0xe0
+ //     means a data packet of L bytes. A length prefix L ≥ 0xe0 means padding
+ //     of L − 0xe0 bytes (not counting the length of the length prefix itself).
+ //
+-//	\xe3\xd9\xa3\x15\x22supercalifragilisticexpialidocious
++//     \xe3\xd9\xa3\x15\x22supercalifragilisticexpialidocious
+ //
+ //  2. Prefix the ClientID.
+ //
+-//	CLIENTID\xe3\xd9\xa3\x15\x22supercalifragilisticexpialidocious
++//     CLIENTID\xe3\xd9\xa3\x15\x22supercalifragilisticexpialidocious
+ //
+ //  3. Base32-encode, without padding and in lower case.
+ //
+-//	ingesrkokreujy6zumkse43vobsxey3bnruwm4tbm5uwy2ltoruwgzlyobuwc3djmrxwg2lpovzq
++//     ingesrkokreujy6zumkse43vobsxey3bnruwm4tbm5uwy2ltoruwgzlyobuwc3djmrxwg2lpovzq
+ //
+ //  4. Break into labels of at most 63 octets.
+ //
+-//	ingesrkokreujy6zumkse43vobsxey3bnruwm4tbm5uwy2ltoruwgzlyobuwc3d.jmrxwg2lpovzq
++//     ingesrkokreujy6zumkse43vobsxey3bnruwm4tbm5uwy2ltoruwgzlyobuwc3d.jmrxwg2lpovzq
+ //
+ //  5. Append the domain.
+ //
+-//	ingesrkokreujy6zumkse43vobsxey3bnruwm4tbm5uwy2ltoruwgzlyobuwc3d.jmrxwg2lpovzq.t.example.com
+-func (c *DNSPacketConn) send(transport net.PacketConn, p []byte, addr net.Addr) error {
++//     ingesrkokreujy6zumkse43vobsxey3bnruwm4tbm5uwy2ltoruwgzlyobuwc3d.jmrxwg2lpovzq.t.example.com
++func (c *DNSPacketConn) send(r *resolver, domain dns.Name, p []byte) error {
+ 	var decoded []byte
+ 	{
+ 		if len(p) >= 224 {
+@@ -306,7 +323,7 @@
+ 	base32Encoding.Encode(encoded, decoded)
+ 	encoded = bytes.ToLower(encoded)
+ 	labels := chunks(encoded, 63)
+-	labels = append(labels, c.domain...)
++	labels = append(labels, domain...)
+ 	name, err := dns.NewName(labels)
+ 	if err != nil {
+ 		return err
+@@ -340,14 +357,15 @@
+ 		return err
+ 	}
+ 
+-	_, err = transport.WriteTo(buf, addr)
++	_, err = r.transport.WriteTo(buf, r.addr)
+ 	return err
+ }
+ 
+ // sendLoop takes packets that have been written using c.WriteTo, and sends them
+ // on the network using send. It also does polling with empty packets when
+ // requested by pollChan or after a timeout.
+-func (c *DNSPacketConn) sendLoop(transport net.PacketConn, addr net.Addr) error {
++func (c *DNSPacketConn) sendLoop() error {
++	addr := turbotunnel.DummyAddr{}
+ 	pollDelay := initPollDelay
+ 	pollTimer := time.NewTimer(pollDelay)
+ 	for {
+@@ -397,8 +415,9 @@
+ 		// Unlike in the server, in the client we assume that because
+ 		// the data capacity of queries is so limited, it's not worth
+ 		// trying to send more than one packet per query.
+-		c.pacer.wait()
+-		err := c.send(transport, p, addr)
++		r, domain := c.pool.pick()
++		r.pacer.wait()
++		err := c.send(r, domain, p)
+ 		if err != nil {
+ 			log.Printf("send: %v", err)
+ 			continue
+diff -ruN a/dnstt-client/main.go b/dnstt-client/main.go
+--- a/dnstt-client/main.go
++++ b/dnstt-client/main.go
+@@ -162,7 +162,7 @@
+ 	return err
+ }
+ 
+-func run(pubkey []byte, domain dns.Name, localAddr *net.TCPAddr, remoteAddr net.Addr, pconn net.PacketConn) error {
++func run(pubkey []byte, domains []dns.Name, localAddr *net.TCPAddr, remoteAddr net.Addr, pconn net.PacketConn) error {
+ 	defer pconn.Close()
+ 
+ 	ln, err := net.ListenTCP("tcp", localAddr)
+@@ -171,9 +171,16 @@
+ 	}
+ 	defer ln.Close()
+ 
+-	mtu := dnsNameCapacity(domain) - 8 - 1 - numPadding - 1 // clientid + padding length prefix + padding + data length prefix
+-	if mtu < 80 {
+-		return fmt.Errorf("domain %s leaves only %d bytes for payload", domain, mtu)
++	// The longest domain leaves the least room; every query must fit.
++	mtu := 0
++	for i, domain := range domains {
++		m := dnsNameCapacity(domain) - 8 - 1 - numPadding - 1 // clientid + padding length prefix + padding + data length prefix
++		if m < 80 {
++			return fmt.Errorf("domain %s leaves only %d bytes for payload", domain, m)
++		}
++		if i == 0 || m < mtu {
++			mtu = m
++		}
+ 	}
+ 	log.Printf("effective MTU %d", mtu)
+ 
+@@ -238,11 +245,11 @@
+ }
+ 
+ func main() {
+-	var dohURL string
+-	var dotAddr string
++	var dohURLs, dotAddrs, udpAddrs stringList
++	var backupDomains string
++	var perResolverRate bool
+ 	var pubkeyFilename string
+ 	var pubkeyString string
+-	var udpAddr string
+ 	var utlsDistribution string
+ 
+ 	flag.Usage = func() {
+@@ -277,11 +284,13 @@
+ 			fmt.Fprintln(flag.CommandLine.Output(), line.String())
+ 		}
+ 	}
+-	flag.StringVar(&dohURL, "doh", "", "URL of DoH resolver")
+-	flag.StringVar(&dotAddr, "dot", "", "address of DoT resolver")
++	flag.Var(&dohURLs, "doh", "URL of DoH resolver (may be repeated)")
++	flag.Var(&dotAddrs, "dot", "address of DoT resolver (may be repeated)")
++	flag.StringVar(&backupDomains, "domains", "", "comma-separated backup tunnel domains served by the same server, used in turn when the current one stops answering")
++	flag.BoolVar(&perResolverRate, "qps-per-resolver", false, "apply the -qps limit to each resolver instead of to all of them together")
+ 	flag.StringVar(&pubkeyString, "pubkey", "", fmt.Sprintf("server public key (%d hex digits)", noise.KeyLen*2))
+ 	flag.StringVar(&pubkeyFilename, "pubkey-file", "", "read server public key from file")
+-	flag.StringVar(&udpAddr, "udp", "", "address of UDP DNS resolver")
++	flag.Var(&udpAddrs, "udp", "address of UDP DNS resolver (may be repeated)")
+ 	flag.Float64Var(&maxQueriesPerSecond, "qps", maxQueriesPerSecond, "maximum DNS queries per second (0 for no limit)")
+ 	flag.StringVar(&utlsDistribution, "utls",
+ 		"4*random,3*Firefox_120,1*Firefox_105,3*Chrome_120,1*Chrome_102,1*iOS_14,1*iOS_13",
+@@ -338,79 +347,110 @@
+ 		log.Printf("uTLS fingerprint %s %s", utlsClientHelloID.Client, utlsClientHelloID.Version)
+ 	}
+ 
+-	// Iterate over the remote resolver address options and select one and
+-	// only one.
+-	var remoteAddr net.Addr
+-	var pconn net.PacketConn
++	// Open every resolver given with -doh, -dot and -udp (each may be
++	// repeated). Queries are spread over them.
++	var resolvers []*resolver
++	shared := newQueryPacer(maxQueriesPerSecond)
+ 	for _, opt := range []struct {
+-		s string
+-		f func(string) (net.Addr, net.PacketConn, error)
+-	}{
+-		// -doh
+-		{dohURL, func(s string) (net.Addr, net.PacketConn, error) {
+-			addr := turbotunnel.DummyAddr{}
+-			var rt http.RoundTripper
+-			if utlsClientHelloID == nil {
+-				transport := http.DefaultTransport.(*http.Transport).Clone()
+-				// Disable DefaultTransport's default Proxy =
+-				// ProxyFromEnvironment setting, for conformity
+-				// with utlsRoundTripper and with DoT mode,
+-				// which do not take a proxy from the
+-				// environment.
+-				transport.Proxy = nil
+-				rt = transport
+-			} else {
+-				rt = NewUTLSRoundTripper(nil, utlsClientHelloID)
+-			}
+-			pconn, err := NewHTTPPacketConn(rt, dohURL, 32)
+-			return addr, pconn, err
+-		}},
+-		// -dot
+-		{dotAddr, func(s string) (net.Addr, net.PacketConn, error) {
+-			addr := turbotunnel.DummyAddr{}
+-			var dialTLSContext func(ctx context.Context, network, addr string) (net.Conn, error)
+-			if utlsClientHelloID == nil {
+-				dialTLSContext = (&tls.Dialer{}).DialContext
+-			} else {
+-				dialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+-					return utlsDialContext(ctx, network, addr, nil, utlsClientHelloID)
+-				}
+-			}
+-			pconn, err := NewTLSPacketConn(dotAddr, dialTLSContext)
+-			return addr, pconn, err
+-		}},
+-		// -udp
+-		{udpAddr, func(s string) (net.Addr, net.PacketConn, error) {
+-			addr, err := net.ResolveUDPAddr("udp", s)
++		kind  string
++		addrs []string
++	}{{"doh", dohURLs}, {"dot", dotAddrs}, {"udp", udpAddrs}} {
++		for _, s := range opt.addrs {
++			addr, pconn, err := openResolver(opt.kind, s, utlsClientHelloID)
+ 			if err != nil {
+-				return nil, nil, err
++				fmt.Fprintln(os.Stderr, err)
++				os.Exit(1)
+ 			}
+-			pconn, err := net.ListenUDP("udp", nil)
+-			return addr, pconn, err
+-		}},
+-	} {
+-		if opt.s == "" {
+-			continue
++			pacer := shared
++			if perResolverRate {
++				pacer = newQueryPacer(maxQueriesPerSecond)
++			}
++			resolvers = append(resolvers, &resolver{name: opt.kind + " " + s, transport: pconn, addr: addr, pacer: pacer})
+ 		}
+-		if pconn != nil {
+-			fmt.Fprintf(os.Stderr, "only one of -doh, -dot, and -udp may be given\n")
+-			os.Exit(1)
++	}
++	if len(resolvers) == 0 {
++		fmt.Fprintf(os.Stderr, "one of -doh, -dot, or -udp is required\n")
++		os.Exit(1)
++	}
++
++	// The tunnel domain, then the backup domains from -domains.
++	domains := []dns.Name{domain}
++	for _, s := range strings.Split(backupDomains, ",") {
++		s = strings.TrimSpace(s)
++		if s == "" {
++			continue
+ 		}
+-		var err error
+-		remoteAddr, pconn, err = opt.f(opt.s)
++		d, err := dns.ParseName(s)
+ 		if err != nil {
+-			fmt.Fprintln(os.Stderr, err)
++			fmt.Fprintf(os.Stderr, "invalid backup domain %+q: %v\n", s, err)
+ 			os.Exit(1)
+ 		}
++		domains = append(domains, d)
+ 	}
+-	if pconn == nil {
+-		fmt.Fprintf(os.Stderr, "one of -doh, -dot, or -udp is required\n")
+-		os.Exit(1)
++	if len(resolvers) > 1 || len(domains) > 1 {
++		log.Printf("%d resolvers, %d domains, rate limit counted %s", len(resolvers), len(domains),
++			map[bool]string{true: "per resolver", false: "over all resolvers"}[perResolverRate])
+ 	}
+ 
+-	pconn = NewDNSPacketConn(pconn, remoteAddr, domain)
+-	err = run(pubkey, domain, localAddr, remoteAddr, pconn)
++	// The session's remote address is a placeholder: the pool decides
++	// where each query goes.
++	remoteAddr := turbotunnel.DummyAddr{}
++	pconn := NewDNSPacketConn(newPool(resolvers, domains, perResolverRate, time.Now))
++	err = run(pubkey, domains, localAddr, remoteAddr, pconn)
+ 	if err != nil {
+ 		log.Fatal(err)
+ 	}
+ }
++
++// openResolver opens one DNS resolver transport of the given kind ("doh",
++// "dot" or "udp").
++func openResolver(kind, s string, utlsClientHelloID *utls.ClientHelloID) (net.Addr, net.PacketConn, error) {
++	switch kind {
++	case "doh":
++		var rt http.RoundTripper
++		if utlsClientHelloID == nil {
++			transport := http.DefaultTransport.(*http.Transport).Clone()
++			// Disable DefaultTransport's default Proxy =
++			// ProxyFromEnvironment setting, for conformity
++			// with utlsRoundTripper and with DoT mode,
++			// which do not take a proxy from the
++			// environment.
++			transport.Proxy = nil
++			rt = transport
++		} else {
++			rt = NewUTLSRoundTripper(nil, utlsClientHelloID)
++		}
++		pconn, err := NewHTTPPacketConn(rt, s, 32)
++		return turbotunnel.DummyAddr{}, pconn, err
++	case "dot":
++		var dialTLSContext func(ctx context.Context, network, addr string) (net.Conn, error)
++		if utlsClientHelloID == nil {
++			dialTLSContext = (&tls.Dialer{}).DialContext
++		} else {
++			dialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
++				return utlsDialContext(ctx, network, addr, nil, utlsClientHelloID)
++			}
++		}
++		pconn, err := NewTLSPacketConn(s, dialTLSContext)
++		return turbotunnel.DummyAddr{}, pconn, err
++	default:
++		addr, err := net.ResolveUDPAddr("udp", s)
++		if err != nil {
++			return nil, nil, err
++		}
++		// Each UDP resolver gets its own socket, so every answer is
++		// credited to the resolver it came through.
++		pconn, err := net.ListenUDP("udp", nil)
++		return addr, pconn, err
++	}
++}
++
++// stringList is a flag that may be given more than once.
++type stringList []string
++
++func (l *stringList) String() string { return strings.Join(*l, ",") }
++
++func (l *stringList) Set(s string) error {
++	*l = append(*l, s)
++	return nil
++}
+diff -ruN a/dnstt-client/pool.go b/dnstt-client/pool.go
+--- a/dnstt-client/pool.go
++++ b/dnstt-client/pool.go
+@@ -0,0 +1,182 @@
++package main
++
++import (
++	"log"
++	"net"
++	"sync"
++	"time"
++
++	"www.bamsoftware.com/git/dnstt.git/dns"
++)
++
++// Health rules for resolvers and tunnel domains. A resolver or a domain is
++// judged only by whether good tunnel answers come back, never by a single
++// error or a "name does not exist" (NXDOMAIN) answer: some networks inject
++// fake NXDOMAIN answers, and on UDP the real answer still arrives after the
++// fake one.
++const (
++	// A resolver that has had this many queries and this much time without a
++	// good answer is set aside for a while.
++	resolverFailQueries = 8
++	resolverFailTime    = 10 * time.Second
++	// How long a failing resolver is set aside: doubling from the first value
++	// up to the second. When the time is up it gets another chance.
++	benchFirst = 30 * time.Second
++	benchMax   = 5 * time.Minute
++	// The client moves to the next tunnel domain when the current one has had
++	// this many queries and this much time with no good answer through any
++	// resolver.
++	domainFailQueries = 12
++	domainFailTime    = 15 * time.Second
++)
++
++// resolver is one DNS resolver the client sends queries through.
++type resolver struct {
++	name      string
++	transport net.PacketConn
++	addr      net.Addr
++	// pacer is this resolver's own when the rate limit counts per resolver,
++	// and shared by all resolvers otherwise.
++	pacer *queryPacer
++
++	// Health, guarded by pool.lock.
++	judgedSince  time.Time
++	sinceGood    int
++	benchedUntil time.Time
++	benchFor     time.Duration
++	nxdomain     int
++}
++
++// pool picks a resolver and a tunnel domain for every query, sets aside
++// resolvers that stop answering, and moves to a backup domain when the current
++// one stops answering.
++type pool struct {
++	lock        sync.Mutex
++	now         func() time.Time
++	resolvers   []*resolver
++	perResolver bool
++	next        int
++	domains     []dns.Name
++	active      int
++	// Since when, and over how many queries, the active domain has gone
++	// without a good answer.
++	domainSince time.Time
++	domainSent  int
++}
++
++func newPool(resolvers []*resolver, domains []dns.Name, perResolver bool, now func() time.Time) *pool {
++	t := now()
++	for _, r := range resolvers {
++		r.judgedSince = t
++		r.benchFor = benchFirst
++	}
++	return &pool{now: now, resolvers: resolvers, perResolver: perResolver, domains: domains, domainSince: t}
++}
++
++// pick returns the resolver and the domain for the next query and counts the
++// query against both.
++func (p *pool) pick() (*resolver, dns.Name) {
++	p.lock.Lock()
++	defer p.lock.Unlock()
++	t := p.now()
++
++	var chosen *resolver
++	if p.perResolver {
++		// Each resolver has its own limit: use the one that may send soonest.
++		for _, r := range p.usable(t) {
++			if chosen == nil || r.pacer.ready().Before(chosen.pacer.ready()) {
++				chosen = r
++			}
++		}
++	} else {
++		usable := p.usable(t)
++		chosen = usable[p.next%len(usable)]
++		p.next++
++	}
++	chosen.sinceGood++
++
++	p.domainSent++
++	if len(p.domains) > 1 && p.domainSent >= domainFailQueries && t.Sub(p.domainSince) >= domainFailTime {
++		p.active = (p.active + 1) % len(p.domains)
++		log.Printf("no answer through domain %s in %d queries; switching to %s",
++			p.domains[(p.active+len(p.domains)-1)%len(p.domains)], p.domainSent, p.domains[p.active])
++		p.domainSince = t
++		p.domainSent = 0
++	}
++	return chosen, p.domains[p.active]
++}
++
++// usable returns the resolvers not set aside, setting aside any that just
++// failed and bringing back any whose time is up. It never returns an empty
++// list: when every resolver is set aside, the one due back soonest is used.
++func (p *pool) usable(t time.Time) []*resolver {
++	var out []*resolver
++	var soonest *resolver
++	for _, r := range p.resolvers {
++		if !r.benchedUntil.IsZero() && t.Before(r.benchedUntil) {
++			if soonest == nil || r.benchedUntil.Before(soonest.benchedUntil) {
++				soonest = r
++			}
++			continue
++		}
++		if !r.benchedUntil.IsZero() {
++			// Back from the bench: judged afresh.
++			r.benchedUntil = time.Time{}
++			r.judgedSince = t
++			r.sinceGood = 0
++		}
++		if len(p.resolvers) > 1 && r.sinceGood >= resolverFailQueries && t.Sub(r.judgedSince) >= resolverFailTime {
++			r.benchedUntil = t.Add(r.benchFor)
++			log.Printf("resolver %s: no answer in %d queries; resting it for %v", r.name, r.sinceGood, r.benchFor)
++			r.benchFor *= 2
++			if r.benchFor > benchMax {
++				r.benchFor = benchMax
++			}
++			if soonest == nil || r.benchedUntil.Before(soonest.benchedUntil) {
++				soonest = r
++			}
++			continue
++		}
++		out = append(out, r)
++	}
++	if len(out) == 0 {
++		out = append(out, soonest)
++	}
++	return out
++}
++
++// good records a good tunnel answer from r for domain index d.
++func (p *pool) good(r *resolver, d int) {
++	p.lock.Lock()
++	defer p.lock.Unlock()
++	t := p.now()
++	r.judgedSince = t
++	r.sinceGood = 0
++	r.benchFor = benchFirst
++	if d == p.active {
++		p.domainSince = t
++		p.domainSent = 0
++	}
++}
++
++// nameError records an NXDOMAIN answer. It is logged, never held against the
++// resolver.
++func (p *pool) nameError(r *resolver) {
++	p.lock.Lock()
++	r.nxdomain++
++	n := r.nxdomain
++	p.lock.Unlock()
++	if n == 1 || n%100 == 0 {
++		log.Printf("resolver %s: %d \"name does not exist\" answers so far (ignored)", r.name, n)
++	}
++}
++
++// domainIndex returns the index of the tunnel domain name is under, or -1.
++func (p *pool) domainIndex(name dns.Name) int {
++	for i, d := range p.domains {
++		if _, ok := name.TrimSuffix(d); ok {
++			return i
++		}
++	}
++	return -1
++}
+diff -ruN a/dnstt-client/pool_test.go b/dnstt-client/pool_test.go
+--- a/dnstt-client/pool_test.go
++++ b/dnstt-client/pool_test.go
+@@ -0,0 +1,156 @@
++package main
++
++import (
++	"testing"
++	"time"
++
++	"www.bamsoftware.com/git/dnstt.git/dns"
++)
++
++type fakeClock struct{ t time.Time }
++
++func (c *fakeClock) now() time.Time { return c.t }
++
++func testPool(t *testing.T, n int, domains []string, perResolver bool) (*pool, *fakeClock) {
++	clock := &fakeClock{time.Unix(1_800_000_000, 0)}
++	shared := newQueryPacer(0)
++	var rs []*resolver
++	for i := 0; i < n; i++ {
++		pacer := shared
++		if perResolver {
++			pacer = newQueryPacer(0)
++		}
++		rs = append(rs, &resolver{name: string(rune('a' + i)), pacer: pacer})
++	}
++	var ds []dns.Name
++	for _, s := range domains {
++		d, err := dns.ParseName(s)
++		if err != nil {
++			t.Fatal(err)
++		}
++		ds = append(ds, d)
++	}
++	return newPool(rs, ds, perResolver, clock.now), clock
++}
++
++// send makes count queries, one every step, and returns how many went through each resolver.
++func send(p *pool, clock *fakeClock, count int, step time.Duration, answer func(*resolver, dns.Name) bool) map[string]int {
++	used := map[string]int{}
++	for i := 0; i < count; i++ {
++		r, d := p.pick()
++		used[r.name]++
++		if answer(r, d) {
++			p.good(r, p.domainIndex(d))
++		}
++		clock.t = clock.t.Add(step)
++	}
++	return used
++}
++
++func TestQueriesSpreadOverResolvers(t *testing.T) {
++	p, clock := testPool(t, 3, []string{"t.example.com"}, false)
++	used := send(p, clock, 30, 250*time.Millisecond, func(*resolver, dns.Name) bool { return true })
++	for _, name := range []string{"a", "b", "c"} {
++		if used[name] != 10 {
++			t.Fatalf("resolver %s got %d of 30 queries, want 10: %v", name, used[name], used)
++		}
++	}
++}
++
++func TestSilentResolverIsRestedAndComesBack(t *testing.T) {
++	p, clock := testPool(t, 2, []string{"t.example.com"}, false)
++	// Resolver b never answers.
++	used := send(p, clock, 80, 250*time.Millisecond, func(r *resolver, _ dns.Name) bool { return r.name == "a" })
++	// It is judged after resolverFailTime: at 2 queries a second, about 20 queries.
++	if used["b"] > int(resolverFailTime/(500*time.Millisecond))+2 {
++		t.Fatalf("silent resolver b kept getting queries: %v", used)
++	}
++	// After its rest it gets another chance.
++	clock.t = clock.t.Add(benchFirst)
++	used = send(p, clock, 4, 250*time.Millisecond, func(r *resolver, _ dns.Name) bool { return true })
++	if used["b"] == 0 {
++		t.Fatalf("rested resolver b never came back: %v", used)
++	}
++}
++
++func TestNameErrorsAreNotHeldAgainstAResolver(t *testing.T) {
++	p, clock := testPool(t, 2, []string{"t.example.com"}, false)
++	// b gets a fake NXDOMAIN for every query, and the real answer after it.
++	used := send(p, clock, 80, 250*time.Millisecond, func(r *resolver, _ dns.Name) bool {
++		if r.name == "b" {
++			p.nameError(r)
++		}
++		return true
++	})
++	if used["b"] != 40 {
++		t.Fatalf("resolver b was set aside over NXDOMAIN answers: %v", used)
++	}
++}
++
++func TestEveryResolverSilentStillSends(t *testing.T) {
++	p, clock := testPool(t, 2, []string{"t.example.com"}, false)
++	used := send(p, clock, 200, 250*time.Millisecond, func(*resolver, dns.Name) bool { return false })
++	if used["a"]+used["b"] != 200 {
++		t.Fatalf("queries were lost: %v", used)
++	}
++}
++
++func TestBlockedDomainSwitchesToBackup(t *testing.T) {
++	p, clock := testPool(t, 1, []string{"t.example.com", "t.example.net"}, false)
++	backup := 0
++	send(p, clock, 200, 250*time.Millisecond, func(_ *resolver, d dns.Name) bool {
++		if d.String() == "t.example.net" {
++			backup++
++			return true
++		}
++		return false
++	})
++	if p.active != 1 {
++		t.Fatalf("still on domain %d, want the backup", p.active)
++	}
++	// About 15 s at 4 a second on the blocked domain, then the backup only.
++	if backup < 200-int(domainFailTime/(250*time.Millisecond))-2 {
++		t.Fatalf("only %d of 200 queries used the backup domain", backup)
++	}
++}
++
++func TestWorkingDomainIsKept(t *testing.T) {
++	p, clock := testPool(t, 1, []string{"t.example.com", "t.example.net"}, false)
++	send(p, clock, 200, 250*time.Millisecond, func(*resolver, dns.Name) bool { return true })
++	if p.active != 0 {
++		t.Fatalf("moved off a working domain to %d", p.active)
++	}
++}
++
++func TestPerResolverLimitUsesTheReadiestResolver(t *testing.T) {
++	clock := &fakeClock{time.Unix(1_800_000_000, 0)}
++	rs := []*resolver{{name: "a", pacer: newQueryPacer(4)}, {name: "b", pacer: newQueryPacer(4)}}
++	d, _ := dns.ParseName("t.example.com")
++	p := newPool(rs, []dns.Name{d}, true, clock.now)
++	start := time.Now()
++	used := map[string]int{}
++	for i := 0; i < 9; i++ {
++		r, _ := p.pick()
++		r.pacer.wait()
++		used[r.name]++
++	}
++	// Two resolvers at 4 a second each: 9 queries take about 1 s, not 2.
++	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond || elapsed < 950*time.Millisecond {
++		t.Fatalf("9 queries over two resolvers at 4/s each took %v", elapsed)
++	}
++	if used["a"] < 4 || used["b"] < 4 {
++		t.Fatalf("queries not shared: %v", used)
++	}
++}
++
++func TestBackupDomainsAcceptAnswers(t *testing.T) {
++	p, _ := testPool(t, 1, []string{"t.example.com", "u.example.org"}, false)
++	n, _ := dns.ParseName("abc.u.example.org")
++	if p.domainIndex(n) != 1 {
++		t.Fatal("answer under the backup domain not recognised")
++	}
++	n, _ = dns.ParseName("abc.example.org")
++	if p.domainIndex(n) != -1 {
++		t.Fatal("answer outside the tunnel domains accepted")
++	}
++}
+diff -ruN a/dnstt-client/querypace.go b/dnstt-client/querypace.go
+--- a/dnstt-client/querypace.go
++++ b/dnstt-client/querypace.go
+@@ -44,3 +44,10 @@
+ 	p.lock.Unlock()
+ 	time.Sleep(time.Until(at))
+ }
++
++// ready returns the earliest time the next query may be sent.
++func (p *queryPacer) ready() time.Time {
++	p.lock.Lock()
++	defer p.lock.Unlock()
++	return p.next
++}

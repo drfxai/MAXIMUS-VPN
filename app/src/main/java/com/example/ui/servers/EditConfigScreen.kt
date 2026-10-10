@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.VlessProfile
+import com.example.vpn.sidecar.DnsttSidecar
 import com.example.ui.theme.AppTheme
 import kotlinx.coroutines.launch
 
@@ -81,6 +82,21 @@ private val TARGET_STRATEGIES = listOf(
  */
 @Composable
 fun EditConfigScreen(
+    profile: VlessProfile,
+    onBack: () -> Unit,
+    onSave: suspend (VlessProfile) -> String?,
+    onDelete: () -> Unit,
+    onFetchFingerprint: suspend (address: String, port: Int, sni: String) -> Result<String>
+) {
+    if (DnsttSidecar().handles(profile)) {
+        DnsTunnelEditor(profile, onBack, onSave, onDelete)
+    } else {
+        XrayConfigEditor(profile, onBack, onSave, onDelete, onFetchFingerprint)
+    }
+}
+
+@Composable
+private fun XrayConfigEditor(
     profile: VlessProfile,
     onBack: () -> Unit,
     onSave: suspend (VlessProfile) -> String?,
@@ -127,50 +143,27 @@ fun EditConfigScreen(
             .background(AppTheme.colors.background)
             .testTag("edit_config_screen")
     ) {
-        // Top bar: back, title, delete, save.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+        EditTopBar(
+            title = "Edit Configuration",
+            subtitle = draft.name.ifBlank { "${draft.address}:$portText" },
+            saving = saving,
+            onBack = { leave() },
+            onDelete = { confirmDelete = true }
         ) {
-            TopBarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", AppTheme.colors.textPrimary) { leave() }
-            Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
-                Text("Edit Configuration", color = AppTheme.colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    text = draft.name.ifBlank { "${draft.address}:$portText" },
-                    color = AppTheme.colors.textMuted,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+            error = null
+            saving = true
+            scope.launch {
+                val trimmed = edited.copy(
+                    name = edited.name.trim(),
+                    address = edited.address.trim(),
+                    uuid = edited.uuid.trim(),
+                    sni = edited.sni.trim(),
+                    host = edited.host.trim(),
+                    pinnedPeerCertSha256 = edited.pinnedPeerCertSha256.trim()
                 )
-            }
-            TopBarIcon(Icons.Default.Delete, "Delete", AppTheme.colors.statusError, Modifier.testTag("edit_config_delete")) {
-                confirmDelete = true
-            }
-            if (saving) {
-                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = AppTheme.colors.primary)
-                }
-            } else {
-                TopBarIcon(Icons.Default.Check, "Save", AppTheme.colors.primary, Modifier.testTag("edit_config_save")) {
-                    error = null
-                    saving = true
-                    scope.launch {
-                        val trimmed = edited.copy(
-                            name = edited.name.trim(),
-                            address = edited.address.trim(),
-                            uuid = edited.uuid.trim(),
-                            sni = edited.sni.trim(),
-                            host = edited.host.trim(),
-                            pinnedPeerCertSha256 = edited.pinnedPeerCertSha256.trim()
-                        )
-                        val refused = if (trimmed.port !in 1..65535) "Port must be between 1 and 65535." else onSave(trimmed)
-                        saving = false
-                        if (refused == null) onBack() else error = refused
-                    }
-                }
+                val refused = if (trimmed.port !in 1..65535) "Port must be between 1 and 65535." else onSave(trimmed)
+                saving = false
+                if (refused == null) onBack() else error = refused
             }
         }
 
@@ -328,6 +321,230 @@ fun EditConfigScreen(
             onConfirm = { confirmDiscard = false; onBack() },
             onDismiss = { confirmDiscard = false }
         )
+    }
+}
+
+/** Top bar of both editors: back, title, delete, save. */
+@Composable
+private fun EditTopBar(title: String, subtitle: String, saving: Boolean, onBack: () -> Unit, onDelete: () -> Unit, onSave: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TopBarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", AppTheme.colors.textPrimary) { onBack() }
+        Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
+            Text(title, color = AppTheme.colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = subtitle,
+                color = AppTheme.colors.textMuted,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        TopBarIcon(Icons.Default.Delete, "Delete", AppTheme.colors.statusError, Modifier.testTag("edit_config_delete")) { onDelete() }
+        if (saving) {
+            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = AppTheme.colors.primary)
+            }
+        } else {
+            TopBarIcon(Icons.Default.Check, "Save", AppTheme.colors.primary, Modifier.testTag("edit_config_save")) { onSave() }
+        }
+    }
+}
+
+/** Public resolvers offered as one-tap additions in the DNS tunnel editor. */
+private val RESOLVER_PRESETS = listOf(
+    "Cloudflare DoH" to "https://1.1.1.1/dns-query",
+    "Google DoH" to "https://8.8.8.8/dns-query",
+    "Quad9 DoH" to "https://9.9.9.9/dns-query",
+    "Cloudflare UDP" to "1.1.1.1:53",
+    "Google UDP" to "8.8.8.8:53"
+)
+
+/**
+ * Editor for a DNS tunnel (dnstt) profile: the tunnel and backup domains, the server key, the
+ * resolvers and the query rate. Saving checks everything the way an imported link is checked.
+ */
+@Composable
+private fun DnsTunnelEditor(
+    profile: VlessProfile,
+    onBack: () -> Unit,
+    onSave: suspend (VlessProfile) -> String?,
+    onDelete: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val initial = remember(profile.id) { runCatching { DnsttSidecar.settings(profile) }.getOrNull() }
+    var name by remember(profile.id) { mutableStateOf(profile.name) }
+    var domain by remember(profile.id) { mutableStateOf(initial?.domain ?: profile.address) }
+    var pubkey by remember(profile.id) { mutableStateOf(initial?.pubkey.orEmpty()) }
+    var backups by remember(profile.id) { mutableStateOf(initial?.backupDomains.orEmpty().joinToString("\n")) }
+    var resolvers by remember(profile.id) {
+        mutableStateOf(initial?.resolvers?.joinToString("\n") { DnsttSidecar.resolverLine(it) } ?: DnsttSidecar.DEFAULT_DOH)
+    }
+    var qps by remember(profile.id) { mutableStateOf(initial?.qps ?: DnsttSidecar.DEFAULT_QPS) }
+    var perResolver by remember(profile.id) { mutableStateOf(initial?.perResolver ?: false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var confirmDiscard by remember { mutableStateOf(false) }
+
+    val resolverCount = DnsttSidecar.parseResolverLines(resolvers).size
+    val built: Result<VlessProfile> = runCatching {
+        val s = DnsttSidecar.validate(
+            pubkey, domain, DnsttSidecar.parseResolverLines(resolvers), initial?.utls.orEmpty(), qps.toString(),
+            backups.split('\n', ',', ' ').map { it.trim() }.filter { it.isNotEmpty() }, perResolver
+        )
+        DnsttSidecar.withSettings(profile.copy(name = name.trim().ifEmpty { "DNS tunnel ${s.domain}" }), s)
+    }
+    val dirty = built.getOrNull()?.let { it != profile } ?: true
+
+    fun leave() = if (dirty) confirmDiscard = true else onBack()
+    BackHandler { leave() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppTheme.colors.background)
+            .testTag("edit_dns_tunnel_screen")
+    ) {
+        EditTopBar("Edit DNS tunnel", name.ifBlank { domain }, saving, onBack = { leave() }, onDelete = { confirmDelete = true }) {
+            val p = built.getOrElse { error = it.message ?: "Check the settings."; return@EditTopBar }
+            error = null
+            saving = true
+            scope.launch {
+                val refused = onSave(p)
+                saving = false
+                if (refused == null) onBack() else error = refused
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            error?.let { ErrorBanner(it) }
+
+            EditSection("Tunnel") {
+                EditField("Remarks", name) { name = it }
+                EditField("Tunnel domain", domain, monospace = true, placeholder = "t.example.com", keyboardType = KeyboardType.Uri) { domain = it }
+                EditField("Server public key", pubkey, monospace = true, minLines = 2, placeholder = "64 hex digits") { pubkey = it }
+            }
+
+            EditSection("Backup domains") {
+                EditField(
+                    "One per line, up to ${DnsttSidecar.MAX_BACKUP_DOMAINS}", backups, monospace = true, minLines = 2,
+                    placeholder = "t.example.net", keyboardType = KeyboardType.Uri
+                ) { backups = it }
+                Hint("When the tunnel domain stops answering for about 15 seconds, the app moves to the next one " +
+                    "without dropping the connection. Your server must answer them all (the Install Center sets this up).")
+            }
+
+            EditSection("Resolvers") {
+                EditField(
+                    "One per line, up to ${DnsttSidecar.MAX_RESOLVERS}", resolvers, monospace = true, minLines = 3,
+                    placeholder = "https://1.1.1.1/dns-query", keyboardType = KeyboardType.Uri
+                ) { resolvers = it }
+                ChipRow(RESOLVER_PRESETS.filter { (_, v) -> resolvers.lines().none { it.trim().equals(v, true) } }.map { it.first }) { label ->
+                    val v = RESOLVER_PRESETS.first { it.first == label }.second
+                    resolvers = (resolvers.trimEnd().takeIf { it.isNotEmpty() }?.plus("\n").orEmpty()) + v
+                }
+                Hint("https:// is DoH, tls:// is DoT, and a plain address is UDP. Queries are shared between them. " +
+                    "A resolver that stops answering is rested for a while; fake \"name does not exist\" answers never count against it.")
+            }
+
+            EditSection("Query rate") {
+                FieldLabel("DNS queries per second")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    (1..DnsttSidecar.MAX_QPS).forEach { n ->
+                        val on = n == qps
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (on) AppTheme.colors.primary.copy(alpha = 0.16f) else AppTheme.colors.surfaceInput)
+                                .border(1.dp, if (on) AppTheme.colors.primary else AppTheme.colors.borderSubtle, RoundedCornerShape(10.dp))
+                                .clickable(role = Role.RadioButton) { qps = n }
+                                .testTag("dns_qps_$n"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(n.toString(), color = if (on) AppTheme.colors.primary else AppTheme.colors.textPrimary,
+                                fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium)
+                        }
+                    }
+                }
+                EditSwitch(
+                    title = "Count the limit per resolver",
+                    subtitle = if (resolverCount > 1) "Faster with several resolvers, but more queries in all" else "Needs two or more resolvers",
+                    checked = perResolver && resolverCount > 1
+                ) { perResolver = it }
+                val total = if (perResolver && resolverCount > 1) qps * resolverCount else qps
+                Text(
+                    if (total > DnsttSidecar.MAX_QPS) "Up to $total queries a second in all. Networks that block more than about 5 a second may cut this tunnel."
+                    else "Up to $total ${if (total == 1) "query" else "queries"} a second in all. Networks block more than about 5 a second.",
+                    color = if (total > DnsttSidecar.MAX_QPS) AppTheme.colors.statusWarning else AppTheme.colors.textMuted,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        ConfirmDialog(
+            title = "Delete node",
+            text = "Remove '${profile.name}'? This cannot be undone.",
+            confirm = "Delete",
+            onConfirm = { confirmDelete = false; onDelete() },
+            onDismiss = { confirmDelete = false }
+        )
+    }
+    if (confirmDiscard) {
+        ConfirmDialog(
+            title = "Discard changes?",
+            text = "Your edits to this node have not been saved.",
+            confirm = "Discard",
+            onConfirm = { confirmDiscard = false; onBack() },
+            onDismiss = { confirmDiscard = false }
+        )
+    }
+}
+
+@Composable
+private fun Hint(text: String) {
+    Text(text, color = AppTheme.colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp)
+}
+
+/** One-tap additions, wrapping onto more lines as needed. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ChipRow(labels: List<String>, onClick: (String) -> Unit) {
+    if (labels.isEmpty()) return
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        labels.forEach { label ->
+            Text(
+                "+ $label",
+                color = AppTheme.colors.primary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .border(1.dp, AppTheme.colors.primary.copy(alpha = 0.45f), RoundedCornerShape(50))
+                    .clickable(role = Role.Button) { onClick(label) }
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
     }
 }
 
