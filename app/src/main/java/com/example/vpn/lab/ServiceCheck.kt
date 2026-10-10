@@ -1,8 +1,7 @@
 package com.example.vpn.lab
 
 /**
- * LAB "Service check": opens the real sites people use (Gemini, AI Studio, ChatGPT, YouTube, Telegram,
- * X) the way a browser would and judges what came back, because a ping or a 204 test passes on paths
+ * LAB "Service check": opens the real sites people use (Gemini, AI Studio, OpenAI, YouTube, Telegram, X) the way a browser would and judges what came back, because a ping or a 204 test passes on paths
  * where the site itself is region-blocked or replaced by the filter's page.
  *
  * The check runs from the app, so with the VPN on it goes through the connected config (for configs run
@@ -18,7 +17,7 @@ object ServiceCheck {
     val SERVICES = listOf(
         Service("gemini", "Gemini", "https://gemini.google.com/app"),
         Service("aistudio", "Google AI Studio", "https://aistudio.google.com/"),
-        Service("chatgpt", "ChatGPT", "https://chatgpt.com/"),
+        Service("openai", "OpenAI", "https://chat.openai.com/"),
         Service("youtube", "YouTube", "https://www.youtube.com/"),
         Service("telegram", "Telegram", "https://web.telegram.org/"),
         Service("x", "X", "https://x.com/")

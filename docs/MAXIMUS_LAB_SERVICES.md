@@ -4,7 +4,7 @@ LAB's **Service check** page opens the sites people actually use and reports wha
 
 ## What it checks
 
-Gemini, Google AI Studio, ChatGPT, YouTube, Telegram Web and X. Each gets one ordinary GET of its front page (browser User-Agent, redirects followed, 10 s connect/read timeouts). The exit address and country come from Cloudflare's `/cdn-cgi/trace`.
+Gemini, Google AI Studio, OpenAI, YouTube, Telegram Web and X. Each gets one ordinary GET of its front page (browser User-Agent, redirects followed, 10 s connect/read timeouts). The exit address and country come from Cloudflare's `/cdn-cgi/trace`.
 
 ## Verdicts
 
