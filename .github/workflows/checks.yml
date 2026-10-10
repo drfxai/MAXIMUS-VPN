@@ -66,6 +66,22 @@ jobs:
       - run: pip install cryptography
       - run: python3 -m unittest discover -s tools/aggregator/tests -v
 
+  server-tools:
+    name: Server tools build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: SOCKS helper tests
+        working-directory: tools/server-tools/socks
+        run: GOTOOLCHAIN=go1.26.8 go test ./...
+      - name: Reproducible build matches the pinned hashes
+        run: bash scripts/server-tools/build.sh
+
   bot:
     name: Telegram bot tests
     runs-on: ubuntu-latest
