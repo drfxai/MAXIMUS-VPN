@@ -71,6 +71,31 @@ class RayApplication : Application() {
         })
     }
 
+    /**
+     * LAB "Revive configs": the same recipes, gate and ledger as [bpbRecovery], with more recipes tried per
+     * config. What it records is what the VPN uses on the next connect.
+     */
+    val configRevival: com.example.vpn.lab.ConfigRevival by lazy {
+        com.example.vpn.lab.ConfigRevival(
+            engine = com.example.vpn.connectivity.BpbRecoveryEngine(
+                ledger = recoveryLedger, maxCandidates = com.example.vpn.lab.ConfigRevival.RECIPES_PER_CONFIG,
+                fragmentReverted = { key, network ->
+                    fragmentProfiles.decide(key, network) == com.example.vpn.connectivity.FragmentProfileEngine.Decision.REVERT
+                }
+            ),
+            probe = { profiles ->
+                com.example.xray.RealDelayProbe.measure(profiles, com.example.vpn.lab.ConfigRevival.TIMEOUT_SEC).map { o ->
+                    when (o) {
+                        is com.example.xray.RealDelayProbe.Outcome.Delay -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed(o.latencyMs)
+                        is com.example.xray.RealDelayProbe.Outcome.Failed -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Failed(o.reason)
+                        is com.example.xray.RealDelayProbe.Outcome.NotRun -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.NotRun(o.reason)
+                    }
+                }
+            },
+            endpoints = { network -> endpointScores.validated(network) }
+        )
+    }
+
     /** Iran intelligence rules from the signed free list's manifest; they only nudge the order servers are tried in. */
     val iranIntel: com.example.vpn.connectivity.IranIntelligence.Store by lazy {
         val prefs = getSharedPreferences("iran_intel", MODE_PRIVATE)
