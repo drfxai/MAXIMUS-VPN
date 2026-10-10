@@ -153,12 +153,12 @@ jobs:
             echo "ARM64 APK was independently package/signature verified; launch testing requires a physical ARM64 device."
       - name: Preserve installation diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-install-diagnostics
           path: /tmp/maximus-*.txt
       - name: Preserve verified APKs independently of release permissions
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: maximus-verified-apks
           path: |

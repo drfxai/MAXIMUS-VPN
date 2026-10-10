@@ -75,7 +75,7 @@ jobs:
       - name: Keep the run's evidence
         # Rejected entries (reason, host and port only) and the per-config scores, for inspection.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: free-config-evidence
           path: |
