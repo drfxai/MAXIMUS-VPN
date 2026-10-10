@@ -16,6 +16,18 @@ data class ShellResult(val exitCode: Int, val output: String)
 interface RemoteShell : Closeable {
     /** Runs [script] with `sh -s`, streaming each output line to [onLine]. */
     fun run(script: String, timeoutMs: Long = 10 * 60_000L, onLine: (String) -> Unit = {}): ShellResult
+
+    /** Writes [data] to [remotePath] (created by the signed-in account, mode 600). */
+    fun upload(data: ByteArray, remotePath: String): Unit = throw UnsupportedOperationException("Upload is not supported")
+
+    /** Reads up to [maxBytes] of [remotePath]. */
+    fun download(remotePath: String, maxBytes: Int = MAX_TRANSFER): ByteArray = throw UnsupportedOperationException("Download is not supported")
+
+    companion object {
+        const val MAX_TRANSFER = 64 * 1024 * 1024
+        private val SAFE_PATH = Regex("^/[A-Za-z0-9._/-]{1,200}$")
+        fun checkPath(path: String): String = path.also { require(SAFE_PATH.matches(it) && !it.contains("..")) { "Invalid remote path" } }
+    }
 }
 
 /**
@@ -100,6 +112,48 @@ object SshShell {
                 }
                 if (pending.isNotEmpty()) onLine(pending.toString())
                 return ShellResult(channel.exitStatus, output.toString("UTF-8"))
+            } finally {
+                channel.disconnect()
+            }
+        }
+
+        override fun upload(data: ByteArray, remotePath: String) {
+            val path = RemoteShell.checkPath(remotePath)
+            val dir = path.substringBeforeLast('/')
+            val channel = session.openChannel("exec") as ChannelExec
+            channel.setCommand("umask 077; mkdir -p '$dir' && cat > '$path.part' && mv -f '$path.part' '$path'")
+            channel.setInputStream(ByteArrayInputStream(data))
+            try {
+                channel.connect(15_000)
+                val deadline = System.nanoTime() + 10 * 60_000L * 1_000_000
+                while (!channel.isClosed) {
+                    check(System.nanoTime() < deadline) { "Sending the file took too long" }
+                    Thread.sleep(50)
+                }
+                check(channel.exitStatus == 0) { "The server did not accept the file (exit ${channel.exitStatus})" }
+            } finally {
+                channel.disconnect()
+            }
+        }
+
+        override fun download(remotePath: String, maxBytes: Int): ByteArray {
+            val path = RemoteShell.checkPath(remotePath)
+            val channel = session.openChannel("exec") as ChannelExec
+            channel.setCommand("cat '$path'")
+            val stdout = channel.inputStream
+            val out = ByteArrayOutputStream()
+            try {
+                channel.connect(15_000)
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val n = stdout.read(buffer)
+                    if (n < 0) break
+                    check(out.size() + n <= maxBytes) { "The file is larger than expected" }
+                    out.write(buffer, 0, n)
+                }
+                while (!channel.isClosed) Thread.sleep(20)
+                check(channel.exitStatus == 0) { "Could not read $path on the server" }
+                return out.toByteArray()
             } finally {
                 channel.disconnect()
             }

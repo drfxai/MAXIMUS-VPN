@@ -28,7 +28,7 @@ The Panels screen has five tabs: **Servers**, **Install**, **Cloudflare**, **Cle
 | Password login off | Both | Only after key login is proved; validated with `sshd -t` |
 | Firewall, Fail2ban, Security updates | Both (apt) | UFW, SSH jail, unattended security upgrades |
 | TCP BBR, Swap | Both | Speed and stability for small servers |
-| Maximus Tunnel | Iran and abroad | Shown as "Later"; it comes after this release |
+| Maximus Tunnel | Iran and abroad | Opens the tunnel setup (see below) |
 
 The wizard runs: pick server, checks (sign-in, admin rights, systemd, CPU, free disk, ports),
 settings, summary, live steps, result. A first install that fails is rolled back on the server.
@@ -37,8 +37,8 @@ moved to a new port or given new keys where that makes sense, and removed.
 
 ## Server programs
 
-dnstt-server, Hysteria2 and a small loopback-only SOCKS5 server (`tools/server-tools/socks`) are
-built reproducibly by `scripts/server-tools/build.sh` (Go 1.26.8, `-trimpath`, empty build id)
+dnstt-server, Hysteria2, Xray and a small loopback-only SOCKS5 server (`tools/server-tools/socks`) are
+built reproducibly by `scripts/server-tools/build.sh` (Go 1.26.8; Xray v26.9.9 with Go 1.27.2, `-trimpath`, empty build id)
 and published by `.github/workflows/server-tools.yml` to the prerelease `server-tools-v1`.
 The app pins the SHA-256 of every file (`tools/server-tools/SHA256SUMS`), and the install
 scripts refuse a download whose hash differs. Nothing is piped into a shell.
@@ -48,7 +48,36 @@ internal UDP port and port 53 is redirected to it with an iptables rule that the
 and removes. The SOCKS server refuses private, loopback, link-local, CGNAT and metadata
 addresses.
 
+## Maximus Tunnel
+
+The Tunnel tab links one server in Iran to one server abroad:
+phone → Iran server → server abroad → internet. It needs both servers in My Servers, signed in.
+
+- The phone connects to the Iran server with VLESS + REALITY + Vision on one TCP port.
+- The Iran server reaches the server abroad three ways at once: REALITY, XHTTP over REALITY and
+  Hysteria2. Xray probes each one every 30 seconds and uses the fastest that answers
+  (`leastPing`), so a blocked path is skipped without the phone noticing.
+- REALITY and XHTTP ports move on a schedule (off, 6, 12 or 24 hours). Both servers work out the
+  next port themselves from a shared seed with a systemd timer, so the phone is not needed; the
+  previous period's port keeps working for one more period. "Move now" picks a new seed.
+- REALITY private keys and the Hysteria2 certificate are made on the servers; only public keys
+  reach the app. The Iran side checks the Hysteria2 certificate with its own copy, never with
+  insecure mode.
+- The server abroad refuses private and local addresses; the Iran server only forwards abroad and
+  never sends traffic to the internet directly.
+- If the Iran server can't reach GitHub, the app downloads the pinned program on the phone (or
+  copies it from the server abroad), checks its SHA-256 and uploads it over SSH.
+- If the server abroad has a cloud firewall (Hetzner, AWS, ...), allow TCP 20000–59999 and the
+  Hysteria2 UDP port there; the app opens them in the server's own firewall.
+
+Code: `panels/servers/tunnel/` (configs, scripts, rotating ports, setup) and
+`ui/panels/servers/TunnelScreens.kt`.
+
 ## Not yet tested
 
 None of this has been run against a real server from a phone yet. The scripts were run on a
 Linux test machine with the real binaries, and a dnstt tunnel carried traffic end to end there.
+
+The Maximus Tunnel has not been tested on real servers or a phone in Iran yet. Both installs,
+port rotation, path switching, the status check and removal were run on a Linux test machine with
+the real Xray and Hysteria2 programs, and traffic passed phone → Iran → abroad there.

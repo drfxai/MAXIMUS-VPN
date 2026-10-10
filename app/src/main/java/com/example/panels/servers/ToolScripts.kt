@@ -16,7 +16,9 @@ object ServerBinaries {
         "hysteria-linux-amd64" to "17d92c287c49f3eeffb0cfdbecc610e03164482fa8518d3b791a5d1df4dbc7c2",
         "hysteria-linux-arm64" to "c0788f9ae2ae91f05fc90265e4793963811c9d325ff5276eed9a3fe1b0e16534",
         "maximus-socks-linux-amd64" to "7628ca100349b4a2d7739a3c6427e6638443f73db4073118f3a460084458d19d",
-        "maximus-socks-linux-arm64" to "5a42edbbc9c06017de567e91351b822c70749f4f66559ff774b7aa5bfcea21ab"
+        "maximus-socks-linux-arm64" to "5a42edbbc9c06017de567e91351b822c70749f4f66559ff774b7aa5bfcea21ab",
+        "xray-linux-amd64" to "21bcb66e8740022fb4e27d5a4fc0af95ee5462ce1cfb4637a5d1551b91772fdf",
+        "xray-linux-arm64" to "9503ec7ad90830e2da13e43d022c346b2e7d13814d2c4f6b9ea88969cf926887"
     )
 
     fun sha(name: String, arch: String): String =
@@ -45,23 +47,28 @@ object ToolScripts {
 
     const val DNSTT_DIR = "/etc/maximus/dnstt"
     const val HYSTERIA_DIR = "/etc/maximus/hysteria"
+    /** Where the app uploads a verified program when the server cannot download it itself. */
+    const val STAGE_DIR = "/tmp/maximus-stage"
+    /** Exit code of a script whose program download failed. */
+    const val EXIT_DOWNLOAD = 31
 
     /** systemd units of each tool, for status, restart and logs. */
     val UNITS: Map<String, List<String>> = mapOf(
         ServerToolCatalog.XUI to listOf("x-ui"),
         ServerToolCatalog.DNSTT to listOf("maximus-socks", "maximus-dnstt"),
         ServerToolCatalog.HYSTERIA2 to listOf("maximus-hysteria"),
+        ServerToolCatalog.MAXIMUS_TUNNEL to listOf("maximus-tunnel"),
         ServerToolCatalog.FAIL2BAN to listOf("fail2ban")
     )
 
-    private val DOMAIN = Regex("^(?=.{4,200}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$")
-    private val SECRET = Regex("^[A-Za-z0-9]{16,64}$")
-    private val HOST = Regex("^[A-Za-z0-9.:-]{1,253}$")
+    internal val DOMAIN = Regex("^(?=.{4,200}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$")
+    internal val SECRET = Regex("^[A-Za-z0-9]{16,64}$")
+    internal val HOST = Regex("^[A-Za-z0-9.:-]{1,253}$")
     private val ARCH = setOf("amd64", "arm64")
     private val PUBLIC_KEY = Regex("^(ecdsa-sha2-nistp256|ssh-ed25519|ssh-rsa) [A-Za-z0-9+/=]{40,1000}( [A-Za-z0-9@._-]{1,64})?$")
 
-    private fun port(p: Int, what: String): Int = p.also { require(it in 1..65535) { "Invalid $what port $it" } }
-    private fun arch(a: String): String = a.also { require(it in ARCH) { "Unsupported processor $it" } }
+    internal fun port(p: Int, what: String): Int = p.also { require(it in 1..65535) { "Invalid $what port $it" } }
+    internal fun arch(a: String): String = a.also { require(it in ARCH) { "Unsupported processor $it" } }
 
     /** Shared helpers. `§` stands for `$` in every script below. */
     private val PRELUDE = """
@@ -105,14 +112,20 @@ object ToolScripts {
           wf=§(mktemp); cat > "§wf"; §SUDO install -m "§2" "§wf" "§1"; rm -f "§wf"
         }
         fetch_bin() {
-          if ! have curl && ! have wget; then pkg_install curl ca-certificates; fi
+          if §SUDO test -f "§3" && [ "§(§SUDO sha256sum "§3" | awk '{print §1}')" = "§2" ]; then return 0; fi
           fb=§(mktemp)
-          if have curl; then curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 20 -o "§fb" "§MX_BASE/§1"
-          else wget --https-only -q -O "§fb" "§MX_BASE/§1"; fi
+          if [ -f "$STAGE_DIR/§1" ]; then
+            cp "$STAGE_DIR/§1" "§fb"; rm -f "$STAGE_DIR/§1"
+          else
+            if ! have curl && ! have wget; then pkg_install curl ca-certificates; fi
+            if have curl; then curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 20 -o "§fb" "§MX_BASE/§1" || dl_failed "§1" "§fb"
+            else wget --https-only -q -O "§fb" "§MX_BASE/§1" || dl_failed "§1" "§fb"; fi
+          fi
           got=§(sha256sum "§fb" | awk '{print §1}')
           if [ "§got" != "§2" ]; then rm -f "§fb"; echo "Checksum mismatch for §1, refusing to install it" >&2; exit 30; fi
-          §SUDO install -m 0755 "§fb" "§3"; rm -f "§fb"
+          §SUDO install -D -m 0755 "§fb" "§3"; rm -f "§fb"
         }
+        dl_failed() { rm -f "§2"; echo "Could not download §1 from GitHub" >&2; exit 31; }
         wait_active() {
           for u in "§@"; do
             i=0
@@ -132,14 +145,14 @@ object ToolScripts {
      * Joins the prelude and [body]. Multi-line [inserts] replace `@@NAME@@` lines after the body is
      * de-indented, so heredoc terminators stay at the start of their lines.
      */
-    private fun script(body: String, steps: List<String>, inserts: Map<String, String> = emptyMap()): ToolScript {
+    internal fun script(body: String, steps: List<String>, inserts: Map<String, String> = emptyMap()): ToolScript {
         var text = PRELUDE + "\n" + body.trimIndent()
         inserts.forEach { (name, value) -> text = text.replace("@@$name@@", value) }
         return ToolScript(text.replace('§', '$'), steps)
     }
 
     /** The unit file text for a Maximus service; its lines are kept literal (no `$` allowed). */
-    private fun unit(description: String, exec: List<String>, extra: List<String> = emptyList(), after: String = "network-online.target"): String {
+    internal fun unit(description: String, exec: List<String>, extra: List<String> = emptyList(), after: String = "network-online.target"): String {
         require((exec + extra).none { it.contains('$') || it.contains('§') }) { "Unit lines must not contain $" }
         return (listOf("[Unit]", "Description=$description", "After=$after", "Wants=network-online.target", "",
             "[Service]", "User=maximus", "Group=maximus") + exec + listOf(

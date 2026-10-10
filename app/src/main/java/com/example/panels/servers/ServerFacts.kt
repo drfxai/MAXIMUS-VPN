@@ -89,7 +89,7 @@ data class ServerFacts(
               §SUDO sshd -T 2>/dev/null | awk '/^passwordauthentication /{print "SSH_PASSWORD=" §2}'
             fi
             if grep -qsE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/' /etc/ssh/sshd_config; then echo SSHD_DROPINS=1; else echo SSHD_DROPINS=0; fi
-            for u in x-ui maximus-dnstt maximus-socks maximus-hysteria fail2ban; do
+            for u in x-ui maximus-dnstt maximus-socks maximus-hysteria maximus-tunnel maximus-tunnel-hy fail2ban; do
               echo "SVC_§u=§(systemctl is-active §u 2>/dev/null || true)"
             done
         """.trimIndent().replace('§', '$')
