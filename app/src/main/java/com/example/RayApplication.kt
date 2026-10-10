@@ -92,7 +92,27 @@ class RayApplication : Application() {
                     }
                 }
             },
-            endpoints = { network -> endpointScores.validated(network) }
+            endpoints = { network -> endpointScores.validated(network) },
+            echCheck = {
+                com.example.vpn.connectivity.EchKeyCheck.check(com.example.vpn.connectivity.RecoveryProfiles.CLOUDFLARE_ECH_DOH) { url ->
+                    val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    try {
+                        c.connectTimeout = 5000; c.readTimeout = 5000
+                        c.setRequestProperty("Accept", "application/dns-message")
+                        if (c.responseCode == 200) c.inputStream.use { it.readNBytes(4096) } else null
+                    } finally { c.disconnect() }
+                }
+            },
+            findCleanIps = { profile, network ->
+                // Edge addresses that pass TCP, TLS (with the config's SNI) and the config's own WebSocket or
+                // HTTP exchange; each one found is recorded for this network, which is what makes it a recipe.
+                val found = kotlinx.coroutines.runBlocking {
+                    com.example.panels.CleanIpOptimizer().scan(profile, targetPort = profile.port, enableSpeedTest = false, candidateCount = 64) { }
+                }.take(6)
+                val now = System.currentTimeMillis()
+                endpointScores.record(found.map { com.example.vpn.connectivity.EndpointScoringEngine.Measurement(it.ip, network, now, true, it.medianMs) })
+                found.map { it.ip }
+            }
         )
     }
 

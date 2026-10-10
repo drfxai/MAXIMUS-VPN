@@ -157,6 +157,9 @@ object RecoveryProfiles {
         p("ech-cloudflare-google", RecoveryProfile.Strategy.ECH, cloudflareEch(CLOUDFLARE_ECH_DOH[1]), 0.45),
         p("ech-cloudflare-quad9", RecoveryProfile.Strategy.ECH, cloudflareEch(CLOUDFLARE_ECH_DOH[2]), 0.4),
         p("bpb-fragment-v1", RecoveryProfile.Strategy.FRAGMENT, bpb(com.example.panels.BpbFix.FINAL_MASK_V1), 0.5),
+        // The Irancell recipe the community reports: the empty-record fragment with Firefox's cipher list.
+        p(NetworkFirewalls.IRANCELL_PROFILE, RecoveryProfile.Strategy.FRAGMENT,
+            bpb(com.example.panels.BpbFix.FINAL_MASK_ORIGINAL) + ("cipherSuites" to com.example.panels.BpbFix.FIREFOX_CIPHER_SUITES), 0.45),
         p("alpn-http11", RecoveryProfile.Strategy.ALPN, mapOf("alpn" to "http/1.1"), 0.25,
             transports = setOf("ws", "httpupgrade")),
         p("endpoint-ipv4", RecoveryProfile.Strategy.ALT_ENDPOINT_V4, mapOf("address" to RecoveryProfile.ENDPOINT), 0.55, family = "ipv4"),
