@@ -42,7 +42,7 @@ class DnsttSidecarTest {
         val context = SidecarContext(dir, File(dir, "libdnstt.so"), 41000, "u", "p", OperationalMode.DAILY)
         val launch = engine.prepare(profile, AppSettings(), context)
         assertEquals(
-            listOf(File(dir, "libdnstt.so").absolutePath, "-doh", "https://1.1.1.1/dns-query", "-pubkey", key, "t.example.com", "127.0.0.1:41000"),
+            listOf(File(dir, "libdnstt.so").absolutePath, "-doh", "https://1.1.1.1/dns-query", "-pubkey", key, "-qps", "4", "t.example.com", "127.0.0.1:41000"),
             launch.command
         )
         assertFalse(launch.socksAuth)
@@ -59,7 +59,7 @@ class DnsttSidecarTest {
         assertEquals("8.8.8.8:5353", udp.resolver)
         assertEquals("none", udp.utls)
         assertEquals(
-            listOf("x", "-udp", "8.8.8.8:5353", "-pubkey", key, "-utls", "none", "t.example.com", "127.0.0.1:1"),
+            listOf("x", "-udp", "8.8.8.8:5353", "-pubkey", key, "-utls", "none", "-qps", "4", "t.example.com", "127.0.0.1:1"),
             DnsttSidecar.command(udp, "x", 1)
         )
         val v6 = DnsttSidecar.settings(DnsttSidecar.parse("dnstt://$key@t.example.com?dot=[2606:4700:4700::1111]"))
@@ -89,6 +89,21 @@ class DnsttSidecarTest {
         assertTrue(refused("dnstt://$key@t.example.com?doh=https://1.1.1.1/dns-query&udp=1.1.1.1").contains("only one"))
         assertTrue(refused("vless://x@y:1").contains("dnstt://"))
         assertNull(DnsttSidecar.parseOrNull("dnstt://$key@t.example.com?utls=a;b"))
+    }
+
+    @Test
+    fun queryRateStaysUnderFivePerSecond() {
+        val slow = DnsttSidecar.parse("dnstt://$key@t.example.com?udp=8.8.8.8&qps=2")
+        assertEquals(2, DnsttSidecar.settings(slow).qps)
+        assertTrue(DnsttSidecar.toLink(slow).contains("&qps=2"))
+        assertEquals(listOf("-qps", "2"), DnsttSidecar.command(DnsttSidecar.settings(slow), "x", 1).let { it.subList(it.indexOf("-qps"), it.indexOf("-qps") + 2) })
+        // A profile saved before the cap existed gets the default.
+        val old = DnsttSidecar.parse("dnstt://$key@t.example.com")
+        assertEquals(DnsttSidecar.DEFAULT_QPS, DnsttSidecar.settings(old).qps)
+        assertFalse(DnsttSidecar.toLink(old).contains("qps"))
+        for (bad in listOf("5", "6", "0", "-1", "2.5", "fast")) {
+            assertTrue(refused("dnstt://$key@t.example.com?qps=$bad").contains("per second"))
+        }
     }
 
     @Test
