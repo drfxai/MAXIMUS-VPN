@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Healing
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.MonitorHeart
@@ -89,6 +90,7 @@ enum class LabSection(val title: String, val icon: ImageVector) {
     VERIFIED("Verified Profiles", Icons.Rounded.Verified),
     REVIVE("Revive configs", Icons.Rounded.Healing),
     SERVICES("Service check", Icons.Rounded.Public),
+    CHAIN("Engine chain", Icons.Rounded.Hub),
     RESEARCH("Research", Icons.Rounded.TravelExplore)
 }
 
@@ -113,7 +115,8 @@ data class NetworkLabUiState(
     val picking: Boolean = false,
     val vpnOn: Boolean = false,
     val revival: RevivalUi = RevivalUi(),
-    val services: ServicesUi = ServicesUi()
+    val services: ServicesUi = ServicesUi(),
+    val chain: ChainUi = ChainUi()
 )
 
 /** Everything the LAB screens can ask for; the screens hold no state of their own beyond expanded cards. */
@@ -138,7 +141,10 @@ class NetworkLabActions(
     val onStopRevive: () -> Unit = {},
     val onFirewall: (com.example.vpn.connectivity.NetworkFirewalls.Firewall?) -> Unit = {},
     val onCheckServices: () -> Unit = {},
-    val onStopServices: () -> Unit = {}
+    val onStopServices: () -> Unit = {},
+    val onChainOrder: (ChainOrder) -> Unit = {},
+    val onChainRegion: (String) -> Unit = {},
+    val onSaveChain: () -> Unit = {}
 )
 
 @Composable
@@ -160,6 +166,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
                     LabSection.REVIVE -> RevivePage(c, state.revival, state.vpnOn, state.snapshot.running != null || state.snapshot.analysisRunning,
                         actions.onRevive, actions.onStopRevive, relativeTime, actions.onFirewall)
                     LabSection.SERVICES -> ServicesPage(c, state.services, state.vpnOn, actions.onCheckServices, actions.onStopServices, relativeTime)
+                    LabSection.CHAIN -> ChainPage(c, state.chain, actions.onChainOrder, actions.onChainRegion, actions.onSaveChain)
                 }
             }
         }
@@ -178,6 +185,7 @@ private fun sectionSubtitle(s: LabSection, state: NetworkLabUiState): String = w
     LabSection.RESEARCH -> "Public sources, checked against the core"
     LabSection.REVIVE -> "Brings dead Cloudflare configs back"
     LabSection.SERVICES -> "Gemini, YouTube, Telegram and more, opened for real"
+    LabSection.CHAIN -> "Run through two relays, Psiphon and Tor"
 }
 
 // ---------------------------------------------------------------- shared wording
@@ -393,6 +401,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                             else -> Triple(LabSection.SERVICES, "", null)
                         }
                     },
+                    Triple(LabSection.CHAIN, state.chain.order.title, null),
                     Triple(LabSection.RESEARCH, "${state.research.size}", null)
                 )
                 rows.forEachIndexed { i, (sec, trailing, color) ->

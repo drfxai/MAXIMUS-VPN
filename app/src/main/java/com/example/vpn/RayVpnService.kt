@@ -359,7 +359,7 @@ class RayVpnService : VpnService() {
     ): com.example.vpn.smart.ServerRace.Winner? {
         // Profiles carried by an engine program cannot be measured before it runs, so they are not raced.
         val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
-            .filter { com.example.vpn.sidecar.Sidecars.forProfile(it) == null }
+            .filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }
         val intel = runCatching { com.example.RayApplication.instance.iranIntel.current() }.getOrNull()
         val ranked = com.example.vpn.smart.ServerRace.rank(
             all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude,
@@ -527,7 +527,7 @@ class RayVpnService : VpnService() {
             var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
             try {
                 // Engine programs (Mihomo, Psiphon, the DNS tunnel) look up their own servers privately.
-                if (profile.profileType != ProfileType.XRAY_JSON && com.example.vpn.sidecar.Sidecars.forProfile(profile) == null &&
+                if (profile.profileType != ProfileType.XRAY_JSON && !com.example.vpn.sidecar.Sidecars.isEngineProfile(profile) &&
                     !isLiteralIp(profile.address)) {
                     // Resolve outside the tunnel: once traffic is captured, DNS for the proxy itself
                     // would loop back into the VPN.
@@ -678,7 +678,7 @@ class RayVpnService : VpnService() {
                     requested = requestedProfile,
                     resolve = { p ->
                         if (p.id == requestedProfile.id) resolvedRequested
-                        else if (p.profileType != ProfileType.XRAY_JSON && com.example.vpn.sidecar.Sidecars.forProfile(p) == null &&
+                        else if (p.profileType != ProfileType.XRAY_JSON && !com.example.vpn.sidecar.Sidecars.isEngineProfile(p) &&
                             !isLiteralIp(p.address)) resolveEndpoint(p) else p
                     },
                     siblings = siblings,
@@ -740,7 +740,7 @@ class RayVpnService : VpnService() {
 
             // Always a pre-flight: a server that was not tested above (no Smart Connect, no stealth variants)
             // gets one real request now, so a dead server is never started blindly.
-            if (!raced && !provenDead && !engineAdopted && !force && com.example.vpn.sidecar.Sidecars.forProfile(profile) == null) {
+            if (!raced && !provenDead && !engineAdopted && !force && !com.example.vpn.sidecar.Sidecars.isEngineProfile(profile)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.ORDINARY_PREFLIGHT)
                 if (recentlyFailed(profile)) {
                     provenDead = true
@@ -830,7 +830,7 @@ class RayVpnService : VpnService() {
             }
 
             // A WireGuard MTU the LAB committed for exactly this network, engine, transport and address family.
-            if (profile.protocolType == com.example.data.model.ProtocolType.WIREGUARD && com.example.vpn.sidecar.Sidecars.forProfile(profile) == null) {
+            if (profile.protocolType == com.example.data.model.ProtocolType.WIREGUARD && !com.example.vpn.sidecar.Sidecars.isEngineProfile(profile)) {
                 val key = book.session()?.networkKey?.let { net ->
                     com.example.vpn.lab.MtuIntelligence.Key(net, "xray", "wireguard", if (profile.address.contains(':')) "ipv6" else "ipv4")
                 }
@@ -855,7 +855,8 @@ class RayVpnService : VpnService() {
             com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { builder.addAddress(it.address, it.prefix) }
             com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { builder.addRoute(it.address, it.prefix) }
             val sidecarEngine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
-            if (sidecarEngine != null) {
+            val engineChain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
+            if (sidecarEngine != null || engineChain != null) {
                 // A separate engine program cannot ask Android to keep its own sockets out of the VPN,
                 // so the app's own traffic is left out; every other app still goes through the tunnel.
                 builder.addDisallowedApplication(packageName)
@@ -924,7 +925,8 @@ class RayVpnService : VpnService() {
             if (settings.preferredEngine == EngineType.MIHOMO) {
                 XrayLogManager.w("VPN", "The Mihomo engine has no native core in this build; using Xray instead.")
             }
-            if (sidecarEngine != null) profile = startSidecar(sidecarEngine, profile, settings)
+            if (engineChain != null) profile = startChain(engineChain, settings)
+            else if (sidecarEngine != null) profile = startSidecar(sidecarEngine, profile, settings)
             val runtime = EngineSelectionPolicy.select(profile)
             val engineId = com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
             if (!engineBreaker.allows(engineId)) {
@@ -1236,6 +1238,59 @@ class RayVpnService : VpnService() {
             }
         }
         return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, context, launch)
+    }
+
+    /**
+     * Starts every hop of a chain and wires each to dial the next (exit hop first). Xray then proxies
+     * to the entry hop's SOCKS port exactly as it would a lone engine.
+     */
+    private fun startChain(chain: com.example.vpn.sidecar.EngineChain.Chain, settings: AppSettings): VlessProfile {
+        sidecar?.stop()
+        sidecar = null
+        val running = com.example.vpn.sidecar.ChainRunner.start(
+            chain = chain,
+            engineFor = { id -> com.example.vpn.sidecar.Sidecars.ENGINES.firstOrNull { it.id == id } },
+            freePort = { com.example.vpn.sidecar.Sidecars.freeLoopbackPort() },
+            context = com.example.vpn.sidecar.ChainRunner.ContextFactory { engineId, socksPort, upstream ->
+                val engine = com.example.vpn.sidecar.Sidecars.ENGINES.first { it.id == engineId }
+                val executable = com.example.vpn.sidecar.Sidecars.executable(engine)
+                    ?: error("The $engineId engine is not included in this build for this phone")
+                com.example.vpn.sidecar.SidecarContext(
+                    workDir = java.io.File(noBackupFilesDir, "engines/chain/$engineId").apply { mkdirs() },
+                    executable = executable,
+                    socksPort = socksPort,
+                    socksUser = com.example.vpn.sidecar.Sidecars.randomToken(9),
+                    socksPass = com.example.vpn.sidecar.Sidecars.randomToken(),
+                    mode = settings.operationalMode,
+                    upstreamSocks = upstream
+                )
+            },
+            start = com.example.vpn.sidecar.ChainRunner.HopStarter { engine, hopProfile, context ->
+                showForegroundNotification("Starting the ${engine.id} engine...")
+                val launch = engine.prepare(hopProfile, settings, context)
+                val process = engine.startInApp(launch, context)
+                    ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort)
+                if (!process.awaitReady(launch.readyTimeoutMs)) {
+                    process.stop()
+                    error("The ${engine.id} engine did not start")
+                }
+                process to launch
+            }
+        )
+        sidecar = running
+        XrayLogManager.i("VPN", "Engine chain is running on a local port")
+        val watched = running
+        serviceScope.launch(Dispatchers.IO) {
+            while (isActive && sidecar === watched && watched.isAlive) delay(1_000)
+            if (sidecar === watched) {
+                XrayLogManager.w("VPN", "A chain engine stopped; traffic stays blocked until another path works")
+                failoverManager?.reportTunnelError("a chain engine stopped")
+            }
+        }
+        return com.example.vpn.sidecar.SidecarChain.xrayProfile(
+            chain.hops.first().let { com.example.vpn.sidecar.EngineChain.hopProfile(it) },
+            running.entryContext, running.entryLaunch
+        )
     }
 
     /** The WireGuard MTU key this connection uses from the LAB's cache; forgotten when traffic fails with it. */

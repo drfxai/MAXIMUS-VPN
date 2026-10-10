@@ -48,7 +48,7 @@ object CoreCapabilityRegistry {
         Capability("ipv6", "IPv6 endpoints", Support.YES, Support.YES, Support.YES, Support.YES, Support.YES,
             "TransportCapabilityEngine.familyOf, VpnRoutePolicy (TUN captures IPv6)"),
         Capability("chain", "Proxy chains", Support.NO, Support.PARTIAL, Support.PARTIAL, Support.PARTIAL, Support.NO,
-            "vpn/sidecar/SidecarChain.kt", "Only Xray in front of a bundled sidecar engine; no user-defined chains."),
+            "vpn/sidecar/SidecarChain.kt, EngineChain.kt", "Xray in front of a bundled engine, or a two-hop Psiphon/Tor chain (EngineChain)."),
         Capability("hysteria2", "Hysteria2", Support.YES, Support.YES, Support.YES, Support.YES, Support.YES, "ProtocolLinks, XrayConfigBuilder"),
         Capability("wireguard", "WireGuard", Support.YES, Support.YES, Support.YES, Support.YES, Support.YES, "WireGuardConf, XrayConfigBuilder"),
         Capability("tuic", "TUIC", Support.YES, Support.YES, Support.NO, Support.NO, Support.NO, "RuntimeCapabilities",

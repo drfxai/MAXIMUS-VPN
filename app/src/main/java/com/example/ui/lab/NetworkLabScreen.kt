@@ -65,7 +65,11 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         val configs = withContext(Dispatchers.IO) { runCatching { RayApplication.instance.serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList()) }
         val eligible = runCatching { revival.eligibleCount(configs) }.getOrDefault(0)
         val detected = com.example.vpn.connectivity.NetworkFirewalls.detect(NetworkKey.current(getApplication<Application>()))
-        local.update { it.copy(revival = it.revival.copy(eligible = eligible, detected = detected)) }
+        val sc = com.example.vpn.sidecar.Sidecars
+        val psiphonReady = runCatching { sc.psiphon().let { sc.isBundled(it) && it.problem(com.example.vpn.sidecar.PsiphonSidecar.profile()) == null } }.getOrDefault(true)
+        val torReady = runCatching { sc.ENGINES.first { it.id == "tor" }.let { sc.isBundled(it) } }.getOrDefault(true)
+        local.update { it.copy(revival = it.revival.copy(eligible = eligible, detected = detected),
+            chain = it.chain.copy(psiphonReady = psiphonReady, torReady = torReady)) }
         local.value = local.value.copy(configs = configs.map { p ->
             LabConfigOption(p.id, p.name.ifBlank { "Config" }, listOf(p.protocolType.displayName, p.transport.uppercase().ifBlank { null }, p.security.uppercase().ifBlank { null })
                 .filterNotNull().filter { it != "NONE" }.joinToString(" · "))
@@ -137,6 +141,29 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun stopServices() { servicesJob?.cancel() }
+
+    fun chainOrder(order: ChainOrder) = local.update { it.copy(chain = it.chain.copy(order = order, savedName = null)) }
+    fun chainRegion(code: String) = local.update { it.copy(chain = it.chain.copy(region = code, savedName = null)) }
+
+    /** Saves the built chain as a server profile the user can connect to. */
+    fun saveChain() {
+        if (_state.value.chain.saving) return
+        local.update { it.copy(chain = it.chain.copy(saving = true)) }
+        viewModelScope.launch {
+            val ui = _state.value.chain
+            val chain = com.example.vpn.sidecar.EngineChain.Chain(listOf(
+                hop(ui.order.first, ui.region), hop(ui.order.second, ui.region)))
+            val profile = com.example.vpn.sidecar.ChainRunner.profile(chain) { titleOf(it) }
+            withContext(Dispatchers.IO) { runCatching { RayApplication.instance.serverRepository.insert(profile) } }
+            local.update { it.copy(chain = it.chain.copy(saving = false, savedName = profile.name)) }
+            lab.showMessage("Saved the chain \"${profile.name}\". Connect to it on the Servers screen.")
+        }
+    }
+
+    private fun hop(engineId: String, region: String) =
+        com.example.vpn.sidecar.EngineChain.Hop(engineId, region = if (engineId == "psiphon") region else "")
+
+    private fun titleOf(engineId: String) = if (engineId == "psiphon") "Psiphon" else "Tor"
     fun chooseFirewall(f: com.example.vpn.connectivity.NetworkFirewalls.Firewall?) = local.update { it.copy(revival = it.revival.copy(chosen = f)) }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }
@@ -221,7 +248,8 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onDisable = lab::setDisabled, onRetire = lab::retire, onDismissMessage = lab::dismissMessage,
                 onResearchRefresh = { viewModel.refreshResearch() }, onAskAgent = viewModel::askAgent, onTestSuggestion = viewModel::testSuggestion,
                 onUseRecommended = viewModel::useRecommended, onRevive = viewModel::revive, onStopRevive = viewModel::stopRevive,
-                onFirewall = viewModel::chooseFirewall, onCheckServices = viewModel::checkServices, onStopServices = viewModel::stopServices
+                onFirewall = viewModel::chooseFirewall, onCheckServices = viewModel::checkServices, onStopServices = viewModel::stopServices,
+                onChainOrder = viewModel::chainOrder, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain
             )
         },
         relativeTime = ::relative
