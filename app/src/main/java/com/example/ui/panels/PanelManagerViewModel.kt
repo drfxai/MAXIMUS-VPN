@@ -166,6 +166,11 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Re-reads saved panels after the Servers tab added or removed a 3X-UI panel. */
+    fun reloadPanels() {
+        _state.update { it.copy(panels = store.load()) }
+    }
+
     fun clearServerProbe() {
         _state.update { it.copy(serverProbeStatus = null, serverProbeBusy = false) }
     }
