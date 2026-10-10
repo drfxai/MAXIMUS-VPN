@@ -18,9 +18,13 @@ import java.net.URLEncoder
  *
  * dnstt-client usage at the pinned version:
  * `dnstt-client [-doh URL | -dot HOST:PORT | -udp HOST:PORT] [-pubkey HEX | -pubkey-file FILE]
- *  [-utls SPEC] DOMAIN LOCALADDR`. Exactly one resolver option; the key is the server's 32-byte Noise
- * public key as 64 hex digits; -utls picks the TLS fingerprint for DoH/DoT (a weighted random choice
- * by default, "none" for Go's own).
+ *  [-utls SPEC] [-qps N] DOMAIN LOCALADDR`. Exactly one resolver option; the key is the server's 32-byte
+ * Noise public key as 64 hex digits; -utls picks the TLS fingerprint for DoH/DoT (a weighted random
+ * choice by default, "none" for Go's own). -qps comes from this app's patch
+ * (scripts/engines/dnstt-query-rate.patch): it caps DNS queries per second, data and polls together.
+ *
+ * Some networks block a client that sends more than about 5 DNS queries a second, so the app always
+ * passes a cap of [MAX_QPS] or less ([DEFAULT_QPS] unless the profile asks for fewer).
  *
  * It listens on LOCALADDR before it has talked to the server (the Noise handshake happens after), so
  * the port check passes as soon as the program starts. If the session fails it exits.
@@ -30,7 +34,7 @@ import java.net.URLEncoder
  * address for DoT and UDP.
  *
  * Link format, chosen for this app:
- * `dnstt://<server public key hex>@<tunnel domain>?doh=<url>|dot=<ip[:port]>|udp=<ip[:port]>[&utls=<spec>]#<name>`
+ * `dnstt://<server public key hex>@<tunnel domain>?doh=<url>|dot=<ip[:port]>|udp=<ip[:port]>[&utls=<spec>][&qps=<1-4>]#<name>`
  */
 class DnsttSidecar : SidecarEngine {
     override val id: String = ID
@@ -60,7 +64,9 @@ class DnsttSidecar : SidecarEngine {
         val kind: ResolverKind,
         /** The DoH URL, or HOST:PORT for DoT and UDP, with an IP-address host. */
         val resolver: String,
-        val utls: String = ""
+        val utls: String = "",
+        /** DNS queries per second, 1 to [MAX_QPS]. */
+        val qps: Int = DEFAULT_QPS
     )
 
     companion object {
@@ -75,6 +81,10 @@ class DnsttSidecar : SidecarEngine {
         const val KEY_RESOLVER_KIND = "resolverKind"
         const val KEY_RESOLVER = "resolver"
         const val KEY_UTLS = "utls"
+        const val KEY_QPS = "qps"
+        /** Queries per second when a profile names none: under the ~5 a second that gets blocked. */
+        const val DEFAULT_QPS = 4
+        const val MAX_QPS = 4
         const val READY_TIMEOUT_MS = 15_000L
         /** dnstt's default DoH resolver choice for a new profile. */
         const val DEFAULT_DOH = "https://1.1.1.1/dns-query"
@@ -90,9 +100,10 @@ class DnsttSidecar : SidecarEngine {
             resolver: String = DEFAULT_DOH,
             kind: ResolverKind = ResolverKind.DOH,
             name: String = "",
-            utls: String = ""
+            utls: String = "",
+            qps: String = ""
         ): VlessProfile {
-            val s = validate(pubkey, domain, kind, resolver, utls)
+            val s = validate(pubkey, domain, kind, resolver, utls, qps)
             val extras = JSONObject()
                 .put(KEY_ENGINE, ENGINE_MARKER)
                 .put(KEY_PUBKEY, s.pubkey)
@@ -100,6 +111,7 @@ class DnsttSidecar : SidecarEngine {
                 .put(KEY_RESOLVER_KIND, s.kind.name.lowercase())
                 .put(KEY_RESOLVER, s.resolver)
             if (s.utls.isNotEmpty()) extras.put(KEY_UTLS, s.utls)
+            if (s.qps != DEFAULT_QPS) extras.put(KEY_QPS, s.qps)
             return VlessProfile(
                 name = name.trim().ifEmpty { "DNS tunnel ${s.domain}" },
                 address = s.domain,
@@ -130,7 +142,7 @@ class DnsttSidecar : SidecarEngine {
             require(given.size <= 1) { "A DNS tunnel link may name only one resolver (doh, dot or udp)." }
             val kind = given.firstOrNull() ?: ResolverKind.DOH
             val resolver = params[kind.name.lowercase()]?.takeIf { it.isNotBlank() } ?: DEFAULT_DOH
-            return profile(pubkey, domain, resolver, kind, name, params["utls"].orEmpty())
+            return profile(pubkey, domain, resolver, kind, name, params["utls"].orEmpty(), params["qps"].orEmpty())
         }
 
         fun parseOrNull(link: String): VlessProfile? = runCatching { parse(link) }.getOrNull()
@@ -140,6 +152,7 @@ class DnsttSidecar : SidecarEngine {
             val s = settings(profile)
             val query = StringBuilder("${s.kind.name.lowercase()}=${encode(s.resolver)}")
             if (s.utls.isNotEmpty()) query.append("&utls=").append(encode(s.utls))
+            if (s.qps != DEFAULT_QPS) query.append("&qps=").append(s.qps)
             return "$SCHEME://${s.pubkey}@${s.domain}?$query#${encode(profile.name)}"
         }
 
@@ -150,25 +163,30 @@ class DnsttSidecar : SidecarEngine {
                 ?: throw IllegalArgumentException("This DNS tunnel has no resolver type (doh, dot or udp).")
             return validate(
                 extras.optString(KEY_PUBKEY), extras.optString(KEY_DOMAIN), kind,
-                extras.optString(KEY_RESOLVER), extras.optString(KEY_UTLS)
+                extras.optString(KEY_RESOLVER), extras.optString(KEY_UTLS), extras.optString(KEY_QPS)
             )
         }
 
         fun command(s: Settings, executable: String, port: Int): List<String> {
             val args = mutableListOf(executable, s.kind.flag, s.resolver, "-pubkey", s.pubkey)
             if (s.utls.isNotEmpty()) args += listOf("-utls", s.utls)
+            args += listOf("-qps", s.qps.coerceIn(1, MAX_QPS).toString())
             args += listOf(s.domain, "127.0.0.1:$port")
             return args
         }
 
-        fun validate(pubkey: String, domain: String, kind: ResolverKind, resolver: String, utls: String): Settings {
+        fun validate(pubkey: String, domain: String, kind: ResolverKind, resolver: String, utls: String, qps: String = ""): Settings {
             val key = pubkey.trim().lowercase()
             require(PUBKEY.matches(key)) { "The DNS tunnel server public key must be 64 hex digits." }
             val zone = domain.trim().trimEnd('.').lowercase()
             require(validDomain(zone)) { "The DNS tunnel domain is not a valid domain name." }
             val fingerprint = utls.trim()
             require(fingerprint.isEmpty() || UTLS.matches(fingerprint)) { "The uTLS setting is not valid." }
-            return Settings(key, zone, kind, resolverAddress(kind, resolver), fingerprint)
+            val rate = if (qps.isBlank()) DEFAULT_QPS else qps.trim().toIntOrNull() ?: -1
+            require(rate in 1..MAX_QPS) {
+                "The DNS query rate must be 1 to $MAX_QPS per second; networks block more than about 5 a second."
+            }
+            return Settings(key, zone, kind, resolverAddress(kind, resolver), fingerprint, rate)
         }
 
         /**

@@ -48,7 +48,15 @@ dnstt-client carries one local TCP port to a dnstt-server inside DNS queries sen
 resolver (DoH, DoT or plain UDP DNS), encrypted with Noise to the server's public key. The server
 forwards the stream to whatever its operator runs; for this app that must be a SOCKS5 server
 without a login. The app starts
-`libdnstt.so (-doh URL | -dot IP:PORT | -udp IP:PORT) -pubkey <hex> [-utls SPEC] <domain> 127.0.0.1:<port>`.
+`libdnstt.so (-doh URL | -dot IP:PORT | -udp IP:PORT) -pubkey <hex> [-utls SPEC] -qps <N> <domain> 127.0.0.1:<port>`.
+
+**Query rate cap.** Some networks block a client that sends more than about 5 DNS queries a
+second. The build applies `scripts/engines/dnstt-query-rate.patch`, which adds `-qps` to
+dnstt-client: queries (data and polls together) are spaced evenly at least 1/N s + 10 ms apart, so
+no one-second window holds more than N. The app always passes `-qps`, 4 by default; a profile may
+ask for 1 to 4 (`qps=` in the link). Measured against a local dnstt-server under a full download:
+the unpatched client sent 392 queries in one second, the patched one at most 4. The cost is speed:
+a 20 KB download took about 8 s over plain UDP DNS at 4 queries a second.
 
 The client listens before the Noise handshake, so the port check passes on start; it exits if the
 session fails. The resolver must be reachable without a DNS lookup: a DoH URL with an IP host
@@ -56,7 +64,7 @@ session fails. The resolver must be reachable without a DNS lookup: a DoH URL wi
 
 Link format (this app's own):
 `dnstt://<64-hex server key>@<tunnel domain>?doh=https://1.1.1.1/dns-query#Name`
-(`dot=9.9.9.9[:853]` or `udp=8.8.8.8[:53]` instead of `doh`; optional `utls=`). With no resolver
+(`dot=9.9.9.9[:853]` or `udp=8.8.8.8[:53]` instead of `doh`; optional `utls=` and `qps=1..4`). With no resolver
 the link uses `https://1.1.1.1/dns-query`. `DnsttSidecar.parse`, `toLink` and `profile` build
 profiles with `extraSettings = {"engine":"dnstt",...}`.
 

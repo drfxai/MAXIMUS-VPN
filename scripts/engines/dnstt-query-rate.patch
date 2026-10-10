@@ -1,0 +1,122 @@
+diff -ruN a/dnstt-client/dns.go b/dnstt-client/dns.go
+--- a/dnstt-client/dns.go
++++ b/dnstt-client/dns.go
+@@ -62,6 +62,8 @@
+ 	// Sending on pollChan permits sendLoop to send an empty polling query.
+ 	// sendLoop also does its own polling according to a time schedule.
+ 	pollChan chan struct{}
++	// pacer keeps the query rate under maxQueriesPerSecond.
++	pacer *queryPacer
+ 	// QueuePacketConn is the direct receiver of ReadFrom and WriteTo calls.
+ 	// recvLoop and sendLoop take the messages out of the receive and send
+ 	// queues and actually put them on the network.
+@@ -79,6 +81,7 @@
+ 		clientID:        clientID,
+ 		domain:          domain,
+ 		pollChan:        make(chan struct{}, pollLimit),
++		pacer:           newQueryPacer(maxQueriesPerSecond),
+ 		QueuePacketConn: turbotunnel.NewQueuePacketConn(clientID, 0),
+ 	}
+ 	go func() {
+@@ -394,6 +397,7 @@
+ 		// Unlike in the server, in the client we assume that because
+ 		// the data capacity of queries is so limited, it's not worth
+ 		// trying to send more than one packet per query.
++		c.pacer.wait()
+ 		err := c.send(transport, p, addr)
+ 		if err != nil {
+ 			log.Printf("send: %v", err)
+diff -ruN a/dnstt-client/main.go b/dnstt-client/main.go
+--- a/dnstt-client/main.go
++++ b/dnstt-client/main.go
+@@ -282,6 +282,7 @@
+ 	flag.StringVar(&pubkeyString, "pubkey", "", fmt.Sprintf("server public key (%d hex digits)", noise.KeyLen*2))
+ 	flag.StringVar(&pubkeyFilename, "pubkey-file", "", "read server public key from file")
+ 	flag.StringVar(&udpAddr, "udp", "", "address of UDP DNS resolver")
++	flag.Float64Var(&maxQueriesPerSecond, "qps", maxQueriesPerSecond, "maximum DNS queries per second (0 for no limit)")
+ 	flag.StringVar(&utlsDistribution, "utls",
+ 		"4*random,3*Firefox_120,1*Firefox_105,3*Chrome_120,1*Chrome_102,1*iOS_14,1*iOS_13",
+ 		"choose TLS fingerprint from weighted distribution")
+diff -ruN a/dnstt-client/querypace.go b/dnstt-client/querypace.go
+--- a/dnstt-client/querypace.go
++++ b/dnstt-client/querypace.go
+@@ -0,0 +1,46 @@
++package main
++
++import (
++	"sync"
++	"time"
++)
++
++// maxQueriesPerSecond caps how many DNS queries the client sends per second,
++// data and polls together. Some networks block a client that sends more than a
++// handful of DNS queries per second, so the default stays below 5. Zero or less
++// means no cap.
++var maxQueriesPerSecond = 4.0
++
++// paceMargin is added to every gap so that timer jitter, here or on the
++// network, never fits one query more than the cap into any one-second window.
++const paceMargin = 10 * time.Millisecond
++
++// queryPacer spaces queries evenly, at least interval apart, with no bursts.
++type queryPacer struct {
++	lock     sync.Mutex
++	interval time.Duration
++	next     time.Time
++}
++
++func newQueryPacer(perSecond float64) *queryPacer {
++	if perSecond <= 0 {
++		return &queryPacer{}
++	}
++	return &queryPacer{interval: time.Duration(float64(time.Second)/perSecond) + paceMargin}
++}
++
++// wait blocks until the next query may be sent.
++func (p *queryPacer) wait() {
++	if p.interval <= 0 {
++		return
++	}
++	p.lock.Lock()
++	now := time.Now()
++	at := p.next
++	if at.Before(now) {
++		at = now
++	}
++	p.next = at.Add(p.interval)
++	p.lock.Unlock()
++	time.Sleep(time.Until(at))
++}
+diff -ruN a/dnstt-client/querypace_test.go b/dnstt-client/querypace_test.go
+--- a/dnstt-client/querypace_test.go
++++ b/dnstt-client/querypace_test.go
+@@ -0,0 +1,29 @@
++package main
++
++import (
++	"testing"
++	"time"
++)
++
++func TestQueryPacerSpacesQueries(t *testing.T) {
++	p := newQueryPacer(4)
++	start := time.Now()
++	for i := 0; i < 5; i++ {
++		p.wait()
++	}
++	// The first query goes at once, the next four 250 ms apart each.
++	if elapsed := time.Since(start); elapsed < 950*time.Millisecond {
++		t.Fatalf("5 queries at 4 per second took %v, want at least 1 s", elapsed)
++	}
++}
++
++func TestQueryPacerZeroMeansNoCap(t *testing.T) {
++	p := newQueryPacer(0)
++	start := time.Now()
++	for i := 0; i < 100; i++ {
++		p.wait()
++	}
++	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
++		t.Fatalf("uncapped pacer waited %v", elapsed)
++	}
++}
