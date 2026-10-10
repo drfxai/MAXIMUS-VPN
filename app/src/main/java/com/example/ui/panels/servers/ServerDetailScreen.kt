@@ -1,32 +1,46 @@
 package com.example.ui.panels.servers
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.automirrored.rounded.Subject
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.NetworkCheck
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,181 +113,201 @@ data class ServerDetailActions(
 
 @Composable
 internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions) {
+    val idle = ui.busy.isBlank()
     ScreenFrame(
         title = ui.row.name,
         subtitle = "${ui.user}@${ui.row.host}:${ui.sshPort}",
+        subtitleMono = true,
         onBack = actions.onBack,
-        leading = { FlagIcon(ui.row.location, height = 20.dp) },
-        bottomBar = if (ui.busy.isNotBlank()) ({
+        leading = { FlagIcon(ui.row.location, height = 18.dp) },
+        actions = {
+            IconButton(onClick = actions.onRefresh, enabled = !ui.checking && idle && !ui.needsSignIn) {
+                if (ui.checking) CircularProgressIndicator(Modifier.size(18.dp), color = Sv.Blue, strokeWidth = 2.dp)
+                else Icon(Icons.Rounded.Refresh, "Check again", tint = Sv.TextSoft)
+            }
+        },
+        bottomBar = if (!idle) ({
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(18.dp), color = Sv.Blue, strokeWidth = 2.dp)
+                CircularProgressIndicator(Modifier.size(16.dp), color = Sv.Blue, strokeWidth = 2.dp)
                 Spacer(Modifier.width(10.dp))
-                Text(ui.busy, color = Sv.Muted, fontSize = 13.sp)
+                Text(ui.busy, color = Sv.TextSoft, fontSize = 13.sp)
             }
         }) else null
     ) {
-        HeaderCard(ui, actions)
         if (ui.error.isNotBlank()) Notice(ui.error, NoticeKind.ERROR)
         if (ui.needsSignIn) {
             Notice("This server was added before My Servers existed. Sign in once to manage it here.", NoticeKind.WARN)
             PrimaryButton("Sign in", actions.onSignIn, Modifier.fillMaxWidth())
         }
-        if (ui.hasFacts || ui.checking) HealthGrid(ui)
-        SecurityCard(ui, actions)
+        OverviewCard(ui)
+
+        SectionLabel("Sign-in security")
+        GroupCard {
+            ListRow(
+                "Key login",
+                subtitle = if (ui.keyLogin) "This phone's key" else "Sign in with a key instead of a password",
+                leading = { IconTile(Icons.Rounded.Key, 32.dp) },
+                trailing = {
+                    if (ui.keyLogin) Badge("On", Tone.GOOD, dot = true)
+                    else if (!ui.needsSignIn) TextAction("Set up", actions.onKeyLogin, enabled = idle)
+                    else Badge("Off")
+                }
+            )
+            RowDivider(58.dp)
+            ListRow(
+                "Password login",
+                subtitle = when {
+                    ui.passwordLoginOff -> "Only keys can sign in"
+                    ui.keyLogin -> "Turn off to stop password guessing"
+                    else -> "Needs key login first"
+                },
+                leading = { IconTile(Icons.Rounded.Lock, 32.dp) },
+                trailing = {
+                    when {
+                        ui.needsSignIn -> Unit
+                        ui.passwordLoginOff -> TextAction("Turn on", { actions.onPasswordLogin(false) }, Sv.Muted, enabled = idle)
+                        ui.keyLogin -> TextAction("Turn off", { actions.onPasswordLogin(true) }, Sv.Amber, enabled = idle)
+                        else -> Badge("On", Tone.WARN, dot = true)
+                    }
+                }
+            )
+        }
 
         SectionLabel("Installed") {
-            Text("+ Install", color = Sv.Blue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable(onClick = actions.onInstallCenter))
+            TextAction("Add tool", actions.onInstallCenter)
         }
-        if (ui.tools.isEmpty()) {
-            Surface(shape = RoundedCornerShape(14.dp), color = Sv.Inset, border = BorderStroke(1.dp, Sv.CardBorder)) {
-                Text("Nothing installed yet. Open the Install Center to add a panel, a tunnel or protection.",
-                    color = Sv.Dim, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(14.dp))
+        GroupCard {
+            if (ui.tools.isEmpty()) {
+                ListRow("Nothing installed yet", subtitle = "Add a panel, a tunnel or protection from the Install tab.")
+            } else {
+                Rows(ui.tools) { ToolBlock(it, actions, idle) }
             }
         }
-        ui.tools.forEach { ToolCard(it, actions) }
 
         if (ui.logs != null) LogCard(ui.logs.ifEmpty { listOf("No log lines yet.") }, initiallyOpen = true, title = ui.logsTitle)
 
         if (ui.advice.isNotEmpty()) {
             SectionLabel("Suggested")
-            ui.advice.forEach { a -> AdviceCard(a) { actions.onInstall(a.toolId) } }
+            GroupCard { Rows(ui.advice, dividerStart = 62.dp) { a -> AdviceRow(a) { actions.onInstall(a.toolId) } } }
         }
 
         SectionLabel("This phone")
-        Surface(
-            modifier = Modifier.fillMaxWidth().clickable(onClick = actions.onRemove),
-            shape = RoundedCornerShape(14.dp), color = Sv.Card, border = BorderStroke(1.dp, Sv.CardBorder)
-        ) {
-            Column(Modifier.padding(14.dp)) {
-                Text("Remove from this phone", color = Sv.Red, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Text("Forgets the server and its sign-in. Nothing on the server changes.", color = Sv.Dim, fontSize = 12.sp)
+        GroupCard {
+            ListRow(
+                "Forget this server",
+                subtitle = "Removes its sign-in from this phone. Nothing on the server changes.",
+                titleColor = Sv.Red,
+                onClick = actions.onRemove
+            )
+        }
+    }
+}
+
+/** Status line plus a four-column strip: processor, memory, disk, uptime. */
+@Composable
+private fun OverviewCard(ui: ServerDetailUi) {
+    GroupCard {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            StatusDot(ui.row.health, 8.dp)
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when (ui.row.health) {
+                        Health.ONLINE -> "Online" + (ui.row.latencyMs?.let { " · $it ms" } ?: "")
+                        Health.OFFLINE -> "Not reachable"
+                        Health.CHECKING -> "Checking"
+                        Health.SIGN_IN -> "Needs sign-in"
+                    },
+                    color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium
+                )
+                val line = listOf(ui.os, locationName(ui.row.location)).filter { it.isNotBlank() }.joinToString(" · ")
+                if (line.isNotBlank()) Text(line, color = Sv.Muted, fontSize = 13.sp)
+            }
+            if (ui.checkedText.isNotBlank()) Text(ui.checkedText, color = Sv.Dim, fontSize = 12.sp)
+        }
+        if (ui.hasFacts || ui.checking) {
+            RowDivider(0.dp)
+            val loading = ui.checking && !ui.hasFacts
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                Metric("CPU", if (ui.cpus > 0) "${ui.cpus} cores" else "—", "load ${ui.load.ifBlank { "—" }}", null, loading, Modifier.weight(1f))
+                VDivider()
+                Metric("Memory", "${ui.ramPercent}%", ui.ramText, ui.ramPercent, loading, Modifier.weight(1f))
+                VDivider()
+                Metric("Disk", "${ui.diskPercent}%", ui.diskText, ui.diskPercent, loading, Modifier.weight(1f))
+                VDivider()
+                Metric("Uptime", ui.uptime.ifBlank { "—" }, "", null, loading, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun HeaderCard(ui: ServerDetailUi, actions: ServerDetailActions) {
-    SvCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusDot(ui.row.health)
-                    Text(
-                        when (ui.row.health) {
-                            Health.ONLINE -> "Online" + (ui.row.latencyMs?.let { " · $it ms" } ?: "")
-                            Health.OFFLINE -> "Not reachable"
-                            Health.CHECKING -> "Checking"
-                            Health.SIGN_IN -> "Needs sign-in"
-                        },
-                        color = Sv.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
-                    )
+private fun VDivider() = Box(Modifier.width(1.dp).fillMaxHeight().background(Sv.Divider))
+
+@Composable
+private fun Metric(label: String, value: String, sub: String, percent: Int?, loading: Boolean, modifier: Modifier) {
+    Column(modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = Sv.Dim, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        if (loading) {
+            Shimmer(Modifier.width(44.dp).height(14.dp)); Shimmer(Modifier.width(56.dp).height(8.dp))
+        } else {
+            Text(value, color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            if (percent != null) Meter(percent)
+            if (sub.isNotBlank()) Text(sub, color = Sv.Muted, fontSize = 11.sp, maxLines = 1)
+        }
+    }
+}
+
+private data class ToolAction(val label: String, val icon: ImageVector, val color: Color = Sv.TextSoft, val run: () -> Unit)
+
+/** An installed tool: one row, an optional test result, and a compact action bar with an overflow menu. */
+@Composable
+private fun ToolBlock(t: ToolRowUi, actions: ServerDetailActions, idle: Boolean) {
+    Column {
+        ListRow(
+            t.title,
+            subtitle = t.detail,
+            subtitleMono = t.detail.any(Char::isDigit),
+            leading = { ToolBadge(t.id) },
+            trailing = { Badge(t.status, if (t.healthy) Tone.GOOD else Tone.BAD, dot = true) }
+        )
+        if (t.testResult != null) {
+            Box(Modifier.padding(start = 62.dp, end = 14.dp, bottom = 8.dp)) {
+                Notice(t.testResult, if (t.testOk == true) NoticeKind.OK else NoticeKind.WARN)
+            }
+        }
+        val all = buildList {
+            if (t.canTest) add(ToolAction("Test", Icons.Rounded.NetworkCheck) { actions.onTest(t.id) })
+            if (t.canOpenPanel) add(ToolAction("Open panel", Icons.AutoMirrored.Rounded.OpenInNew) { actions.onOpenPanel(t.id) })
+            if (t.link != null) add(ToolAction("Copy link", Icons.Rounded.ContentCopy) { actions.onCopy(t.link) })
+            if (t.canRestart) add(ToolAction("Restart", Icons.Rounded.RestartAlt) { actions.onRestart(t.id) })
+            if (t.canLogs) add(ToolAction("Logs", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })
+            if (t.canRotatePort) add(ToolAction("New port", Icons.Rounded.SwapHoriz) { actions.onRotatePort(t.id) })
+            if (t.canRotateKey) add(ToolAction("New keys", Icons.Rounded.VpnKey) { actions.onRotateKey(t.id) })
+            if (t.canUninstall) add(ToolAction("Uninstall", Icons.Rounded.Delete, Sv.Red) { actions.onUninstall(t.id) })
+        }
+        if (all.isEmpty()) return@Column
+        val shown = all.filter { it.color != Sv.Red }.take(3)
+        val more = all - shown.toSet()
+        Row(Modifier.fillMaxWidth().padding(start = 54.dp, end = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            shown.forEach { a -> TextAction(a.label, a.run, Sv.Blue, enabled = idle, icon = a.icon) }
+            Spacer(Modifier.weight(1f))
+            if (more.isNotEmpty()) {
+                var open by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { open = true }, enabled = idle, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Rounded.MoreHoriz, "More", tint = Sv.Muted)
+                    }
+                    DropdownMenu(open, { open = false }, modifier = Modifier.background(Sv.Raised)) {
+                        more.forEach { a ->
+                            DropdownMenuItem(
+                                text = { Text(a.label, color = if (a.color == Sv.Red) Sv.Red else Sv.Text, fontSize = 14.sp) },
+                                leadingIcon = { Icon(a.icon, null, tint = a.color, modifier = Modifier.size(18.dp)) },
+                                onClick = { open = false; a.run() }
+                            )
+                        }
+                    }
                 }
-                Text(listOf(ui.os, if (ui.row.location == com.example.panels.servers.ServerLocation.IRAN) "In Iran" else "Abroad")
-                    .filter { it.isNotBlank() }.joinToString(" · "), color = Sv.Muted, fontSize = 12.sp)
-                if (ui.checkedText.isNotBlank()) Text(ui.checkedText, color = Sv.Dim, fontSize = 11.sp)
-            }
-            IconButton(onClick = actions.onRefresh, enabled = !ui.checking && ui.busy.isBlank()) {
-                if (ui.checking) CircularProgressIndicator(Modifier.size(18.dp), color = Sv.Blue, strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.Refresh, "Check again", tint = Sv.Blue)
-            }
-        }
-    }
-}
-
-@Composable
-private fun HealthGrid(ui: ServerDetailUi) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Tile("Processor", if (ui.cpus > 0) "${ui.cpus} cores" else "", "load ${ui.load}", null, ui.checking && !ui.hasFacts, Modifier.weight(1f))
-            Tile("Uptime", ui.uptime, "since last reboot", null, ui.checking && !ui.hasFacts, Modifier.weight(1f))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Tile("Memory", "${ui.ramPercent}%", ui.ramText, ui.ramPercent, ui.checking && !ui.hasFacts, Modifier.weight(1f))
-            Tile("Disk", "${ui.diskPercent}%", ui.diskText, ui.diskPercent, ui.checking && !ui.hasFacts, Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun Tile(label: String, value: String, sub: String, percent: Int?, loading: Boolean, modifier: Modifier) {
-    Surface(modifier, shape = RoundedCornerShape(14.dp), color = Sv.Card, border = BorderStroke(1.dp, Sv.CardBorder)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(label, color = Sv.Dim, fontSize = 11.sp)
-            if (loading) {
-                Shimmer(Modifier.width(60.dp).height(16.dp)); Shimmer(Modifier.width(90.dp).height(8.dp))
-            } else {
-                Text(value.ifBlank { "—" }, color = Sv.Text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                if (percent != null) Meter(percent)
-                Text(sub, color = Sv.Muted, fontSize = 11.sp, maxLines = 1)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SecurityCard(ui: ServerDetailUi, actions: ServerDetailActions) {
-    SvCard {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Shield, null, tint = if (ui.passwordLoginOff) Sv.Green else Sv.Amber, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Sign-in security", color = Sv.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
-            SecurityLine(Icons.Rounded.Key, "Key login", if (ui.keyLogin) "On · this phone's key" else "Off", ui.keyLogin)
-            SecurityLine(Icons.Rounded.LockOpen, "Password login", if (ui.passwordLoginOff) "Off" else "On", ui.passwordLoginOff)
-            when {
-                ui.needsSignIn -> Unit
-                !ui.keyLogin -> PrimaryButton("Add key login", actions.onKeyLogin, Modifier.fillMaxWidth(), Icons.Rounded.Key, enabled = ui.busy.isBlank())
-                !ui.passwordLoginOff -> {
-                    Text("Key login works. Turning password login off stops password guessing for good; only this phone can sign in.",
-                        color = Sv.Muted, fontSize = 12.sp)
-                    PrimaryButton("Turn password login off", { actions.onPasswordLogin(true) }, Modifier.fillMaxWidth(), enabled = ui.busy.isBlank())
-                }
-                else -> SmallAction("Turn password login back on", { actions.onPasswordLogin(false) }, Sv.Muted, enabled = ui.busy.isBlank())
-            }
-        }
-    }
-}
-
-@Composable
-private fun SecurityLine(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String, good: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = Sv.Dim, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(label, color = Sv.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        Text(value, color = if (good) Sv.Green else Sv.Amber, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ToolCard(t: ToolRowUi, actions: ServerDetailActions) {
-    SvCard(padding = 14.dp) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ToolBadge(t.id, 38.dp)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(t.title, color = Sv.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    if (t.detail.isNotBlank()) Text(t.detail, color = Sv.Dim, fontSize = 12.sp, maxLines = 1)
-                }
-                Chip(t.status, if (t.healthy) Sv.Green else Sv.Red, if (t.healthy) Sv.GreenSoft else Sv.RedSoft)
-            }
-            if (t.testResult != null) Notice(t.testResult, if (t.testOk == true) NoticeKind.OK else NoticeKind.WARN)
-            val items = buildList<Pair<String, () -> Unit>> {
-                if (t.canTest) add("Test" to { actions.onTest(t.id) })
-                if (t.canOpenPanel) add("Open panel" to { actions.onOpenPanel(t.id) })
-                if (t.link != null) add("Copy link" to { actions.onCopy(t.link) })
-                if (t.canRestart) add("Restart" to { actions.onRestart(t.id) })
-                if (t.canLogs) add("Logs" to { actions.onLogs(t.id) })
-                if (t.canRotatePort) add("New port" to { actions.onRotatePort(t.id) })
-                if (t.canRotateKey) add("New key" to { actions.onRotateKey(t.id) })
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items.forEach { (label, onClick) -> SmallAction(label, onClick) }
-                if (t.canUninstall) SmallAction("Uninstall", { actions.onUninstall(t.id) }, Sv.Red)
             }
         }
     }
