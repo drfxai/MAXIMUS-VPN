@@ -28,8 +28,13 @@ data class TunnelChecks(
     val abroadSites: List<String>,
     val iranReachesGithub: Boolean,
     /** Difference between the two servers' clocks in seconds. */
-    val clockSkewSec: Long
+    val clockSkewSec: Long,
+    /** Whether each server could open a TCP connection to the other; null when it could not be tested. */
+    val iranReachesAbroad: Boolean? = null,
+    val abroadReachesIran: Boolean? = null
 ) {
+    /** The ways across that can work between these two servers. */
+    val recommended: Set<TunnelTransport> get() = TunnelTransport.recommended(iranReachesAbroad, abroadReachesIran)
     val blocked: Boolean get() = items.any { !it.ok && it.blocking }
 }
 
@@ -83,14 +88,14 @@ class TunnelManager(
 
     fun check(iranServer: ManagedServer, abroadServer: ManagedServer): TunnelChecks {
         require(iranServer.location == ServerLocation.IRAN && abroadServer.location == ServerLocation.ABROAD) { "Pick one server in Iran and one abroad" }
-        fun one(s: ManagedServer, sites: List<String>): Triple<ManagedServer, Map<String, String>, Long> = connect(s).use { shell ->
+        fun one(s: ManagedServer, sites: List<String>, peer: ManagedServer): Triple<ManagedServer, Map<String, String>, Long> = connect(s).use { shell ->
             val f = facts(shell)
             val before = System.currentTimeMillis() / 1000
-            val r = if (f.blocker() == null) runCatching { run(shell, TunnelScripts.check(sites), null, 3 * 60_000L) }.getOrDefault(emptyMap()) else emptyMap()
+            val r = if (f.blocker() == null) runCatching { run(shell, TunnelScripts.check(sites, peer.host, peer.sshPort), null, 3 * 60_000L) }.getOrDefault(emptyMap()) else emptyMap()
             Triple(s.copy(facts = f, checkedAt = System.currentTimeMillis()), r, before)
         }
-        val (iran, ir, irPhone) = one(iranServer, TunnelScripts.IRAN_SNI)
-        val (abroad, ab, abPhone) = one(abroadServer, TunnelScripts.ABROAD_SNI)
+        val (iran, ir, irPhone) = one(iranServer, TunnelScripts.IRAN_SNI, abroadServer)
+        val (abroad, ab, abPhone) = one(abroadServer, TunnelScripts.ABROAD_SNI, iranServer)
         val irFacts = iran.facts!!
         val abFacts = abroad.facts!!
         val irOffset = ir["TIME"]?.toLongOrNull()?.minus(irPhone)
@@ -99,6 +104,9 @@ class TunnelManager(
         val iranSites = ir["SNI"].orEmpty().split(',').filter { it.isNotBlank() }
         val abroadSites = ab["SNI"].orEmpty().split(',').filter { it.isNotBlank() }
         val github = ir["GITHUB"] == "ok"
+        fun reach(v: String?) = when (v) { "ok" -> true; "no" -> false; else -> null }
+        val forward = reach(ir["REACH"])
+        val backward = reach(ab["REACH"])
         val items = buildList {
             for ((label, s, f) in listOf(Triple("Iran server", iran, irFacts), Triple("Server abroad", abroad, abFacts))) {
                 val blocker = f.blocker()
@@ -112,8 +120,18 @@ class TunnelManager(
                 iranSites.firstOrNull() ?: "none answered with TLS 1.3; using ${TunnelScripts.IRAN_SNI.first()}", blocking = false))
             add(CheckItem("Iran server reaches GitHub", github,
                 if (github) "downloads programs itself" else "blocked; this phone will send the verified programs", blocking = false))
+            add(CheckItem("Iran server reaches the server abroad", forward != false, when (forward) {
+                true -> "direct ways can be used"
+                false -> "no connection; the reverse way will carry the tunnel"
+                null -> "could not be tested; trying every way"
+            }, blocking = false))
+            add(CheckItem("Server abroad reaches the Iran server", backward != false, when (backward) {
+                true -> "the reverse way can be used"
+                false -> "no connection; the reverse way stays off"
+                null -> "could not be tested; trying every way"
+            }, blocking = forward == false && backward == false))
         }
-        return TunnelChecks(iran, abroad, items, iranSites, abroadSites, github, skew)
+        return TunnelChecks(iran, abroad, items, iranSites, abroadSites, github, skew, forward, backward)
     }
 
     // ------------------------------------------------------------------ plan
@@ -156,6 +174,7 @@ class TunnelManager(
             hyObfs = previous?.hyObfs ?: ServerRandom.secret(24),
             hyCertPem = previous?.hyCertPem.orEmpty(),
             hyLocalPort = previous?.hyLocalPort ?: ServerRandom.port(iranUsed, range = 10_000..19_999),
+            reverseUuid = previous?.reverseUuid?.takeIf { it.isNotBlank() } ?: TunnelRandom.uuid(),
             createdAt = previous?.createdAt ?: System.currentTimeMillis()
         ).also { TunnelScripts.validate(it) }
     }
@@ -220,6 +239,12 @@ class TunnelManager(
         spec = spec.copy(entryPublicKey = entryPub)
 
         progress.step(5)
+        if (TunnelTransport.REVERSE in spec.transports) {
+            progress.log("Linking the server abroad back to the Iran server")
+            connect(abroadServer).use { run(it, TunnelScripts.abroadReverse(spec, iranServer.host), progress, 3 * 60_000L) }
+            // The server abroad opens its first connections within a few seconds.
+            Thread.sleep(REVERSE_SETTLE_MS)
+        }
         val status = runCatching { status(iranServer, progress) }.getOrNull()
         status?.paths?.forEach { (tag, ms) -> progress.log("$tag: ${ms?.let { "$it ms" } ?: "no answer"}") }
 
@@ -298,5 +323,7 @@ class TunnelManager(
         return server.withoutTool(ServerToolCatalog.MAXIMUS_TUNNEL)
     }
 }
+
+private const val REVERSE_SETTLE_MS = 4_000L
 
 class TunnelScriptException(val exitCode: Int, message: String) : IllegalStateException(message)

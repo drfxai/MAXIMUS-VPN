@@ -45,16 +45,23 @@ object TunnelScripts {
         listOf(spec.entryPort, spec.hyPort, spec.hyLocalPort).forEach { ToolScripts.port(it, "tunnel") }
         spec.fixedPorts.values.forEach { ToolScripts.port(it, "tunnel") }
         spec.avoidPorts.forEach { ToolScripts.port(it, "avoided") }
+        if (TunnelTransport.REVERSE in spec.transports) require(UUID.matches(spec.reverseUuid) && spec.reverseUuid != spec.entryUuid) { "Invalid reverse id" }
         if (spec.rotationHours == 0) require(TunnelTransport.ROTATING.filter { it in spec.transports }.all { it in spec.fixedPorts }) { "Missing a fixed port" }
     }
 
     // ---------------------------------------------------------------- check (read-only)
 
-    val CHECK_STEPS = listOf("Read the clock", "Look for camouflage sites", "Check GitHub")
+    val CHECK_STEPS = listOf("Read the clock", "Look for camouflage sites", "Check GitHub", "Try the other server")
 
-    /** Changes nothing: the server's clock, which [sites] answer with TLS 1.3 + HTTP/2, and whether GitHub is reachable. */
-    fun check(sites: List<String>): ToolScript {
+    /**
+     * Changes nothing: the server's clock, which [sites] answer with TLS 1.3 + HTTP/2, whether GitHub
+     * is reachable, and whether a TCP connection to the other server ([peerHost]:[peerPort], its SSH
+     * port) opens. REACH is ok, no or unknown (no tool to test with).
+     */
+    fun check(sites: List<String>, peerHost: String, peerPort: Int): ToolScript {
         require(sites.all { SNI.matches(it) })
+        require(ToolScripts.HOST.matches(peerHost)) { "Invalid address of the other server" }
+        ToolScripts.port(peerPort, "SSH")
         return ToolScripts.script(
             """
             step 1
@@ -70,6 +77,14 @@ object TunnelScripts {
             result SNI "§{ok#,}"
             step 3
             if curl -fsSIL -o /dev/null --max-time 15 "§MX_BASE/SHA256SUMS" 2>/dev/null; then result GITHUB ok; else result GITHUB no; fi
+            step 4
+            reach=unknown
+            if have bash && have timeout; then
+              if timeout 8 bash -c 'exec 3<>"/dev/tcp/§1/§2"' _ "$peerHost" $peerPort 2>/dev/null; then reach=ok; else reach=no; fi
+            elif have nc; then
+              if nc -z -w 8 "$peerHost" $peerPort 2>/dev/null; then reach=ok; else reach=no; fi
+            fi
+            result REACH "§reach"
             """,
             CHECK_STEPS
         )
@@ -320,6 +335,7 @@ object TunnelScripts {
             @@BASE@@
             EOF_BASE
             §SUDO chgrp maximus $DIR/conf.d/00-base.json
+            if [ ${if (TunnelTransport.REVERSE in spec.transports) 1 else 0} = 0 ]; then §SUDO rm -f $DIR/conf.d/${TunnelConfigs.REVERSE_FILE}; fi
             @@WRITE_TPL@@
             OLD_HY=§(§SUDO awk '/^listen:/{sub(/.*:/, ""); print}' $DIR/hy/server.yaml 2>/dev/null || true)
             if [ $hy = 1 ]; then
@@ -411,6 +427,14 @@ object TunnelScripts {
             else
               §SUDO rm -f $DIR/conf.d/30-t-hy2.json
             fi
+            if [ ${if (TunnelTransport.REVERSE in spec.transports) 1 else 0} = 1 ]; then
+              write_file $DIR/reverse.env 0600 <<'EOF_RV'
+            RV_FROM=$abroadHost
+            RV_PORT=${spec.entryPort}
+            EOF_RV
+            else
+              §SUDO rm -f $DIR/reverse.env
+            fi
 
             step 4
             @@KEYS@@
@@ -427,6 +451,34 @@ object TunnelScripts {
             """,
             IRAN_STEPS, spec, TunnelSpec.ROLE_IRAN, a,
             "$DIR/entry.key", "$DIR/conf.d/00-base.json", renewKeys, files
+        )
+    }
+
+    val REVERSE_STEPS = listOf("Link back to the Iran server", "Start and verify")
+
+    /**
+     * On the server abroad, after the Iran server is set up: writes the reverse link to [iranHost]
+     * (it needs the Iran server's public key) and restarts Xray. The server abroad only connects
+     * out, so no port is opened for it.
+     */
+    fun abroadReverse(spec: TunnelSpec, iranHost: String): ToolScript {
+        validate(spec)
+        require(TunnelTransport.REVERSE in spec.transports)
+        require(ToolScripts.HOST.matches(iranHost)) { "Invalid address of the Iran server" }
+        return ToolScripts.script(
+            """
+            step 1
+            write_file $DIR/conf.d/${TunnelConfigs.REVERSE_FILE} 0640 <<'EOF_RV'
+            @@RV@@
+            EOF_RV
+            §SUDO chgrp maximus $DIR/conf.d/${TunnelConfigs.REVERSE_FILE}
+            step 2
+            §SUDO systemctl restart maximus-tunnel
+            wait_active maximus-tunnel
+            result REVERSE linked
+            """,
+            REVERSE_STEPS,
+            mapOf("RV" to TunnelConfigs.abroadReverse(spec, iranHost))
         )
     }
 
@@ -470,6 +522,22 @@ object TunnelScripts {
           else result "PATH_§tag" "fail"; fi
         done
         rm -rf "§work"
+        # Reverse: the server abroad holds connections open to the phone port; report the round trip
+        # of the best one (from the kernel), or fail when none is open.
+        if §SUDO test -f $DIR/reverse.env; then
+          RV_FROM=§(§SUDO sed -n 's/^RV_FROM=//p' $DIR/reverse.env)
+          RV_PORT=§(§SUDO sed -n 's/^RV_PORT=//p' $DIR/reverse.env)
+          ips=§(getent ahosts "§RV_FROM" 2>/dev/null | awk '{print §1}' | sort -u | tr '\n' ' ')
+          [ -n "§ips" ] || ips="§RV_FROM"
+          rtt=""
+          if have ss; then
+            rtt=§(ss -Htni state established "( sport = :§RV_PORT )" 2>/dev/null | awk -v ips=" §ips " '
+              /^[ \t]/ { if (m && match(§0, /rtt:[0-9.]+/)) { v = substr(§0, RSTART + 4, RLENGTH - 4) + 0; if (best == "" || v < best) best = v }; next }
+              { p = §4; sub(/:[0-9]+§/, "", p); gsub(/[][]/, "", p); sub(/^::ffff:/, "", p); m = index(ips, " " p " ") > 0 }
+              END { if (best != "") printf "%d", (best < 1 ? 1 : best) }')
+          fi
+          if [ -n "§rtt" ]; then result "PATH_${TunnelTransport.REVERSE.tagPrefix}" "ok:§rtt"; else result "PATH_${TunnelTransport.REVERSE.tagPrefix}" "fail"; fi
+        fi
         """,
         STATUS_STEPS
     )
