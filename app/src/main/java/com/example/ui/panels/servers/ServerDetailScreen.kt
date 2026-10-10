@@ -61,6 +61,7 @@ data class ToolRowUi(
     val canRotateKey: Boolean = false,
     val canOpenPanel: Boolean = false,
     val canUninstall: Boolean = true,
+    val canOpenTunnel: Boolean = false,
     val link: String? = null,
     val testResult: String? = null,
     val testOk: Boolean? = null
@@ -106,6 +107,7 @@ data class ServerDetailActions(
     val onOpenPanel: (String) -> Unit,
     val onCopy: (String) -> Unit,
     val onUninstall: (String) -> Unit,
+    val onOpenTunnel: () -> Unit = {},
     val onInstall: (String) -> Unit,
     val onInstallCenter: () -> Unit,
     val onRemove: () -> Unit
@@ -279,6 +281,7 @@ private fun ToolBlock(t: ToolRowUi, actions: ServerDetailActions, idle: Boolean)
         val all = buildList {
             if (t.canTest) add(ToolAction("Test", Icons.Rounded.NetworkCheck) { actions.onTest(t.id) })
             if (t.canOpenPanel) add(ToolAction("Open panel", Icons.AutoMirrored.Rounded.OpenInNew) { actions.onOpenPanel(t.id) })
+            if (t.canOpenTunnel) add(ToolAction("Open tunnel", Icons.AutoMirrored.Rounded.OpenInNew) { actions.onOpenTunnel() })
             if (t.link != null) add(ToolAction("Copy link", Icons.Rounded.ContentCopy) { actions.onCopy(t.link) })
             if (t.canRestart) add(ToolAction("Restart", Icons.Rounded.RestartAlt) { actions.onRestart(t.id) })
             if (t.canLogs) add(ToolAction("Logs", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })

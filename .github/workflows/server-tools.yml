@@ -1,7 +1,7 @@
 name: Server tools
 
 # Publishes the Linux programs the Panels Install Center installs on a user's own server
-# (dnstt-server, Hysteria2, the loopback SOCKS helper). The build is reproducible and must match
+# (dnstt-server, Hysteria2, the loopback SOCKS helper, Xray for Maximus Tunnel). The build is reproducible and must match
 # tools/server-tools/SHA256SUMS, which the app pins; servers refuse any file with another hash.
 # The release is a pre-release that is never marked latest, so the app's update check ignores it.
 on:
@@ -42,5 +42,5 @@ jobs:
               --title "Server tools for the Panels Install Center" \
               --notes "Linux programs installed on your own server by MAXIMUS VPN (Panels > Install). Built reproducibly from pinned sources; see scripts/server-tools/build.sh. Not an app release."
           fi
-          gh release upload "$TAG" dnstt-server-linux-* hysteria-linux-* maximus-socks-linux-* SHA256SUMS --clobber
+          gh release upload "$TAG" dnstt-server-linux-* hysteria-linux-* maximus-socks-linux-* xray-linux-* SHA256SUMS --clobber
           gh release view "$TAG" --json assets --jq '[.assets[].name] | sort | join(",")'

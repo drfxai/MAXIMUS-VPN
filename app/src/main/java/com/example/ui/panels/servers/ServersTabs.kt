@@ -62,7 +62,9 @@ internal fun MyServersTab(
     rows: List<ServerRowUi>,
     onAdd: () -> Unit,
     onOpen: (String) -> Unit,
-    onInstallCenter: () -> Unit
+    onInstallCenter: () -> Unit,
+    tunnels: Int = 0,
+    onTunnel: () -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val online = rows.count { it.health == Health.ONLINE }
@@ -95,8 +97,8 @@ internal fun MyServersTab(
             }
         }
         if (rows.any { it.location == ServerLocation.IRAN } && rows.any { it.location == ServerLocation.ABROAD }) {
-            SectionLabel("Coming next")
-            GroupCard { TunnelRow() }
+            SectionLabel("Maximus Tunnel")
+            GroupCard { TunnelRow(tunnels, onTunnel) }
         }
     }
 }
@@ -190,12 +192,13 @@ private fun LinkedFlags() {
 }
 
 @Composable
-private fun TunnelRow() {
+private fun TunnelRow(tunnels: Int, onClick: () -> Unit) {
     ListRow(
-        "Maximus Tunnel",
-        subtitle = "Links your server in Iran with one abroad",
-        leading = { IconTile(Icons.Rounded.SyncAlt) },
-        trailing = { Badge("Soon", Tone.ACCENT) }
+        if (tunnels == 0) "Link Iran and abroad" else if (tunnels == 1) "1 tunnel" else "$tunnels tunnels",
+        subtitle = if (tunnels == 0) "Phone → Iran server → server abroad, switching paths by itself" else "Open the Tunnel tab for paths and ports",
+        leading = { IconTile(Icons.Rounded.SyncAlt, accent = tunnels == 0) },
+        trailing = { if (tunnels == 0) Badge("New", Tone.ACCENT) else Chevron() },
+        onClick = onClick
     )
 }
 

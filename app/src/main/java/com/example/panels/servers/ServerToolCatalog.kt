@@ -66,9 +66,11 @@ object ServerToolCatalog {
         ),
         ServerTool(
             MAXIMUS_TUNNEL, "Maximus Tunnel", "Iran ↔ abroad, automatic",
-            "Links an Iranian server to a server abroad with random ports, several transports and " +
-                "automatic switching. Comes after the other tools.",
-            ToolGroup.TUNNELS, both, emptyList(), comingLater = true
+            "Links your server in Iran to one abroad over REALITY, XHTTP and Hysteria2 at once, uses " +
+                "the fastest open path and moves its ports on a schedule. Set up from the Tunnel tab.",
+            ToolGroup.TUNNELS, both,
+            listOf("Abroad: Xray and Hysteria2 under a locked user, keys made on the server, rotating ports",
+                "Iran: Xray with one port for your phone that only forwards abroad")
         ),
         ServerTool(
             HYSTERIA2, "Hysteria2", "Very fast on bad networks (UDP)",

@@ -22,6 +22,9 @@ import com.example.panels.servers.ServerToolCatalog
 import com.example.panels.servers.ToolAdvisor
 import com.example.panels.servers.ToolProfiles
 import com.example.panels.servers.ToolScripts
+import com.example.panels.servers.ServerBinaries
+import com.example.panels.servers.tunnel.TunnelManager
+import com.example.panels.servers.tunnel.TunnelSpec
 import com.example.vpn.lab.EngineProbe
 import com.example.vpn.sidecar.Sidecars
 import kotlinx.coroutines.Dispatchers
@@ -88,6 +91,20 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     private val _events = MutableSharedFlow<ServersEvent>(extraBufferCapacity = 8)
     val events: SharedFlow<ServersEvent> = _events
     private var job: Job? = null
+
+    /** Maximus Tunnel: the Tunnel tab, its setup and the tunnel page. */
+    val tunnel = TunnelController(
+        scope = viewModelScope,
+        servers = { _state.value.servers },
+        rows = ::rows,
+        save = ::save,
+        message = { emit(ServersEvent.Message(it)) },
+        success = { emit(ServersEvent.Success) },
+        testProfile = ::testProfile,
+        storeProfile = ::storeProfile,
+        deleteProfile = { RayApplication.instance.serverRepository.delete(it) },
+        manager = TunnelManager(fetchProgram = ::downloadProgram)
+    )
 
     private fun server(id: String?) = _state.value.servers.firstOrNull { it.id == id }
 
@@ -269,6 +286,13 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             ServerToolCatalog.HYSTERIA2 -> ToolRowUi(id, title, status, running, "UDP ${t.port} · Salamander",
                 canTest = true, canRestart = true, canLogs = true, canRotatePort = true, canRotateKey = true,
                 link = runCatching { ToolProfiles.hysteriaLink(s, t) }.getOrNull(), testResult = test?.second, testOk = test?.first)
+            ServerToolCatalog.MAXIMUS_TUNNEL -> {
+                val spec = TunnelSpec.fromSettings(t.settings)
+                val peer = server(if (s.location == com.example.panels.servers.ServerLocation.IRAN) spec?.abroadId else spec?.iranId)
+                ToolRowUi(id, title, status, running,
+                    peer?.let { (if (s.location == com.example.panels.servers.ServerLocation.IRAN) "To " else "From ") + it.displayName }.orEmpty(),
+                    canRestart = true, canLogs = true, canUninstall = false, canOpenTunnel = spec != null)
+            }
             ServerToolCatalog.KEY_LOGIN -> null // shown in the security card
             ServerToolCatalog.FIREWALL -> ToolRowUi(id, title, if (f?.firewall == "ufw-active") "On" else if (f == null) "Unknown" else "Off",
                 f == null || f.firewall == "ufw-active", "UFW")
@@ -403,17 +427,47 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The Iran server of the tunnel [serverId] belongs to. */
+    fun tunnelIranIdFor(serverId: String): String? =
+        server(serverId)?.tool(ServerToolCatalog.MAXIMUS_TUNNEL)?.let { TunnelSpec.fromSettings(it.settings)?.iranId }
+
+    /** Puts [profile] in the profile list, replacing [oldId]; returns the saved profile's id. */
+    private suspend fun storeProfile(oldId: String?, profile: VlessProfile): String? {
+        val repo = RayApplication.instance.serverRepository
+        oldId?.let { old -> runCatching { repo.delete(old) } }
+        val (inserted, duplicates) = repo.insertAllWithDeduplication(listOf(profile))
+        return (inserted.firstOrNull() ?: duplicates.firstOrNull()?.let { repo.getProfileByFingerprint(it.effectiveFingerprint) })?.id
+    }
+
+    /** A pinned server program downloaded on this phone, for a server that cannot reach GitHub. Checked by the caller. */
+    private fun downloadProgram(name: String): ByteArray? {
+        val client = http.newBuilder().readTimeout(60, TimeUnit.SECONDS).followRedirects(true).build()
+        return client.newCall(Request.Builder().url("${ServerBinaries.BASE_URL}/$name").build()).execute().use { r ->
+            if (!r.isSuccessful) return null
+            val body = r.body ?: return null
+            val limit = com.example.panels.servers.RemoteShell.MAX_TRANSFER
+            if (body.contentLength() > limit) return null
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(64 * 1024)
+            body.byteStream().use { input ->
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    if (out.size() + n > limit) return null
+                    out.write(buffer, 0, n)
+                }
+            }
+            out.toByteArray()
+        }
+    }
+
     /** Saves an install's server and puts its config in the profile list (replacing the old one). */
     private suspend fun applyOutcome(out: InstallOutcome): ManagedServer {
         var server = out.server
         val profile = out.profile
         val tool = out.tool
         if (profile != null && tool != null) {
-            val repo = RayApplication.instance.serverRepository
-            tool.profileId?.let { old -> runCatching { repo.delete(old) } }
-            val (inserted, duplicates) = repo.insertAllWithDeduplication(listOf(profile))
-            val saved = inserted.firstOrNull() ?: duplicates.firstOrNull()?.let { repo.getProfileByFingerprint(it.effectiveFingerprint) }
-            if (saved != null) server = server.withTool(tool.copy(profileId = saved.id))
+            storeProfile(tool.profileId, profile)?.let { server = server.withTool(tool.copy(profileId = it)) }
         }
         out.panel?.let { panel ->
             val panels = PanelStore(getApplication())
@@ -598,6 +652,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         job?.cancel()
+        tunnel.cancel()
         super.onCleared()
     }
 
