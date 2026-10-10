@@ -103,6 +103,8 @@ jobs:
           fi
           publish=$(mktemp -d)
           cp "$out/free.txt" "$out/free-base64.txt" "$out/configs.json" "$out/history.json" "$out/manifest.json" "$out/manifest.sig" "$publish/"
+          # Probe targets are optional: published only when the run produced them (they are in the signed manifest).
+          if [ -s "$out/probes.json" ]; then cp "$out/probes.json" "$publish/"; fi
           cd "$publish"
           git init -q -b free-configs
           git config user.name "github-actions[bot]"

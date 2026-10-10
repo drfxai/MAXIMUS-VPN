@@ -17,6 +17,9 @@ import com.example.vpn.connectivity.RecoveryLedger
 import com.example.vpn.connectivity.RecoveryProfiles
 import com.example.vpn.connectivity.RecoverySecurityGate
 import com.example.vpn.connectivity.BpbRecoveryEngine
+import com.example.vpn.connectivity.DnsEvidenceKind
+import com.example.vpn.connectivity.DnsEvidenceStatus
+import com.example.vpn.connectivity.MeasurementType
 import com.example.vpn.connectivity.EndpointScoringEngine
 import com.example.vpn.diagnostics.FailureStage
 import com.example.vpn.smart.NetworkCapabilityDetector
@@ -42,6 +45,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.withLock
 
 /**
  * The phone side of the LAB: watches network sessions, runs bounded experiments with the bundled core's real
@@ -135,6 +139,7 @@ class LabController(
         store.recordNetwork(ctx, if (core.isEmpty()) null else core.count { it } * 100 / core.size, cap.observations().filter { !it.endsWith("not measured") }.joinToString(" · "))
         val reading = stateTracker.update(ctx.sessionId, NetworkStateClassifier.classify(cap))
         XrayLogManager.i("LAB", "Network state: ${reading.summary()}.")
+        observeIntoBrain(key, cap, reading)
         val plan = store.planFor(ctx.contextKey, policy)
         if (isNew) {
             com.example.vpn.diagnostics.ConnectionMetrics.labSessions.incrementAndGet()
@@ -181,7 +186,7 @@ class LabController(
      */
     fun fullAnalysis() = launchJob {
         analysisRunning = true
-        try { runFullAnalysis() } finally { analysisRunning = false; live = null; publish() }
+        try { testLock.withLock { runFullAnalysis() } } finally { analysisRunning = false; live = null; publish() }
     }
 
     private suspend fun runFullAnalysis() {
@@ -222,7 +227,16 @@ class LabController(
         val now0 = System.currentTimeMillis()
         val memory = LabEvidence.priors(store.evidenceFor(ctx.contextKey), ctx.contextKey, now0, BuildConfig.VERSION_CODE)
         val lowBattery = device.charging != true && (device.batteryPercent ?: 100) < 20
-        val planner = AdaptivePlanner(plan, cap, AdaptivePlanner.Priors(memory = memory), AdaptivePlanner.Device(device.metered, lowBattery))
+        // Paths that failed a real request on this network moments ago are not retested (ConnectivityBrain).
+        val book = com.example.vpn.connectivity.ConnectivityBrain.book
+        val recentlyFailed = profiles.mapNotNull { p ->
+            if (book.eligibility(com.example.vpn.connectivity.PathRef.of(p)) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED)
+                p.id to "failed a real request on this network moments ago" else null
+        }.toMap()
+        val planner = AdaptivePlanner(plan, cap, AdaptivePlanner.Priors(memory = memory, recentlyFailed = recentlyFailed), AdaptivePlanner.Device(device.metered, lowBattery))
+        val requestsAtStart = RealDelayProbe.requestsSent.get()
+        val bytesAtStart = appBytes()
+        var engineStarts = 0
         val aiFirst = aiCheckpoint("after classification", reading, plan, available, planner)
         step(STEP_A_PLAN, LabStep.State.DONE, "${plan.mode.title} · up to ${plan.budget} tests" +
             (if (memory.isNotEmpty()) " · fresh memory for ${memory.size} famil${if (memory.size == 1) "y" else "ies"}" else "") +
@@ -244,8 +258,10 @@ class LabController(
             AdaptivePlanner.Candidate(pk.profile.id, pk.profile.name, pk.family,
                 ipv6 = pk.profile.address.contains(':'), provenHere = pk.profile.effectiveFingerprint in proven)
         })
+        val notConfigured = mutableSetOf<PathFamily>()
         if (plan.mode == ExperimentPlanner.Mode.EMERGENCY_RECOVERY) {
             ExperimentPlanner.emergencyOrder(cap).filter { f -> f !in available && f !in plan.skip }.forEach { f ->
+                notConfigured += f
                 notTested[f] = "no ${f.title} config is saved" + when (f) {
                     PathFamily.DNS_TUNNEL -> "; add a dnstt config for your own server"
                     PathFamily.PSIPHON -> "; Psiphon needs a config from Psiphon Inc."
@@ -256,11 +272,12 @@ class LabController(
         }
 
         var current: String? = null
+        val extraRows = mutableListOf<LivePath>()
         fun publishLive(finished: Boolean = false, notRequired: Set<PathFamily> = emptySet()) {
             val now = System.currentTimeMillis()
             val rows = FullAnalysis.networkPaths(cap, now).map { it.copy(sessionId = ctx.sessionId) } +
                 listOfNotNull(FullAnalysis.resolverPath(resolvers), burst?.let { FullAnalysis.burstPath(it) }).map { it.copy(sessionId = ctx.sessionId) } +
-                FullAnalysis.liveFamilyRows(planner.tracks(), current, plan, notTested, ctx.sessionId, now, finished, planner.stopReason, notRequired)
+                FullAnalysis.liveFamilyRows(planner.tracks(), current, plan, notTested, ctx.sessionId, now, finished, planner.stopReason, notRequired, notConfigured) + extraRows
             fun pick(t: AdaptivePlanner.Track?) = t?.let { LabPick(it.candidate.id, it.candidate.name, it.candidate.family, it.status, it.bestLatency) }
             live = LiveAnalysis(ctx.sessionId, ctx.label, reading?.primary?.title ?: "Unknown", planner.phase, planner.hypothesis(),
                 current?.let { id -> byId[id]?.let { "${it.family.title} · ${it.profile.name}" } }, rows,
@@ -299,8 +316,12 @@ class LabController(
                                 r == null -> planner.notTested(pk.profile.id, "no engine in this build carries it")
                                 r.notTested -> planner.notTested(pk.profile.id, r.failure ?: "not measured")
                                 else -> {
+                                    engineStarts++
                                     engineResults[pk.profile.id] = r
                                     planner.record(pk.profile.id, r.outcomes, r.latencyMs, System.currentTimeMillis(), r.failure ?: r.stage.title, r.spanMs)
+                                    book.recordPath(com.example.vpn.connectivity.EvidenceSource.LAB, com.example.vpn.connectivity.MeasurementType.ENGINE_REQUEST,
+                                        com.example.vpn.connectivity.PathRef.of(pk.profile), pk.family.name, r.stage.carriesTraffic, r.latencyMs,
+                                        if (r.stage.carriesTraffic) null else r.stage.name, detail = r.engineId)
                                 }
                             }
                         } else {
@@ -334,8 +355,21 @@ class LabController(
             step(STEP_A_VERIFY, LabStep.State.DONE, "${planner.verifiedFamilies().size} verified famil${if (planner.verifiedFamilies().size == 1) "y" else "ies"} · stopped: ${stoppedBy ?: "done"}")
         }
 
+        // Deep optimization with evidence-driven experiments only: ECH where a TLS hypothesis exists, MTU where a
+        // WireGuard path failed while UDP answers. Each is bounded and uses derived copies; saved configs never change.
+        val deepResults = mutableListOf<RankedMethod>()
+        if (!vpnOn && stoppedBy?.startsWith("the network changed") != true && tracker.isCurrent(ctx.sessionId)) {
+            step(STEP_A_VERIFY, LabStep.State.RUNNING, "evidence-driven experiments: ECH and MTU")
+            extraRows += echExperiment(pool, planner, reading, ctx, deepResults)
+            publishLive()
+            extraRows += mtuExperiment(pool, planner, cap, ctx, deepResults)
+            publishLive()
+            step(STEP_A_VERIFY, LabStep.State.DONE, "${planner.verifiedFamilies().size} verified famil${if (planner.verifiedFamilies().size == 1) "y" else "ies"} · stopped: ${stoppedBy ?: "done"}")
+        }
+
         // Results from what this run measured, then safe copies when nothing ordinary passed on an ordinary network.
         val results = mutableListOf<RankedMethod>()
+        results += deepResults
         results += rejected
         planner.tracks().forEach { t ->
             val pk = byId[t.candidate.id] ?: return@forEach
@@ -360,7 +394,8 @@ class LabController(
         step(STEP_A_SCORE, LabStep.State.DONE, ranked.firstOrNull { it.stage.carriesTraffic }?.let { "best: ${it.name} (${it.status.title})" } ?: "no method passed")
 
         // Isolation is concluded only from strong negative evidence across every available family.
-        val isolation = EmergencyRecovery.conclude(cap, planner.tracks(), available.filter { it !in plan.skip }.toSet())
+        val isolation = if (vpnOn) null else EmergencyRecovery.conclude(cap, planner.tracks(), available.filter { it !in plan.skip }.toSet())
+        if (isolation != null) book.markRecoveryExhausted()
         val stateTitle = isolation?.title ?: reading?.primary?.title ?: "Unknown"
         val notRequired = if (stoppedBy?.startsWith("three independent") == true)
             planner.tracks().filter { it.outcomes.isEmpty() && it.notTested == null }.map { it.candidate.family }.toSet() - planner.tracks().filter { it.outcomes.isNotEmpty() }.map { it.candidate.family }.toSet()
@@ -370,7 +405,8 @@ class LabController(
             notTested.getOrPut(t.candidate.family) { "not reached: ${stoppedBy ?: "the run ended"}" }
         }
         val paths = (FullAnalysis.networkPaths(cap, now) + listOfNotNull(FullAnalysis.resolverPath(resolvers), burst?.let { FullAnalysis.burstPath(it) }) +
-            FullAnalysis.familyPaths(families.map { it.second }.toSet() + notTested.keys, ranked, plan, notTested, now, notRequired)).map { it.copy(sessionId = ctx.sessionId) }
+            FullAnalysis.familyPaths(families.map { it.second }.toSet() + notTested.keys, ranked, plan, notTested, now, notRequired, notConfigured) +
+            extraRows).map { it.copy(sessionId = ctx.sessionId) }
         step(STEP_A_PATHS, LabStep.State.DONE, "${paths.count { it.status == PathStatus.VERIFIED || it.status == PathStatus.CANDIDATE || it.status == PathStatus.AVAILABLE }} open of ${paths.size}")
 
         // LEARN: one sanitized evidence record per tested config; history only reorders later runs.
@@ -388,20 +424,295 @@ class LabController(
             stoppedBy?.startsWith("the network changed") == true -> "The network changed during the analysis. Results stay with ${ctx.label}; run it again on the new network."
             best != null && best.status == PathStatus.VERIFIED -> "Use ${best.name}. It passed ${best.passes} real requests on ${ctx.label} and is verified."
             best != null -> "Use ${best.name} for now: it passed a real request on ${ctx.label} (${best.status.title.lowercase()})."
-            isolation != null -> "Every network check and every saved recovery method failed on ${ctx.label}. No software path can work here until the network changes."
+            isolation != null -> "No verified international egress after recovery on ${ctx.label}: every available, configured method was tested and none " +
+                "carried a real request. This is about the methods Maximus has here; other methods or servers may still work."
             plan.mode == ExperimentPlanner.Mode.EMERGENCY_RECOVERY -> "No path got traffic through on ${ctx.label}. " +
                 (EmergencyRecovery.whyNot(cap, planner.tracks(), available) ?: "Add recovery configs (DNS tunnel, Tor bridges, Psiphon) and try again.")
             else -> "No saved config got a real request through on ${ctx.label}."
         }
         val report = AnalysisReport(ctx.sessionId, ctx.contextKey, ctx.label, startedAt, now, stateTitle, reading?.confidence ?: 0.0,
             plan.mode.title, plan.reasons, domains, paths, ranked, FullAnalysis.untested(cap, reading, burst != null), note,
-            firstWorking = firstName, events = planner.events(), stopReason = stoppedBy)
+            firstWorking = firstName, events = planner.events() + resourceLine(planner.spent, RealDelayProbe.requestsSent.get() - requestsAtStart,
+                engineStarts, bytesAtStart, now - startedAt), stopReason = stoppedBy)
         store.saveReport(report)
         step(STEP_A_MEMORY, LabStep.State.DONE, "saved for ${ctx.label}; old results only reorder what is tried")
         step(STEP_A_REPORT, LabStep.State.DONE, note)
         XrayLogManager.i("LAB", "Full analysis on ${ctx.label}: $stateTitle, ${ranked.count { it.stage.carriesTraffic }} method(s) passed, stopped: ${stoppedBy ?: "done"}.")
         live = null
         publish(running = null, message = note)
+    }
+
+    /** Bytes this app sent and received (Xray probes run in-process; engine programs share the app's uid). */
+    private fun appBytes(): Long? = runCatching {
+        val uid = android.os.Process.myUid()
+        val rx = android.net.TrafficStats.getUidRxBytes(uid)
+        val tx = android.net.TrafficStats.getUidTxBytes(uid)
+        if (rx < 0 || tx < 0) null else rx + tx
+    }.getOrNull()
+
+    /** The run's resource use, each budget counted on its own. */
+    private fun resourceLine(tests: Int, requests: Long, engineStarts: Int, bytesAtStart: Long?, elapsedMs: Long): String {
+        val bytes = bytesAtStart?.let { start -> appBytes()?.let { (it - start).coerceAtLeast(0) } }
+        return "Resources: $tests candidate test(s) · $requests real request(s) · $engineStarts engine start(s) · " +
+            (bytes?.let { "${(it + 1023) / 1024} KB" } ?: "data not measured") + " · ${elapsedMs / 1000}s"
+    }
+
+    private val ECH_FAMILIES = setOf(PathFamily.VLESS_TLS, PathFamily.XHTTP, PathFamily.WEBSOCKET, PathFamily.GRPC, PathFamily.HTTP2, PathFamily.TROJAN, PathFamily.VMESS)
+
+    /**
+     * ECH, measured rather than assumed: only when a TLS hypothesis exists (TLS path failure, suspected SNI
+     * interference) and a TLS config can carry ECH. At most two configs, each a derived copy whose ECHConfig comes
+     * over DoH; a pass is rechecked after the stable window. Returns the "ECH" row.
+     */
+    private suspend fun echExperiment(pool: List<FullAnalysis.Pick>, planner: AdaptivePlanner, reading: NetworkStateReading?,
+                                      ctx: NetworkContext, out: MutableList<RankedMethod>): List<LivePath> {
+        val tls = pool.filter { it.family in ECH_FAMILIES }
+        val capable = tls.filter { EchMeasurement.unsupportedReason(it.profile) == null }
+        if (tls.isEmpty()) return listOf(LivePath("ech", "ECH", PathStatus.NOT_CONFIGURED, reason = "no TLS config is saved"))
+        if (capable.isEmpty()) return listOf(LivePath("ech", "ECH", PathStatus.UNSUPPORTED,
+            reason = EchMeasurement.unsupportedReason(tls.first().profile) ?: "no config can carry ECH"))
+        val baselineReliable = capable.any { planner.track(it.profile.id)?.status == PathStatus.VERIFIED }
+        val priority = EchMeasurement.priority(reading?.restrictions.orEmpty(), reading?.primary ?: NetworkState.UNKNOWN, baselineReliable, false)
+        if (priority < 0.5) return listOf(LivePath("ech", "ECH", PathStatus.NOT_TESTED,
+            reason = if (baselineReliable) "ordinary TLS already works here; ECH was not needed" else "no TLS or SNI hypothesis on this network"))
+        // Configs whose ordinary TLS failed first: that is where ECH can change the outcome.
+        val order = capable.sortedBy { planner.track(it.profile.id)?.passes ?: 0 }.take(2)
+        var best: Pair<FullAnalysis.Pick, EchMeasurement.Result>? = null
+        var attempts = 0
+        for (pk in order) {
+            val variant = EchMeasurement.variant(pk.profile) ?: continue
+            val t = planner.track(pk.profile.id)
+            val baseline = when {
+                t == null || t.outcomes.isEmpty() -> null
+                t.passes > 0 -> RealDelayProbe.Outcome.Delay(t.bestLatency ?: 0)
+                else -> RealDelayProbe.Outcome.Failed(t.failure ?: "failed")
+            }
+            val first = withContext(Dispatchers.IO) { RealDelayProbe.measure(listOf(variant), budget.probeTimeoutSec).first() }
+            attempts++
+            val recheck = if (first is RealDelayProbe.Outcome.Delay) {
+                delay(FullAnalysis.STABLE_WINDOW_MS); attempts++
+                withContext(Dispatchers.IO) { RealDelayProbe.measure(listOf(variant), budget.probeTimeoutSec).first() }
+            } else null
+            val r = EchMeasurement.judge(baseline, first, recheck)
+            com.example.vpn.connectivity.ConnectivityBrain.book.recordPath(com.example.vpn.connectivity.EvidenceSource.LAB,
+                com.example.vpn.connectivity.MeasurementType.ECH, com.example.vpn.connectivity.PathRef.of(variant), "ECH",
+                EchMeasurement.proven(r.state), r.latencyMs, if (EchMeasurement.proven(r.state)) null else r.state.name, detail = r.state.name)
+            if (best == null || EchMeasurement.proven(r.state)) best = pk to r
+            if (EchMeasurement.proven(r.state)) {
+                out += RankedMethod(pk.profile.id, "${pk.profile.name} · ECH", pk.family,
+                    if (r.state == EchMeasurement.State.ECH_VERIFIED) PathStatus.VERIFIED else PathStatus.CANDIDATE,
+                    if (r.state == EchMeasurement.State.ECH_VERIFIED) ConnectionStage.STABILITY_VERIFIED else ConnectionStage.APPLICATION_REQUEST_PASSED,
+                    r.latencyMs, null, "safe copy with ECH (config fetched over DoH): ${r.why}; the saved config is unchanged",
+                    if (recheck != null) 2 else 1, if (r.state == EchMeasurement.State.ECH_VERIFIED) 2 else 1)
+                break
+            }
+        }
+        val (pk, r) = best ?: return listOf(LivePath("ech", "ECH", PathStatus.NOT_TESTED, reason = "no ECH copy could be built"))
+        val status = when (r.state) {
+            EchMeasurement.State.ECH_VERIFIED -> PathStatus.VERIFIED
+            EchMeasurement.State.ECH_APPLICATION_TRAFFIC_VERIFIED -> PathStatus.CANDIDATE
+            EchMeasurement.State.ECH_DEGRADED -> PathStatus.DEGRADED
+            EchMeasurement.State.ECH_NOT_TESTED -> PathStatus.NOT_TESTED
+            EchMeasurement.State.ECH_CONFIG_UNAVAILABLE -> PathStatus.UNSUPPORTED
+            else -> PathStatus.FAILED
+        }
+        return listOf(LivePath("ech", "ECH", status, latencyMs = r.latencyMs, checkedAt = System.currentTimeMillis(),
+            reason = "${pk.profile.name}: ${r.state.title}. ${r.why}", tried = order.size, attempts = attempts,
+            passed = if (EchMeasurement.proven(r.state)) 1 else 0, sessionId = ctx.sessionId))
+    }
+
+    /**
+     * MTU, only on evidence: a WireGuard config failed while UDP on this network answers. A bounded search over
+     * derived copies (floor first, then upward); a value that passes twice is committed for this network, engine,
+     * transport and address family only. Returns the "MTU (WireGuard)" row.
+     */
+    private suspend fun mtuExperiment(pool: List<FullAnalysis.Pick>, planner: AdaptivePlanner, cap: NetworkCapabilityProfile?,
+                                      ctx: NetworkContext, out: MutableList<RankedMethod>): List<LivePath> {
+        val wg = pool.filter { it.family == PathFamily.WIREGUARD }
+        if (wg.isEmpty()) return listOf(LivePath("mtu", "MTU (WireGuard)", PathStatus.NOT_CONFIGURED, reason = "no WireGuard config is saved"))
+        val failed = wg.firstOrNull { t -> planner.track(t.profile.id)?.let { it.outcomes.isNotEmpty() && it.passes == 0 } == true }
+        val signals = MtuIntelligence.Signals(udpAliveButWireGuardStalls = failed != null && cap?.udpAvailable == true)
+        if (failed == null || MtuIntelligence.suspicion(signals) == MtuIntelligence.Suspicion.NONE) return listOf(LivePath("mtu", "MTU (WireGuard)",
+            PathStatus.NOT_TESTED, reason = if (failed == null) "no WireGuard failure to explain" else "UDP is not shown to work here, so MTU is not the first suspect"))
+        val p = failed.profile
+        val v6 = p.address.contains(':')
+        val key = MtuIntelligence.Key(ctx.networkKey, "xray", "wireguard", if (v6) "ipv6" else "ipv4")
+        val search = MtuIntelligence.Search(MtuIntelligence.wireGuardMtu(p), v6)
+        var attempts = 0
+        while (true) {
+            if (!tracker.isCurrent(ctx.sessionId)) break
+            val mtu = search.next() ?: break
+            val tx = MtuIntelligence.cache.propose(key, mtu, System.currentTimeMillis()).stage()
+            val copy = MtuIntelligence.withWireGuardMtu(p, mtu)
+            val o = withContext(Dispatchers.IO) { RealDelayProbe.measure(listOf(copy), budget.probeTimeoutSec).first() }
+            attempts++
+            if (o is RealDelayProbe.Outcome.NotRun) break
+            val ok = o is RealDelayProbe.Outcome.Delay
+            search.record(mtu, ok)
+            com.example.vpn.connectivity.ConnectivityBrain.book.recordPath(com.example.vpn.connectivity.EvidenceSource.LAB,
+                com.example.vpn.connectivity.MeasurementType.MTU, com.example.vpn.connectivity.PathRef.of(copy), "MTU $mtu", ok,
+                (o as? RealDelayProbe.Outcome.Delay)?.latencyMs, if (ok) null else "MTU_$mtu")
+            MtuIntelligence.cache.store(if (ok) tx.verify() else tx.rollBack())
+        }
+        // The highest value that passed is confirmed once more after the stable window before it is committed.
+        search.best()?.let { mtu ->
+            if (!tracker.isCurrent(ctx.sessionId)) return@let
+            val copy = MtuIntelligence.withWireGuardMtu(p, mtu)
+            delay(FullAnalysis.STABLE_WINDOW_MS)
+            val again = withContext(Dispatchers.IO) { RealDelayProbe.measure(listOf(copy), budget.probeTimeoutSec).first() }
+            attempts++
+            val tx = MtuIntelligence.cache.propose(key, mtu, System.currentTimeMillis()).stage().verify()
+            if (again is RealDelayProbe.Outcome.Delay) {
+                MtuIntelligence.cache.store(tx.commit())
+                out += RankedMethod(p.id, "${p.name} · MTU $mtu", PathFamily.WIREGUARD, PathStatus.VERIFIED, ConnectionStage.STABILITY_VERIFIED,
+                    again.latencyMs, null, "safe copy with WireGuard MTU $mtu passed twice where the saved MTU ${search.current} failed; the saved config is unchanged", 2, 2)
+            } else MtuIntelligence.cache.store(tx.rollBack())
+        }
+        val best = search.best()
+        val committed = MtuIntelligence.cache.working(key, System.currentTimeMillis())
+        val suspicion = MtuIntelligence.suspicion(signals.copy(lowerMtuRestored = if (committed != null) 2 else if (best != null) 1 else 0,
+            lowerMtuNoImprovement = if (search.ruledOut) 1 else 0))
+        return listOf(LivePath("mtu", "MTU (WireGuard)",
+            when { committed != null -> PathStatus.VERIFIED; best != null -> PathStatus.CANDIDATE; search.tested.isEmpty() -> PathStatus.NOT_TESTED; else -> PathStatus.FAILED },
+            checkedAt = System.currentTimeMillis(), attempts = attempts, tried = search.tested.size, passed = search.tested.count { it.value },
+            reason = "${p.name}: ${suspicion.title}; " + (search.tested.entries.joinToString { "${it.key} ${if (it.value) "passed" else "failed"}" }.ifBlank { "nothing measured" }) +
+                (committed?.let { "; $it kept for this network only" } ?: ""), sessionId = ctx.sessionId))
+    }
+
+    /**
+     * The LAB's measurements become shared evidence of the current network session (ConnectivityBrain), so
+     * Smart Connect, recovery and failover reason from the same facts. DNS properties are kept apart.
+     */
+    private fun observeIntoBrain(key: String, cap: NetworkCapabilityProfile, reading: NetworkStateReading) {
+        val book = com.example.vpn.connectivity.ConnectivityBrain.book
+        book.observeNetwork(key)
+        book.recordReading(reading)
+        val src = com.example.vpn.connectivity.EvidenceSource.LAB
+        cap.internationalReachable?.let { book.recordNetwork(src, MeasurementType.NETWORK_REACHABILITY, "international", it, reading.confidence) }
+        cap.domesticReachable?.let { book.recordNetwork(src, MeasurementType.NETWORK_REACHABILITY, "domestic", it) }
+        // Only the controlled comparison (same address, filtered vs neutral name) is SNI evidence.
+        cap.sniFiltered?.let { book.recordNetwork(src, MeasurementType.SNI_COMPARISON, "sni", !it, detail = "${cap.sniCut ?: 0}/${cap.sniPairs ?: 0} cut") }
+        cap.udpAvailable?.let { book.recordNetwork(src, MeasurementType.UDP, "udp", it) }
+        cap.quicStatus?.takeIf { it != "QUIC_NOT_MEASURED" }?.let { book.recordNetwork(src, MeasurementType.QUIC, "quic", it == "QUIC_AVAILABLE", detail = it) }
+        cap.dnsManipulated?.let { book.recordNetwork(src, MeasurementType.DNS, "dns-poisoned", !it) }
+        when {
+            cap.dnsManipulated == true -> book.recordDns(DnsEvidenceKind.SYSTEM_DNS, DnsEvidenceStatus.POISONED)
+            cap.dnsWorking == true -> book.recordDns(DnsEvidenceKind.SYSTEM_DNS, DnsEvidenceStatus.WORKS)
+            cap.dnsWorking == false -> book.recordDns(DnsEvidenceKind.SYSTEM_DNS, DnsEvidenceStatus.FAILED)
+        }
+        cap.udpAvailable?.let { book.recordDns(DnsEvidenceKind.DIRECT_FOREIGN_DNS, if (it) DnsEvidenceStatus.WORKS else DnsEvidenceStatus.FAILED) }
+        // DoH and DoT answers come over an authenticated TLS session, so a pass is verified.
+        cap.dohReachable?.let { book.recordDns(DnsEvidenceKind.PRECONNECT_DOH_RESOLUTION, if (it) DnsEvidenceStatus.VERIFIED else DnsEvidenceStatus.FAILED) }
+        cap.dotReachable?.let { book.recordDns(DnsEvidenceKind.PRECONNECT_DOT, if (it) DnsEvidenceStatus.VERIFIED else DnsEvidenceStatus.FAILED) }
+        // Recursive egress needs a controlled foreign authoritative zone; DoH or 1.1.1.1 never stand in for it.
+        cap.recursiveDnsEgress?.let { book.recordDns(DnsEvidenceKind.RECURSIVE_FOREIGN_DNS_EGRESS, if (it) DnsEvidenceStatus.VERIFIED else DnsEvidenceStatus.FAILED) }
+    }
+
+    /** A path that carried real traffic in Connect mode's fast recovery. */
+    data class FastRecoveryResult(
+        val profile: VlessProfile,
+        val family: PathFamily,
+        val latencyMs: Long?,
+        val status: PathStatus,
+        /** Carried by its own engine program (Psiphon, Tor, DNS tunnel, Mihomo). */
+        val engine: Boolean,
+        val tested: Int
+    )
+
+    /** Outcome of a fast recovery: the path, or why none (with what was tested). */
+    data class FastRecoveryOutcome(val result: FastRecoveryResult?, val tested: Int, val exhausted: Boolean, val why: String)
+
+    private val testLock = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * CONNECT mode's escalation, called by the VPN service when no saved path carried traffic: the adaptive planner
+     * with the CONNECT goal over every saved family plus the built-in recovery engines this build supports
+     * (Psiphon, Tor), skipping paths the connect just tested ([exclude]: profile ids or PathRefs) and paths that failed on this
+     * network moments ago. Stops at the first verified path or [deadlineMs]. Engine tests run inside
+     * [engineWindow], which lets the service open its blocking interface for the app's own engine sockets.
+     * Returns at once when a LAB run holds the test core.
+     */
+    suspend fun fastRecovery(
+        exclude: Set<String>,
+        deadlineMs: Long,
+        engineWindow: suspend (() -> EngineProbe.Result) -> EngineProbe.Result,
+        onProgress: (String) -> Unit = {}
+    ): FastRecoveryOutcome {
+        if (!testLock.tryLock()) return FastRecoveryOutcome(null, 0, false, "the LAB is running an analysis")
+        try {
+            val book = com.example.vpn.connectivity.ConnectivityBrain.book
+            com.example.vpn.connectivity.ConnectivityBrain.refreshSession()
+            val cap = NetworkCapabilityDetector.last?.takeIf { System.currentTimeMillis() - it.measuredAt < 10 * 60_000L }
+            val reading = stateTracker.current() ?: cap?.let { NetworkStateClassifier.classify(it) }
+            val device = deviceState(userStarted = true)
+            val plan = ExperimentPlanner.plan(reading, cap, ExperimentPlanner.budget(
+                ExperimentPlanner.Budget(true, device.batteryPercent, device.charging, device.metered)))
+            val saved = loadAllProfiles().filter { !it.allowInsecure && com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
+            // The engines that need nothing of the user's, when this build carries them.
+            val builtIn = listOfNotNull(
+                runCatching { com.example.vpn.sidecar.PsiphonSidecar.profile() }.getOrNull(),
+                runCatching { TorSidecar.profile() }.getOrNull()
+            ).filter { b -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(b) == null && saved.none { s -> familyOf(s) == familyOf(b) } }
+            val all = (saved + builtIn).filter { it.id !in exclude && com.example.vpn.connectivity.PathRef.of(it) !in exclude }
+            if (all.isEmpty()) return FastRecoveryOutcome(null, 0, true, "no other saved config or recovery engine is available")
+            val families = all.map { it to familyOf(it) }
+            val recent = all.mapNotNull { p ->
+                val ref = com.example.vpn.connectivity.PathRef.of(p)
+                if (book.eligibility(ref) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED) p.id to "failed a real request on this network moments ago" else null
+            }.toMap()
+            val pool = FullAnalysis.select(families, plan.copy(budget = MAX_POOL), emptySet())
+            val byId = pool.associateBy { it.profile.id }
+            val now0 = System.currentTimeMillis()
+            val memory = tracker.current?.let { LabEvidence.priors(store.evidenceFor(it.contextKey), it.contextKey, now0, BuildConfig.VERSION_CODE) }.orEmpty()
+            val lowBattery = device.charging != true && (device.batteryPercent ?: 100) < 20
+            val planner = AdaptivePlanner(plan, cap, AdaptivePlanner.Priors(memory = memory, recentlyFailed = recent),
+                AdaptivePlanner.Device(device.metered, lowBattery), AdaptivePlanner.Goal.CONNECT)
+            planner.add(pool.map { pk -> AdaptivePlanner.Candidate(pk.profile.id, pk.profile.name, pk.family, ipv6 = pk.profile.address.contains(':')) })
+            loop@ while (System.currentTimeMillis() < deadlineMs) {
+                when (val d = planner.decide(System.currentTimeMillis())) {
+                    is AdaptivePlanner.Decision.Stop -> break@loop
+                    is AdaptivePlanner.Decision.Wait -> { delay((d.untilMs - System.currentTimeMillis()).coerceIn(100, 3_000)); continue@loop }
+                    is AdaptivePlanner.Decision.Test -> {
+                        val pk = byId[d.candidate.id] ?: continue@loop
+                        onProgress("${pk.family.title}: ${if (d.recheck) "rechecking" else "testing"} ${pk.profile.name}")
+                        val engine = Sidecars.forProfile(pk.profile)
+                        if (engine != null) {
+                            val r = engineWindow { EngineProbe.test(context, engine, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2) }
+                            if (r.notTested) planner.notTested(pk.profile.id, r.failure ?: "not measured")
+                            else {
+                                planner.record(pk.profile.id, r.outcomes, r.latencyMs, System.currentTimeMillis(), r.failure ?: r.stage.title, r.spanMs)
+                                book.recordPath(com.example.vpn.connectivity.EvidenceSource.RECOVERY, com.example.vpn.connectivity.MeasurementType.ENGINE_REQUEST,
+                                    com.example.vpn.connectivity.PathRef.of(pk.profile), pk.family.name, r.stage.carriesTraffic, r.latencyMs,
+                                    if (r.stage.carriesTraffic) null else r.stage.name, detail = r.engineId)
+                            }
+                        } else when (val o = withContext(Dispatchers.IO) { RealDelayProbe.measure(listOf(pk.profile), budget.probeTimeoutSec).first() }) {
+                            is RealDelayProbe.Outcome.Delay -> planner.record(pk.profile.id, listOf(true), o.latencyMs, System.currentTimeMillis())
+                            is RealDelayProbe.Outcome.Failed -> planner.record(pk.profile.id, listOf(false), null, System.currentTimeMillis(), o.reason)
+                            is RealDelayProbe.Outcome.NotRun -> planner.notTested(pk.profile.id, o.reason)
+                        }
+                    }
+                }
+            }
+            val tested = planner.tracks().count { it.outcomes.isNotEmpty() }
+            val best = planner.verifiedFamilies().firstOrNull() ?: planner.best()
+            if (best != null) {
+                val pk = byId.getValue(best.candidate.id)
+                XrayLogManager.i("LAB", "Connect recovery: ${pk.profile.name} (${pk.family.title}) carried real traffic after $tested test(s).")
+                return FastRecoveryOutcome(FastRecoveryResult(pk.profile, pk.family, best.bestLatency, best.status,
+                    Sidecars.forProfile(pk.profile) != null, tested), tested, false, "")
+            }
+            val available = families.map { it.second }.filter { it !in plan.skip }.toSet()
+            val exhausted = EmergencyRecovery.conclude(cap, planner.tracks(), available) != null
+            if (exhausted) book.markRecoveryExhausted()
+            val why = when {
+                System.currentTimeMillis() >= deadlineMs -> "the recovery time limit was reached after $tested test(s)"
+                exhausted -> "every available family was tested and none carried traffic"
+                else -> "no candidate carried traffic ($tested tested)"
+            }
+            return FastRecoveryOutcome(null, tested, exhausted, why)
+        } finally {
+            testLock.unlock()
+        }
     }
 
     /** The family of a saved config from its fields: Tor by its bridge transport, Mihomo by its proxy type. */

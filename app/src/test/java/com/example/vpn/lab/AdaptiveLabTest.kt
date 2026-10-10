@@ -185,7 +185,7 @@ class AdaptiveLabTest {
 
     // ------------------------------------------------------------ isolation semantics
 
-    @Test fun trueIsolationNeedsEveryAvailableFamilyToFail() {
+    @Test fun noVerifiedEgressAfterRecoveryNeedsEveryAvailableFamilyTested() {
         assertEquals(NetworkState.NO_VERIFIED_EGRESS, NetworkStateClassifier.classify(dead, 1L).primary)
         val p = AdaptivePlanner(ordinary, dead)
         p.add(listOf(cand("tls", PathFamily.VLESS_TLS), cand("tor", PathFamily.TOR_SNOWFLAKE)))
@@ -195,12 +195,17 @@ class AdaptiveLabTest {
         assertNull(EmergencyRecovery.conclude(dead, p.tracks(), available))
         assertTrue(EmergencyRecovery.whyNot(dead, p.tracks(), available)!!.contains("Tor Snowflake"))
         p.record("tor", listOf(false), null, 2)
-        assertEquals(NetworkState.TRUE_PHYSICAL_ISOLATION, EmergencyRecovery.conclude(dead, p.tracks(), available))
-        // Any sign of life on the network, or no engine family among the tests: never isolation.
-        assertNull(EmergencyRecovery.conclude(dead.copy(dnsWorking = true), p.tracks(), available))
-        assertNull(EmergencyRecovery.conclude(dead.copy(quicStatus = "QUIC_DEGRADED"), p.tracks(), available))
+        assertEquals(NetworkState.NO_VERIFIED_EGRESS_AFTER_RECOVERY, EmergencyRecovery.conclude(dead, p.tracks(), available))
+        // The wording never claims more than "the methods tested here".
+        assertTrue(NetworkState.NO_VERIFIED_EGRESS_AFTER_RECOVERY.detail.contains("tested here"))
+        assertTrue(EmergencyRecovery.whyNot(dead, p.tracks(), available)!!.contains("Other methods"))
+        // A pass anywhere: no conclusion.
+        val passed = AdaptivePlanner(ordinary, dead).apply { add(listOf(cand("tls", PathFamily.VLESS_TLS))); record("tls", listOf(true), 300, 1) }
+        assertNull(EmergencyRecovery.conclude(dead, passed.tracks(), setOf(PathFamily.VLESS_TLS)))
+        // Only ordinary configs: concluded for those methods, and the reason says engines were not available.
         val xrayOnly = AdaptivePlanner(ordinary, dead).apply { add(listOf(cand("tls", PathFamily.VLESS_TLS))); record("tls", listOf(false), null, 1) }
-        assertNull(EmergencyRecovery.conclude(dead, xrayOnly.tracks(), setOf(PathFamily.VLESS_TLS)))
+        assertEquals(NetworkState.NO_VERIFIED_EGRESS_AFTER_RECOVERY, EmergencyRecovery.conclude(dead, xrayOnly.tracks(), setOf(PathFamily.VLESS_TLS)))
+        assertTrue(EmergencyRecovery.whyNot(dead, xrayOnly.tracks(), setOf(PathFamily.VLESS_TLS))!!.contains("not available"))
     }
 
     @Test fun quicSuspectedIsNeverShownAsBlocked() {

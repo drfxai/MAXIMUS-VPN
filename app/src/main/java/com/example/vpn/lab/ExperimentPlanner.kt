@@ -77,7 +77,7 @@ object ExperimentPlanner {
         val mode = if (state in NetworkStateClassifier.EMERGENCY) Mode.EMERGENCY_RECOVERY else Mode.ORDINARY
         when (state) {
             NetworkState.NIN_WITH_DNS_EGRESS -> reasons += "Only domestic sites answer, but recursive DNS reaches abroad: DNS tunnels first."
-            NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS -> reasons += "Only domestic sites answer. Recovery methods of different kinds are tried; ordinary config changes cannot help."
+            NetworkState.DOMESTIC_ONLY -> reasons += "Only domestic sites answer. Recovery methods of different kinds are tried; ordinary config changes cannot help."
             NetworkState.SEVERE_FILTERING -> reasons += "No international site answers, but some traffic still gets a reply: recovery methods of different kinds are tried."
             NetworkState.NO_VERIFIED_EGRESS -> reasons += "Nothing answered yet. This is not proof of isolation: recovery methods are tried before any conclusion."
             else -> {}
@@ -91,17 +91,17 @@ object ExperimentPlanner {
         }
 
         if (mode == Mode.ORDINARY) {
-            if (NetworkState.UDP_BLOCKED in restrictions && udpDead(net)) {
+            if (NetworkState.UDP_BLOCKED_SUSPECTED in restrictions && udpDead(net)) {
                 PathFamily.entries.filter { it.udp }.forEach { skip[it] = "UDP abroad gets no answer here" }
                 reasons += "UDP is blocked: UDP-based methods are skipped."
-            } else if (NetworkState.UDP_BLOCKED in restrictions) {
+            } else if (NetworkState.UDP_BLOCKED_SUSPECTED in restrictions) {
                 reasons += "Direct UDP DNS abroad failed, but QUIC answered: UDP methods are still tried."
             }
-            if (NetworkState.QUIC_BLOCKED in restrictions || NetworkState.UDP_BLOCKED in restrictions) {
+            if (NetworkState.QUIC_BLOCKED_SUSPECTED in restrictions || NetworkState.UDP_BLOCKED_SUSPECTED in restrictions) {
                 prefer += listOf(PathFamily.VLESS_REALITY, PathFamily.XHTTP, PathFamily.WEBSOCKET, PathFamily.HTTP2, PathFamily.VLESS_TLS)
                 reasons += "QUIC/UDP is unreliable: TCP-based transports go first."
             }
-            if (NetworkState.SNI_INTERFERENCE_SUSPECTED in restrictions || state == NetworkState.TLS_INTERFERED) {
+            if (NetworkState.SNI_INTERFERENCE_SUSPECTED in restrictions || state == NetworkState.TLS_PATH_FAILURE) {
                 prefer += listOf(PathFamily.VLESS_REALITY, PathFamily.XHTTP)
                 reasons += "TLS names seem to be inspected: REALITY first, then fragment and ECH variants of TLS configs."
             }
@@ -122,7 +122,7 @@ object ExperimentPlanner {
 
     /** Null when an automatic (background) experiment may run; otherwise the reason it was not started. */
     fun automaticRefusal(reading: NetworkStateReading?): String? = when (reading?.primary) {
-        in NetworkStateClassifier.EMERGENCY, NetworkState.TRUE_PHYSICAL_ISOLATION ->
+        in NetworkStateClassifier.EMERGENCY, NetworkState.NO_VERIFIED_EGRESS_AFTER_RECOVERY ->
             "${reading!!.primary.title}: config mutations cannot help here. Run a Full Analysis to try recovery methods."
         else -> null
     }

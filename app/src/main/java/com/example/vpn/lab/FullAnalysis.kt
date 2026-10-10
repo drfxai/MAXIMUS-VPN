@@ -227,7 +227,9 @@ object FullAnalysis {
         plan: ExperimentPlanner.Plan,
         notTestedReason: Map<PathFamily, String>,
         now: Long,
-        notRequired: Set<PathFamily> = emptySet()
+        notRequired: Set<PathFamily> = emptySet(),
+        /** Families with no saved config: NOT_CONFIGURED, never FAILED. */
+        notConfigured: Set<PathFamily> = emptySet()
     ): List<LivePath> = families.sortedBy { it.ordinal }.map { f ->
         val mine = results.filter { it.family == f }
         val passed = mine.filter { it.stage.carriesTraffic }
@@ -237,6 +239,9 @@ object FullAnalysis {
                 passed.firstOrNull { it.status == PathStatus.VERIFIED }?.status ?: passed.firstOrNull { it.status == PathStatus.CANDIDATE }?.status ?: best.status,
                 best.stage, best.confidence, best.latencyMs, now, "real request passed through ${best.name}", mine.size, passed.size)
             f in notRequired -> LivePath("family-${f.name}", f.title, PathStatus.NOT_REQUIRED, reason = notTestedReason[f] ?: "enough verified paths already")
+            f in notConfigured && mine.isEmpty() -> LivePath("family-${f.name}", f.title, PathStatus.NOT_CONFIGURED, reason = notTestedReason[f] ?: "no config of this family is saved")
+            mine.isNotEmpty() && mine.all { it.status == PathStatus.RECENTLY_FAILED } -> LivePath("family-${f.name}", f.title, PathStatus.RECENTLY_FAILED,
+                reason = mine.first().why, tried = mine.size)
             // A skip is a planning choice from other measurements, never proof that the family is blocked.
             plan.skip[f] != null -> LivePath("family-${f.name}", f.title, PathStatus.NOT_TESTED, reason = "skipped: ${plan.skip[f]}")
             mine.any { !it.status.equals(PathStatus.NOT_TESTED) } -> LivePath("family-${f.name}", f.title,
@@ -260,7 +265,8 @@ object FullAnalysis {
         now: Long,
         finished: Boolean = false,
         stopReason: String? = null,
-        notRequired: Set<PathFamily> = emptySet()
+        notRequired: Set<PathFamily> = emptySet(),
+        notConfigured: Set<PathFamily> = emptySet()
     ): List<LivePath> {
         val byFamily = tracks.groupBy { it.candidate.family }
         return (byFamily.keys + notTestedReason.keys).distinct().sortedBy { it.ordinal }.map { f ->
@@ -285,6 +291,9 @@ object FullAnalysis {
                 tested.isNotEmpty() -> base.copy(status = PathStatus.FAILED, confidence = 0.0, checkedAt = now,
                     reason = tested.firstNotNullOfOrNull { it.failure } ?: "no real request passed")
                 f in notRequired -> base.copy(status = PathStatus.NOT_REQUIRED, reason = "not needed: ${stopReason ?: "enough verified paths"}")
+                f in notConfigured && mine.isEmpty() -> base.copy(status = PathStatus.NOT_CONFIGURED, reason = notTestedReason[f] ?: "no config of this family is saved")
+                mine.isNotEmpty() && mine.all { it.notTested?.startsWith("recently failed") == true } ->
+                    base.copy(status = PathStatus.RECENTLY_FAILED, reason = mine.first().notTested!!)
                 plan.skip[f] != null -> base.copy(reason = "skipped: ${plan.skip[f]}")
                 !finished && mine.any { it.notTested == null } -> base.copy(status = PathStatus.QUEUED, reason = "waiting for its turn")
                 else -> base.copy(reason = notTestedReason[f] ?: mine.firstNotNullOfOrNull { it.notTested }?.let { "not tested: $it" }

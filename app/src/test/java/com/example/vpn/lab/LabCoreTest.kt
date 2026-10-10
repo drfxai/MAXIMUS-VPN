@@ -51,7 +51,9 @@ class LabCoreTest {
         assertEquals(LabFailureCategory.TLS_HANDSHAKE_FAILED, o.category)
         val a = FailureClassifier.assess(o.category)
         assertEquals(Assessment.Source.DETERMINISTIC_RULE, a.by)
-        assertTrue(a.text.contains("possible"))
+        // A hedged reading; a TLS failure alone never claims SNI filtering.
+        assertTrue(a.text.contains("not known"))
+        assertTrue(a.text.startsWith("TLS path failure"))
         assertTrue(a.confidence < 1.0)
     }
 

@@ -13,18 +13,22 @@ enum class NetworkState(val title: String, val detail: String) {
     FILTERED("Filtered", "International sites answer, with several kinds of filtering"),
     DNS_MANIPULATED("DNS tampered", "The network's DNS answers some foreign names with block pages"),
     SNI_INTERFERENCE_SUSPECTED("SNI interference suspected", "TLS was cut for filtered site names on several addresses while neutral names passed"),
-    TLS_INTERFERED("TLS interfered", "International TCP connects, but TLS handshakes are cut"),
+    /**
+     * TLS to neutral international references fails although TCP connects. A path failure, not a claim about
+     * server names: only a controlled comparison (same address, filtered vs neutral name) may say SNI.
+     */
+    TLS_PATH_FAILURE("TLS path failure", "International TCP connects, but TLS handshakes do not complete"),
     UDP_DEGRADED("UDP degraded", "UDP abroad answers only some of the time"),
-    UDP_BLOCKED("UDP blocked", "UDP to international addresses gets no answer"),
+    UDP_BLOCKED_SUSPECTED("UDP blocked (suspected)", "UDP to international addresses got no answer in repeated checks"),
     QUIC_DEGRADED("QUIC degraded", "Some QUIC endpoints answer and some do not"),
-    QUIC_BLOCKED("QUIC blocked (suspected)", "No QUIC endpoint answered while UDP DNS and TLS abroad worked"),
+    QUIC_BLOCKED_SUSPECTED("QUIC blocked (suspected)", "No QUIC endpoint answered while UDP DNS and TLS abroad worked"),
     IPV4_DEGRADED("IPv4 degraded", "International TLS fails over IPv4 but works over IPv6"),
     IPV6_DEGRADED("IPv6 degraded", "The network offers IPv6 but international TLS over it fails"),
     CDN_PATH_DEGRADED("CDN path degraded", "A major CDN fails while other international sites answer"),
     INTERNATIONAL_DEGRADED("International degraded", "International sites answer slowly or unreliably"),
     PARTIAL_INTERNATIONAL_CONNECTIVITY("Partial egress", "Some international references answer and some do not"),
     NIN_WITH_DNS_EGRESS("National network, DNS egress", "Only domestic sites answer, but recursive DNS was verified to reach abroad"),
-    DOMESTIC_ONLY_NO_VERIFIED_EGRESS("Domestic only", "Only domestic sites answer and no way out was verified"),
+    DOMESTIC_ONLY("Domestic only", "Only domestic sites answer and no way out was verified"),
     /**
      * Nothing ordinary answers abroad and DNS, UDP, DoH, DoT or QUIC still showed some life. Recovery
      * families (DNS tunnel, Psiphon, Tor bridges, Mihomo transports) are worth trying.
@@ -36,10 +40,12 @@ enum class NetworkState(val title: String, val detail: String) {
      */
     NO_VERIFIED_EGRESS("No verified egress", "No reference answered; recovery methods have not ruled out a way out"),
     /**
-     * Only after a full analysis: every network-level check failed, and every available recovery family
-     * was tested and failed. Never produced from the network profile alone.
+     * After recovery: every available, configured family was really tested on this network and none carried
+     * international traffic. It means only "MAXIMUS did not verify international egress using the currently
+     * available, configured and tested methods" and never that no other technology could work.
      */
-    TRUE_PHYSICAL_ISOLATION("No connectivity (verified)", "Every check and every available recovery method failed on this network")
+    NO_VERIFIED_EGRESS_AFTER_RECOVERY("No verified egress after recovery",
+        "Maximus did not verify international egress using the methods available, configured and tested here")
 }
 
 /**
@@ -106,12 +112,12 @@ object NetworkStateClassifier {
         // No international reference completed TLS over IPv4.
         if (intl == false || (intl == null && p.tlsAvailable == false && p.tcpAvailable == false)) {
             if (p.ipv6TlsOk == true) return reading(NetworkState.IPV4_DEGRADED, 0.7, setOf(NetworkState.IPV4_DEGRADED))
-            if (p.tcpAvailable == true) return reading(NetworkState.TLS_INTERFERED, 0.7)
+            if (p.tcpAvailable == true) return reading(NetworkState.TLS_PATH_FAILURE, 0.7)
             return when (p.domesticReachable) {
                 // DNS egress means a recursive resolver reached a foreign authoritative server; a direct
                 // UDP answer from a foreign resolver is a different property and never counts here.
                 true -> if (p.recursiveDnsEgress == true) reading(NetworkState.NIN_WITH_DNS_EGRESS, 0.75)
-                else reading(NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS, 0.7)
+                else reading(NetworkState.DOMESTIC_ONLY, 0.7)
                 // Nothing ordinary answers. Any sign of life (a DNS answer, a UDP reply, DoH, DoT, a QUIC
                 // endpoint) means traffic is filtered rather than absent. Neither case is isolation: that
                 // needs every recovery family to fail too (see EmergencyRecovery.conclude).
@@ -126,9 +132,9 @@ object NetworkStateClassifier {
         val restrictions = linkedSetOf<NetworkState>()
         if (p.dnsManipulated == true) restrictions += NetworkState.DNS_MANIPULATED
         if (p.sniFiltered == true) restrictions += NetworkState.SNI_INTERFERENCE_SUSPECTED
-        if (p.udpAvailable == false) restrictions += NetworkState.UDP_BLOCKED
+        if (p.udpAvailable == false) restrictions += NetworkState.UDP_BLOCKED_SUSPECTED
         when (p.quicStatus) {
-            "QUIC_BLOCKED_SUSPECTED" -> restrictions += NetworkState.QUIC_BLOCKED
+            "QUIC_BLOCKED_SUSPECTED" -> restrictions += NetworkState.QUIC_BLOCKED_SUSPECTED
             "QUIC_DEGRADED" -> restrictions += NetworkState.QUIC_DEGRADED
         }
         if (p.ipv6Available == true && p.ipv6TlsOk == false) restrictions += NetworkState.IPV6_DEGRADED
@@ -155,7 +161,7 @@ object NetworkStateClassifier {
 
     /** States where no ordinary international path exists and recovery families are the plan. */
     val EMERGENCY = setOf(
-        NetworkState.NIN_WITH_DNS_EGRESS, NetworkState.DOMESTIC_ONLY_NO_VERIFIED_EGRESS,
+        NetworkState.NIN_WITH_DNS_EGRESS, NetworkState.DOMESTIC_ONLY,
         NetworkState.SEVERE_FILTERING, NetworkState.NO_VERIFIED_EGRESS
     )
 }
@@ -200,36 +206,31 @@ class NetworkStateTracker {
 }
 
 /**
- * The only way to TRUE_PHYSICAL_ISOLATION: after a full analysis, every network-level check was negative
- * (no international or domestic answer, no DNS, UDP, DoH, DoT or QUIC reply), every family with a saved
- * config was really tested (not merely skipped) and none passed, and at least one recovery engine family
- * was among them. Anything less stays NO_VERIFIED_EGRESS (or what the classifier said). Pure.
+ * The only way to NO_VERIFIED_EGRESS_AFTER_RECOVERY: after a recovery run, every family with a saved, supported
+ * config was really tested (not merely skipped) and none carried a real request. It is a statement about the
+ * methods MAXIMUS had and tested here, never that the network is physically isolated or that no other
+ * technology could work. Anything less stays NO_VERIFIED_EGRESS (or what the classifier said). Pure.
  */
 object EmergencyRecovery {
 
     fun conclude(net: NetworkCapabilityProfile?, tracks: List<AdaptivePlanner.Track>, available: Set<PathFamily>): NetworkState? {
-        if (net == null) return null
-        val networkDead = net.internationalReachable == false && net.domesticReachable != true && net.dnsWorking != true &&
-            net.udpAvailable != true && net.dohReachable != true && net.dotReachable != true &&
-            net.quicStatus != "QUIC_AVAILABLE" && net.quicStatus != "QUIC_DEGRADED"
-        if (!networkDead) return null
+        if (available.isEmpty()) return null
         val tested = tracks.filter { it.outcomes.isNotEmpty() }
         if (tested.isEmpty() || tested.any { it.passes > 0 }) return null
         val testedFamilies = tested.map { it.candidate.family }.toSet()
         if (!testedFamilies.containsAll(available)) return null
-        if (testedFamilies.none { it.engine }) return null
-        return NetworkState.TRUE_PHYSICAL_ISOLATION
+        return NetworkState.NO_VERIFIED_EGRESS_AFTER_RECOVERY
     }
 
-    /** Why isolation was not concluded, in words, so the report never implies more than was shown. */
+    /** What the conclusion leaves open, in words, so the report never implies more than was shown. */
     fun whyNot(net: NetworkCapabilityProfile?, tracks: List<AdaptivePlanner.Track>, available: Set<PathFamily>): String? {
-        if (conclude(net, tracks, available) != null) return null
         val untested = available - tracks.filter { it.outcomes.isNotEmpty() }.map { it.candidate.family }.toSet()
         return when {
             tracks.any { it.passes > 0 } -> null
-            untested.isNotEmpty() -> "Not every recovery family was tested (${untested.joinToString { it.title }}), so isolation is not concluded."
-            available.none { it.engine } -> "No recovery engine config (DNS tunnel, Psiphon, Tor, Mihomo) is saved, so isolation cannot be concluded."
-            else -> "Some network-level checks still got an answer, so this is filtering, not isolation."
+            available.isEmpty() -> "No usable config is saved, so nothing could be tested."
+            untested.isNotEmpty() -> "Not every family was tested (${untested.joinToString { it.title }}), so recovery is not finished."
+            available.none { it.engine } -> "Only ordinary configs were tested. Recovery engines (DNS tunnel, Psiphon, Tor bridges) were not available to try."
+            else -> "Every available method was tested here. Other methods or servers may still work."
         }
     }
 }

@@ -23,8 +23,12 @@ class AdaptivePlanner(
     private val plan: ExperimentPlanner.Plan,
     private val net: NetworkCapabilityProfile?,
     private var priors: Priors = Priors(),
-    private val device: Device = Device()
+    private val device: Device = Device(),
+    /** CONNECT stops at the first verified path; FULL_ANALYSIS goes on to bounded optimization. */
+    private val goal: Goal = Goal.FULL_ANALYSIS
 ) {
+    enum class Goal { CONNECT, FULL_ANALYSIS }
+
     enum class Phase(val title: String) {
         FAST_RECOVERY("Fast recovery: finding a first working path"),
         DEEP_OPTIMIZATION("Deep optimization: verifying and comparing paths"),
@@ -66,7 +70,16 @@ class AdaptivePlanner(
      * Soft priors: [memory] per family in -1..1 from fresh, unexpired evidence on this network (never stale
      * history), and [ai], families an optional AI checkpoint ranked first. Both only reorder.
      */
-    data class Priors(val memory: Map<PathFamily, Double> = emptyMap(), val ai: List<PathFamily> = emptyList())
+    data class Priors(
+        val memory: Map<PathFamily, Double> = emptyMap(),
+        val ai: List<PathFamily> = emptyList(),
+        /**
+         * Candidates that failed a real request on this network session moments ago (ConnectivityBrain): not
+         * retested now, so the budget goes to other paths. A network change, an aged-out failure or a newer pass
+         * makes them eligible again.
+         */
+        val recentlyFailed: Map<String, String> = emptyMap()
+    )
 
     data class Device(val metered: Boolean? = null, val lowBattery: Boolean = false)
 
@@ -115,7 +128,11 @@ class AdaptivePlanner(
         if (ai.isNotEmpty()) event("ai-${ai.joinToString { it.name }}", "AI checkpoint suggested ${ai.joinToString { it.title }} first (order only).")
     }
 
-    fun add(candidates: List<Candidate>) = candidates.forEach { c -> tracks.putIfAbsent(c.id, Track(c)) }
+    fun add(candidates: List<Candidate>) = candidates.forEach { c ->
+        val why = priors.recentlyFailed[c.id]
+        tracks.putIfAbsent(c.id, if (why != null) Track(c, notTested = "recently failed: $why") else Track(c))
+        if (why != null) event("recent-${c.family.name}", "${c.name} failed a real request on this network moments ago: not retested now.")
+    }
 
     fun tracks(): List<Track> = tracks.values.toList()
     fun track(id: String): Track? = tracks[id]
@@ -257,6 +274,7 @@ class AdaptivePlanner(
     /** The stop rules; null to continue. */
     private fun stop(now: Long): String? {
         if (spent >= plan.budget) return "the test budget of ${plan.budget} is spent"
+        if (goal == Goal.CONNECT && verifiedFamilies().isNotEmpty()) return "a verified path was found for the connection"
         val verified = verifiedFamilies()
         if (verified.size >= 3) {
             val a = verified[0].bestLatency

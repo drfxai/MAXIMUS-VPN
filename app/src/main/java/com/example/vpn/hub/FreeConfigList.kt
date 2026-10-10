@@ -57,15 +57,26 @@ object FreeConfigList {
      * [INTEL_FILE] and its hash matches; null when the manifest names none. Throws [HubManifest.Refused]
      * when the signature or the hash does not match.
      */
-    fun downloadIntel(url: String, get: (String) -> String, key: String = HubManifest.PUBLIC_KEY_DER_BASE64): String? {
+    fun downloadIntel(url: String, get: (String) -> String, key: String = HubManifest.PUBLIC_KEY_DER_BASE64): String? =
+        downloadSigned(url, INTEL_FILE, get, key)
+
+    /** The probe-target manifest published beside the list (see ProbeManifest), named in the same signed manifest. */
+    const val PROBES_FILE = "probes.json"
+
+    /**
+     * A file [name] published beside the list at [url], only when the signed manifest names it and its hash
+     * matches; null when the manifest names none. Throws [HubManifest.Refused] when the signature or the hash
+     * does not match.
+     */
+    fun downloadSigned(url: String, name: String, get: (String) -> String, key: String = HubManifest.PUBLIC_KEY_DER_BASE64): String? {
         val base = url.substringBeforeLast('/')
         val manifest = HubManifest.verify(get("$base/manifest.json").toByteArray(Charsets.UTF_8), get("$base/manifest.sig"), key)
-        if (!manifest.sha256.containsKey(INTEL_FILE)) return null
-        val intel = get("$base/$INTEL_FILE")
-        if (!HubManifest.matches(manifest, INTEL_FILE, intel.toByteArray(Charsets.UTF_8))) {
-            throw HubManifest.Refused("The intelligence rules do not match their signed manifest")
+        if (!manifest.sha256.containsKey(name)) return null
+        val body = get("$base/$name")
+        if (!HubManifest.matches(manifest, name, body.toByteArray(Charsets.UTF_8))) {
+            throw HubManifest.Refused("$name does not match its signed manifest")
         }
-        return intel
+        return body
     }
 
     private val COUNTRY_PREFIX = Regex("^([A-Z]{2}) \u00B7 ")

@@ -497,6 +497,16 @@ class SubscriptionManager(
             } catch (e: Exception) {
                 XrayLogManager.w("SUBSCRIPTION", "Intelligence rules not taken: ${SecretRedactor.redact(e.message.orEmpty())}")
             }
+            // Probe targets for multi-target verification, from the same signed manifest; a failure keeps the
+            // last valid manifest or the built-in targets (ProbeManifestStore).
+            try {
+                FreeConfigList.downloadSigned(outcome.url, FreeConfigList.PROBES_FILE, get, freeListKey)
+                    ?.let { com.example.vpn.connectivity.ProbeManifestStore.accept(it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                XrayLogManager.w("SUBSCRIPTION", "Probe manifest not taken: ${SecretRedactor.redact(e.message.orEmpty())}")
+            }
         }
         val viaMirror = outcome.url.takeIf { it != subscription.url }
         outcome.failures.forEach { (url, why) ->

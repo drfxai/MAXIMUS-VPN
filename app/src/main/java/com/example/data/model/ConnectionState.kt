@@ -70,7 +70,9 @@ data class ConnectionState(
     /** Bumped when the phone's own network changes: results measured before it no longer hold. */
     val networkGeneration: Int = 0,
     /** The last connect stopped because the server failed its real test; "Connect anyway" may override. */
-    val canConnectAnyway: Boolean = false
+    val canConnectAnyway: Boolean = false,
+    /** Where the connect's recovery escalation stands (RecoveryStage title), for display only. */
+    val recoveryStage: String? = null
 ) {
     val isConnected: Boolean get() = status == ConnectionStatus.CONNECTED
 

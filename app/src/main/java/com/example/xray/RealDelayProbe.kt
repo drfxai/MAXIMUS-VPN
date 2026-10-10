@@ -28,10 +28,32 @@ object RealDelayProbe {
     const val MAX_BATCH = 5
 
     sealed class Outcome {
-        data class Delay(val latencyMs: Long) : Outcome()
-        data class Failed(val reason: String) : Outcome()
+        /**
+         * A real request went through. [target] is the ProbeTargets id that answered; [targetsTried] counts the
+         * targets asked (a fallback after one target's failure makes it 2).
+         */
+        data class Delay(val latencyMs: Long, val target: String = "", val targetsPassed: Int = 1, val targetsTried: Int = 1) : Outcome()
+        /**
+         * No request got through. [request] is false when no request was sent (the config could not be built);
+         * [targetsTried] counts the independent targets that all failed through this candidate.
+         */
+        data class Failed(val reason: String, val request: Boolean = true, val targetsTried: Int = 1) : Outcome()
         data class NotRun(val reason: String) : Outcome()
     }
+
+    /** Independent targets tried in a fast check before a candidate is called failed (one fallback). */
+    const val FAST_TARGETS = 2
+
+    /**
+     * Every finished outcome of [measure], so one evidence model sees every real test the app runs (see
+     * ConnectivityBrain). Never given credentials: the receiver gets the profile object and keeps only its
+     * fingerprint and family.
+     */
+    @Volatile
+    var observer: ((VlessProfile, Outcome) -> Unit)? = null
+
+    /** HTTP requests actually sent through candidates, for the LAB's resource budget. */
+    val requestsSent = java.util.concurrent.atomic.AtomicLong(0)
 
     /** Sends the libXray invoke request and returns its JSON response; replaceable in tests. */
     @Volatile
@@ -50,10 +72,83 @@ object RealDelayProbe {
 
     fun measure(profile: VlessProfile, timeoutSec: Int): Outcome = measure(listOf(profile), timeoutSec).first()
 
+    /**
+     * Fast check of each profile against the first independent target. A profile that failed is asked once more
+     * through the next target (another provider) unless that first target is known to be up, either because
+     * another profile in the same batch just passed through it or because one did recently (ProbeTargets.Health).
+     * So one target's outage never marks a working candidate as failed, and a known-up target costs no extra request.
+     */
     fun measure(profiles: List<VlessProfile>, timeoutSec: Int): List<Outcome> =
-        profiles.chunked(MAX_BATCH).flatMap { measureBatch(it, timeoutSec) }
+        profiles.chunked(MAX_BATCH).flatMap { batch ->
+            measureFast(batch, timeoutSec).also { outcomes ->
+                observer?.let { o -> batch.zip(outcomes).forEach { (p, r) -> if (r !is Outcome.NotRun) runCatching { o(p, r) } } }
+            }
+        }
 
-    private fun measureBatch(profiles: List<VlessProfile>, timeoutSec: Int): List<Outcome> {
+    private fun measureFast(batch: List<VlessProfile>, timeoutSec: Int): List<Outcome> {
+        val targets = ProbeTargets.independent(n = FAST_TARGETS).ifEmpty { ProbeTargets.BUILT_IN.take(1) }
+        val results = measureBatch(batch, timeoutSec, targets[0]).toMutableList()
+        var previous = targets[0]
+        for (next in targets.drop(1)) {
+            val someonePassed = results.any { it is Outcome.Delay }
+            if (someonePassed || ProbeTargets.health.knownUp(previous)) break
+            val retry = results.indices.filter { (results[it] as? Outcome.Failed)?.request == true }
+            if (retry.isEmpty()) break
+            val again = measureBatch(retry.map { batch[it] }, timeoutSec, next)
+            retry.forEachIndexed { i, index ->
+                val before = results[index] as Outcome.Failed
+                results[index] = when (val o = again[i]) {
+                    is Outcome.Delay -> o.copy(targetsTried = before.targetsTried + 1)
+                    is Outcome.Failed -> before.copy(targetsTried = before.targetsTried + 1)
+                    is Outcome.NotRun -> before
+                }
+            }
+            previous = next
+        }
+        return results
+    }
+
+    /** Result of asking one candidate every target in [targets] (full verification). */
+    data class MultiTarget(
+        val passedTargets: List<String>,
+        val failedTargets: Map<String, String>,
+        val latencyMs: Long?,
+        val notRun: String? = null
+    ) {
+        val tried: Int get() = passedTargets.size + failedTargets.size
+        val verdict: ProbeTargets.Verdict get() = if (notRun != null && tried == 0) ProbeTargets.Verdict.NOT_RUN
+            else ProbeTargets.verdict(passedTargets.size, tried)
+    }
+
+    /**
+     * Full verification: one real request per independent target. One pass proves egress; fewer than all is
+     * degraded; none is this candidate's failure only.
+     */
+    fun measureTargets(profile: VlessProfile, timeoutSec: Int, targets: List<ProbeTargets.Target> = ProbeTargets.independent(n = 3)): MultiTarget {
+        val passed = mutableListOf<String>()
+        val failed = linkedMapOf<String, String>()
+        val latencies = mutableListOf<Long>()
+        var notRun: String? = null
+        for (t in targets) {
+            when (val o = measureBatch(listOf(profile), timeoutSec, t).first()) {
+                is Outcome.Delay -> { passed += t.id; latencies += o.latencyMs }
+                is Outcome.Failed -> if (o.request) failed[t.id] = o.reason else return MultiTarget(passed, failed, latencies.minOrNull(), o.reason)
+                is Outcome.NotRun -> { notRun = o.reason; break }
+            }
+        }
+        val result = MultiTarget(passed, failed, latencies.minOrNull(), notRun)
+        observer?.let { o ->
+            val summary: Outcome? = when {
+                passed.isNotEmpty() -> Outcome.Delay(latencies.min(), passed.first(), passed.size, result.tried)
+                failed.isNotEmpty() -> Outcome.Failed(failed.values.first(), true, failed.size)
+                else -> null
+            }
+            summary?.let { runCatching { o(profile, it) } }
+        }
+        return result
+    }
+
+    private fun measureBatch(profiles: List<VlessProfile>, timeoutSec: Int, target: ProbeTargets.Target): List<Outcome> {
         // Only the proxy outbound is used, so the user's DNS and routing settings do not matter.
         // Profiles carried by a separate engine program (Mihomo, Psiphon...) cannot be measured by the
         // Xray core alone; they are not failures, just not measured here.
@@ -70,11 +165,13 @@ object RealDelayProbe {
         val results = arrayOfNulls<Outcome>(profiles.size)
         configs.forEachIndexed { index, config ->
             if (config == null) results[index] = Outcome.NotRun("carried by its own engine")
-            config?.exceptionOrNull()?.let { results[index] = Outcome.Failed(it.message ?: "Invalid configuration") }
+            config?.exceptionOrNull()?.let { results[index] = Outcome.Failed(it.message ?: "Invalid configuration", request = false) }
         }
         if (runnable.isNotEmpty()) {
             val outcomes = try {
-                parseResponse(invoker(buildRequest(runnable.map { it.second }, timeoutSec).toString()), runnable.size)
+                parseResponse(invoker(buildRequest(runnable.map { it.second }, target.timeoutSec ?: timeoutSec, target.url).toString()), runnable.size)
+                    .also { list -> if (list.any { it !is Outcome.NotRun }) requestsSent.addAndGet(list.count { it !is Outcome.NotRun }.toLong()) }
+                    .map { o -> if (o is Outcome.Delay) o.copy(target = target.id).also { ProbeTargets.health.recordPass(target) } else o }
             } catch (e: Exception) {
                 List(runnable.size) { Outcome.NotRun(e.message ?: e.javaClass.simpleName) }
             } catch (e: LinkageError) {
