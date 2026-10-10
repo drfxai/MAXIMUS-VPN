@@ -17,6 +17,9 @@ import com.example.vpn.connectivity.RecoveryLedger
 import com.example.vpn.connectivity.RecoveryProfiles
 import com.example.vpn.connectivity.RecoverySecurityGate
 import com.example.vpn.connectivity.BpbRecoveryEngine
+import com.example.vpn.connectivity.DnsEvidenceKind
+import com.example.vpn.connectivity.DnsEvidenceStatus
+import com.example.vpn.connectivity.MeasurementType
 import com.example.vpn.connectivity.EndpointScoringEngine
 import com.example.vpn.diagnostics.FailureStage
 import com.example.vpn.smart.NetworkCapabilityDetector
@@ -585,27 +588,24 @@ class LabController(
         book.observeNetwork(key)
         book.recordReading(reading)
         val src = com.example.vpn.connectivity.EvidenceSource.LAB
-        val T = com.example.vpn.connectivity.MeasurementType
-        cap.internationalReachable?.let { book.recordNetwork(src, T.NETWORK_REACHABILITY, "international", it, reading.confidence) }
-        cap.domesticReachable?.let { book.recordNetwork(src, T.NETWORK_REACHABILITY, "domestic", it) }
+        cap.internationalReachable?.let { book.recordNetwork(src, MeasurementType.NETWORK_REACHABILITY, "international", it, reading.confidence) }
+        cap.domesticReachable?.let { book.recordNetwork(src, MeasurementType.NETWORK_REACHABILITY, "domestic", it) }
         // Only the controlled comparison (same address, filtered vs neutral name) is SNI evidence.
-        cap.sniFiltered?.let { book.recordNetwork(src, T.SNI_COMPARISON, "sni", !it, detail = "${cap.sniCut ?: 0}/${cap.sniPairs ?: 0} cut") }
-        cap.udpAvailable?.let { book.recordNetwork(src, T.UDP, "udp", it) }
-        cap.quicStatus?.takeIf { it != "QUIC_NOT_MEASURED" }?.let { book.recordNetwork(src, T.QUIC, "quic", it == "QUIC_AVAILABLE", detail = it) }
-        cap.dnsManipulated?.let { book.recordNetwork(src, T.DNS, "dns-poisoned", !it) }
-        val K = com.example.vpn.connectivity.DnsEvidenceKind
-        val S = com.example.vpn.connectivity.DnsEvidenceStatus
+        cap.sniFiltered?.let { book.recordNetwork(src, MeasurementType.SNI_COMPARISON, "sni", !it, detail = "${cap.sniCut ?: 0}/${cap.sniPairs ?: 0} cut") }
+        cap.udpAvailable?.let { book.recordNetwork(src, MeasurementType.UDP, "udp", it) }
+        cap.quicStatus?.takeIf { it != "QUIC_NOT_MEASURED" }?.let { book.recordNetwork(src, MeasurementType.QUIC, "quic", it == "QUIC_AVAILABLE", detail = it) }
+        cap.dnsManipulated?.let { book.recordNetwork(src, MeasurementType.DNS, "dns-poisoned", !it) }
         when {
-            cap.dnsManipulated == true -> book.recordDns(K.SYSTEM_DNS, S.POISONED)
-            cap.dnsWorking == true -> book.recordDns(K.SYSTEM_DNS, S.WORKS)
-            cap.dnsWorking == false -> book.recordDns(K.SYSTEM_DNS, S.FAILED)
+            cap.dnsManipulated == true -> book.recordDns(DnsEvidenceKind.SYSTEM_DNS, DnsEvidenceStatus.POISONED)
+            cap.dnsWorking == true -> book.recordDns(DnsEvidenceKind.SYSTEM_DNS, DnsEvidenceStatus.WORKS)
+            cap.dnsWorking == false -> book.recordDns(DnsEvidenceKind.SYSTEM_DNS, DnsEvidenceStatus.FAILED)
         }
-        cap.udpAvailable?.let { book.recordDns(K.DIRECT_FOREIGN_DNS, if (it) S.WORKS else S.FAILED) }
+        cap.udpAvailable?.let { book.recordDns(DnsEvidenceKind.DIRECT_FOREIGN_DNS, if (it) DnsEvidenceStatus.WORKS else DnsEvidenceStatus.FAILED) }
         // DoH and DoT answers come over an authenticated TLS session, so a pass is verified.
-        cap.dohReachable?.let { book.recordDns(K.PRECONNECT_DOH_RESOLUTION, if (it) S.VERIFIED else S.FAILED) }
-        cap.dotReachable?.let { book.recordDns(K.PRECONNECT_DOT, if (it) S.VERIFIED else S.FAILED) }
+        cap.dohReachable?.let { book.recordDns(DnsEvidenceKind.PRECONNECT_DOH_RESOLUTION, if (it) DnsEvidenceStatus.VERIFIED else DnsEvidenceStatus.FAILED) }
+        cap.dotReachable?.let { book.recordDns(DnsEvidenceKind.PRECONNECT_DOT, if (it) DnsEvidenceStatus.VERIFIED else DnsEvidenceStatus.FAILED) }
         // Recursive egress needs a controlled foreign authoritative zone; DoH or 1.1.1.1 never stand in for it.
-        cap.recursiveDnsEgress?.let { book.recordDns(K.RECURSIVE_FOREIGN_DNS_EGRESS, if (it) S.VERIFIED else S.FAILED) }
+        cap.recursiveDnsEgress?.let { book.recordDns(DnsEvidenceKind.RECURSIVE_FOREIGN_DNS_EGRESS, if (it) DnsEvidenceStatus.VERIFIED else DnsEvidenceStatus.FAILED) }
     }
 
     /** A path that carried real traffic in Connect mode's fast recovery. */

@@ -1029,7 +1029,7 @@ class RayVpnService : VpnService() {
             showForegroundNotification("Verifying traffic through ${profile.name}...")
             val check = verifyTraffic()
             book.recordPath(com.example.vpn.connectivity.EvidenceSource.SMART_CONNECT, com.example.vpn.connectivity.MeasurementType.TUNNEL_TRAFFIC,
-                com.example.vpn.connectivity.PathRef.of(profile), com.example.vpn.stealth.ConnectionKind.of(profile).name, check.first != null,
+                com.example.vpn.connectivity.PathRef.of(profile), com.example.vpn.stealth.ConnectionKind.of(profile), check.first != null,
                 check.first, check.second?.name)
             if (check.first != null) ladder.advance(com.example.vpn.connectivity.RecoveryStage.CONNECTED_VERIFIED)
             else activeMtuKey?.let { com.example.vpn.lab.MtuIntelligence.cache.failed(it); activeMtuKey = null }
