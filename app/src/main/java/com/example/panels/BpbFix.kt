@@ -26,6 +26,18 @@ object BpbFix {
             "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256:TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"
 
     /**
+     * Firefox's cipher order (TLS 1.3, then ECDHE with AES-GCM, ChaCha20 and AES-CBC), which the community
+     * pairs with the empty-record fragment on Irancell. Like [CIPHER_SUITES] it needs the Go TLS stack.
+     */
+    const val FIREFOX_CIPHER_SUITES =
+        "TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_256_GCM_SHA384:" +
+            "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256:" +
+            "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256:TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256:" +
+            "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:" +
+            "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA:TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA:" +
+            "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA:TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA"
+
+    /**
      * The original FIX BPB recipe: an empty TLS record, a 104-byte record, then 1-byte records, all in
      * one write, which is then split into TCP segments. The empty record confuses some filters, but
      * TLS forbids empty handshake records (RFC 8446 section 5.1) and strict servers such as Go's abort

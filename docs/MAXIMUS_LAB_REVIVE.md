@@ -42,6 +42,22 @@ Everything else stays refused:
 - `allowInsecure`,
 - any change to SNI, Host, path, UUID or security mode.
 
+## Network-aware runs
+
+Before reviving, a run looks at the network the phone is on:
+
+- **Firewall order** (`NetworkFirewalls`). The network key's MCC+MNC names the network, not the SIM.
+  - Irancell (43235): the Irancell recipe first (empty-record fragment, Go TLS, Firefox cipher list), then the other fragment recipes.
+  - Hamrah-e-Aval (43211): ECH first; fragment recipes are skipped, since the community reports fragment fully blocked there, IPv6 too.
+  - Rightel (43220): ECH first, fragment last.
+  - Wi-Fi and other networks: the usual order.
+  - The user can override the detected network on the page (Auto, Irancell, MCI, Rightel, Other).
+  - The preference only adds to the ledger's measured success rate, so this network's own results win once there are some.
+- **ECH key check** (`EchKeyCheck`). One RFC 8484 GET per Cloudflare ECH resolver asks for the HTTPS record of `cloudflare-ech.com`. Recipes through a resolver that returned no ECH key are skipped. When none returned it, nothing is skipped, since the check itself may be what was blocked.
+- **Clean IPs.** When no clean Cloudflare address is validated on this network and some config is dead, the existing clean-IP scanner (`CleanIpOptimizer`) runs once through the first dead config: TCP, TLS with the config's SNI, and the config's own WebSocket or HTTP exchange. Up to 6 addresses that pass are recorded in the endpoint scores for this network, which makes them endpoint recipes.
+
+The page shows the network, the resolvers that returned the ECH key and the clean IPs used.
+
 ## Files
 
 - `vpn/lab/ConfigRevival.kt`: the run.
@@ -49,6 +65,8 @@ Everything else stays refused:
 - `RayApplication.configRevival`: wiring.
 - `RecoveryProfile.kt`: the new profiles `ech-cloudflare*` and `bpb-fragment-v1`.
 - `BpbFix.FINAL_MASK_V1`: the v1 mask.
+- `vpn/connectivity/NetworkFirewalls.kt`, `EchKeyCheck.kt`: network order and the ECH key check.
+- `BpbFix.FIREFOX_CIPHER_SUITES` and the `irancell-fragment` profile.
 - Tests: `ConfigRevivalTest`.
 
 ## Not verified
