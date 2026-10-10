@@ -23,17 +23,23 @@ import com.example.vpn.lab.LabBrief
 import com.example.vpn.lab.research.GitHubReleaseSource
 import com.example.vpn.lab.research.ResearchPipeline
 import com.example.vpn.lab.research.ResearchStore
+import com.example.vpn.smart.NetworkKey
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Holds the LAB screen's state: the controller's snapshot plus the saved configs (names only) and research. */
 class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     private val lab = RayApplication.instance.lab
+    private val revival = RayApplication.instance.configRevival
+    private var revivalJob: Job? = null
     private val gateway = AiGatewayHolder.get(app)
     private val chat = AiChat { consumer, request -> gateway.chat(consumer, request) }
     private val research = run {
@@ -57,6 +63,8 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadConfigs() = viewModelScope.launch {
         val configs = withContext(Dispatchers.IO) { runCatching { RayApplication.instance.serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList()) }
+        val eligible = runCatching { revival.eligibleCount(configs) }.getOrDefault(0)
+        local.update { it.copy(revival = it.revival.copy(eligible = eligible)) }
         local.value = local.value.copy(configs = configs.map { p ->
             LabConfigOption(p.id, p.name.ifBlank { "Config" }, listOf(p.protocolType.displayName, p.transport.uppercase().ifBlank { null }, p.security.uppercase().ifBlank { null })
                 .filterNotNull().filter { it != "NONE" }.joinToString(" · "))
@@ -70,6 +78,26 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun open(section: LabSection?) { local.value = local.value.copy(section = section) }
+
+    /** Revives the dead Cloudflare configs (VPN off); results stay on the Revive page. */
+    fun revive() {
+        if (revivalJob?.isActive == true) return
+        revivalJob = viewModelScope.launch {
+            local.update { it.copy(revival = it.revival.copy(running = true, done = 0, total = 0, current = "Starting")) }
+            val results = withContext(Dispatchers.IO) {
+                val profiles = runCatching { RayApplication.instance.serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                val network = NetworkKey.current(getApplication<Application>())
+                revival.run(profiles, network, cancelled = { !isActive }) { p ->
+                    local.update { it.copy(revival = it.revival.copy(done = p.done, total = p.total, current = p.current ?: it.revival.current)) }
+                }
+            }
+            local.update { it.copy(revival = it.revival.copy(running = false, current = null, results = results, ranAt = System.currentTimeMillis())) }
+        }.also { job ->
+            job.invokeOnCompletion { local.update { it.copy(revival = it.revival.copy(running = false, current = null)) } }
+        }
+    }
+
+    fun stopRevive() { revivalJob?.cancel() }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }
     fun fullAnalysis() {
@@ -152,7 +180,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onAutomation = lab::setAutomation, onRefreshNetwork = { viewModel.refreshNetwork() }, onRetest = { viewModel.open(LabSection.LIVE); lab.retest(it) },
                 onDisable = lab::setDisabled, onRetire = lab::retire, onDismissMessage = lab::dismissMessage,
                 onResearchRefresh = { viewModel.refreshResearch() }, onAskAgent = viewModel::askAgent, onTestSuggestion = viewModel::testSuggestion,
-                onUseRecommended = viewModel::useRecommended
+                onUseRecommended = viewModel::useRecommended, onRevive = viewModel::revive, onStopRevive = viewModel::stopRevive
             )
         },
         relativeTime = ::relative

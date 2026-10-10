@@ -46,7 +46,7 @@ object CandidateMutationPolicy {
     val APPROVED_FINGERPRINTS: Set<String> = RecoverySecurityGate.TLS_FINGERPRINTS - ""
     val APPROVED_ALPN = setOf("h2", "http/1.1", "h2,http/1.1")
     val APPROVED_TARGET_STRATEGIES = setOf("UseIPv4", "UseIPv6", "UseIPv4v6", "UseIPv6v4")
-    val APPROVED_MASKS: Set<String> = BpbFix.MASKS.toSet()
+    val APPROVED_MASKS: Set<String> = BpbFix.MASKS.toSet() + BpbFix.FINAL_MASK_V1
     val APPROVED_CIPHERS = setOf(BpbFix.CIPHER_SUITES)
 
     data class Verdict(val allowed: Boolean, val reason: String? = null, val changed: Set<Field> = emptySet()) {
@@ -98,7 +98,8 @@ object CandidateMutationPolicy {
                 Field.TLS_FINGERPRINT -> v.lowercase() in APPROVED_FINGERPRINTS
                 Field.TLS_CIPHERS -> v.isEmpty() || (v in APPROVED_CIPHERS && derived.fingerprint == BpbFix.FINGERPRINT)
                 Field.FRAGMENT -> v.isEmpty() || v in APPROVED_MASKS
-                Field.ECH -> v.isEmpty() || v.endsWith("+" + StealthVariants.ECH_DNS)
+                Field.ECH -> v.isEmpty() || v.endsWith("+" + StealthVariants.ECH_DNS) ||
+                    v in com.example.vpn.connectivity.RecoveryProfiles.CLOUDFLARE_ECH_VALUES
             }
             if (!ok) return Verdict.no("${f.title} value is not an approved one")
         }

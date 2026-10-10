@@ -68,14 +68,14 @@ data class RecoveryProfile(
         if (needsEndpoint() && endpoint.isNullOrBlank()) return null
         var p = parent
         for ((field, raw) in parameters) {
+            if (field == "echConfigList") {
+                // ECH hides a server name, so an IP or missing SNI cannot use it; a config with its own ECH keeps it.
+                val sni = parent.sni.ifBlank { parent.host }
+                if (sni.isBlank() || sni.all { it.isDigit() || it == '.' || it == ':' } || parent.echConfigList.isNotBlank()) return null
+            }
             val value = when {
                 raw == ENDPOINT -> endpoint!!
-                SNI in raw -> {
-                    // ECH looks up the site's own key by its name; an IP or missing SNI cannot use it.
-                    val sni = parent.sni.ifBlank { parent.host }
-                    if (sni.isBlank() || sni.all { it.isDigit() || it == '.' || it == ':' } || parent.echConfigList.isNotBlank()) return null
-                    raw.replace(SNI, sni)
-                }
+                SNI in raw -> raw.replace(SNI, parent.sni.ifBlank { parent.host })
                 else -> raw
             }
             p = when (field) {
@@ -133,6 +133,16 @@ object RecoveryProfiles {
         "alpn" to com.example.panels.BpbFix.ALPN, "cipherSuites" to com.example.panels.BpbFix.CIPHER_SUITES
     )
 
+    /** DoH resolvers the Cloudflare ECH recipes look the shared key up through, in order. */
+    val CLOUDFLARE_ECH_DOH = listOf("https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query")
+
+    /** The echConfigList values the Cloudflare ECH recipes set. */
+    val CLOUDFLARE_ECH_VALUES: Set<String> = CLOUDFLARE_ECH_DOH.map { RecoverySecurityGate.CLOUDFLARE_ECH_NAME + "+" + it }.toSet()
+
+    private fun cloudflareEch(doh: String) = mapOf(
+        "echConfigList" to RecoverySecurityGate.CLOUDFLARE_ECH_NAME + "+" + doh, "fingerprint" to "chrome"
+    )
+
     val BUILT_IN: List<RecoveryProfile> = listOf(
         p("bpb-fragment-original", RecoveryProfile.Strategy.FRAGMENT, bpb(com.example.panels.BpbFix.FINAL_MASK_ORIGINAL), 0.6),
         p("bpb-fragment", RecoveryProfile.Strategy.FRAGMENT, bpb(com.example.panels.BpbFix.FINAL_MASK), 0.6),
@@ -141,6 +151,12 @@ object RecoveryProfiles {
         p("fingerprint-firefox", RecoveryProfile.Strategy.FINGERPRINT, mapOf("fingerprint" to "firefox"), 0.35),
         p("fingerprint-chrome", RecoveryProfile.Strategy.FINGERPRINT, mapOf("fingerprint" to "chrome"), 0.35),
         p("ech-doh", RecoveryProfile.Strategy.ECH, mapOf("echConfigList" to RecoveryProfile.SNI + "+" + com.example.vpn.stealth.StealthVariants.ECH_DNS), 0.3),
+        // Cloudflare's shared ECH key (Proxy Builder's ECH recipe), fetched over DoH from three resolvers in
+        // turn, with a Chrome fingerprint. Works for Cloudflare-fronted configs whose own name has no ECH record.
+        p("ech-cloudflare", RecoveryProfile.Strategy.ECH, cloudflareEch(CLOUDFLARE_ECH_DOH[0]), 0.55),
+        p("ech-cloudflare-google", RecoveryProfile.Strategy.ECH, cloudflareEch(CLOUDFLARE_ECH_DOH[1]), 0.45),
+        p("ech-cloudflare-quad9", RecoveryProfile.Strategy.ECH, cloudflareEch(CLOUDFLARE_ECH_DOH[2]), 0.4),
+        p("bpb-fragment-v1", RecoveryProfile.Strategy.FRAGMENT, bpb(com.example.panels.BpbFix.FINAL_MASK_V1), 0.5),
         p("alpn-http11", RecoveryProfile.Strategy.ALPN, mapOf("alpn" to "http/1.1"), 0.25,
             transports = setOf("ws", "httpupgrade")),
         p("endpoint-ipv4", RecoveryProfile.Strategy.ALT_ENDPOINT_V4, mapOf("address" to RecoveryProfile.ENDPOINT), 0.55, family = "ipv4"),

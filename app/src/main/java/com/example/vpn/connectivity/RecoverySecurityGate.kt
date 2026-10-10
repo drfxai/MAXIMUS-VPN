@@ -10,7 +10,7 @@ import org.json.JSONObject
  * A derived copy may only differ from its original in [RecoveryProfile.ALLOWED_FIELDS], and each
  * change must keep TLS authentication intact: same security mode, same SNI / Host / credential / pins,
  * certificate checking on, a known fingerprint, no weak cipher, a bounded fragmentation mask, ECH only
- * through an IP-literal DoH resolver, and a new endpoint only as a public IP literal (the certificate is
+ * through an IP-literal DoH resolver (for the server's own name or Cloudflare's shared ECH name), and a new endpoint only as a public IP literal (the certificate is
  * still checked against the unchanged SNI).
  */
 object RecoverySecurityGate {
@@ -27,10 +27,10 @@ object RecoverySecurityGate {
 
     private val WEAK_CIPHER = Regex("NULL|EXPORT|RC4|_DES_|3DES|_anon_|_MD5|PSK", RegexOption.IGNORE_CASE)
 
-    /** Fragment bounds: no TCP piece over 2000 bytes, no delay over 200 ms, at most 64 splits. */
+    /** Fragment bounds: no TCP piece over 2000 bytes, no delay over 200 ms, at most 512 splits (the "v1" fragment recipe uses 355). */
     const val MAX_FRAGMENT_LENGTH = 2000
     const val MAX_FRAGMENT_DELAY_MS = 200
-    const val MAX_SPLITS = 64
+    const val MAX_SPLITS = 512
 
     fun check(parent: VlessProfile, derived: VlessProfile): Result {
         fun refuse(why: String) = Result(false, why)
@@ -86,7 +86,9 @@ object RecoverySecurityGate {
         val name = v.substringBefore('+', "")
         val resolver = v.substringAfter('+', "")
         if (name.isBlank() || resolver.isBlank()) return "ECH must name the server and a DoH resolver"
-        if (!name.equals(p.sni.ifBlank { p.host }, true)) return "ECH must look up the server's own name"
+        if (!name.equals(p.sni.ifBlank { p.host }, true) && !name.equals(CLOUDFLARE_ECH_NAME, true)) {
+            return "ECH must look up the server's own name or Cloudflare's shared ECH name"
+        }
         val host = resolver.removePrefix("https://").substringBefore('/')
         if (!resolver.startsWith("https://") || !isIpLiteral(host)) return "ECH resolver must be a DoH address given as an IP"
         return null
@@ -99,6 +101,13 @@ object RecoverySecurityGate {
         if (isPrivateOrReserved(ip)) return "the new endpoint is a private or reserved address"
         return null
     }
+
+    /**
+     * The public name of the ECH key Cloudflare shares across every site it fronts. Looking it up gives a
+     * Cloudflare-fronted config (a Worker, Pages or a proxied domain) ECH even when its own name has no
+     * HTTPS record. The certificate is still checked against the config's unchanged SNI.
+     */
+    const val CLOUDFLARE_ECH_NAME = "cloudflare-ech.com"
 
     fun isIpLiteral(h: String): Boolean {
         val v4 = h.split('.')

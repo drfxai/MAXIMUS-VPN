@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.CellTower
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Healing
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -60,6 +61,7 @@ import com.example.ui.protocols.LabText
 import com.example.ui.protocols.labColors
 import com.example.vpn.lab.AnalysisReport
 import com.example.vpn.lab.AutomationLevel
+import com.example.vpn.lab.ConfigRevival
 import com.example.vpn.lab.ConfigTransaction
 import com.example.vpn.lab.ExperimentState
 import com.example.vpn.lab.LabDiscovery
@@ -84,6 +86,7 @@ enum class LabSection(val title: String, val icon: ImageVector) {
     EXPERIMENTS("Experiments", Icons.Rounded.Science),
     DISCOVERIES("Discoveries", Icons.Rounded.Lightbulb),
     VERIFIED("Verified Profiles", Icons.Rounded.Verified),
+    REVIVE("Revive configs", Icons.Rounded.Healing),
     RESEARCH("Research", Icons.Rounded.TravelExplore)
 }
 
@@ -106,7 +109,8 @@ data class NetworkLabUiState(
     val research: List<LabResearchItem> = emptyList(),
     val section: LabSection? = null,
     val picking: Boolean = false,
-    val vpnOn: Boolean = false
+    val vpnOn: Boolean = false,
+    val revival: RevivalUi = RevivalUi()
 )
 
 /** Everything the LAB screens can ask for; the screens hold no state of their own beyond expanded cards. */
@@ -126,7 +130,9 @@ class NetworkLabActions(
     val onAskAgent: () -> Unit = {},
     val onTestSuggestion: (LabSuggestionUi) -> Unit = {},
     /** Selects a saved config (id, name) as the one to connect with. */
-    val onUseRecommended: (String, String) -> Unit = { _, _ -> }
+    val onUseRecommended: (String, String) -> Unit = { _, _ -> },
+    val onRevive: () -> Unit = {},
+    val onStopRevive: () -> Unit = {}
 )
 
 @Composable
@@ -145,6 +151,8 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
                     LabSection.DISCOVERIES -> DiscoveriesPage(c, state, actions, relativeTime)
                     LabSection.VERIFIED -> VerifiedPage(c, state.snapshot, actions, relativeTime)
                     LabSection.RESEARCH -> ResearchPage(c, state.research, actions, relativeTime)
+                    LabSection.REVIVE -> RevivePage(c, state.revival, state.vpnOn, state.snapshot.running != null || state.snapshot.analysisRunning,
+                        actions.onRevive, actions.onStopRevive, relativeTime)
                 }
             }
         }
@@ -161,6 +169,7 @@ private fun sectionSubtitle(s: LabSection, state: NetworkLabUiState): String = w
     LabSection.DISCOVERIES -> "Measurements and AI readings, labelled"
     LabSection.VERIFIED -> "Strategies measured to work, per network"
     LabSection.RESEARCH -> "Public sources, checked against the core"
+    LabSection.REVIVE -> "Brings dead Cloudflare configs back"
 }
 
 // ---------------------------------------------------------------- shared wording
@@ -359,6 +368,14 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                     Triple(LabSection.EXPERIMENTS, "${s.experiments.size}", null),
                     Triple(LabSection.DISCOVERIES, "${s.discoveries.size}", null),
                     Triple(LabSection.VERIFIED, "${s.verified.count { it.state != PromotionState.RETIRED }}", null),
+                    state.revival.let { r ->
+                        val revived = r.results.count { it.outcome == ConfigRevival.Outcome.REVIVED }
+                        when {
+                            r.running -> Triple(LabSection.REVIVE, "Running", c.okay)
+                            revived > 0 -> Triple(LabSection.REVIVE, "$revived revived", c.good)
+                            else -> Triple(LabSection.REVIVE, "${r.eligible}", null)
+                        }
+                    },
                     Triple(LabSection.RESEARCH, "${state.research.size}", null)
                 )
                 rows.forEachIndexed { i, (sec, trailing, color) ->

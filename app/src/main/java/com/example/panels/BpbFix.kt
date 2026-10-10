@@ -50,6 +50,16 @@ object BpbFix {
     const val FINAL_MASK_TLSHELLO_SMALL =
         """{"tcp": [{"type": "fragment", "settings": {"packets": "tlshello", "length": "10-20", "delay": "10-20"}}]}"""
 
+    /**
+     * The older "v1" recipe some Iranian clients still use (PattNG's export format, also Proxy Builder's
+     * "v1" preset): 5-, 94- and 1-byte records, then 109- and 1-byte records split into up to 355 TCP
+     * segments 1 ms apart. Revive tries it after [FINAL_MASK_ORIGINAL]; FIX BPB does not.
+     */
+    const val FINAL_MASK_V1 =
+        """{"tcp": [{"type": "fragment", "settings": {"packets": "tlshello", "lengths": ["5", "94", "1"], """ +
+            """"delays": ["0"], "maxSplit": "0"}},{"type": "fragment", "settings": {"packets": "1-1", """ +
+            """"lengths": ["109", "1"], "delays": ["1"], "maxSplit": "355"}}]}"""
+
     /** Masks FIX BPB tries, most preferred first; with the unfixed config they fill one probe batch. */
     val MASKS = listOf(FINAL_MASK_ORIGINAL, FINAL_MASK, FINAL_MASK_TLSHELLO, FINAL_MASK_TLSHELLO_SMALL)
 
