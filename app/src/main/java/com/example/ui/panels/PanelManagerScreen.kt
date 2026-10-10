@@ -36,6 +36,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.panels.servers.InstallTabHost
+import com.example.ui.panels.servers.ServersEffects
+import com.example.ui.panels.servers.ServersOverlay
+import com.example.ui.panels.servers.ServersTabHost
+import com.example.ui.panels.servers.ServersViewModel
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -168,7 +174,6 @@ fun PanelManagerScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var selectedPanelId by remember { mutableStateOf<String?>(null) }
-    var showServerSetupDialog by remember { mutableStateOf(false) }
     var selectedWorkerTemplate by remember { mutableStateOf(PanelCatalog.cloudflareTemplates.first().id) }
     var selectedRegion by remember { mutableStateOf("Iran 🇮🇷 (All Operators)") }
     var regionDropdownExpanded by remember { mutableStateOf(false) }
@@ -187,11 +192,6 @@ fun PanelManagerScreen(
     var tunnelPasswordVisible by remember { mutableStateOf(false) }
 
     // Forms
-    var host by remember { mutableStateOf("") }
-    var sshPort by remember { mutableStateOf("22") }
-    var sshUser by remember { mutableStateOf("root") }
-    var sshPassword by remember { mutableStateOf("") }
-    var hostFingerprint by remember { mutableStateOf("") }
     var cfToken by remember { mutableStateOf("") }
     var account by remember { mutableStateOf("") }
     var cfEmail by remember { mutableStateOf("") }
@@ -214,6 +214,17 @@ fun PanelManagerScreen(
 
     // Determine current panel for detail view (Screen 4)
     val activePanel = state.panels.firstOrNull { it.id == selectedPanelId }
+
+    // My Servers, Install Center and their full-screen pages (Add server, install wizard, server page).
+    val serversVm: ServersViewModel = viewModel()
+    val serversState by serversVm.state.collectAsStateWithLifecycle()
+    ServersEffects(serversVm) { viewModel.reloadPanels() }
+    if (ServersOverlay(
+            serversVm, serversState,
+            onOpenPanel = { id -> viewModel.reloadPanels(); selectedTab = 0; selectedPanelId = id },
+            onInstallCenter = { selectedPanelId = null; selectedTab = 1 }
+        )
+    ) return
 
     Column(
         modifier = Modifier
@@ -278,9 +289,9 @@ fun PanelManagerScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val tabs = listOf("Servers", "Cloudflare", "Clean IP", "Tunnel")
+            val tabs = listOf("Servers", "Install", "Cloudflare", "Clean IP", "Tunnel")
             tabs.forEachIndexed { index, title ->
                 val isSelected = (selectedPanelId != null && index == 0) || (selectedPanelId == null && selectedTab == index)
                 Surface(
@@ -303,7 +314,9 @@ fun PanelManagerScreen(
                             text = title,
                             color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 13.sp
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -353,20 +366,12 @@ fun PanelManagerScreen(
                 )
             } else {
                 // STAT CARDS (3 COLUMNS). Cloudflare carries its own header.
-                if (selectedTab == 0 || selectedTab == 2 || selectedTab == 3) Row(
+                if (selectedTab == 3 || selectedTab == 4) Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     when (selectedTab) {
-                        0 -> {
-                            val serverCount = state.panels.count { it.type == PanelType.XUI }
-                            val workerCount = state.panels.count { it.type == PanelType.BPB_WORKER }
-                            val totalActive = serverCount + workerCount
-                            StatCard(Icons.Default.Dns, PanelColors.CyanAccent, serverCount.toString(), "Servers", Modifier.weight(1f))
-                            StatCard(Icons.Default.Cloud, PanelColors.CyanAccent, workerCount.toString(), "Workers", Modifier.weight(1f))
-                            StatCard(Icons.Default.Shield, if (totalActive > 0) PanelColors.SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant, if (totalActive > 0) "Online" else "Standby", "Status", Modifier.weight(1f))
-                        }
-                        2 -> {
+                        3 -> {
                             val scanningCount = if (state.busy) state.tested else 0
                             val cleanCount = state.edges.size
                             StatCard(Icons.Default.Language, PanelColors.CyanAccent, scanningCount.toString(), "Tested", Modifier.weight(1f))
@@ -381,196 +386,18 @@ fun PanelManagerScreen(
                     }
                 }
 
-                // TAB 0: SERVERS
+                // TAB 0: MY SERVERS (Iran and abroad, with flags)
                 if (selectedTab == 0) {
-                    // LIVE SERVER INSTALLATION STATUS & LOGS BANNER (If installing, failed, or newly installed)
-                    if (state.installingServer || state.newlyInstalledServerPanel != null || (state.error.isNotBlank() && selectedTab == 0)) {
-                        LiveServerInstallationCard(
-                            installing = state.installingServer,
-                            target = state.installServerTarget,
-                            newPanel = state.newlyInstalledServerPanel,
-                            error = state.error,
-                            logs = state.logs,
-                            onDismiss = { viewModel.dismissNewlyInstalledServer() },
-                            onOpenUrl = { url ->
-                                runCatching {
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                }.onFailure {
-                                    Toast.makeText(context, "Cannot open browser: $url", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            onCopy = copyWithToast,
-                            onImportToVpn = { panel ->
-                                viewModel.importServerToProfiles(panel)
-                                Toast.makeText(context, "3X-UI server imported to VPN profiles!", Toast.LENGTH_SHORT).show()
-                            },
-                            onRetry = { showServerSetupDialog = true }
-                        )
-                    }
-
-                    // Action button: + Install a new server panel
-                    Button(
-                        onClick = {
-                            viewModel.clearServerProbe()
-                            showServerSetupDialog = true
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp),
-                        shape = RoundedCornerShape(25.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PanelColors.PrimaryBlue)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Install a new server panel",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
-
-                    // Available Panels Section (2x2 Grid)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Available Panels",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "View All >",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp,
-                            modifier = Modifier.clickable {
-                                viewModel.clearServerProbe()
-                                showServerSetupDialog = true
-                            }
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            AvailablePanelCard(
-                                title = "3X-UI Panel",
-                                subtitle = "Xray multi-protocol\n(VLESS, Trojan, etc.)",
-                                logoType = "3X-UI",
-                                isActive = true,
-                                onInstall = {
-                                    val existingXui = state.panels.firstOrNull { it.type == PanelType.XUI }
-                                    if (existingXui != null) {
-                                        selectedPanelId = existingXui.id
-                                    } else {
-                                        viewModel.clearServerProbe()
-                                        showServerSetupDialog = true
-                                    }
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                            AvailablePanelCard(
-                                title = "x-ui Panel",
-                                subtitle = "Simple & Lightweight\nXray panel",
-                                logoType = "x-ui",
-                                isActive = false,
-                                onInstall = {},
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            AvailablePanelCard(
-                                title = "Hiddify Manager",
-                                subtitle = "Advanced Xray panel\nwith smart routing",
-                                logoType = "hiddify",
-                                isActive = false,
-                                onInstall = {},
-                                modifier = Modifier.weight(1f)
-                            )
-                            AvailablePanelCard(
-                                title = "Other Panels",
-                                subtitle = "Marzban, Sing-box\nand more...",
-                                logoType = "other",
-                                isActive = false,
-                                onInstall = {},
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    // Managed Servers Section
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val serverList = state.panels.filter { it.type == PanelType.XUI }
-                        Text(
-                            text = "Managed Servers (${serverList.size})",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (serverList.isNotEmpty()) {
-                            Text(
-                                text = "Add Server +",
-                                color = PanelColors.CyanAccent,
-                                fontSize = 12.sp,
-                                modifier = Modifier.clickable {
-                                    viewModel.clearServerProbe()
-                                    showServerSetupDialog = true
-                                }
-                            )
-                        }
-                    }
-
-                    val serverList = state.panels.filter { it.type == PanelType.XUI }
-
-                    if (serverList.isEmpty()) {
-                        EmptyServersCard(onInstallClick = {
-                            viewModel.clearServerProbe()
-                            showServerSetupDialog = true
-                        })
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            serverList.forEach { server ->
-                                val hostStr = server.host.ifBlank { runCatching { Uri.parse(server.url).host.orEmpty() }.getOrDefault("") }
-                                val flag = if (server.name.startsWith("DE", ignoreCase = true)) "🇩🇪"
-                                    else if (server.name.startsWith("IR", ignoreCase = true) || hostStr.contains(".ir")) "🇮🇷"
-                                    else if (server.name.startsWith("US", ignoreCase = true)) "🇺🇸"
-                                    else if (server.name.startsWith("NL", ignoreCase = true)) "🇳🇱"
-                                    else "🌐"
-                                ManagedServerItemCard(
-                                    name = server.name.ifBlank { "3X-UI • $hostStr" },
-                                    host = hostStr,
-                                    flag = flag,
-                                    onClick = {
-                                        selectedPanelId = server.id
-                                    },
-                                    onMenuClick = {
-                                        confirmRemovePanel = server
-                                    }
-                                )
-                            }
-                        }
-                    }
+                    ServersTabHost(serversVm, serversState, onInstallCenter = { selectedTab = 1 })
                 }
 
-                // TAB 1: CLOUDFLARE
+                // TAB 1: INSTALL CENTER
                 if (selectedTab == 1) {
+                    InstallTabHost(serversVm, serversState)
+                }
+
+                // TAB 2: CLOUDFLARE
+                if (selectedTab == 2) {
                     CloudflareTab(
                         token = cfToken,
                         onTokenChange = { cfToken = it },
@@ -596,8 +423,8 @@ fun PanelManagerScreen(
                     )
                 }
 
-                // TAB 2: CLEAN IP SCANNER
-                if (selectedTab == 2) {
+                // TAB 3: CLEAN IP SCANNER
+                if (selectedTab == 3) {
                     CleanIpScannerCard(
                         scanning = state.busy,
                         scanPaused = state.scanPaused,
@@ -788,8 +615,8 @@ fun PanelManagerScreen(
                     }
                 }
 
-                // TAB 3: TUNNEL — UI scaffold only. Real tunnel provisioning will be implemented later.
-                if (selectedTab == 3) {
+                // TAB 4: TUNNEL — UI scaffold only. Real tunnel provisioning will be implemented later.
+                if (selectedTab == 4) {
                     TunnelSetupCard(
                         iranHost = tunnelIranHost,
                         onIranHostChange = { tunnelIranHost = it.trim() },
@@ -807,189 +634,6 @@ fun PanelManagerScreen(
     }
 
     // MODAL DIALOGS
-    if (showServerSetupDialog) {
-        AlertDialog(
-            onDismissRequest = { showServerSetupDialog = false },
-            containerColor = MaterialTheme.colorScheme.surface,
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    PanelBrandLogo("3X-UI", Modifier.size(28.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Install 3X-UI Panel", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "Deploy a secure Xray panel to your VPS via SSH with real-time status telemetry.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp
-                    )
-                    OutlinedTextField(
-                        value = host,
-                        onValueChange = {
-                            host = it.trim()
-                            if (state.serverProbeStatus != null) viewModel.clearServerProbe()
-                        },
-                        label = { Text("Server IP / Host") },
-                        placeholder = { Text("e.g. 194.163.140.22") },
-                        singleLine = true,
-                        colors = outlinedColors()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = sshPort,
-                            onValueChange = {
-                                sshPort = it.filter(Char::isDigit)
-                                if (state.serverProbeStatus != null) viewModel.clearServerProbe()
-                            },
-                            label = { Text("Port") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            colors = outlinedColors()
-                        )
-                        OutlinedTextField(
-                            value = sshUser,
-                            onValueChange = { sshUser = it.trim() },
-                            label = { Text("User") },
-                            modifier = Modifier.weight(1.5f),
-                            singleLine = true,
-                            colors = outlinedColors()
-                        )
-                    }
-
-                    // Live Pre-flight Probe Button & Status
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Connection Status",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        TextButton(
-                            onClick = {
-                                viewModel.probeServer(host, sshPort.toIntOrNull() ?: 22)
-                            },
-                            enabled = host.isNotBlank() && !state.serverProbeBusy,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            if (state.serverProbeBusy) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(12.dp),
-                                    strokeWidth = 1.5.dp,
-                                    color = PanelColors.CyanAccent
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Probing...", fontSize = 11.sp, color = PanelColors.CyanAccent)
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = null,
-                                    tint = PanelColors.CyanAccent,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Test Connection", fontSize = 11.sp, color = PanelColors.CyanAccent)
-                            }
-                        }
-                    }
-
-                    state.serverProbeStatus?.let { probe ->
-                        if (probe.reachable && probe.hostKeySha256.isNotBlank() && hostFingerprint != probe.hostKeySha256) {
-                            hostFingerprint = probe.hostKeySha256
-                        }
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (probe.reachable) PanelColors.SuccessGreenBg else Color(0xFF331118),
-                            border = BorderStroke(1.dp, if (probe.reachable) PanelColors.SuccessGreenBorder else Color(0xFF7F1D1D))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = if (probe.reachable) Icons.Default.CheckCircle else Icons.Default.Error,
-                                    contentDescription = null,
-                                    tint = if (probe.reachable) PanelColors.SuccessGreen else Color(0xFFEF4444),
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = probe.message,
-                                    color = if (probe.reachable) PanelColors.SuccessGreen else Color(0xFFFCA5A5),
-                                    fontSize = 11.sp,
-                                    lineHeight = 14.sp
-                                )
-                            }
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = sshPassword,
-                        onValueChange = { sshPassword = it },
-                        label = { Text("SSH Password") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true,
-                        colors = outlinedColors()
-                    )
-                    OutlinedTextField(
-                        value = hostFingerprint,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("SSH Host Key SHA256") },
-                        placeholder = { Text("Tap Test Connection to discover securely") },
-                        supportingText = {
-                            Text(
-                                if (hostFingerprint.isBlank()) "Required: discover and confirm the server key before installation."
-                                else "Confirm this fingerprint matches your VPS provider/console before installing."
-                            )
-                        },
-                        singleLine = true,
-                        colors = outlinedColors()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val effectiveHost = host.trim()
-                        val effectivePass = sshPassword
-                        if (effectiveHost.isBlank() || effectivePass.isBlank()) {
-                            Toast.makeText(context, "Please enter server IP/Host and SSH password", Toast.LENGTH_SHORT).show()
-                        } else if (hostFingerprint.isBlank() || state.serverProbeStatus?.reachable != true) {
-                            Toast.makeText(context, "Tap Test Connection and confirm the SSH fingerprint first", Toast.LENGTH_LONG).show()
-                        } else {
-                            viewModel.installXui(
-                                host = effectiveHost,
-                                port = sshPort.toIntOrNull() ?: 22,
-                                username = sshUser.ifBlank { "root" }.trim(),
-                                password = effectivePass,
-                                fingerprint = hostFingerprint.trim()
-                            )
-                            showServerSetupDialog = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = PanelColors.PrimaryBlue)
-                ) {
-                    Text("Install Panel")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showServerSetupDialog = false }) {
-                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        )
-    }
-
-
-
     confirmRemovePanel?.let { panel ->
         AlertDialog(
             onDismissRequest = { confirmRemovePanel = null },
@@ -1431,165 +1075,6 @@ private fun StatCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp
             )
-        }
-    }
-}
-
-@Composable
-private fun AvailablePanelCard(
-    title: String,
-    subtitle: String,
-    logoType: String,
-    isActive: Boolean = true,
-    onInstall: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, if (isActive) MaterialTheme.colorScheme.outlineVariant else Color(0xFF16243A)),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                PanelBrandLogo(logoType, Modifier.size(36.dp))
-                if (!isActive) {
-                    Box(
-                        modifier = Modifier
-                            .background(Color(0xFF0F233D), RoundedCornerShape(6.dp))
-                            .border(1.dp, Color(0xFF1E3A5F), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "Soon",
-                            color = Color(0xFF60A5FA),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-            Text(
-                text = title,
-                color = if (isActive) Color.White else Color(0xFFE2E8F0),
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
-            )
-            Text(
-                text = subtitle,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 10.5.sp,
-                lineHeight = 14.sp,
-                minLines = 2,
-                maxLines = 2
-            )
-            if (isActive) {
-                Button(
-                    onClick = onInstall,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(34.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PanelColors.PrimaryBlue),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("Install", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(34.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF0D1B2E),
-                    border = BorderStroke(1.dp, Color(0xFF162842))
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Soon",
-                            color = Color(0xFF64748B),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ManagedServerItemCard(
-    name: String,
-    host: String,
-    flag: String,
-    onClick: () -> Unit,
-    onMenuClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Status dot
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(PanelColors.SuccessGreen, CircleShape)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            CountryFlag(flag)
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = name,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.5.sp
-                )
-                Text(
-                    text = host,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.5.sp
-                )
-            }
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = "Details",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            IconButton(
-                onClick = onMenuClick,
-                modifier = Modifier.size(24.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "Menu",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
-                    modifier = Modifier.size(18.dp)
-                )
-            }
         }
     }
 }
@@ -2903,319 +2388,6 @@ private fun InstalledPanelDetailView(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-// LIVE SERVER INSTALLATION STATUS & TELEMETRY CARD
-@Composable
-private fun LiveServerInstallationCard(
-    installing: Boolean,
-    target: String,
-    newPanel: ManagedPanel?,
-    error: String,
-    logs: List<String>,
-    onDismiss: () -> Unit,
-    onOpenUrl: (String) -> Unit,
-    onCopy: (String, String) -> Unit,
-    onImportToVpn: (ManagedPanel) -> Unit,
-    onRetry: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(
-            1.dp,
-            if (error.isNotBlank()) Color(0xFFEF4444)
-            else if (newPanel != null) PanelColors.SuccessGreen
-            else PanelColors.CyanAccent
-        ),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF091424))
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Header Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (installing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = PanelColors.CyanAccent
-                        )
-                    } else if (error.isNotBlank()) {
-                        Icon(
-                            imageVector = Icons.Default.Error,
-                            contentDescription = "Error",
-                            tint = Color(0xFFEF4444),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    } else if (newPanel != null) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = "Success",
-                            tint = PanelColors.SuccessGreen,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (installing) "Deploying 3X-UI on $target"
-                            else if (error.isNotBlank()) "Server Installation Error"
-                            else if (newPanel != null) "3X-UI Deployed Successfully!"
-                            else "Installation Telemetry",
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.5.sp
-                    )
-                }
-
-                if (!installing) {
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Dismiss",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-
-            // Step Progress Track (5 stages)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val hasLogs = logs.isNotEmpty()
-                val isDone = newPanel != null
-                val isFailed = error.isNotBlank()
-
-                StepCheckItem("SSH", hasLogs)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(2.dp)
-                        .background(if (hasLogs) PanelColors.SuccessGreen else MaterialTheme.colorScheme.outlineVariant)
-                )
-                StepCheckItem("Auth", hasLogs && logs.any { it.contains("session", ignoreCase = true) || it.contains("verified", ignoreCase = true) || isDone })
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(2.dp)
-                        .background(if (logs.any { it.contains("Installing", ignoreCase = true) || isDone }) PanelColors.SuccessGreen else MaterialTheme.colorScheme.outlineVariant)
-                )
-                StepCheckItem("Install", logs.any { it.contains("Installing", ignoreCase = true) || isDone })
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(2.dp)
-                        .background(if (isDone) PanelColors.SuccessGreen else MaterialTheme.colorScheme.outlineVariant)
-                )
-                StepCheckItem("Ready", isDone)
-            }
-
-            // Live Terminal Console
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceContainerHighest)
-            ) {
-                Column(
-                    modifier = Modifier.padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    if (logs.isEmpty()) {
-                        TerminalLine("Initiating encrypted SSH handshake...")
-                    } else {
-                        logs.takeLast(6).forEach { logLine ->
-                            val isSuccess = logLine.contains("complete", ignoreCase = true) || logLine.contains("success", ignoreCase = true)
-                            val isErr = logLine.contains("error", ignoreCase = true) || logLine.contains("fail", ignoreCase = true)
-                            Row {
-                                Text(
-                                    text = if (isErr) "[FAIL] " else if (isSuccess) "[OK] " else "[SSH] ",
-                                    color = if (isErr) Color(0xFFEF4444) else if (isSuccess) PanelColors.SuccessGreen else PanelColors.CyanAccent,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = logLine.removePrefix("[SSH] ").removePrefix("[3X-UI] ").removePrefix("[ERROR] "),
-                                    color = if (isErr) Color(0xFFFCA5A5) else if (isSuccess) PanelColors.SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 10.5.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Error Diagnosis Box
-            if (error.isNotBlank()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF331118),
-                    border = BorderStroke(1.dp, Color(0xFF7F1D1D))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "Cause: $error",
-                            color = Color(0xFFFCA5A5),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        val diagnosis = when {
-                            error.contains("login failed", ignoreCase = true) || error.contains("Auth fail", ignoreCase = true) ->
-                                "Wrong SSH username or password, or password login is disabled for this user. Check the root credentials from your VPS provider."
-                            error.contains("fingerprint", ignoreCase = true) || error.contains("host key", ignoreCase = true) ->
-                                "Re-open Install, tap Test Connection, verify the discovered SHA256 fingerprint against your VPS console/provider, then install."
-                            error.contains("plain HTTP", ignoreCase = true) ->
-                                "Tap Retry Installation and enter the SSH details again. The existing panel is kept; only its HTTPS is repaired."
-                            error.contains("not reachable", ignoreCase = true) || error.contains("Cannot resolve", ignoreCase = true) ->
-                                "This device cannot open the SSH port. Check the IP address, the SSH port, and that the cloud firewall allows inbound TCP on it."
-                            error.contains("did not complete", ignoreCase = true) || error.contains("timed out", ignoreCase = true) ->
-                                "The server answers on the SSH port but the login stalls. Make sure password login is enabled for this user, wait a minute (rate limiting / fail2ban) and retry; Retry reuses an existing installation."
-                            error.contains("refused", ignoreCase = true) -> "SSH service connection refused. Confirm SSH daemon is running and port is correct."
-                            else -> "Check VPS internet access, SSH credentials, sudo privileges, and supported operating system."
-                        }
-                        Text(
-                            text = "💡 Remediation: $diagnosis",
-                            color = Color(0xFFE2E8F0),
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = onRetry,
-                        modifier = Modifier.weight(1f).height(38.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PanelColors.PrimaryBlue),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Retry Installation", fontSize = 12.sp)
-                    }
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f).height(38.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Dismiss", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            // Succeeded Actions Box
-            if (newPanel != null) {
-                PanelCredentialsCard(
-                    panelName = newPanel.name,
-                    link = newPanel.url,
-                    username = newPanel.username,
-                    password = newPanel.password,
-                    healthNote = newPanel.healthNote
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { onOpenUrl(newPanel.url) },
-                        modifier = Modifier.weight(1f).height(40.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Open Panel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    Button(
-                        onClick = { onImportToVpn(newPanel) },
-                        modifier = Modifier.weight(1f).height(40.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PanelColors.SuccessGreenBg),
-                        border = BorderStroke(1.dp, PanelColors.SuccessGreenBorder),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(Icons.Default.Shield, contentDescription = null, tint = PanelColors.SuccessGreen, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add to VPN", color = PanelColors.SuccessGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// EMPTY SERVERS COMPONENT
-@Composable
-private fun EmptyServersCard(
-    onInstallClick: () -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .background(Color(0xFF0F243E), CircleShape)
-                    .border(1.dp, PanelColors.CyanAccent.copy(alpha = 0.4f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Dns,
-                    contentDescription = null,
-                    tint = PanelColors.CyanAccent,
-                    modifier = Modifier.size(26.dp)
-                )
-            }
-
-            Text(
-                text = "No Server Panels Installed",
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
-            )
-
-            Text(
-                text = "Connect or install a 3X-UI / Xray panel on your Ubuntu or Debian VPS with automated SSH provisioning.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center,
-                lineHeight = 16.sp
-            )
-
-            Button(
-                onClick = onInstallClick,
-                colors = ButtonDefaults.buttonColors(containerColor = PanelColors.PrimaryBlue),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.height(40.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Install 3X-UI Server Panel", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

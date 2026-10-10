@@ -1,0 +1,46 @@
+name: Server tools
+
+# Publishes the Linux programs the Panels Install Center installs on a user's own server
+# (dnstt-server, Hysteria2, the loopback SOCKS helper). The build is reproducible and must match
+# tools/server-tools/SHA256SUMS, which the app pins; servers refuse any file with another hash.
+# The release is a pre-release that is never marked latest, so the app's update check ignores it.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [scripts/server-tools/**, tools/server-tools/**]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: server-tools
+  cancel-in-progress: false
+
+env:
+  TAG: server-tools-v1
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Build and compare with the pinned hashes
+        run: OUT=build/server-tools bash scripts/server-tools/build.sh
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd build/server-tools
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Server tools for the Panels Install Center" \
+              --notes "Linux programs installed on your own server by MAXIMUS VPN (Panels > Install). Built reproducibly from pinned sources; see scripts/server-tools/build.sh. Not an app release."
+          fi
+          gh release upload "$TAG" dnstt-server-linux-* hysteria-linux-* maximus-socks-linux-* SHA256SUMS --clobber
+          gh release view "$TAG" --json assets --jq '[.assets[].name] | sort | join(",")'

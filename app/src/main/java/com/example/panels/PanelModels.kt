@@ -31,7 +31,9 @@ data class XuiInstallRequest(
     val username: String,
     val password: String,
     val expectedHostKeySha256: String = "",
-    val allowTrustOnFirstUse: Boolean = false
+    val allowTrustOnFirstUse: Boolean = false,
+    /** PEM private key for key login (Panels > My Servers); used instead of [password] when set. */
+    val privateKey: String = ""
 )
 
 data class CloudflareInstallRequest(
