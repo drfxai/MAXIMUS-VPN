@@ -133,6 +133,12 @@ object RecoveryProfiles {
         "alpn" to com.example.panels.BpbFix.ALPN, "cipherSuites" to com.example.panels.BpbFix.CIPHER_SUITES
     )
 
+    /** DoH resolvers the Cloudflare ECH recipes look the shared key up through, in order. */
+    val CLOUDFLARE_ECH_DOH = listOf("https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query")
+
+    /** The echConfigList values the Cloudflare ECH recipes set. */
+    val CLOUDFLARE_ECH_VALUES: Set<String> = CLOUDFLARE_ECH_DOH.map { RecoverySecurityGate.CLOUDFLARE_ECH_NAME + "+" + it }.toSet()
+
     private fun cloudflareEch(doh: String) = mapOf(
         "echConfigList" to RecoverySecurityGate.CLOUDFLARE_ECH_NAME + "+" + doh, "fingerprint" to "chrome"
     )
@@ -147,9 +153,9 @@ object RecoveryProfiles {
         p("ech-doh", RecoveryProfile.Strategy.ECH, mapOf("echConfigList" to RecoveryProfile.SNI + "+" + com.example.vpn.stealth.StealthVariants.ECH_DNS), 0.3),
         // Cloudflare's shared ECH key (Proxy Builder's ECH recipe), fetched over DoH from three resolvers in
         // turn, with a Chrome fingerprint. Works for Cloudflare-fronted configs whose own name has no ECH record.
-        p("ech-cloudflare", RecoveryProfile.Strategy.ECH, cloudflareEch("https://1.1.1.1/dns-query"), 0.55),
-        p("ech-cloudflare-google", RecoveryProfile.Strategy.ECH, cloudflareEch("https://8.8.8.8/dns-query"), 0.45),
-        p("ech-cloudflare-quad9", RecoveryProfile.Strategy.ECH, cloudflareEch("https://9.9.9.9/dns-query"), 0.4),
+        p("ech-cloudflare", RecoveryProfile.Strategy.ECH, cloudflareEch(CLOUDFLARE_ECH_DOH[0]), 0.55),
+        p("ech-cloudflare-google", RecoveryProfile.Strategy.ECH, cloudflareEch(CLOUDFLARE_ECH_DOH[1]), 0.45),
+        p("ech-cloudflare-quad9", RecoveryProfile.Strategy.ECH, cloudflareEch(CLOUDFLARE_ECH_DOH[2]), 0.4),
         p("bpb-fragment-v1", RecoveryProfile.Strategy.FRAGMENT, bpb(com.example.panels.BpbFix.FINAL_MASK_V1), 0.5),
         p("alpn-http11", RecoveryProfile.Strategy.ALPN, mapOf("alpn" to "http/1.1"), 0.25,
             transports = setOf("ws", "httpupgrade")),
