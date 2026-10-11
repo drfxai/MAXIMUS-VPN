@@ -98,6 +98,7 @@ fun HomeScreen(
     val selectedProfile by vpnViewModel.selectedProfile.collectAsStateWithLifecycle()
     val activeProfile = connectionState.activeProfile ?: selectedProfile
     val smartRecommendation by vpnViewModel.smartRecommendation.collectAsStateWithLifecycle()
+    val topNodes by vpnViewModel.topNodes.collectAsStateWithLifecycle()
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     var showLandingTourDialog by remember { mutableStateOf(false) }
 
@@ -206,13 +207,13 @@ fun HomeScreen(
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 val isGodMode = settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE
-                val accent = if (isGodMode) Color(0xFFFF5252) else AppTheme.colors.primary
-                val toggleMode = {
-                    val nextMode = if (isGodMode) {
-                        com.example.data.model.OperationalMode.DAILY
-                    } else {
-                        com.example.data.model.OperationalMode.GOD_MODE
-                    }
+                val isTrade = settings.operationalMode == com.example.data.model.OperationalMode.TRADE
+                val accent = when {
+                    isGodMode -> Color(0xFFFF5252)
+                    isTrade -> Color(0xFF26A69A)
+                    else -> AppTheme.colors.primary
+                }
+                val setMode = { nextMode: com.example.data.model.OperationalMode ->
                     settingsViewModel.updateSettings(settings.copy(operationalMode = nextMode))
                     if (nextMode == com.example.data.model.OperationalMode.GOD_MODE) {
                         com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
@@ -234,7 +235,11 @@ fun HomeScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isGodMode) Icons.Default.Shield else Icons.Default.Bolt,
+                            imageVector = when {
+                                isGodMode -> Icons.Default.Shield
+                                isTrade -> Icons.Default.Lock
+                                else -> Icons.Default.Bolt
+                            },
                             contentDescription = null,
                             tint = accent,
                             modifier = Modifier.size(18.dp)
@@ -256,21 +261,42 @@ fun HomeScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    // Mode switch
-                    Surface(
-                        onClick = toggleMode,
-                        shape = RoundedCornerShape(10.dp),
-                        color = accent.copy(alpha = 0.12f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.4f))
-                    ) {
-                        Text(
-                            text = if (isGodMode) "Daily Mode" else "GOD Mode",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isGodMode) Color(0xFFFF8A80) else AppTheme.colors.primary,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                // Three-way mode selector: Daily / GOD / Trade.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val chips = listOf(
+                        Triple(com.example.data.model.OperationalMode.DAILY, "⚡ Daily", AppTheme.colors.primary),
+                        Triple(com.example.data.model.OperationalMode.GOD_MODE, "🛡 GOD", Color(0xFFFF5252)),
+                        Triple(com.example.data.model.OperationalMode.TRADE, "📈 Trade", Color(0xFF26A69A))
+                    )
+                    chips.forEach { (chipMode, label, tint) ->
+                        val selected = settings.operationalMode == chipMode
+                        Surface(
+                            onClick = { if (!selected) setMode(chipMode) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (selected) tint.copy(alpha = 0.18f) else Color.Transparent,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp, if (selected) tint.copy(alpha = 0.6f) else AppTheme.colors.borderSubtle
+                            )
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) tint else AppTheme.colors.textMuted,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 7.dp)
+                            )
+                        }
                     }
                 }
 
@@ -393,11 +419,22 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Smart Connect Hero Card
-        smartRecommendation?.let { smart ->
+        // Smart Connect Hero Card — or, in Trade mode, the fixed-exit card.
+        if (settings.operationalMode == com.example.data.model.OperationalMode.TRADE) {
+            TradeModeCard(
+                pinned = activeProfile,
+                isConnected = connectionState.isConnected,
+                tradeSet = topNodes,
+                onConnect = {
+                    vpnViewModel.toggleConnection(context) { onRequestVpnPermission() }
+                }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        } else smartRecommendation?.let { smart ->
             SmartRecommendationCard(
                 smart = smart,
                 isConnected = connectionState.isConnected,
+                runnersUp = topNodes.drop(1),
                 onSmartConnect = {
                     vpnViewModel.connectSmart(context) {
                         onRequestVpnPermission()
@@ -571,9 +608,112 @@ fun HomeScreen(
 }
 
 @Composable
+private fun TradeModeCard(
+    pinned: com.example.data.model.VlessProfile?,
+    isConnected: Boolean,
+    tradeSet: List<SmartConnect.SmartSelection>,
+    onConnect: () -> Unit
+) {
+    val teal = Color(0xFF26A69A)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("trade_mode_card"),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = teal.copy(alpha = 0.10f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, teal.copy(alpha = 0.4f))
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Lock, contentDescription = null, tint = teal, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "TRADE MODE — FIXED EXIT",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = teal
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = pinned?.name ?: "No server selected",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Your IP, exit location and configuration stay the same every time. No smart switching, failover or recovery runs while Trade mode is on.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 15.sp
+            )
+            if (tradeSet.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Steadiest configs for a fixed exit",
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
+                    color = teal.copy(alpha = 0.9f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                tradeSet.take(3).forEach { node ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = teal, modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = node.profile.name,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = node.reasonStability,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = onConnect,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp)
+                    .testTag("trade_connect_button"),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = teal)
+            ) {
+                Icon(imageVector = Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isConnected) "Connected — exit locked" else "Connect (fixed exit)",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SmartRecommendationCard(
     smart: SmartConnect.SmartSelection,
     isConnected: Boolean,
+    runnersUp: List<SmartConnect.SmartSelection> = emptyList(),
     onSmartConnect: () -> Unit
 ) {
     Card(
@@ -697,6 +837,57 @@ private fun SmartRecommendationCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            if (runnersUp.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Falls over to, in order",
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                runnersUp.forEachIndexed { index, node ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${index + 2}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = node.profile.name,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "%.0f".format(node.overallScore),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

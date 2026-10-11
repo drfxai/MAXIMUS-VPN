@@ -69,6 +69,9 @@ class RayVpnService : VpnService() {
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
         /** How long a connect may spend in the LAB's fast recovery before it reports no verified path. */
         private const val FAST_RECOVERY_MS = 90_000L
+        // The agent's last resort: revive dead Cloudflare-fronted configs. Bounded so a failed connect
+        // does not hang; revival keeps the winning recipe for next time even if this run is cut short.
+        private const val CONFIG_REVIVE_MS = 60_000L
         /** Re-check interval for a connection whose last checks all passed. */
         private const val PING_HEALTHY_MS = 30_000L
         /** How long a clean-address scan may take before the connect goes on without one. */
@@ -507,7 +510,8 @@ class RayVpnService : VpnService() {
             dnsPoisoned = false
             privateServerLookup = policy.privateServerLookup
             val settings = policy.apply(settingsRepository.getSettings())
-            val raceFirst = smart || policy.alwaysSmartConnect
+            // Trade mode pins the exit: never race, never switch the chosen config for anything.
+            val raceFirst = !policy.lockExit && (smart || policy.alwaysSmartConnect)
 
             updateState(fresh(ConnectionStatus.PREPARING))
 
@@ -645,7 +649,7 @@ class RayVpnService : VpnService() {
             // 3a. A recovery candidate that carried traffic for this config on this network before (FIX BPB
             // or earlier recovery): a derived copy, the saved config itself is unchanged. One request decides;
             // a failure counts towards its rollback and the normal path search continues.
-            if (!raced) {
+            if (!raced && !policy.lockExit) {
                 val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile) }.getOrNull()
                 if (recovery != null) {
                     showForegroundNotification("Trying the recovered settings...")
@@ -669,7 +673,7 @@ class RayVpnService : VpnService() {
             // 3b. Find a path that carries traffic before the core starts: the saved profile, its stealth
             // alternates (split handshake, other fingerprint, ECH, UDP junk) or another kind on the same
             // server. The probe's sockets bypass the traffic-blocking interface (RealDelayProbe.socketProtector).
-            if (!raced && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
+            if (!raced && !policy.lockExit && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
                 showForegroundNotification("Finding a working route...")
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.SAFE_VARIANTS)
                 val resolvedRequested = profile
@@ -777,7 +781,7 @@ class RayVpnService : VpnService() {
             // Escalation before giving up: the LAB's fast recovery (Connect goal) over every other saved family
             // and the built-in recovery engines, stopping at the first path that carries a real request.
             var recoveryExhausted = false
-            if (!raced && !engineAdopted && provenDead && !force && (raceFirst || settings.autoFailoverEnabled)) {
+            if (!raced && !engineAdopted && provenDead && !force && !policy.lockExit && (raceFirst || settings.autoFailoverEnabled)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.RECOVERY_ENGINES)
                 showForegroundNotification("No server answered; trying recovery methods...")
                 val skipRefs = setOf(com.example.vpn.connectivity.PathRef.of(requestedProfile), com.example.vpn.connectivity.PathRef.of(userProfile))
@@ -805,6 +809,62 @@ class RayVpnService : VpnService() {
                 } else {
                     recoveryExhausted = outcome?.exhausted == true
                     XrayLogManager.w("SMART", "Recovery found no path: ${outcome?.why ?: "not run"}.")
+                }
+            }
+
+            // Last resort for the agent: when every saved server and recovery engine failed, revive the
+            // dead Cloudflare-fronted configs (ECH, fragment, fingerprint, clean IP) and connect the one
+            // that comes back. Bounded in time; never in Trade (its exit is pinned). The winning recipe is
+            // saved to the ledger, so even a cut-short run helps the next connect.
+            if (!raced && !engineAdopted && provenDead && !force && !policy.lockExit && recoveryExhausted &&
+                (raceFirst || settings.autoFailoverEnabled)) {
+                ladder.advance(com.example.vpn.connectivity.RecoveryStage.RECOVERY_ENGINES)
+                showForegroundNotification("Reviving configurations...")
+                val reviveDeadline = System.currentTimeMillis() + CONFIG_REVIVE_MS
+                val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                val report = runCatching {
+                    com.example.RayApplication.instance.configRevival.run(
+                        saved, network, cancelled = { System.currentTimeMillis() > reviveDeadline }
+                    ) { p -> p.current?.let { showForegroundNotification(it) } }
+                }.onFailure { XrayLogManager.w("SMART", "Config revival stopped: ${com.example.core.SecretRedactor.redact(it.message.orEmpty())}") }.getOrNull()
+                // Results come back revived-first; take the fastest config that was brought back to life.
+                val revived = report?.results
+                    ?.filter { it.outcome == com.example.vpn.lab.ConfigRevival.Outcome.REVIVED }
+                    ?.minByOrNull { it.latencyMs ?: Long.MAX_VALUE }
+                val owner = revived?.let { r -> saved.firstOrNull { it.id == r.profileId } }
+                val recovery = owner?.let {
+                    runCatching { com.example.RayApplication.instance.bpbRecovery.active(it, network, base = it) }.getOrNull()
+                }
+                if (owner != null && recovery != null) {
+                    // The revived copy still has to carry a real request here before we start the tunnel on
+                    // it (same no-blind-connection rule as every other tier); a bad copy just falls through.
+                    val chosen = runCatching {
+                        var c = recovery.profile
+                        if (c.profileType != ProfileType.XRAY_JSON && !com.example.vpn.sidecar.Sidecars.isEngineProfile(c) &&
+                            !isLiteralIp(c.address)) c = resolveEndpoint(c)
+                        com.example.vless.VlessValidator.validate(c)
+                        com.example.vpn.engine.RuntimeCapabilities.requireSupported(c)
+                        c
+                    }.getOrNull()
+                    val verified = chosen != null &&
+                        com.example.xray.RealDelayProbe.measure(chosen, timeouts.firstSec) is com.example.xray.RealDelayProbe.Outcome.Delay
+                    if (verified && chosen != null) {
+                        requestedProfile = owner
+                        activeProfile = owner
+                        profile = chosen
+                        raced = true
+                        activeRecovery = recovery
+                        com.example.RayApplication.instance.bpbRecovery.recordOutcome(recovery, success = true)
+                        ladder.advance(com.example.vpn.connectivity.RecoveryStage.FIRST_VERIFIED_PATH)
+                        mutateState { it.copy(activeProfile = owner, attemptedProfileId = owner.id) }
+                        XrayLogManager.i("SMART", "Config revival brought back ${com.example.core.SecretRedactor.redact(owner.name)} " +
+                            "(${revived.recipe ?: "recipe"}); its recovered settings carried traffic.")
+                    } else {
+                        runCatching { com.example.RayApplication.instance.bpbRecovery.recordOutcome(recovery, success = false) }
+                        XrayLogManager.w("SMART", "Config revival produced a candidate that carried no traffic; going on.")
+                    }
+                } else if (report != null) {
+                    XrayLogManager.w("SMART", "Config revival brought nothing back (${report.results.size} eligible).")
                 }
             }
 
