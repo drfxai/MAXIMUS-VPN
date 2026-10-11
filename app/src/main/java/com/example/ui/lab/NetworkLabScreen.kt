@@ -102,6 +102,41 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun stopRevive() { revivalJob?.cancel() }
+
+    private var servicesJob: Job? = null
+    private val serviceHttp by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .followRedirects(true).followSslRedirects(true)
+            .build()
+    }
+
+    /** Opens each service's front page from the app (through the VPN when it is on) and judges the answer. */
+    fun checkServices() {
+        if (servicesJob?.isActive == true) return
+        val throughVpn = _state.value.vpnOn
+        servicesJob = viewModelScope.launch {
+            local.update { it.copy(services = it.services.copy(running = true, partial = emptyList())) }
+            val report = withContext(Dispatchers.IO) {
+                com.example.vpn.lab.ServiceCheck.run(fetch = { url ->
+                    val start = System.nanoTime()
+                    serviceHttp.newCall(okhttp3.Request.Builder().url(url)
+                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36")
+                        .header("Accept-Language", "en-US,en;q=0.9").build()).execute().use { r ->
+                        com.example.vpn.lab.ServiceCheck.Response(r.code, r.request.url.toString(), r.peekBody(65_536).string(),
+                            (System.nanoTime() - start) / 1_000_000)
+                    }
+                }, throughVpn = throughVpn, cancelled = { !isActive }) { res ->
+                    local.update { it.copy(services = it.services.copy(partial = it.services.partial + res)) }
+                }
+            }
+            local.update { it.copy(services = ServicesUi(report = report)) }
+        }.also { job -> job.invokeOnCompletion { local.update { it.copy(services = it.services.copy(running = false)) } } }
+    }
+
+    fun stopServices() { servicesJob?.cancel() }
     fun chooseFirewall(f: com.example.vpn.connectivity.NetworkFirewalls.Firewall?) = local.update { it.copy(revival = it.revival.copy(chosen = f)) }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }
@@ -186,7 +221,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onDisable = lab::setDisabled, onRetire = lab::retire, onDismissMessage = lab::dismissMessage,
                 onResearchRefresh = { viewModel.refreshResearch() }, onAskAgent = viewModel::askAgent, onTestSuggestion = viewModel::testSuggestion,
                 onUseRecommended = viewModel::useRecommended, onRevive = viewModel::revive, onStopRevive = viewModel::stopRevive,
-                onFirewall = viewModel::chooseFirewall
+                onFirewall = viewModel::chooseFirewall, onCheckServices = viewModel::checkServices, onStopServices = viewModel::stopServices
             )
         },
         relativeTime = ::relative
