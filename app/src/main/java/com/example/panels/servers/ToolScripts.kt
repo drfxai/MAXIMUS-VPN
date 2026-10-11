@@ -7,12 +7,12 @@ package com.example.panels.servers
  * refuses any file whose hash differs, wherever it came from.
  */
 object ServerBinaries {
-    const val RELEASE_TAG = "server-tools-v1"
+    const val RELEASE_TAG = "server-tools-v2"
     const val BASE_URL = "https://github.com/drfxai/MAXIMUS-VPN/releases/download/$RELEASE_TAG"
 
     val SHA256: Map<String, String> = mapOf(
-        "dnstt-server-linux-amd64" to "16c4df19255d7b63efcce8382d55d6da49272d9c5a4bfdf041c1f77c2cd17ad8",
-        "dnstt-server-linux-arm64" to "45cee8cb7d959a69ac54014b40a68e72d7fc54b0d6f494d8de6075277447a788",
+        "dnstt-server-linux-amd64" to "cd10e81a7bc305a72822324ead7beb7c68bc88a3b0b35798412a08a39adb46b3",
+        "dnstt-server-linux-arm64" to "42daffa2107e3dd04b1c6b3973b31e3fd2c7532b47361563a43f48e4f8d847a5",
         "hysteria-linux-amd64" to "17d92c287c49f3eeffb0cfdbecc610e03164482fa8518d3b791a5d1df4dbc7c2",
         "hysteria-linux-arm64" to "c0788f9ae2ae91f05fc90265e4793963811c9d325ff5276eed9a3fe1b0e16534",
         "maximus-socks-linux-amd64" to "7628ca100349b4a2d7739a3c6427e6638443f73db4073118f3a460084458d19d",
@@ -171,10 +171,14 @@ object ToolScripts {
      * Installs the DNS tunnel for [domain] (the delegated name, e.g. t.example.com). dnstt-server
      * listens on [dnsPort]; incoming UDP 53 is redirected there while the service runs, so it never
      * needs to run as root and does not collide with a local resolver on 127.0.0.53. Tunnel streams
-     * go to the loopback SOCKS helper on [socksPort]. [newKey] replaces the key pair.
+     * go to the loopback SOCKS helper on [socksPort]. [newKey] replaces the key pair. The server also
+     * answers [backups], tunnel names under other domains the user delegated to it, so clients can
+     * move to one when [domain] is blocked and keep their session.
      */
-    fun dnsttInstall(domain: String, arch: String, dnsPort: Int, socksPort: Int, newKey: Boolean): ToolScript {
+    fun dnsttInstall(domain: String, arch: String, dnsPort: Int, socksPort: Int, newKey: Boolean, backups: List<String> = emptyList()): ToolScript {
         require(DOMAIN.matches(domain)) { "Invalid tunnel domain" }
+        require(backups.size <= DnsDelegation.MAX_BACKUPS && backups.all { DOMAIN.matches(it) }) { "Invalid backup domain" }
+        val domains = (listOf(domain) + backups).map { it.lowercase() }.distinct().joinToString(",")
         val a = arch(arch)
         port(dnsPort, "tunnel"); port(socksPort, "SOCKS")
         require(dnsPort != 53 && dnsPort != socksPort) { "The internal ports must differ from 53 and each other" }
@@ -186,7 +190,7 @@ object ToolScripts {
             "Maximus DNS tunnel (dnstt)",
             listOf(
                 "ExecStartPre=+/usr/local/lib/maximus/dnstt-redirect add $dnsPort",
-                "ExecStart=/usr/local/bin/maximus-dnstt-server -udp :$dnsPort -privkey-file $DNSTT_DIR/server.key ${domain.lowercase()} 127.0.0.1:$socksPort",
+                "ExecStart=/usr/local/bin/maximus-dnstt-server -udp :$dnsPort -privkey-file $DNSTT_DIR/server.key $domains 127.0.0.1:$socksPort",
                 "ExecStopPost=+/usr/local/lib/maximus/dnstt-redirect del $dnsPort"
             ),
             after = "network-online.target maximus-socks.service"

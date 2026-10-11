@@ -9,6 +9,8 @@ import com.example.panels.XuiInstallRequest
 data class InstallOptions(
     val baseDomain: String = "",
     val tunnelLabel: String = "t",
+    /** DNS tunnel backup domains (base domains, like [baseDomain]). */
+    val backupBases: List<String> = emptyList(),
     val port: Int? = null,
     val swapMb: Int = 1024,
     /** Replace keys or secrets that already exist on the server. */
@@ -74,13 +76,15 @@ class ServerManager(
                 when (toolId) {
                     ServerToolCatalog.DNSTT -> {
                         DnsDelegation.problem(options.baseDomain, options.tunnelLabel)?.let { error(it) }
+                        DnsDelegation.backupProblem(options.baseDomain, options.backupBases)?.let { error(it) }
                         val domain = DnsDelegation.tunnelDomain(options.baseDomain, options.tunnelLabel)
+                        val backups = options.backupBases.map { DnsDelegation.tunnelDomain(it, options.tunnelLabel) }
                         val previous = server.tool(toolId)
                         val dnsPort = previous?.settings?.get(ToolProfiles.DNSTT_PORT)?.toIntOrNull()
                             ?: ServerRandom.port(facts.udpPorts + facts.tcpPorts)
                         val socksPort = previous?.settings?.get(ToolProfiles.SOCKS_PORT)?.toIntOrNull()
                             ?: ServerRandom.port(facts.udpPorts + facts.tcpPorts, exclude = setOf(dnsPort))
-                        val r = runScript(shell, ToolScripts.dnsttInstall(domain, arch, dnsPort, socksPort, options.renew), progress)
+                        val r = runScript(shell, ToolScripts.dnsttInstall(domain, arch, dnsPort, socksPort, options.renew, backups), progress)
                         val pubkey = r["PUBKEY"].orEmpty()
                         require(pubkey.matches(Regex("[0-9a-fA-F]{64}"))) { "The server did not return the tunnel key" }
                         val installed = InstalledTool(
@@ -89,7 +93,10 @@ class ServerManager(
                                 ToolProfiles.DNSTT_DOMAIN to domain, ToolProfiles.DNSTT_BASE to DnsDelegation.normalizeBase(options.baseDomain),
                                 ToolProfiles.DNSTT_LABEL to options.tunnelLabel, ToolProfiles.DNSTT_PUBKEY to pubkey.lowercase(),
                                 ToolProfiles.DNSTT_PORT to dnsPort.toString(), ToolProfiles.SOCKS_PORT to socksPort.toString()
-                            )
+                            ) + (if (options.backupBases.isEmpty()) emptyMap() else mapOf(
+                                ToolProfiles.DNSTT_BACKUP_BASES to options.backupBases.joinToString(","),
+                                ToolProfiles.DNSTT_BACKUPS to backups.joinToString(",")
+                            ))
                         )
                         val updated = server.withTool(installed).copy(facts = facts, checkedAt = System.currentTimeMillis())
                         InstallOutcome(updated, installed, ToolProfiles.dnsttProfile(updated, installed), ToolProfiles.dnsttLink(updated, installed),
@@ -219,7 +226,8 @@ class ServerManager(
     fun rotateKey(server: ManagedServer, toolId: String, progress: ActionProgress): InstallOutcome {
         val t = requireNotNull(server.tool(toolId)) { "Not installed" }
         val options = when (toolId) {
-            ServerToolCatalog.DNSTT -> InstallOptions(t.settings[ToolProfiles.DNSTT_BASE].orEmpty(), t.settings[ToolProfiles.DNSTT_LABEL] ?: "t", renew = true)
+            ServerToolCatalog.DNSTT -> InstallOptions(t.settings[ToolProfiles.DNSTT_BASE].orEmpty(), t.settings[ToolProfiles.DNSTT_LABEL] ?: "t",
+                backupBases = ToolProfiles.backupBases(t), renew = true)
             ServerToolCatalog.HYSTERIA2 -> InstallOptions(renew = true)
             else -> error("Nothing to rotate for $toolId")
         }

@@ -61,6 +61,9 @@ HY_EXTRAS_SUM="h1:cenZ6WcsvwyNvRAUjqNxjDcyAJH7GeGP8DLuSRFSfyo="
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 DNSTT_SRC="$(copy_checked "$DNSTT_MODULE" "$DNSTT_VERSION" "$DNSTT_SUM")"
+# Lets dnstt-server answer several tunnel domains (DOMAIN may be a comma-separated list), so clients
+# can move to a backup domain without losing their session.
+patch -d "$DNSTT_SRC" -p1 --forward --batch --silent < "$ROOT/scripts/server-tools/dnstt-server-domains.patch"
 XRAY_SRC="$(GOTOOLCHAIN=$XRAY_TOOLCHAIN copy_checked "$XRAY_MODULE" "$XRAY_VERSION" "$XRAY_SUM")"
 # Hysteria's app module points at its sibling modules with relative replaces; rebuild that layout.
 mkdir -p "$work/hy"

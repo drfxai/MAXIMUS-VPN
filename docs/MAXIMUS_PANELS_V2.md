@@ -39,7 +39,8 @@ moved to a new port or given new keys where that makes sense, and removed.
 
 dnstt-server, Hysteria2, Xray and a small loopback-only SOCKS5 server (`tools/server-tools/socks`) are
 built reproducibly by `scripts/server-tools/build.sh` (Go 1.26.8; Xray v26.9.9 with Go 1.27.2, `-trimpath`, empty build id)
-and published by `.github/workflows/server-tools.yml` to the prerelease `server-tools-v1`.
+and published by `.github/workflows/server-tools.yml` to the prerelease `server-tools-v2` (`server-tools-v1`
+stays for older app builds; v2's dnstt-server answers several tunnel domains, for backup domains).
 The app pins the SHA-256 of every file (`tools/server-tools/SHA256SUMS`), and the install
 scripts refuse a download whose hash differs. Nothing is piped into a shell.
 

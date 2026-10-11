@@ -434,8 +434,12 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     /** Puts [profile] in the profile list, replacing [oldId]; returns the saved profile's id. */
     private suspend fun storeProfile(oldId: String?, profile: VlessProfile): String? {
         val repo = RayApplication.instance.serverRepository
+        // A reinstalled DNS tunnel keeps the resolvers and rate chosen on this phone.
+        val previous = oldId?.let { runCatching { repo.getProfileById(it) }.getOrNull() }
+        val stored = if (previous != null && com.example.vpn.sidecar.DnsttSidecar().handles(previous) &&
+            com.example.vpn.sidecar.DnsttSidecar().handles(profile)) com.example.vpn.sidecar.DnsttSidecar.carryOver(previous, profile) else profile
         oldId?.let { old -> runCatching { repo.delete(old) } }
-        val (inserted, duplicates) = repo.insertAllWithDeduplication(listOf(profile))
+        val (inserted, duplicates) = repo.insertAllWithDeduplication(listOf(stored))
         return (inserted.firstOrNull() ?: duplicates.firstOrNull()?.let { repo.getProfileByFingerprint(it.effectiveFingerprint) })?.id
     }
 
@@ -499,6 +503,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 serverId = id, stage = WizardStage.CHECK, checks = null, reinstall = existing != null,
                 baseDomain = existing?.settings?.get(ToolProfiles.DNSTT_BASE).orEmpty(),
                 tunnelLabel = existing?.settings?.get(ToolProfiles.DNSTT_LABEL) ?: "t",
+                backupDomains = existing?.let { ToolProfiles.backupBases(it).joinToString(", ") }.orEmpty(),
                 port = "", renew = false, error = ""
             ).withRecords(s))
         }
@@ -517,7 +522,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun WizardUi.withRecords(s: ManagedServer?): WizardUi =
         if (tool.id == ServerToolCatalog.DNSTT && s != null && DnsDelegation.problem(baseDomain, tunnelLabel) == null)
-            copy(records = DnsDelegation.records(baseDomain, tunnelLabel, s.host))
+            copy(records = DnsDelegation.records(baseDomain, tunnelLabel, s.host,
+                backups.takeIf { DnsDelegation.backupProblem(baseDomain, it) == null }.orEmpty()))
         else copy(records = emptyList())
 
     fun changeWizard(ui: WizardUi) = _state.update { it.copy(wizard = ui.withRecords(server(ui.serverId))) }
@@ -555,12 +561,15 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun checkDns() {
         val w = _state.value.wizard ?: return
-        if (w.records.size != 2 || w.dnsChecking) return
+        if (w.records.isEmpty() || w.records.size % 2 != 0 || w.dnsChecking) return
         _state.update { it.copy(wizard = w.copy(dnsChecking = true)) }
         viewModelScope.launch {
+            // Each domain's pair of records: the name server's address, then the delegation.
             val checks = withContext(Dispatchers.IO) {
-                val (a, ns) = w.records
-                DnsDelegation.judge(w.records, doh(a.name, a.type), doh(ns.name, "NS"))
+                w.records.chunked(2).flatMap { pair ->
+                    val (a, ns) = pair
+                    DnsDelegation.judge(pair, doh(a.name, a.type), doh(ns.name, "NS"))
+                }
             }
             _state.update { it.copy(wizard = it.wizard?.copy(dnsChecks = checks, dnsChecking = false)) }
         }
@@ -605,6 +614,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         val options = InstallOptions(baseDomain = w.baseDomain, tunnelLabel = w.tunnelLabel.ifBlank { "t" },
+            backupBases = if (w.tool.id == ServerToolCatalog.DNSTT) w.backups else emptyList(),
             port = w.port.toIntOrNull(), renew = w.renew)
         job = viewModelScope.launch {
             try {
@@ -614,7 +624,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                     st.copy(wizard = st.wizard?.copy(
                         stage = WizardStage.DONE, currentStep = steps.size + 1, summary = out.summary,
                         link = out.link, profileName = out.profile?.name, serverId = saved.id,
-                        records = if (w.tool.id == ServerToolCatalog.DNSTT) DnsDelegation.records(w.baseDomain, w.tunnelLabel, saved.host) else emptyList()
+                        records = if (w.tool.id == ServerToolCatalog.DNSTT) DnsDelegation.records(w.baseDomain, w.tunnelLabel, saved.host, w.backups) else emptyList()
                     ))
                 }
                 emit(ServersEvent.Success)

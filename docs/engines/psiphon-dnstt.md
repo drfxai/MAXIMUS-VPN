@@ -48,7 +48,7 @@ dnstt-client carries one local TCP port to a dnstt-server inside DNS queries sen
 resolver (DoH, DoT or plain UDP DNS), encrypted with Noise to the server's public key. The server
 forwards the stream to whatever its operator runs; for this app that must be a SOCKS5 server
 without a login. The app starts
-`libdnstt.so (-doh URL | -dot IP:PORT | -udp IP:PORT) -pubkey <hex> [-utls SPEC] -qps <N> <domain> 127.0.0.1:<port>`.
+`libdnstt.so (-doh URL | -dot IP:PORT | -udp IP:PORT)... -pubkey <hex> [-utls SPEC] -qps <N> [-qps-per-resolver] [-domains <backup>,...] <domain> 127.0.0.1:<port>`.
 
 **Query rate cap.** Some networks block a client that sends more than about 5 DNS queries a
 second. The build applies `scripts/engines/dnstt-query-rate.patch`, which adds `-qps` to
@@ -58,13 +58,33 @@ ask for 1 to 4 (`qps=` in the link). Measured against a local dnstt-server under
 the unpatched client sent 392 queries in one second, the patched one at most 4. The cost is speed:
 a 20 KB download took about 8 s over plain UDP DNS at 4 queries a second.
 
+**Several resolvers, backup domains.** `scripts/engines/dnstt-multipath.patch` (applied after the
+rate patch) lets the resolver options repeat, up to 6. Queries are shared between the resolvers in
+turn, all under one `-qps` limit, or each under its own with `-qps-per-resolver` (faster, but the
+total is N times the number of resolvers; off by default). A resolver with no good answer in 10 s
+and 8 queries is rested for 30 s, doubling up to 5 min, then tried again; "name does not exist"
+(NXDOMAIN) answers are logged and never count against it, since some networks inject fake ones
+(over UDP the real answer still arrives after the fake one). `-domains` lists up to 3 backup tunnel
+domains: when the current domain has had no good answer through any resolver for 15 s and 12
+queries, the client moves to the next one. The KCP/Noise session is not tied to a domain, so the
+connection carries on when the server answers all of them; `scripts/server-tools/dnstt-server-domains.patch`
+lets dnstt-server take a comma-separated DOMAIN list, and the Install Center passes the backups.
+Measured locally against the patched server, with fake resolvers in front of it:
+three resolvers (one answering, one silent, one sending a fake NXDOMAIN before every real answer)
+delivered 20 KB in about 15 s with at most 4 queries in any second over all three, the silent one
+rested after 10 s and the NXDOMAIN one kept; two resolvers with the per-resolver limit delivered
+60 KB in about 17 s (at most 4 a second each, 8 in all) against about 45 s through one; with the
+main domain answered only by NXDOMAIN, the client moved to the backup after 15 s and the same
+session finished the download.
+
 The client listens before the Noise handshake, so the port check passes on start; it exits if the
 session fails. The resolver must be reachable without a DNS lookup: a DoH URL with an IP host
 (well-known DoH names are replaced via `DnsResolvers`), or an IP for DoT/UDP. Host names are refused.
 
 Link format (this app's own):
 `dnstt://<64-hex server key>@<tunnel domain>?doh=https://1.1.1.1/dns-query#Name`
-(`dot=9.9.9.9[:853]` or `udp=8.8.8.8[:53]` instead of `doh`; optional `utls=` and `qps=1..4`). With no resolver
+(`dot=9.9.9.9[:853]` or `udp=8.8.8.8[:53]` instead of `doh`, and any of them repeated for several resolvers;
+optional `utls=`, `qps=1..4`, `perresolver=1` and `domains=<backup>,<backup>`). With no resolver
 the link uses `https://1.1.1.1/dns-query`. `DnsttSidecar.parse`, `toLink` and `profile` build
 profiles with `extraSettings = {"engine":"dnstt",...}`.
 
