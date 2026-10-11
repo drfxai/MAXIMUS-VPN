@@ -1,0 +1,64 @@
+package com.example.vpn.smart
+
+import com.example.data.model.ServerCategory
+import com.example.data.model.VlessProfile
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/** The Optimal Node agent's shortlist: order, the favorite bonus, and that dead nodes drop out. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class SmartConnectRankTest {
+    private fun node(
+        id: String,
+        score: Double,
+        stability: Double = 100.0,
+        latency: Long? = 100L,
+        loss: Double = 0.0,
+        favorite: Boolean = false,
+        category: ServerCategory = ServerCategory.BALANCED
+    ) = VlessProfile(
+        id = id, name = "N$id", address = "203.0.113.${id.filter { it.isDigit() }.ifEmpty { "1" }}", port = 443,
+        uuid = "11111111-1111-1111-1111-111111111111", security = "reality", sni = "www.example.com",
+        publicKey = "pbk$id", shortId = "ab", flow = "xtls-rprx-vision", fingerprint = "chrome",
+        overallScore = score, stability = stability, lastLatencyMs = latency, packetLoss = loss,
+        isFavorite = favorite, category = category
+    )
+
+    @Test fun ranksBestFirstAndCapsAtTheRequestedCount() {
+        val pool = listOf(node("1", 40.0), node("2", 90.0), node("3", 70.0), node("4", 55.0))
+        val top = SmartConnect.rankTopNodes(pool, count = 3)
+        assertEquals(listOf("2", "3", "4"), top.map { it.profile.id })
+    }
+
+    @Test fun aFavoriteLeadsEvenWithALowerScore() {
+        val pool = listOf(node("1", 95.0), node("2", 30.0, favorite = true))
+        val top = SmartConnect.rankTopNodes(pool, count = 2)
+        assertEquals("2", top.first().profile.id)
+    }
+
+    @Test fun offlineAndHighLossNodesDropOutWhenHealthyOnesExist() {
+        val pool = listOf(
+            node("ok", 50.0),
+            node("off", 99.0, category = ServerCategory.OFFLINE),
+            node("lossy", 99.0, loss = 55.0)
+        )
+        val top = SmartConnect.rankTopNodes(pool, count = 3)
+        assertEquals(listOf("ok"), top.map { it.profile.id })
+    }
+
+    @Test fun selectBestNodeIsTheTopOfTheRanking() {
+        val pool = listOf(node("1", 40.0), node("2", 90.0))
+        assertEquals(SmartConnect.rankTopNodes(pool, count = 1).firstOrNull()?.profile?.id,
+            SmartConnect.selectBestNode(pool)?.profile?.id)
+        assertEquals("2", SmartConnect.selectBestNode(pool)?.profile?.id)
+    }
+
+    @Test fun emptyInEmptyOut() {
+        assertTrue(SmartConnect.rankTopNodes(emptyList()).isEmpty())
+    }
+}

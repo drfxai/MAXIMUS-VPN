@@ -45,16 +45,25 @@ class VpnViewModel(
         initialValue = null
     )
 
-    val smartRecommendation: StateFlow<SmartConnect.SmartSelection?> = combine(
+    /** The Optimal Node agent's ranked shortlist: best first, up to three. */
+    val topNodes: StateFlow<List<SmartConnect.SmartSelection>> = combine(
         serverRepository.allProfiles,
         settingsRepository.settingsFlow
     ) { profiles, settings ->
-        SmartConnect.selectBestNode(profiles, settings.scoringProfile)
+        SmartConnect.rankTopNodes(profiles, settings.scoringProfile, count = 3)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = null
+        initialValue = emptyList()
     )
+
+    val smartRecommendation: StateFlow<SmartConnect.SmartSelection?> = topNodes
+        .combine(settingsRepository.settingsFlow) { ranked, _ -> ranked.firstOrNull() }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
 
     fun prepareConnect(profile: VlessProfile?) {
         _pendingProfile.value = profile

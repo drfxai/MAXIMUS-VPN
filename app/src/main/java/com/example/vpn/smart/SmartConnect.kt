@@ -17,32 +17,47 @@ object SmartConnect {
     )
 
     /**
-     * Analyzes all available profiles and selects the optimal healthy node for the active scoring profile.
+     * The healthy, supported nodes in the order the Optimal Node agent would try them: best first.
+     * The agent connects to the first and, if it is disrupted or slow, moves down this list before it
+     * reaches for anything heavier (clean addresses, the free list, LAB recovery).
      */
-    fun selectBestNode(profiles: List<VlessProfile>, scoringProfile: ScoringProfile = ScoringProfile.BALANCED): SmartSelection? {
-        if (profiles.isEmpty()) return null
+    fun rankTopNodes(
+        profiles: List<VlessProfile>,
+        scoringProfile: ScoringProfile = ScoringProfile.BALANCED,
+        count: Int = 3
+    ): List<SmartSelection> {
+        if (profiles.isEmpty() || count <= 0) return emptyList()
 
-        // Filter for eligible nodes (exclude known offline or high-loss nodes)
+        // Only nodes the core can actually run.
         val supportedProfiles = profiles.filter { com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
         val healthyProfiles = supportedProfiles.filter {
             it.category != ServerCategory.OFFLINE &&
-            it.packetLoss < 40.0 &&
-            (it.lastLatencyMs == null || it.lastLatencyMs > 0)
+                it.packetLoss < 40.0 &&
+                (it.lastLatencyMs == null || it.lastLatencyMs > 0)
         }
-
         val pool = if (healthyProfiles.isNotEmpty()) healthyProfiles else supportedProfiles
 
-        // Sort: Favorite bonus, then overallScore desc, stability desc, latency asc (lower is better)
-        val best = pool.maxWithOrNull(
-            compareBy<VlessProfile> { if (it.isFavorite) 1 else 0 }
-                .thenBy { it.overallScore }
-                .thenBy { it.stability }
-                .thenBy { -(it.lastLatencyMs ?: 9999L) }
-        ) ?: return null
+        // Favorite bonus, then overallScore, stability, lower latency. maxWith's comparator read in reverse
+        // gives the descending order the agent wants.
+        val ordered = pool.sortedWith(
+            compareByDescending<VlessProfile> { if (it.isFavorite) 1 else 0 }
+                .thenByDescending { it.overallScore }
+                .thenByDescending { it.stability }
+                .thenBy { it.lastLatencyMs ?: 9999L }
+        )
+        return ordered.take(count).map { describe(it, scoringProfile) }
+    }
 
+    /**
+     * Analyzes all available profiles and selects the optimal healthy node for the active scoring profile.
+     */
+    fun selectBestNode(profiles: List<VlessProfile>, scoringProfile: ScoringProfile = ScoringProfile.BALANCED): SmartSelection? =
+        rankTopNodes(profiles, scoringProfile, count = 1).firstOrNull()
+
+    /** The human-readable rating lines for one node. */
+    private fun describe(best: VlessProfile, scoringProfile: ScoringProfile): SmartSelection {
         val pingStr = if (best.lastLatencyMs != null && best.lastLatencyMs > 0) "${best.lastLatencyMs} ms" else "Not measured"
         val dlStr = if (best.downloadMbps > 0) "%.1f Mbps".format(best.downloadMbps) else "Not measured"
-        val stabStr = "%.0f%%".format(best.stability)
         val lossStr = "%.1f%%".format(best.packetLoss)
 
         val pingRating = when {

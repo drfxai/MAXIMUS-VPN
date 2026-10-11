@@ -24,6 +24,24 @@ class OperatingModePolicyTest {
         assertFalse(OperatingModePolicy.DAILY.alwaysSmartConnect)
     }
 
+    @Test fun tradeLocksTheExitAndNeverSwitches() {
+        val policy = OperatingModePolicy.of(OperationalMode.TRADE)
+        assertTrue(policy.lockExit)
+        assertFalse(policy.alwaysSmartConnect)
+        // A fixed exit means failover is forced off, whatever the user had.
+        val trade = policy.apply(userChoices.copy(operationalMode = OperationalMode.TRADE, autoFailoverEnabled = true))
+        assertFalse(trade.autoFailoverEnabled)
+        // The user's routing and IPv6 choices are left alone (unlike GOD MODE).
+        assertEquals(userChoices.routingMode, trade.routingMode)
+        assertEquals(userChoices.ipv6Enabled, trade.ipv6Enabled)
+    }
+
+    @Test fun onlyTradeLocksTheExit() {
+        assertFalse(OperatingModePolicy.of(OperationalMode.DAILY).lockExit)
+        assertFalse(OperatingModePolicy.of(OperationalMode.GOD_MODE).lockExit)
+        assertTrue(OperatingModePolicy.of(OperationalMode.TRADE).lockExit)
+    }
+
     @Test fun godModeProxiesEverythingBlocksIpv6AndKeepsRecoveryOn() {
         val god = OperatingModePolicy.GOD_MODE.apply(userChoices.copy(operationalMode = OperationalMode.GOD_MODE))
         assertEquals(RoutingMode.GLOBAL, god.routingMode)
