@@ -714,6 +714,19 @@ class RayVpnService : VpnService() {
                     warpPath(timeouts.alternateSec)?.let { adopt(it) }
                 }
                 if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
+                    // WARP again, but over MASQUE (HTTP/3 to Cloudflare on 443), for networks that block
+                    // the plain WireGuard UDP the step above uses. It registers its own device, so it is
+                    // only taken when this build carries the program; verified with a real request once it runs.
+                    val masque = com.example.vpn.sidecar.MasqueSidecar.profile()
+                    val missing = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(masque)
+                    if (missing == null) {
+                        XrayLogManager.i("SMART", "WARP UDP did not carry traffic; trying WARP over MASQUE (HTTP/3).")
+                        adoptEngine(masque)
+                    } else {
+                        XrayLogManager.i("SMART", "MASQUE not tried: not available ($missing). Not a failure: nothing was tested.")
+                    }
+                }
+                if (choice.nothingWorked && !raced && policy.mode == com.example.data.model.OperationalMode.GOD_MODE) {
                     // Psiphon finds its own servers. It cannot be measured before it starts, so it is
                     // only taken when this build carries it; if it finds nothing, traffic stays blocked.
                     val psiphon = com.example.vpn.sidecar.PsiphonSidecar.profile()

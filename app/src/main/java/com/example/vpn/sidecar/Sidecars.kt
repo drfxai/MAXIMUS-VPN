@@ -15,6 +15,7 @@ object Sidecars {
                 openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
             }),
             DnsttSidecar(),
+            MasqueSidecar,
             TorSidecar { torrc, port -> (torStarter ?: error("Tor needs Android to run")).invoke(torrc, port) }
         )
     }

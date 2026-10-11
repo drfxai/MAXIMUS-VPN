@@ -46,8 +46,10 @@ object EngineRegistry {
     val NAIVE = EngineDescriptor("naive", "NaiveProxy", null, "BSD-3-Clause", bundled = false, runtime = null)
     val DNS_TUNNEL = EngineDescriptor("dns-tunnel", "DNS tunnel (dnstt, separate program)", "v1.20260501.0", "CC0-1.0",
         bundled = true, runtime = null)
+    val MASQUE = EngineDescriptor("masque", "Cloudflare WARP over MASQUE (usque, separate program)", "v1.5.0", "MPL-2.0",
+        bundled = true, runtime = null)
 
-    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, MIHOMO, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL)
+    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, MIHOMO, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL, MASQUE)
 
     fun descriptorFor(runtime: EngineSelectionPolicy.Runtime): EngineDescriptor =
         ENGINES.first { it.runtime == runtime }
