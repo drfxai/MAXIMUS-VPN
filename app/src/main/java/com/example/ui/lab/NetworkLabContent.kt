@@ -132,7 +132,8 @@ class NetworkLabActions(
     /** Selects a saved config (id, name) as the one to connect with. */
     val onUseRecommended: (String, String) -> Unit = { _, _ -> },
     val onRevive: () -> Unit = {},
-    val onStopRevive: () -> Unit = {}
+    val onStopRevive: () -> Unit = {},
+    val onFirewall: (com.example.vpn.connectivity.NetworkFirewalls.Firewall?) -> Unit = {}
 )
 
 @Composable
@@ -152,7 +153,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
                     LabSection.VERIFIED -> VerifiedPage(c, state.snapshot, actions, relativeTime)
                     LabSection.RESEARCH -> ResearchPage(c, state.research, actions, relativeTime)
                     LabSection.REVIVE -> RevivePage(c, state.revival, state.vpnOn, state.snapshot.running != null || state.snapshot.analysisRunning,
-                        actions.onRevive, actions.onStopRevive, relativeTime)
+                        actions.onRevive, actions.onStopRevive, relativeTime, actions.onFirewall)
                 }
             }
         }

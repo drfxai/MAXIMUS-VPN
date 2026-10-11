@@ -64,7 +64,8 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     private fun loadConfigs() = viewModelScope.launch {
         val configs = withContext(Dispatchers.IO) { runCatching { RayApplication.instance.serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList()) }
         val eligible = runCatching { revival.eligibleCount(configs) }.getOrDefault(0)
-        local.update { it.copy(revival = it.revival.copy(eligible = eligible)) }
+        val detected = com.example.vpn.connectivity.NetworkFirewalls.detect(NetworkKey.current(getApplication<Application>()))
+        local.update { it.copy(revival = it.revival.copy(eligible = eligible, detected = detected)) }
         local.value = local.value.copy(configs = configs.map { p ->
             LabConfigOption(p.id, p.name.ifBlank { "Config" }, listOf(p.protocolType.displayName, p.transport.uppercase().ifBlank { null }, p.security.uppercase().ifBlank { null })
                 .filterNotNull().filter { it != "NONE" }.joinToString(" · "))
@@ -84,20 +85,24 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         if (revivalJob?.isActive == true) return
         revivalJob = viewModelScope.launch {
             local.update { it.copy(revival = it.revival.copy(running = true, done = 0, total = 0, current = "Starting")) }
-            val results = withContext(Dispatchers.IO) {
+            val chosen = local.value.revival.chosen
+            val report = withContext(Dispatchers.IO) {
                 val profiles = runCatching { RayApplication.instance.serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
                 val network = NetworkKey.current(getApplication<Application>())
-                revival.run(profiles, network, cancelled = { !isActive }) { p ->
+                revival.run(profiles, network, cancelled = { !isActive }, firewall = chosen) { p ->
                     local.update { it.copy(revival = it.revival.copy(done = p.done, total = p.total, current = p.current ?: it.revival.current)) }
                 }
             }
-            local.update { it.copy(revival = it.revival.copy(running = false, current = null, results = results, ranAt = System.currentTimeMillis())) }
+            local.update { it.copy(revival = it.revival.copy(running = false, current = null, results = report.results, ranAt = System.currentTimeMillis(),
+                echResolvers = report.echResolvers, cleanIps = report.cleanIps, scannedForIps = report.scannedForIps,
+                detected = if (chosen == null) report.firewall else it.revival.detected)) }
         }.also { job ->
             job.invokeOnCompletion { local.update { it.copy(revival = it.revival.copy(running = false, current = null)) } }
         }
     }
 
     fun stopRevive() { revivalJob?.cancel() }
+    fun chooseFirewall(f: com.example.vpn.connectivity.NetworkFirewalls.Firewall?) = local.update { it.copy(revival = it.revival.copy(chosen = f)) }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }
     fun fullAnalysis() {
@@ -180,7 +185,8 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onAutomation = lab::setAutomation, onRefreshNetwork = { viewModel.refreshNetwork() }, onRetest = { viewModel.open(LabSection.LIVE); lab.retest(it) },
                 onDisable = lab::setDisabled, onRetire = lab::retire, onDismissMessage = lab::dismissMessage,
                 onResearchRefresh = { viewModel.refreshResearch() }, onAskAgent = viewModel::askAgent, onTestSuggestion = viewModel::testSuggestion,
-                onUseRecommended = viewModel::useRecommended, onRevive = viewModel::revive, onStopRevive = viewModel::stopRevive
+                onUseRecommended = viewModel::useRecommended, onRevive = viewModel::revive, onStopRevive = viewModel::stopRevive,
+                onFirewall = viewModel::chooseFirewall
             )
         },
         relativeTime = ::relative
