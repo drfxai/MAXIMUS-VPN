@@ -51,7 +51,13 @@ data class SidecarContext(
     /** Random per-connection login for that port, so other apps on the phone cannot use it. */
     val socksUser: String,
     val socksPass: String,
-    val mode: OperationalMode
+    val mode: OperationalMode,
+    /**
+     * When this engine is a non-final hop of an [EngineChain], the loopback SOCKS5 port of the next
+     * hop toward the exit. The engine dials the internet through it instead of directly. Null for a
+     * lone engine or the exit hop.
+     */
+    val upstreamSocks: Int? = null
 )
 
 data class SidecarLaunch(

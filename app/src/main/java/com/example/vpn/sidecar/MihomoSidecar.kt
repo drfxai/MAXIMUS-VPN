@@ -23,6 +23,7 @@ object MihomoSidecar : SidecarEngine {
     override val binary = "mihomo"
     const val VERSION = "v1.19.32"
     private const val NODE = "node"
+    private const val UPSTREAM = "maximus-upstream"
 
     /** Proxy types Mihomo carries here; anything else in a Clash file stays on Xray or is skipped. */
     val TYPES = setOf(
@@ -84,7 +85,19 @@ object MihomoSidecar : SidecarEngine {
             .put("ipv6", true)
             .put("nameserver", JSONArray(RESOLVERS))
             .put("proxy-server-nameserver", JSONArray(RESOLVERS)))
-        .put("proxies", JSONArray().put(JSONObject(proxy.toString()).put("name", NODE)))
+        .let { base ->
+            val node = JSONObject(proxy.toString()).put("name", NODE)
+            val up = context.upstreamSocks
+            if (up == null) {
+                base.put("proxies", JSONArray().put(node))
+            } else {
+                // Chain hop: the node dials out through the next hop toward the exit.
+                node.put("dialer-proxy", UPSTREAM)
+                val upstream = JSONObject().put("name", UPSTREAM).put("type", "socks5")
+                    .put("server", "127.0.0.1").put("port", up)
+                base.put("proxies", JSONArray().put(node).put(upstream))
+            }
+        }
         .put("rules", JSONArray().put("MATCH,$NODE"))
 
     fun proxyOf(profile: VlessProfile): JSONObject? =

@@ -15,6 +15,7 @@ object Sidecars {
                 openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
             }),
             DnsttSidecar(),
+            MasqueSidecar,
             TorSidecar { torrc, port -> (torStarter ?: error("Tor needs Android to run")).invoke(torrc, port) }
         )
     }
@@ -37,6 +38,10 @@ object Sidecars {
     fun isBundled(engine: SidecarEngine): Boolean = executable(engine) != null
 
     fun forProfile(profile: VlessProfile): SidecarEngine? = ENGINES.firstOrNull { it.handles(profile) }
+
+    /** True when [profile] runs on a bundled engine: a lone sidecar, or a chain of them. */
+    fun isEngineProfile(profile: VlessProfile): Boolean =
+        forProfile(profile) != null || ChainRunner.isChain(profile)
 
     fun freeLoopbackPort(): Int = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
 

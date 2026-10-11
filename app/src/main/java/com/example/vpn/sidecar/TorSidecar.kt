@@ -33,7 +33,7 @@ class TorSidecar(
     override fun problem(profile: VlessProfile): String? = problemOf(profile)
 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
-        val torrc = torrc(bridges(profile), context.socksPort, context.executable)
+        val torrc = torrc(bridges(profile), context.socksPort, context.executable, context.upstreamSocks)
         File(context.workDir, TORRC).writeText(torrc)
         // Tor reads the name and password of a SOCKS request as circuit isolation, not as a login.
         return SidecarLaunch(command = emptyList(), readyTimeoutMs = READY_TIMEOUT_MS, socksAuth = false)
@@ -103,13 +103,15 @@ class TorSidecar(
             return lines
         }
 
-        fun torrc(bridges: List<String>, socksPort: Int, lyrebird: File): String = buildString {
+        fun torrc(bridges: List<String>, socksPort: Int, lyrebird: File, upstreamSocks: Int? = null): String = buildString {
             appendLine("SocksPort 127.0.0.1:$socksPort")
             appendLine("ClientOnly 1")
             appendLine("AvoidDiskWrites 1")
             appendLine("UseBridges 1")
             appendLine("ClientTransportPlugin ${TRANSPORTS.joinToString(",")} exec ${lyrebird.absolutePath}")
             bridges.forEach { appendLine("Bridge $it") }
+            // Chain hop: Tor makes its connections through the next hop toward the exit.
+            if (upstreamSocks != null) appendLine("Socks5Proxy 127.0.0.1:$upstreamSocks")
         }
 
         /** True once a request through Tor's SOCKS port reaches the internet, which needs a circuit. */

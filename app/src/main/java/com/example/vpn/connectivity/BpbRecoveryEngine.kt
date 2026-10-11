@@ -76,9 +76,15 @@ class BpbRecoveryEngine(
      * Candidates for [parent] after it failed at [failure] on [network]. [endpoints] are locally
      * validated alternative addresses (clean-IP hints are not enough). Withdrawn, expired and
      * locally worse profiles are skipped; candidates the gate refuses are returned with the refusal
-     * and never tested.
+     * and never tested. [bias] moves a profile up (positive) or down in the order, or skips it (null); see [NetworkFirewalls].
      */
-    fun generate(parent: VlessProfile, failure: FailureStage?, network: String?, endpoints: List<String> = emptyList()): List<DerivedRecoveryCandidate> {
+    fun generate(
+        parent: VlessProfile,
+        failure: FailureStage?,
+        network: String?,
+        endpoints: List<String> = emptyList(),
+        bias: (RecoveryProfile) -> Double? = { 0.0 }
+    ): List<DerivedRecoveryCandidate> {
         if (!isRecoverable(parent)) return emptyList()
         val wanted = strategiesFor(failure)
         if (wanted.isEmpty()) return emptyList()
@@ -88,7 +94,9 @@ class BpbRecoveryEngine(
             .filter { !it.isExpired(now) && it.networkConditions.any { s -> s in wanted } && it.appliesTo(parent) }
             .filter { !ledger.profileIsWorse(it.key, network) }
             .filter { RecoveryProfile.Strategy.FRAGMENT !in it.networkConditions || !fragmentReverted(it.key, network) }
-            .sortedWith(compareBy({ -ledger.profileSuccessRate(it.key, network, it.confidence) }, { it.key }))
+            .mapNotNull { rp -> bias(rp)?.let { rp to it } }
+            .sortedWith(compareBy({ (rp, b) -> -(ledger.profileSuccessRate(rp.key, network, rp.confidence) + b) }, { it.first.key }))
+            .map { it.first }
         val out = mutableListOf<DerivedRecoveryCandidate>()
         for (rp in usable) {
             val targets: List<String?> = if (rp.needsEndpoint()) endpoints.filter { familyOf(it) == rp.addressFamily }.distinct().take(2) else listOf(null)
