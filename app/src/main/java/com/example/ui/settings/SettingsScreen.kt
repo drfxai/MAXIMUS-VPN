@@ -21,21 +21,29 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.CurrencyBitcoin
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -51,6 +59,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +73,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
@@ -77,8 +87,13 @@ import com.example.data.model.EngineType
 import com.example.data.model.RoutingMode
 import com.example.data.model.ScoringProfile
 import com.example.ui.components.ThemeToggleSwitch
+import com.example.ui.popups.CommunityLinks
+import com.example.ui.popups.GitHubLogo
+import com.example.ui.popups.TelegramLogo
+import com.example.ui.popups.YouTubeLogo
 import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.SettingsViewModel
+import com.example.update.AppUpdateChecker
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,6 +112,26 @@ fun SettingsScreen(
     var previewJson by remember { mutableStateOf("") }
     var showResetConfirm by remember { mutableStateOf(false) }
     var dnsDropdownExpanded by remember { mutableStateOf(false) }
+
+    // APP UPDATE section: looks up public release info only. Nothing is downloaded or installed here;
+    // "Download" simply opens the GitHub release page in the browser.
+    val uriHandler = LocalUriHandler.current
+    var updateChecking by remember { mutableStateOf(false) }
+    var updateChecked by remember { mutableStateOf(false) }
+    var updateUrl by remember { mutableStateOf<String?>(null) }
+    var showCryptoSupport by remember { mutableStateOf(false) }
+    val performUpdateCheck: suspend () -> Unit = {
+        updateChecking = true
+        val latest = runCatching { AppUpdateChecker.fetchLatest() }.getOrNull()
+        updateUrl = latest?.takeIf {
+            AppUpdateChecker.shouldShow(
+                it, BuildConfig.VERSION_NAME, BuildConfig.RELEASE_BUILD, 0, 0L, System.currentTimeMillis()
+            )
+        }?.pageUrl
+        updateChecking = false
+        updateChecked = true
+    }
+    LaunchedEffect(Unit) { performUpdateCheck() }
 
     Column(
         modifier = modifier
@@ -780,6 +815,140 @@ fun SettingsScreen(
             }
         }
 
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // SECTION: APP UPDATE
+        SectionHeader("APP UPDATE")
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(4.dp)) {
+                SettingsRow(
+                    title = "Check for updates",
+                    subtitle = "Get the latest version of Maximus VPN",
+                    leading = { SettingsIconBox(Icons.Default.SystemUpdate, AppTheme.colors.primary) },
+                    trailing = {
+                        if (updateChecking) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = AppTheme.colors.primary
+                            )
+                        } else {
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = AppTheme.colors.textMuted.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+                        }
+                    },
+                    onClick = {
+                        scope.launch {
+                            if (!updateChecking) {
+                                performUpdateCheck()
+                                val url = updateUrl
+                                if (url != null) uriHandler.openUri(url)
+                                else Toast.makeText(context, "You're on the latest version.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = "View changelog",
+                    subtitle = "See what's new in recent versions",
+                    leading = { SettingsIconBox(Icons.Default.Article, AppTheme.colors.textSecondary) },
+                    onClick = { uriHandler.openUri(AppUpdateChecker.RELEASES_URL) }
+                )
+                SettingsRowDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SettingsIconBox(Icons.Default.Info, AppTheme.colors.textSecondary)
+                    Spacer(modifier = Modifier.width(13.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Current version", color = AppTheme.colors.textPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("v${BuildConfig.VERSION_NAME} · stable channel", color = AppTheme.colors.textMuted, fontSize = 11.5.sp)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    UpdateStatusChip(checking = updateChecking, checked = updateChecked, hasUpdate = updateUrl != null)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // SECTION: COMMUNITY & LINKS
+        SectionHeader("COMMUNITY & LINKS")
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(4.dp)) {
+                SettingsRow(
+                    title = "Telegram channel",
+                    subtitle = "News, updates and community",
+                    leading = { SettingsLogoTile { TelegramLogo(size = 19.dp) } },
+                    trailing = { Icon(Icons.Default.OpenInNew, contentDescription = null, tint = AppTheme.colors.textMuted.copy(alpha = 0.7f), modifier = Modifier.size(15.dp)) },
+                    onClick = { uriHandler.openUri(CommunityLinks.TELEGRAM) }
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = "YouTube channel",
+                    subtitle = "Tutorials, guides and more",
+                    leading = { SettingsLogoTile { YouTubeLogo(size = 19.dp) } },
+                    trailing = { Icon(Icons.Default.OpenInNew, contentDescription = null, tint = AppTheme.colors.textMuted.copy(alpha = 0.7f), modifier = Modifier.size(15.dp)) },
+                    onClick = { uriHandler.openUri(CommunityLinks.YOUTUBE) }
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = "GitHub repository",
+                    subtitle = "Source code, issues and contributions",
+                    leading = { SettingsLogoTile { GitHubLogo(size = 19.dp) } },
+                    trailing = { Icon(Icons.Default.OpenInNew, contentDescription = null, tint = AppTheme.colors.textMuted.copy(alpha = 0.7f), modifier = Modifier.size(15.dp)) },
+                    onClick = { uriHandler.openUri(CommunityLinks.GITHUB) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // SECTION: SUPPORT MAXIMUS
+        SectionHeader("SUPPORT MAXIMUS")
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(4.dp)) {
+                SettingsRow(
+                    title = "Support with crypto",
+                    subtitle = if (com.example.ui.popups.SupportLinks.CRYPTO.isNotEmpty()) "USDT · Tron (TRC20)" else "Help support development",
+                    leading = { SettingsIconBox(Icons.Default.CurrencyBitcoin, Color(0xFFE0A94A)) },
+                    onClick = {
+                        if (com.example.ui.popups.SupportLinks.CRYPTO.isEmpty()) {
+                            Toast.makeText(context, "Crypto support details coming soon.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            showCryptoSupport = true
+                        }
+                    }
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = "Buy a coffee",
+                    subtitle = "Support the developer",
+                    leading = { SettingsIconBox(Icons.Default.LocalCafe, AppTheme.colors.textSecondary) },
+                    onClick = {
+                        val url = com.example.ui.popups.SupportLinks.COFFEE
+                        if (url.isBlank()) Toast.makeText(context, "Coming soon.", Toast.LENGTH_SHORT).show()
+                        else uriHandler.openUri(url)
+                    }
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
     }
 
@@ -814,6 +983,46 @@ fun SettingsScreen(
             containerColor = AppTheme.colors.surfaceCard
         )
     }
+
+    if (showCryptoSupport) {
+        val clipboard = LocalClipboardManager.current
+        AlertDialog(
+            onDismissRequest = { showCryptoSupport = false },
+            title = { Text("Support with Crypto", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        "Thank you for supporting Maximus VPN. Tap an address to copy it.",
+                        color = AppTheme.colors.textSecondary, fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    com.example.ui.popups.SupportLinks.CRYPTO.forEach { (coin, address) ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(AppTheme.colors.surfaceElevated)
+                                .clickable {
+                                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(address))
+                                    Toast.makeText(context, "$coin address copied", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Text(coin, color = AppTheme.colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(address, color = AppTheme.colors.textPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCryptoSupport = false }) {
+                    Text("Close", color = AppTheme.colors.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = AppTheme.colors.surfaceCard
+        )
+    }
 }
 
 @Composable
@@ -826,6 +1035,95 @@ private fun SectionHeader(title: String) {
         letterSpacing = 1.sp,
         modifier = Modifier.padding(bottom = 6.dp)
     )
+}
+
+/** A calm, uniform graphite tile for the bottom Settings rows, so the list reads as one family. */
+@Composable
+private fun SettingsIconBox(icon: ImageVector, tint: Color) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(AppTheme.colors.surfaceElevated)
+            .border(1.dp, AppTheme.colors.borderSubtle, RoundedCornerShape(9.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+    }
+}
+
+/** The same tile, framing a community brand logo. */
+@Composable
+private fun SettingsLogoTile(logo: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(AppTheme.colors.surfaceElevated)
+            .border(1.dp, AppTheme.colors.borderSubtle, RoundedCornerShape(9.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        logo()
+    }
+}
+
+/** A tappable settings row: a leading tile/logo, a title and subtitle, and a trailing indicator. */
+@Composable
+private fun SettingsRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    leading: @Composable () -> Unit,
+    trailing: @Composable () -> Unit = {
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = AppTheme.colors.textMuted, modifier = Modifier.size(20.dp))
+    }
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        leading()
+        Spacer(modifier = Modifier.width(13.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = AppTheme.colors.textPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(subtitle, color = AppTheme.colors.textMuted, fontSize = 11.5.sp, lineHeight = 15.sp)
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        trailing()
+    }
+}
+
+/** Hairline divider inset to line up under the row text. */
+@Composable
+private fun SettingsRowDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 60.dp, end = 10.dp)
+            .height(1.dp)
+            .background(AppTheme.colors.borderSubtle)
+    )
+}
+
+/** The small status pill on the current-version row. */
+@Composable
+private fun UpdateStatusChip(checking: Boolean, checked: Boolean, hasUpdate: Boolean) {
+    val (label, color) = when {
+        checking -> "Checking…" to AppTheme.colors.textSecondary
+        hasUpdate -> "Update ready" to AppTheme.colors.statusWarning
+        checked -> "Up to date" to AppTheme.colors.statusConnected
+        else -> return
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(color))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
 }
 
 @Composable
