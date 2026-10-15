@@ -38,7 +38,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -668,7 +670,10 @@ class LabController(
             val planner = AdaptivePlanner(plan, cap, AdaptivePlanner.Priors(memory = memory, recentlyFailed = recent),
                 AdaptivePlanner.Device(device.metered, lowBattery), AdaptivePlanner.Goal.CONNECT)
             planner.add(pool.map { pk -> AdaptivePlanner.Candidate(pk.profile.id, pk.profile.name, pk.family, ipv6 = pk.profile.address.contains(':')) })
-            loop@ while (System.currentTimeMillis() < deadlineMs) {
+            // Stop the moment the attempt is cancelled (the user pressed Stop, or a newer Connect arrived),
+            // not only when the time limit is reached: otherwise recovery runs on for up to its full window
+            // and the connect lock it holds blocks the disconnect behind it.
+            loop@ while (currentCoroutineContext().isActive && System.currentTimeMillis() < deadlineMs) {
                 when (val d = planner.decide(System.currentTimeMillis())) {
                     is AdaptivePlanner.Decision.Stop -> break@loop
                     is AdaptivePlanner.Decision.Wait -> { delay((d.untilMs - System.currentTimeMillis()).coerceIn(100, 3_000)); continue@loop }
