@@ -65,6 +65,21 @@ object CommunityLinks {
     const val GITHUB = "https://github.com/drfxai/MAXIMUS-VPN"
 }
 
+/**
+ * Ways to support the project, shown in Settings → SUPPORT MAXIMUS. Values stay empty until the
+ * developer provides them; an empty entry makes its row show "coming soon" instead of opening a link.
+ * No wallet addresses or personal identifiers are hard-coded here.
+ */
+object SupportLinks {
+    /** (coin label, address) pairs shown in the Support dialog. */
+    val CRYPTO: List<Pair<String, String>> = listOf(
+        "USDT · Tron (TRC20)" to "TC5Hhsxy8WfVG857UPRwxVsBSPpzLW97wc"
+    )
+
+    /** A "buy me a coffee" style URL. Empty until provided. */
+    const val COFFEE = ""
+}
+
 private object Lux {
     val night = Color(0xFF070816)
     val deep = Color(0xFF0D0B26)

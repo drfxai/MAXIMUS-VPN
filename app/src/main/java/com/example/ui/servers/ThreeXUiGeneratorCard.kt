@@ -1,18 +1,12 @@
 package com.example.ui.servers
 
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -58,12 +53,15 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -104,7 +102,7 @@ import com.example.ui.viewmodel.ServerViewModel
  * 3. Smooth animated dropdown menu/panel for custom transmission & security inbound generation.
  * 4. Dialog showing complete inbound JSON specification and client VLESS URI.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ThreeXUiGeneratorCard(
     serverViewModel: ServerViewModel,
@@ -506,23 +504,36 @@ fun ThreeXUiGeneratorCard(
                 }
             }
 
-            // SMOOTH ANIMATED EXPANDABLE MENU
-            AnimatedVisibility(
-                visible = isMenuExpanded,
-                enter = expandVertically(animationSpec = tween(280)) + fadeIn(animationSpec = tween(280)),
-                exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(animationSpec = tween(200))
-            ) {
+            // CUSTOM INBOUND CREATION SHEET — the whole form scrolls so the Create button is always reachable
+            if (isMenuExpanded) {
+                ModalBottomSheet(
+                    onDismissRequest = { isMenuExpanded = false },
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                    containerColor = AppTheme.colors.surface,
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 14.dp)
-                        .background(
-                            AppTheme.colors.surfaceElevated.copy(alpha = 0.6f),
-                            RoundedCornerShape(12.dp)
-                        )
-                        .border(1.dp, AppTheme.colors.borderSubtle, RoundedCornerShape(12.dp))
-                        .padding(14.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 18.dp)
+                        .padding(top = 4.dp, bottom = 24.dp)
+                        .navigationBarsPadding()
                 ) {
+                    Text(
+                        text = "Create custom inbound",
+                        color = AppTheme.colors.textPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Pick a transport and security, then create it and add it to Maximus VPN.",
+                        color = AppTheme.colors.textSecondary,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
                     // SECTION 1: TRANSMISSION PROTOCOL SELECTOR
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -719,21 +730,16 @@ fun ThreeXUiGeneratorCard(
                                 fontWeight = FontWeight.SemiBold
                             )
                         } else {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "1-Click Generate & Add to VPN",
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold,
+                                text = "Create and add to VPN",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 softWrap = false
                             )
                         }
                     }
+                }
                 }
             }
         }

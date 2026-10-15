@@ -39,6 +39,7 @@ import com.example.xray.XrayEngineImpl
 import com.example.xray.XrayLogManager
 import java.net.DatagramSocket
 import java.net.Socket
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -109,7 +110,22 @@ class RayVpnService : VpnService() {
         val lockdown: StateFlow<com.example.vpn.safety.MaximusVpnSupervisor.Lockdown> = _lockdown.asStateFlow()
     }
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    // Safety net: any unexpected error in a VPN coroutine becomes a clean FAILED state instead of
+    // crashing the whole app ("Maximus VPN closed because this app has a bug"). The user can then
+    // retry or stop, which tears the connection down normally.
+    private val serviceExceptionHandler = CoroutineExceptionHandler { _, e ->
+        if (e is CancellationException) return@CoroutineExceptionHandler
+        runCatching { XrayLogManager.e("VPN", "Unhandled error in a VPN coroutine: ${e.message}", e) }
+        runCatching {
+            updateState(
+                _vpnState.value.copy(
+                    status = ConnectionStatus.FAILED,
+                    errorMessage = "Unexpected error while connecting. Please try again."
+                )
+            )
+        }
+    }
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob() + serviceExceptionHandler)
     private val connectionMutex = Mutex()
     private var connectJob: Job? = null
     /** Single-flight rules: stale failover or auto-reconnect work is dropped, one teardown and one switch at a time. */
@@ -778,6 +794,10 @@ class RayVpnService : VpnService() {
                 }
             }
 
+            // A Stop pressed during the earlier probes unwinds here, before the long recovery stages begin,
+            // so the connection attempt can always be cancelled rather than running on for minutes.
+            coroutineContext.ensureActive()
+
             // Escalation before giving up: the LAB's fast recovery (Connect goal) over every other saved family
             // and the built-in recovery engines, stopping at the first path that carries a real request.
             var recoveryExhausted = false
@@ -816,15 +836,18 @@ class RayVpnService : VpnService() {
             // dead Cloudflare-fronted configs (ECH, fragment, fingerprint, clean IP) and connect the one
             // that comes back. Bounded in time; never in Trade (its exit is pinned). The winning recipe is
             // saved to the ledger, so even a cut-short run helps the next connect.
+            coroutineContext.ensureActive()
             if (!raced && !engineAdopted && provenDead && !force && !policy.lockExit && recoveryExhausted &&
                 (raceFirst || settings.autoFailoverEnabled)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.RECOVERY_ENGINES)
                 showForegroundNotification("Reviving configurations...")
                 val reviveDeadline = System.currentTimeMillis() + CONFIG_REVIVE_MS
+                val attemptJob = coroutineContext[Job]
                 val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
                 val report = runCatching {
                     com.example.RayApplication.instance.configRevival.run(
-                        saved, network, cancelled = { System.currentTimeMillis() > reviveDeadline }
+                        // Stops on its own deadline, and also the moment the user presses Stop (the attempt is cancelled).
+                        saved, network, cancelled = { System.currentTimeMillis() > reviveDeadline || attemptJob?.isActive == false }
                     ) { p -> p.current?.let { showForegroundNotification(it) } }
                 }.onFailure { XrayLogManager.w("SMART", "Config revival stopped: ${com.example.core.SecretRedactor.redact(it.message.orEmpty())}") }.getOrNull()
                 // Results come back revived-first; take the fastest config that was brought back to life.
