@@ -28,6 +28,77 @@ object XrayConfigBuilder {
         return config
     }
 
+    const val SHARE_SOCKS_TAG = "share-socks"
+    const val SHARE_HTTP_TAG = "share-http"
+
+    /** Private IPv4 ranges a hotspot client can legitimately come from; anything else is dropped. */
+    private val HOTSPOT_SOURCE_RANGES = listOf(
+        "192.168.0.0/16", "172.16.0.0/12", "10.0.0.0/8", "100.64.0.0/10"
+    )
+
+    /** True when hotspot sharing is on and has credentials, so it is safe to open the proxy. */
+    fun hotspotShareActive(settings: AppSettings): Boolean =
+        settings.hotspotShareEnabled &&
+            settings.hotspotShareUser.isNotBlank() &&
+            settings.hotspotSharePassword.isNotBlank() &&
+            settings.hotspotSharePort in 1024..65534
+
+    /**
+     * Adds a password-protected SOCKS5 inbound and an HTTP-proxy inbound bound to the LAN, so devices
+     * on this phone's hotspot can route through the tunnel. The two inbounds share one credential.
+     * Nothing is added unless [hotspotShareActive] holds, so an unauthenticated proxy is never opened.
+     */
+    private fun addHotspotShareInbounds(inbounds: JSONArray, settings: AppSettings) {
+        if (!hotspotShareActive(settings)) return
+        val account = JSONArray().put(
+            JSONObject().put("user", settings.hotspotShareUser).put("pass", settings.hotspotSharePassword)
+        )
+        val sniffing = JSONObject()
+            .put("enabled", true)
+            .put("destOverride", JSONArray().put("http").put("tls"))
+        inbounds.put(JSONObject().apply {
+            put("tag", SHARE_SOCKS_TAG)
+            put("listen", "0.0.0.0")
+            put("port", settings.hotspotSharePort)
+            put("protocol", "socks")
+            put("settings", JSONObject()
+                .put("auth", "password")
+                .put("accounts", account)
+                .put("udp", true))
+            put("sniffing", sniffing)
+        })
+        inbounds.put(JSONObject().apply {
+            put("tag", SHARE_HTTP_TAG)
+            put("listen", "0.0.0.0")
+            put("port", settings.hotspotSharePort + 1)
+            put("protocol", "http")
+            put("settings", JSONObject().put("accounts", account))
+            put("sniffing", sniffing)
+        })
+    }
+
+    /**
+     * Routes the shared proxy's traffic out through the tunnel, but only from private LAN sources.
+     * A first rule sends private-source traffic on the share inbounds to the proxy outbound; a second
+     * rule blocks anything else arriving on them, so the proxy is unreachable from the upstream network.
+     */
+    private fun addHotspotShareRouting(rulesArray: JSONArray, settings: AppSettings) {
+        if (!hotspotShareActive(settings)) return
+        val tags = JSONArray().put(SHARE_SOCKS_TAG).put(SHARE_HTTP_TAG)
+        val sources = JSONArray().apply { HOTSPOT_SOURCE_RANGES.forEach { put(it) } }
+        rulesArray.put(JSONObject().apply {
+            put("type", "field")
+            put("inboundTag", tags)
+            put("source", sources)
+            put("outboundTag", "proxy")
+        })
+        rulesArray.put(JSONObject().apply {
+            put("type", "field")
+            put("inboundTag", JSONArray().put(SHARE_SOCKS_TAG).put(SHARE_HTTP_TAG))
+            put("outboundTag", "block")
+        })
+    }
+
     /**
      * Builds a complete, valid Xray-core JSON configuration object from a VlessProfile and AppSettings.
      * If the profile has a raw JSON config, it sanitizes and preserves it directly.
@@ -49,6 +120,11 @@ object XrayConfigBuilder {
 
         // 3. Inbounds (Local SOCKS & Dokodemo-Door for TUN forwarder)
         val inbounds = JSONArray()
+
+        // Hotspot sharing: a password-protected SOCKS5 + HTTP proxy on the LAN so other devices on
+        // this phone's hotspot can reach the internet through the tunnel. Added only when the user
+        // has turned it on AND credentials exist; an unauthenticated proxy is never opened.
+        addHotspotShareInbounds(inbounds, settings)
 
         root.put("inbounds", inbounds)
 
@@ -101,6 +177,10 @@ object XrayConfigBuilder {
             put("outboundTag", "block")
         })
 
+        // Hotspot sharing: send the shared proxy's traffic out through the tunnel, but only from
+        // private LAN sources (the hotspot clients). Anything arriving on these inbounds from a
+        // non-private address is dropped, so the proxy cannot be reached from the upstream network.
+        addHotspotShareRouting(rulesArray, settings)
 
         when (settings.routingMode) {
             RoutingMode.GLOBAL -> {
