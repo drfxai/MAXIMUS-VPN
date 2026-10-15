@@ -398,7 +398,7 @@ class RayVpnService : VpnService() {
         if (candidates.isEmpty() && dead.isEmpty()) return null
         XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
         val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
-        val raceJob = coroutineContext[Job]
+        val raceJob = kotlinx.coroutines.currentCoroutineContext()[Job]
         com.example.vpn.smart.ServerRace().run(candidates, resolve, timeoutSec, onFailure = {
             networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
         }, disguiseOnly = dead, shouldStop = { raceJob?.isActive == false })?.let { return it }
