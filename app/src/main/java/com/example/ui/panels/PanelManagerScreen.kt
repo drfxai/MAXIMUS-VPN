@@ -176,7 +176,7 @@ fun PanelManagerScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     var selectedPanelId by remember { mutableStateOf<String?>(null) }
     var selectedWorkerTemplate by remember { mutableStateOf(PanelCatalog.cloudflareTemplates.first().id) }
-    var selectedRegion by remember { mutableStateOf("Iran 🇮🇷 (All Operators)") }
+    var selectedRegion by remember { mutableStateOf(CleanIpOptimizer.SCOPE_ALL) }
     var regionDropdownExpanded by remember { mutableStateOf(false) }
     var scanPort by remember { mutableStateOf("443") }
     var accessInfoExpanded by remember { mutableStateOf(true) }
@@ -1173,9 +1173,9 @@ private fun CleanIpScannerCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "CFScanner Clean IP",
+                        text = "Clean IP scanner",
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                             fontSize = 17.5.sp
                         ),
                         color = MaterialTheme.colorScheme.onSurface
@@ -1184,22 +1184,24 @@ private fun CleanIpScannerCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .background(Color(0xFF0F2B48), RoundedCornerShape(4.dp))
-                                .border(1.dp, PanelColors.CyanAccent.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    RoundedCornerShape(4.dp)
+                                )
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "v2ray / Xray",
-                                color = PanelColors.CyanAccent,
+                                text = "Xray / v2ray",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 softWrap = false
                             )
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Edge Subnet Scanner",
+                            text = "Cloudflare edge scanner",
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.5.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1
@@ -1207,20 +1209,26 @@ private fun CleanIpScannerCard(
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Scan Cloudflare edge subnets for unblocked Anycast IPs with low ping & real download throughput.",
+                        text = "Scans real Cloudflare edge ranges and ranks the IPs by measured ping and download throughput, so a working address can replace one your ISP blocks.",
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                CyberGlobeCanvas(Modifier.size(72.dp))
+                Spacer(modifier = Modifier.width(12.dp))
+                Icon(
+                    imageVector = Icons.Default.Language,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.size(40.dp)
+                )
             }
 
-            // Architecture Notice (CFScanner principles)
+            // Architecture notice
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF081B30),
-                border = BorderStroke(1.dp, Color(0xFF163255))
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Row(
                     modifier = Modifier.padding(10.dp),
@@ -1229,12 +1237,12 @@ private fun CleanIpScannerCard(
                     Icon(
                         imageVector = Icons.Default.Description,
                         contentDescription = null,
-                        tint = PanelColors.CyanAccent,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp).padding(top = 1.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Clean IPs replace entry IPs to bypass ISP firewall blocks on active Cloudflare CDN/Worker backends. Note: Clean IPs cannot revive dead origin servers (HTTP 521), deleted Workers, or expired accounts.",
+                        text = "A clean IP replaces the entry address so traffic reaches an active Cloudflare CDN or Worker backend your ISP has blocked. It cannot revive a dead origin server (HTTP 521), a deleted Worker, or an expired account.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         lineHeight = 15.sp
@@ -1465,28 +1473,15 @@ private fun CleanIpScannerCard(
                         modifier = Modifier.background(MaterialTheme.colorScheme.surface)
                     ) {
                         listOf(
-                            "Iran 🇮🇷 (All Operators)",
-                            "Iran 📱 MCI (Hamrah-e Aval)",
-                            "Iran 🟡 MTN Irancell",
-                            "Iran 🟣 Rightel",
-                            "Iran ☎️ TCI / Mokhaberat",
-                            "Iran ⚡ Shatel / FCP",
-                            "Iran 🌐 Mobinnet / Zitel",
-                            "🎯 Custom CIDR / Subnet (CFScanner)",
-                            "All Regions 🌐",
-                            "Germany 🇩🇪",
-                            "United States 🇺🇸",
-                            "Netherlands 🇳🇱",
-                            "Singapore 🇸🇬",
-                            "France 🇫🇷",
-                            "United Kingdom 🇬🇧"
+                            CleanIpOptimizer.SCOPE_ALL,
+                            CleanIpOptimizer.SCOPE_CUSTOM
                         ).forEach { region ->
                             DropdownMenuItem(
                                 text = {
                                     Text(
                                         region,
-                                        color = if (region.startsWith("Iran") || region.contains("Custom")) PanelColors.SuccessGreen else Color.White,
-                                        fontWeight = if (region.startsWith("Iran") || region.contains("Custom")) FontWeight.Bold else FontWeight.Normal,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = if (region == selectedRegion) FontWeight.SemiBold else FontWeight.Normal,
                                         fontSize = 12.5.sp
                                     )
                                 },
@@ -1543,7 +1538,7 @@ private fun CleanIpScannerCard(
             // Custom Subnet Input field (if Custom selected)
             if (selectedRegion.contains("Custom")) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Custom Subnet / CIDR (CFScanner format):", color = PanelColors.CyanAccent, fontSize = 11.sp)
+                    Text("Custom subnet / CIDR:", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
                     Surface(
                         modifier = Modifier.fillMaxWidth().height(42.dp),
                         shape = RoundedCornerShape(10.dp),
@@ -1714,7 +1709,7 @@ private fun CleanIpScannerCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Start CFScanner",
+                        text = "Start scan",
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.5.sp

@@ -104,158 +104,37 @@ class CleanIpOptimizer {
         object Unknown : OriginHealth()
     }
 
-    data class RegionPool(
-        val name: String,
-        val operatorCode: String,
-        val countryCode: String,
-        val flagEmoji: String,
-        val operatorTag: String,
-        val subnets: List<String>
-    )
-
     companion object {
-        val REGION_POOLS = listOf(
-            RegionPool(
-                name = "Iran 🇮🇷 (All Operators)",
-                operatorCode = "IR_ALL",
-                countryCode = "IR",
-                flagEmoji = "🇮🇷",
-                operatorTag = "Measured on current route",
-                subnets = listOf(
-                    "104.16.12", "104.16.18", "104.16.24", "104.16.30", "104.16.45",
-                    "104.17.24", "104.17.32", "104.17.64",
-                    "104.18.20", "104.18.30", "104.18.42",
-                    "104.19.45", "104.19.50", "104.19.78",
-                    "104.21.48", "104.21.50", "104.21.72",
-                    "104.22.40", "104.22.60",
-                    "104.24.96", "104.24.100",
-                    "104.26.10", "104.26.12", "104.26.14",
-                    "162.159.128", "162.159.130", "162.159.133", "162.159.135", "162.159.138",
-                    "172.67.70", "172.67.100", "172.67.140", "172.67.180", "172.67.220",
-                    "188.114.96", "188.114.97", "188.114.98", "188.114.99",
-                    "198.41.128", "198.41.130", "198.41.132", "198.41.137",
-                    "141.101.64", "141.101.90", "141.101.120"
-                )
-            ),
-            RegionPool(
-                name = "Iran 📱 MCI (Hamrah-e Aval)",
-                operatorCode = "IR_MCI",
-                countryCode = "IR",
-                flagEmoji = "📱",
-                operatorTag = "Measured on current route",
-                subnets = listOf(
-                    "104.16.12", "104.16.18", "104.17.24", "104.17.32", "104.18.20",
-                    "104.19.45", "104.22.40", "104.26.12",
-                    "162.159.130", "162.159.135", "172.67.70", "172.67.140",
-                    "188.114.96", "188.114.97", "198.41.128", "141.101.64"
-                )
-            ),
-            RegionPool(
-                name = "Iran 🟡 MTN Irancell",
-                operatorCode = "IR_MTN",
-                countryCode = "IR",
-                flagEmoji = "🟡",
-                operatorTag = "Measured on current route",
-                subnets = listOf(
-                    "104.16.24", "104.16.45", "104.17.64", "104.18.30", "104.19.50",
-                    "104.21.48", "104.24.96", "104.26.10",
-                    "162.159.128", "162.159.138", "172.67.100", "172.67.180",
-                    "188.114.98", "198.41.130", "141.101.90"
-                )
-            ),
-            RegionPool(
-                name = "Iran 🟣 Rightel",
-                operatorCode = "IR_RIGHTEL",
-                countryCode = "IR",
-                flagEmoji = "🟣",
-                operatorTag = "Measured on current route",
-                subnets = listOf(
-                    "104.16.30", "104.17.32", "104.18.42", "104.21.50", "104.24.100",
-                    "104.26.12", "162.159.133", "172.67.220", "188.114.99", "198.41.132"
-                )
-            ),
-            RegionPool(
-                name = "Iran ☎️ TCI / Mokhaberat",
-                operatorCode = "IR_TCI",
-                countryCode = "IR",
-                flagEmoji = "☎️",
-                operatorTag = "Measured on current route",
-                subnets = listOf(
-                    "104.16.12", "104.18.20", "104.19.78", "104.21.72", "104.22.60",
-                    "104.26.14", "162.159.130", "172.67.140", "188.114.96", "198.41.137", "141.101.120"
-                )
-            ),
-            RegionPool(
-                name = "Iran ⚡ Shatel / FCP",
-                operatorCode = "IR_SHATEL",
-                countryCode = "IR",
-                flagEmoji = "⚡",
-                operatorTag = "Measured on current route",
-                subnets = listOf(
-                    "104.17.24", "104.18.30", "104.21.48", "104.26.10",
-                    "162.159.135", "172.67.70", "188.114.97", "198.41.128"
-                )
-            ),
-            RegionPool(
-                name = "Iran 🌐 Mobinnet / Zitel",
-                operatorCode = "IR_MOBINNET",
-                countryCode = "IR",
-                flagEmoji = "🌐",
-                operatorTag = "Measured on current route",
-                subnets = listOf(
-                    "104.16.24", "104.17.32", "104.18.42", "104.26.12",
-                    "162.159.135", "172.67.140", "188.114.96"
-                )
-            ),
-            RegionPool(
-                name = "Germany 🇩🇪",
-                operatorCode = "GLOBAL_DE",
-                countryCode = "DE",
-                flagEmoji = "🇩🇪",
-                operatorTag = "Frankfurt Edge",
-                subnets = listOf("188.114.96", "188.114.97", "104.26.12", "104.26.13", "162.159.130")
-            ),
-            RegionPool(
-                name = "United States 🇺🇸",
-                operatorCode = "GLOBAL_US",
-                countryCode = "US",
-                flagEmoji = "🇺🇸",
-                operatorTag = "US East/West",
-                subnets = listOf("104.16.12", "104.16.18", "104.18.20", "172.67.34", "104.21.72")
-            ),
-            RegionPool(
-                name = "Netherlands 🇳🇱",
-                operatorCode = "GLOBAL_NL",
-                countryCode = "NL",
-                flagEmoji = "🇳🇱",
-                operatorTag = "Amsterdam Edge",
-                subnets = listOf("104.22.40", "172.67.70", "104.25.10", "188.114.96")
-            ),
-            RegionPool(
-                name = "Singapore 🇸🇬",
-                operatorCode = "GLOBAL_SG",
-                countryCode = "SG",
-                flagEmoji = "🇸🇬",
-                operatorTag = "Singapore Edge",
-                subnets = listOf("104.21.72", "172.67.180", "103.21.244", "103.22.200")
-            ),
-            RegionPool(
-                name = "United Kingdom 🇬🇧",
-                operatorCode = "GLOBAL_UK",
-                countryCode = "UK",
-                flagEmoji = "🇬🇧",
-                operatorTag = "London Edge",
-                subnets = listOf("188.114.98", "188.114.99", "104.24.100", "104.26.10")
-            ),
-            RegionPool(
-                name = "France 🇫🇷",
-                operatorCode = "GLOBAL_FR",
-                countryCode = "FR",
-                flagEmoji = "🇫🇷",
-                operatorTag = "Paris Edge",
-                subnets = listOf("104.19.84", "172.67.140", "104.22.40")
-            )
+        /**
+         * Cloudflare's published IPv4 ranges (the list at www.cloudflare.com/ips-v4). Cloudflare is an
+         * Anycast network: which edge any one of these addresses reaches is decided by how the phone's
+         * network peers with Cloudflare, not by the address, so a "clean" IP cannot be picked by country
+         * or ISP in advance. The scanner therefore samples real addresses across every published range and
+         * ranks them by what it actually measures from this phone (latency, loss, throughput), rather than
+         * labelling them with a country or operator it cannot verify.
+         */
+        val CLOUDFLARE_V4_RANGES = listOf(
+            "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+            "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+            "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+            "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22"
         )
+
+        /** The scan scopes the UI offers: all of Cloudflare's ranges, or the user's own CIDR list. */
+        const val SCOPE_ALL = "All Cloudflare ranges"
+        const val SCOPE_CUSTOM = "Custom CIDR / Subnet"
+
+        /** A random usable host inside [cidr] (network and broadcast addresses skipped). */
+        fun randomHostIn(cidr: String): String {
+            val parts = cidr.split('/')
+            val bits = parts[1].toInt().also { require(it in 1..32) }
+            val baseNum = ipv4(parts[0])
+            val size = 1L shl (32 - bits)
+            val network = baseNum and ((0xffffffffL shl (32 - bits)) and 0xffffffffL)
+            val offset = if (size <= 2) 0L else Random.nextLong(1, size - 1)
+            val n = network or offset
+            return "${(n shr 24) and 0xff}.${(n shr 16) and 0xff}.${(n shr 8) and 0xff}.${n and 0xff}"
+        }
 
         fun eligible(p: VlessProfile): Boolean = p.profileType == ProfileType.VLESS &&
             p.protocolType == ProtocolType.VLESS && p.transport.equals("ws", true) &&
@@ -432,7 +311,7 @@ class CleanIpOptimizer {
         }
 
         fun generateCandidates(
-            regionQuery: String = "Iran",
+            regionQuery: String = SCOPE_ALL,
             count: Int = 60,
             customSubnet: String? = null
         ): List<Triple<String, String, Pair<String, String>>> {
@@ -441,32 +320,25 @@ class CleanIpOptimizer {
                 if (parsed.isNotEmpty()) return parsed
             }
 
-            val matchedPools = if (regionQuery.startsWith("All", ignoreCase = true) || regionQuery.isBlank()) {
-                REGION_POOLS
-            } else {
-                val matched = REGION_POOLS.filter {
-                    regionQuery.contains(it.name, ignoreCase = true) ||
-                    regionQuery.contains(it.operatorCode, ignoreCase = true) ||
-                    regionQuery.contains(it.countryCode, ignoreCase = true) ||
-                    it.name.contains(regionQuery.take(8), ignoreCase = true)
+            // Sample real addresses across Cloudflare's published ranges, weighted by range size so
+            // every address is about equally likely, then rank by what the probes measure from here.
+            val weighted = CLOUDFLARE_V4_RANGES.map { it to (1L shl (32 - it.substringAfter('/').toInt())) }
+            val totalWeight = weighted.sumOf { it.second }
+            val candidates = LinkedHashSet<String>()
+            var guard = 0
+            val target = count.coerceAtLeast(1)
+            while (candidates.size < target && guard < target * 40) {
+                guard++
+                val roll = Random.nextLong(totalWeight)
+                var acc = 0L
+                var chosen = weighted.first().first
+                for ((cidr, weight) in weighted) {
+                    acc += weight
+                    if (roll < acc) { chosen = cidr; break }
                 }
-                if (matched.isNotEmpty()) matched else REGION_POOLS
+                candidates.add(randomHostIn(chosen))
             }
-
-            val candidates = mutableListOf<Triple<String, String, Pair<String, String>>>()
-            val perPool = (count / matchedPools.size).coerceAtLeast(6)
-
-            for (pool in matchedPools) {
-                for (subnet in pool.subnets) {
-                    val countForSubnet = (perPool / pool.subnets.size).coerceAtLeast(2)
-                    repeat(countForSubnet) {
-                        val lastOctet = Random.nextInt(2, 253)
-                        val ip = "$subnet.$lastOctet"
-                        candidates.add(Triple(ip, pool.countryCode, Pair(pool.flagEmoji, pool.operatorTag)))
-                    }
-                }
-            }
-            return candidates.distinctBy { it.first }.shuffled().take(count)
+            return candidates.map { Triple(it, "CF", Pair("🌐", "Cloudflare edge")) }
         }
     }
 
