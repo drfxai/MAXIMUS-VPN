@@ -104,6 +104,30 @@ class SettingsViewModel(
         settingsRepository.updateSettings(current.copy(killSwitchEnabled = enabled))
     }
 
+    /**
+     * Turns hotspot sharing on or off. On enable, credentials are generated when none exist yet, so
+     * the shared proxy is never opened without a password. Reconnect is needed for it to take effect.
+     */
+    fun setHotspotShare(enabled: Boolean) {
+        val current = settingsRepository.getSettings()
+        if (current.hotspotShareEnabled == enabled) return
+        val next = if (enabled && (current.hotspotShareUser.isBlank() || current.hotspotSharePassword.isBlank())) {
+            val (user, pass) = com.example.vpn.share.HotspotShare.newCredentials()
+            current.copy(hotspotShareEnabled = true, hotspotShareUser = user, hotspotSharePassword = pass)
+        } else {
+            current.copy(hotspotShareEnabled = enabled)
+        }
+        XrayLogManager.i("SETTINGS", "Hotspot sharing turned ${if (enabled) "on" else "off"}")
+        settingsRepository.updateSettings(next)
+    }
+
+    /** Rotates the shared proxy's username and password; reconnect applies it. */
+    fun regenerateHotspotCredentials() {
+        val current = settingsRepository.getSettings()
+        val (user, pass) = com.example.vpn.share.HotspotShare.newCredentials()
+        settingsRepository.updateSettings(current.copy(hotspotShareUser = user, hotspotSharePassword = pass))
+    }
+
     fun setIpv6(enabled: Boolean) {
         val current = settingsRepository.getSettings()
         XrayLogManager.i("SETTINGS", "IPv6 leak blocking updated: $enabled")

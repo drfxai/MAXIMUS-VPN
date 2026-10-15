@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.filled.CurrencyBitcoin
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
@@ -54,6 +56,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -106,6 +109,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val settingsClipboard = LocalClipboardManager.current
     val settings by viewModel.settings.collectAsStateWithLifecycle()
 
     var showConfigPreview by remember { mutableStateOf(false) }
@@ -572,6 +576,82 @@ fun SettingsScreen(
                     checked = settings.freeConfigsEnabled,
                     onCheckedChange = { viewModel.setFreeConfigs(it) }
                 )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // SECTION: SHARE OVER HOTSPOT
+        SectionHeader("SHARE OVER HOTSPOT")
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                SettingToggleItem(
+                    icon = Icons.Default.WifiTethering,
+                    title = "Share VPN over hotspot",
+                    subtitle = "Opens a password-protected proxy on your hotspot so other devices route through this tunnel. Off by default; works only while connected.",
+                    checked = settings.hotspotShareEnabled,
+                    onCheckedChange = { viewModel.setHotspotShare(it) }
+                )
+                if (settings.hotspotShareEnabled) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    val share = remember(
+                        settings.hotspotShareUser,
+                        settings.hotspotSharePassword,
+                        settings.hotspotSharePort,
+                        settings.hotspotShareEnabled
+                    ) { com.example.vpn.share.HotspotShare.clientInstructions(settings) }
+                    val copy: (String, String) -> Unit = { value, label ->
+                        settingsClipboard.setText(androidx.compose.ui.text.AnnotatedString(value))
+                        Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
+                    }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = AppTheme.colors.surfaceElevated,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            if (share == null) {
+                                Text(
+                                    "Turn on your phone's hotspot, then connect the VPN. The address to use on other devices will appear here.",
+                                    color = AppTheme.colors.textSecondary,
+                                    fontSize = 11.5.sp
+                                )
+                            } else {
+                                Text(
+                                    "On the other device, set this phone as a SOCKS5 (or HTTP) proxy:",
+                                    color = AppTheme.colors.textSecondary,
+                                    fontSize = 11.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                HotspotCopyRow("SOCKS5 proxy", share.socksEndpoint) { copy(share.socksEndpoint, "SOCKS5 address") }
+                                HotspotCopyRow("HTTP proxy", share.httpEndpoint) { copy(share.httpEndpoint, "HTTP address") }
+                                HotspotCopyRow("Username", share.user) { copy(share.user, "Username") }
+                                HotspotCopyRow("Password", share.password) { copy(share.password, "Password") }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                "Only devices on your hotspot can connect, and only with these credentials. Changing them or the switch takes effect on the next connect.",
+                                color = AppTheme.colors.textMuted,
+                                fontSize = 10.5.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            androidx.compose.material3.OutlinedButton(
+                                onClick = { viewModel.regenerateHotspotCredentials() },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Generate new password", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1154,6 +1234,37 @@ private fun RoutingOptionItem(
             Text(title, color = AppTheme.colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Text(subtitle, color = AppTheme.colors.textSecondary, fontSize = 11.sp)
         }
+    }
+}
+
+@Composable
+private fun HotspotCopyRow(label: String, value: String, onCopy: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onCopy)
+            .padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            color = AppTheme.colors.textMuted,
+            fontSize = 11.sp,
+            modifier = Modifier.width(96.dp)
+        )
+        Text(
+            value,
+            color = AppTheme.colors.textPrimary,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            Icons.Default.ContentCopy,
+            contentDescription = "Copy $label",
+            tint = AppTheme.colors.primary,
+            modifier = Modifier.size(15.dp)
+        )
     }
 }
 

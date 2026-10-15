@@ -93,7 +93,11 @@ class SettingsRepository(context: Context) {
             godModeMeshEnabled = prefs.getBoolean("god_mode_mesh", true),
             godModePsiphonEnabled = prefs.getBoolean("god_mode_psiphon", true),
             godModeConduitEnabled = prefs.getBoolean("god_mode_conduit", true),
-            freeConfigsEnabled = prefs.getBoolean("free_configs_enabled", true)
+            freeConfigsEnabled = prefs.getBoolean("free_configs_enabled", true),
+            hotspotShareEnabled = prefs.getBoolean("hotspot_share", false),
+            hotspotSharePort = prefs.getInt("hotspot_share_port", 8388),
+            hotspotShareUser = prefs.getString("hotspot_share_user", "") ?: "",
+            hotspotSharePassword = prefs.getString("hotspot_share_pass", "") ?: ""
         )
     }
 
@@ -130,6 +134,10 @@ class SettingsRepository(context: Context) {
             .putBoolean("god_mode_psiphon", settings.godModePsiphonEnabled)
             .putBoolean("god_mode_conduit", settings.godModeConduitEnabled)
             .putBoolean("free_configs_enabled", settings.freeConfigsEnabled)
+            .putBoolean("hotspot_share", settings.hotspotShareEnabled)
+            .putInt("hotspot_share_port", settings.hotspotSharePort)
+            .putString("hotspot_share_user", settings.hotspotShareUser)
+            .putString("hotspot_share_pass", settings.hotspotSharePassword)
             .apply()
 
         _settingsFlow.value = settings

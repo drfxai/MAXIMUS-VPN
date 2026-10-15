@@ -318,7 +318,17 @@ data class AppSettings(
     val godModePsiphonEnabled: Boolean = true,
     val godModeConduitEnabled: Boolean = true,
     /** The signed free config list: downloaded, saved and shown only while this is on. */
-    val freeConfigsEnabled: Boolean = true
+    val freeConfigsEnabled: Boolean = true,
+    /**
+     * Hotspot sharing: when on, the app opens a password-protected SOCKS5 + HTTP proxy on the
+     * phone's local network so other devices on this phone's hotspot can route through the tunnel.
+     * Off by default; it only accepts connections while the VPN is connected, and always requires
+     * the generated credentials below. See [[hotspot-sharing]].
+     */
+    val hotspotShareEnabled: Boolean = false,
+    val hotspotSharePort: Int = 8388,
+    val hotspotShareUser: String = "",
+    val hotspotSharePassword: String = ""
 )
 
 data class DiagnosticReport(
