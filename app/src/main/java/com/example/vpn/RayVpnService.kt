@@ -398,9 +398,10 @@ class RayVpnService : VpnService() {
         if (candidates.isEmpty() && dead.isEmpty()) return null
         XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
         val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
+        val raceJob = coroutineContext[Job]
         com.example.vpn.smart.ServerRace().run(candidates, resolve, timeoutSec, onFailure = {
             networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
-        }, disguiseOnly = dead)?.let { return it }
+        }, disguiseOnly = dead, shouldStop = { raceJob?.isActive == false })?.let { return it }
         val best = candidates.firstOrNull() ?: return null
         val choice = runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() ?: return null
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }

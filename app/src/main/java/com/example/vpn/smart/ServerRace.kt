@@ -61,13 +61,20 @@ class ServerRace(
          * form is tried, ahead of the others'. A filter that starts reading server names cuts a REALITY
          * connection, but the same server with a split handshake usually still works.
          */
-        disguiseOnly: List<VlessProfile> = emptyList()
+        disguiseOnly: List<VlessProfile> = emptyList(),
+        /**
+         * Checked before each round so a cancelled attempt (the user pressed Stop, or a newer Connect
+         * arrived) stops racing at once instead of probing every remaining batch; probing is a blocking
+         * thread-pool call, so coroutine cancellation alone cannot break into it.
+         */
+        shouldStop: () -> Boolean = { false }
     ): Winner? {
         if (candidates.isEmpty() && disguiseOnly.isEmpty()) return null
         val dead = disguiseOnly.filter { ConnectionKind.of(it) in TLS_LOOKING }.take(DISGUISED)
         val paths = withDisguises(resolveAll(dead + candidates, resolve), dead.map { it.id }.toSet()).take(MAX_CANDIDATES)
         val batches = StealthPathFinder.parallelSafeBatches(paths) { it.profile }.take(maxBatches)
         for ((round, batch) in batches.withIndex()) {
+            if (shouldStop()) return null
             val outcomes = probe(batch.map { it.profile }, timeoutSec)
             if (outcomes.all { it is RealDelayProbe.Outcome.NotRun }) {
                 log("Server test unavailable (${(outcomes.first() as RealDelayProbe.Outcome.NotRun).reason}).")
