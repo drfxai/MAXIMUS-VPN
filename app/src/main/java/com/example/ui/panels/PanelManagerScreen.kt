@@ -405,6 +405,8 @@ fun PanelManagerScreen(
                         },
                         onImportToVpn = { panel -> viewModel.importBpbToProfiles(panel) },
                         onFixBpb = { panel -> viewModel.fixBpbProfiles(panel) },
+                        onAttachDomain = { panel, domain -> viewModel.attachCustomDomain(panel, domain) },
+                        onRemoveDomain = { panel, domain -> viewModel.removeCustomDomain(panel, domain) },
                         onOpenUrl = openUrl,
                         onCopy = { label, value -> copyWithToast(value, label) }
                     )

@@ -610,6 +610,40 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(newlyDeployedPanel = null) }
     }
 
+    /** Attaches the user's own domain to a BPB worker via the Cloudflare API, then saves the panel. */
+    fun attachCustomDomain(panel: ManagedPanel, domain: String) {
+        runJob("Attaching $domain to the Cloudflare worker…") {
+            resetLogs("[DOMAIN] Connecting to Cloudflare v4 API")
+            val updated = provisioner.attachCustomDomain(panel, domain, ::appendLog)
+            store.save(updated)
+            val fresh = store.load()
+            _state.value.copy(
+                panels = fresh,
+                newlyDeployedPanel = _state.value.newlyDeployedPanel?.let { shown ->
+                    if (shown.id == updated.id) fresh.firstOrNull { it.id == updated.id } else shown
+                },
+                status = "Custom domain attached. The certificate can take a few minutes to go live."
+            )
+        }
+    }
+
+    /** Detaches a custom domain from a BPB worker via the Cloudflare API, then saves the panel. */
+    fun removeCustomDomain(panel: ManagedPanel, domain: String) {
+        runJob("Removing $domain from the Cloudflare worker…") {
+            resetLogs("[DOMAIN] Connecting to Cloudflare v4 API")
+            val updated = provisioner.removeCustomDomain(panel, domain, ::appendLog)
+            store.save(updated)
+            val fresh = store.load()
+            _state.value.copy(
+                panels = fresh,
+                newlyDeployedPanel = _state.value.newlyDeployedPanel?.let { shown ->
+                    if (shown.id == updated.id) fresh.firstOrNull { it.id == updated.id } else shown
+                },
+                status = "Custom domain removed."
+            )
+        }
+    }
+
     fun importBpbToProfiles(panel: ManagedPanel) {
         runJob("Importing BPB configuration to VPN profiles…") {
             val app = RayApplication.instance
