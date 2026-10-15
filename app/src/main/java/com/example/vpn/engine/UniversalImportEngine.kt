@@ -217,6 +217,13 @@ object UniversalImportEngine {
             } catch (e: IllegalArgumentException) {
                 ParsedItem.Invalid(uriString.take(60), e.message ?: "Invalid DNS tunnel link")
             }
+            lower.startsWith("slipstream://") -> try {
+                // A QUIC-over-DNS tunnel (slipstream engine program) for the same near-total blackouts.
+                ParsedItem.Success(com.example.vpn.sidecar.SlipstreamSidecar.parse(uriString)
+                    .copy(sourceFile = fileName, sourceSubscription = subUrl))
+            } catch (e: IllegalArgumentException) {
+                ParsedItem.Invalid(uriString.take(60), e.message ?: "Invalid Slipstream link")
+            }
             lower.startsWith("tuic://") -> {
                 // Xray has no TUIC client; these run on the Mihomo engine.
                 parseTuicUri(uriString, fileName, subUrl)

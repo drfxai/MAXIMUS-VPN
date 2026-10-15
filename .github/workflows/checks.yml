@@ -82,6 +82,21 @@ jobs:
       - name: Reproducible build matches the pinned hashes
         run: bash scripts/server-tools/build.sh
 
+  slipstream:
+    name: Slipstream tunnel self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config build-essential perl
+      - name: Build slipstream-client and slipstream-server from pinned sources
+        run: HOST=1 OUT=build/slipstream-host bash scripts/engines/slipstream.sh
+      - name: Carry real traffic both ways through the tunnel
+        run: python3 scripts/engines/slipstream-selftest.py --dir build/slipstream-host
+
   bot:
     name: Telegram bot tests
     runs-on: ubuntu-latest

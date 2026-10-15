@@ -100,7 +100,7 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
                 "snowflake", null -> TOR_SNOWFLAKE
                 else -> TOR
             }
-            engineId == "dns-tunnel" -> DNS_TUNNEL
+            engineId == "dns-tunnel" || engineId == "slipstream" -> DNS_TUNNEL
             engineId != null -> when (detail) {
                 "wireguard+awg" -> AMNEZIAWG
                 "wireguard" -> WIREGUARD
