@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.VlessProfile
 import com.example.vpn.sidecar.DnsttSidecar
+import com.example.vpn.sidecar.SlipstreamSidecar
 import com.example.ui.theme.AppTheme
 import kotlinx.coroutines.launch
 
@@ -90,6 +91,8 @@ fun EditConfigScreen(
 ) {
     if (DnsttSidecar().handles(profile)) {
         DnsTunnelEditor(profile, onBack, onSave, onDelete)
+    } else if (SlipstreamSidecar().handles(profile)) {
+        SlipstreamEditor(profile, onBack, onSave, onDelete)
     } else {
         XrayConfigEditor(profile, onBack, onSave, onDelete, onFetchFingerprint)
     }
@@ -764,3 +767,130 @@ private fun ConfirmDialog(title: String, text: String, confirm: String, onConfir
         containerColor = AppTheme.colors.surfaceCard
     )
 }
+
+/**
+ * Editor for a Slipstream profile: the tunnel domain, the resolvers, the congestion-control algorithm
+ * and whether the server certificate is pinned. Saving checks everything the way an imported link is.
+ */
+@Composable
+private fun SlipstreamEditor(
+    profile: VlessProfile,
+    onBack: () -> Unit,
+    onSave: suspend (VlessProfile) -> String?,
+    onDelete: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val initial = remember(profile.id) { runCatching { SlipstreamSidecar.settings(profile) }.getOrNull() }
+    var name by remember(profile.id) { mutableStateOf(profile.name) }
+    var domain by remember(profile.id) { mutableStateOf(initial?.domain ?: profile.address) }
+    var resolvers by remember(profile.id) {
+        mutableStateOf(initial?.resolvers?.joinToString("\n") ?: SlipstreamSidecar.DEFAULT_RESOLVER)
+    }
+    var bbr by remember(profile.id) { mutableStateOf((initial?.congestionControl ?: SlipstreamSidecar.DEFAULT_CC) == "bbr") }
+    val certPem = initial?.certPem.orEmpty()
+    var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var confirmDiscard by remember { mutableStateOf(false) }
+
+    val built: Result<VlessProfile> = runCatching {
+        val s = SlipstreamSidecar.validate(
+            domain, SlipstreamSidecar.parseResolverLines(resolvers), if (bbr) "bbr" else "dcubic", certPem
+        )
+        SlipstreamSidecar.withSettings(profile.copy(name = name.trim().ifEmpty { "Slipstream ${s.domain}" }), s)
+    }
+    val dirty = built.getOrNull()?.let { it != profile } ?: true
+
+    fun leave() = if (dirty) confirmDiscard = true else onBack()
+    BackHandler { leave() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppTheme.colors.background)
+            .testTag("edit_slipstream_screen")
+    ) {
+        EditTopBar("Edit Slipstream", name.ifBlank { domain }, saving, onBack = { leave() }, onDelete = { confirmDelete = true }) {
+            val p = built.getOrElse { error = it.message ?: "Check the settings."; return@EditTopBar }
+            error = null
+            saving = true
+            scope.launch {
+                val refused = onSave(p)
+                saving = false
+                if (refused == null) onBack() else error = refused
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            error?.let { ErrorBanner(it) }
+
+            EditSection("Tunnel") {
+                EditField("Remarks", name) { name = it }
+                EditField("Tunnel domain", domain, monospace = true, placeholder = "t.example.com", keyboardType = KeyboardType.Uri) { domain = it }
+            }
+
+            EditSection("Resolvers") {
+                EditField(
+                    "One per line, up to ${SlipstreamSidecar.MAX_RESOLVERS}", resolvers, monospace = true, minLines = 3,
+                    placeholder = "1.1.1.1", keyboardType = KeyboardType.Uri
+                ) { resolvers = it }
+                ChipRow(SLIPSTREAM_RESOLVER_PRESETS.filter { (_, v) -> resolvers.lines().none { it.trim().equals(v, true) } }.map { it.first }) { label ->
+                    val v = SLIPSTREAM_RESOLVER_PRESETS.first { it.first == label }.second
+                    resolvers = (resolvers.trimEnd().takeIf { it.isNotEmpty() }?.plus("\n").orEmpty()) + v
+                }
+                Hint("Plain-UDP DNS resolvers by IP address (a bare address uses port 53). Slipstream spreads the " +
+                    "connection over all of them and keeps going when one slows down.")
+            }
+
+            EditSection("Speed") {
+                EditSwitch(
+                    title = "BBR congestion control",
+                    subtitle = "Often faster on long or lossy routes; dcubic is gentler on the network",
+                    checked = bbr
+                ) { bbr = it }
+            }
+
+            EditSection("Security") {
+                Hint(
+                    if (certPem.isNotBlank())
+                        "This profile pins the server certificate, so a resolver on the path cannot read or change the tunnel."
+                    else
+                        "This profile has no pinned certificate, so the tunnel is not authenticated. Import it again from a " +
+                            "link that carries the certificate, or set the server up from the Install Center, to pin it."
+                )
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        ConfirmDialog(
+            title = "Delete node",
+            text = "Remove '${profile.name}'? This cannot be undone.",
+            confirm = "Delete",
+            onConfirm = { confirmDelete = false; onDelete() },
+            onDismiss = { confirmDelete = false }
+        )
+    }
+    if (confirmDiscard) {
+        ConfirmDialog(
+            title = "Discard changes?",
+            text = "Your edits to this node have not been saved.",
+            confirm = "Discard",
+            onConfirm = { confirmDiscard = false; onBack() },
+            onDismiss = { confirmDiscard = false }
+        )
+    }
+}
+
+private val SLIPSTREAM_RESOLVER_PRESETS = listOf(
+    "Cloudflare" to "1.1.1.1",
+    "Google" to "8.8.8.8",
+    "Quad9" to "9.9.9.9"
+)

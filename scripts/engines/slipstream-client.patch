@@ -1,0 +1,117 @@
+diff --git a/include/slipstream.h b/include/slipstream.h
+index 03fe794..6629e24 100644
+--- a/include/slipstream.h
++++ b/include/slipstream.h
+@@ -22,7 +22,7 @@ typedef struct st_address_t {
+     bool added;
+ } address_t;
+ 
+-int picoquic_slipstream_client(int listen_port, struct st_address_t* server_addresses, size_t server_address_count, const char* domain_name,
++int picoquic_slipstream_client(const char* listen_host, const char* pinned_cert_file, int listen_port, struct st_address_t* server_addresses, size_t server_address_count, const char* domain_name,
+                                const char* cc_algo_id, bool gso, size_t keep_alive_interval);
+ 
+ int picoquic_slipstream_server(int server_port, bool listen_ipv6, const char* pem_cert, const char* pem_key,
+diff --git a/src/slipstream_client.c b/src/slipstream_client.c
+index 482b963..123a7f5 100644
+--- a/src/slipstream_client.c
++++ b/src/slipstream_client.c
+@@ -12,6 +12,7 @@
+ #include <pthread.h>
+ #include <slipstream_sockloop.h>
+ #include <stdbool.h>
++#include <arpa/inet.h>
+ #include <arpa/nameser.h>
+ #include <sys/ioctl.h>
+ #include <sys/param.h>
+@@ -698,7 +699,7 @@ static int slipstream_connect(struct sockaddr_storage* server_address,
+     return ret;
+ }
+ 
+-int picoquic_slipstream_client(int listen_port, struct st_address_t* server_addresses, size_t server_address_count, const char* domain_name, const char* cc_algo_id, bool gso, const size_t keep_alive_interval) {
++int picoquic_slipstream_client(const char* listen_host, const char* pinned_cert_file, int listen_port, struct st_address_t* server_addresses, size_t server_address_count, const char* domain_name, const char* cc_algo_id, bool gso, const size_t keep_alive_interval) {
+     /* Start: start the QUIC process */
+     int ret = 0;
+     uint64_t current_time = 0;
+@@ -726,8 +727,13 @@ int picoquic_slipstream_client(int listen_port, struct st_address_t* server_addr
+     config.use_long_log = 1;
+     config.do_preemptive_repeat = 1;
+     config.disable_port_blocking = 1;
+-    config.enable_sslkeylog = 1;
++    /* Never write TLS session keys anywhere, whatever the environment says. */
++    config.enable_sslkeylog = 0;
+     config.alpn = SLIPSTREAM_ALPN;
++    /* With a pinned certificate the server must present it (or one it signed); without one, picoquic skips the check. */
++    if (pinned_cert_file != NULL && pinned_cert_file[0] != '\0') {
++        config.root_trust_file = strdup(pinned_cert_file);
++    }
+ 
+     /* Create the QUIC context for the server */
+     current_time = picoquic_current_time();
+@@ -740,13 +746,18 @@ int picoquic_slipstream_client(int listen_port, struct st_address_t* server_addr
+         return -1;
+     }
+ 
++    if (pinned_cert_file != NULL && pinned_cert_file[0] != '\0' && !quic->is_cert_store_not_empty) {
++        fprintf(stderr, "Could not load the pinned server certificate %s\n", pinned_cert_file);
++        picoquic_free(quic);
++        return -1;
++    }
++
+     picoquic_set_cookie_mode(quic, 0);
+     picoquic_set_default_priority(quic, 2);
+ #ifdef BUILD_LOGLIB
+     picoquic_set_qlog(quic, config.qlog_dir);
+     debug_printf_push_stream(stderr);
+ #endif
+-    picoquic_set_key_log_file_from_env(quic);
+     // picoquic_set_textlog(quic, "-");
+     // picoquic_set_log_level(quic, 1);
+     // TODO: idle timeout?
+@@ -780,7 +791,12 @@ int picoquic_slipstream_client(int listen_port, struct st_address_t* server_addr
+ 
+     struct sockaddr_in listen_addr = {0};
+     listen_addr.sin_family = AF_INET;
+-    listen_addr.sin_addr.s_addr = INADDR_ANY;
++    /* Loopback by default: other devices on the network must not reach the tunnel. */
++    if (inet_pton(AF_INET, listen_host != NULL ? listen_host : "127.0.0.1", &listen_addr.sin_addr) != 1) {
++        fprintf(stderr, "Invalid listen address %s\n", listen_host);
++        close(client_ctx.listen_sock);
++        exit(EXIT_FAILURE);
++    }
+     listen_addr.sin_port = htons(listen_port);
+ 
+     if (bind(client_ctx.listen_sock, (struct sockaddr*)&listen_addr, sizeof(listen_addr)) < 0) {
+@@ -839,6 +855,11 @@ int picoquic_slipstream_client(int listen_port, struct st_address_t* server_addr
+     slipstream_packet_loop(&thread_ctx);
+     ret = thread_ctx.return_code;
+ 
++    /* A tunnel that never came up is a failure, so whoever started the client can tell. */
++    if (ret == 0 && !client_ctx.ready) {
++        ret = 2;
++    }
++
+     /* And finish. */
+     printf("Client exit, ret = %d\n", ret);
+ 
+diff --git a/src/slipstream_client_cli.cpp b/src/slipstream_client_cli.cpp
+index 96b6cc5..dce6cdd 100644
+--- a/src/slipstream_client_cli.cpp
++++ b/src/slipstream_client_cli.cpp
+@@ -13,6 +13,8 @@ struct ClientArgs : MainArguments<ClientArgs> {
+     std::string congestion_control = option("congestion-control", 'c', "Congestion control algorithm (bbr, dcubic) (default: dcubic)") = "dcubic";
+     bool gso = option('g', "GSO enabled (true/false) (default: false). Use --gso or --gso=true to enable.");
+     std::string domain = option("domain", 'd', "Domain name used for the covert channel (Required)");
++    std::string listen_host = option("tcp-listen-host", 'H', "Listen address (default: 127.0.0.1)") = "127.0.0.1";
++    std::string cert = option("cert", 'C', "Pinned server certificate (PEM); the connection fails unless the server presents it (default: not checked)") = "";
+     int keep_alive_interval = option("keep-alive-interval", 't', "Send keep alive pings at this interval (default: 400, disabled: 0)") = 400;
+ 
+     static std::string help(const std::string& program_name) {
+@@ -108,6 +110,8 @@ int main(int argc, char** argv) {
+     }
+ 
+     exit_code = picoquic_slipstream_client(
++        args.listen_host.c_str(),
++        args.cert.c_str(),
+         args.listen_port,
+         resolver_addresses.data(),
+         resolver_addresses.size(),
