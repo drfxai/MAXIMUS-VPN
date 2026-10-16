@@ -193,6 +193,33 @@ class ConfigRevivalTest {
         assertFalse(alive.scannedForIps)
     }
 
+    @Test fun anAddressThatRefusesTheCertificateIsSkippedForADay() {
+        val dead = cf("q", "q.example.workers.dev")
+        val bad = "188.114.97.3"
+        val good = "188.114.96.9"
+        val tried = mutableListOf<String>()
+        fun run() = ConfigRevival(engine, endpoints = { listOf(bad, good) }, probe = { ps ->
+            ps.map { p ->
+                tried += p.address
+                if (p.address == bad) TestResult.Failed("tls: failed to verify certificate: x509: certificate is valid for other.example, not q.example.workers.dev")
+                else TestResult.Failed("timeout")
+            }
+        }).run(listOf(dead), net)
+        run()
+        assertTrue(bad in tried)
+        assertTrue(ledger.isIntercepted(bad, net, now))
+        assertFalse("a timeout is not interception", ledger.isIntercepted(good, net, now))
+        assertFalse("only on the network where it happened", ledger.isIntercepted(bad, "wifi:home", now))
+        tried.clear()
+        run()
+        assertFalse("the intercepting address is not tried again", bad in tried)
+        assertTrue(good in tried)
+        now += RecoveryLedger.INTERCEPT_QUARANTINE_MS
+        assertFalse(ledger.isIntercepted(bad, net, now))
+        // Quarantine entries never look like a recipe that worked for a config.
+        assertNull(engine.active(dead, net))
+    }
+
     @Test fun echKeyCheckReadsHttpsRecords() {
         val q = EchKeyCheck.query()
         assertEquals(0x41, q[q.size - 3].toInt()) // type HTTPS

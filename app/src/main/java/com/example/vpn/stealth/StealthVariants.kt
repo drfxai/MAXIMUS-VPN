@@ -12,7 +12,8 @@ import org.json.JSONObject
  * they work against the user's existing server without any server change:
  *
  * - TLS and REALITY over TCP (direct or through a CDN): the ClientHello split into small TCP pieces
- *   (DPI that does not reassemble cannot read the SNI), another browser's TLS fingerprint, both, and
+ *   (DPI that does not reassemble cannot read the SNI), the two-stage split Iranian users rely on
+ *   (1-byte TLS records sent as tiny TCP segments), another browser's TLS fingerprint, both, and
  *   for TLS with a domain name, Encrypted ClientHello fetched over DoH (hides the SNI entirely when the
  *   site supports ECH).
  * - Other TCP (VLESS Encryption, Shadowsocks, VMess): the first packets split into random pieces, which
@@ -27,6 +28,7 @@ object StealthVariants {
     data class Variant(val key: String, val label: String, val profile: VlessProfile)
 
     const val FRAGMENT = "fragment"
+    const val DOUBLE_FRAGMENT = "double-fragment"
     const val FINGERPRINT = "fingerprint"
     const val FRAGMENT_FINGERPRINT = "fragment+fingerprint"
     const val ECH = "ech"
@@ -69,6 +71,10 @@ object StealthVariants {
         }
         val fragmented = if (hasTcpMask) null else profile.copy(finalMask = withTcp(mask, helloFragment()).toString())
         fragmented?.let { out += Variant(FRAGMENT, "TLS handshake split into small pieces", it) }
+        if (!hasTcpMask) {
+            out += Variant(DOUBLE_FRAGMENT, "TLS handshake split into 1-byte records and tiny packets",
+                profile.copy(finalMask = withTcpChain(mask, doubleFragment()).toString()))
+        }
         altFp?.let { out += Variant(FINGERPRINT, "${it.replaceFirstChar(Char::uppercase)} TLS fingerprint", profile.copy(fingerprint = it)) }
         if (fragmented != null && altFp != null) {
             out += Variant(FRAGMENT_FINGERPRINT, "Split handshake with a $altFp fingerprint", fragmented.copy(fingerprint = altFp))
@@ -105,6 +111,17 @@ object StealthVariants {
         "settings", JSONObject().put("packets", "tlshello").put("length", "100-200").put("delay", "10-20")
     )
 
+    /**
+     * The two-stage split (patterniha's Serverless-for-Iran, FIX BPB without the empty record): the
+     * ClientHello becomes a 104-byte TLS record followed by 1-byte records, all in one write (a single
+     * zero delay merges them), then that write leaves as a 114-byte TCP segment and about ten 1-byte
+     * segments 1 ms apart. Every TLS server accepts it; filters that read the SNI from one record or
+     * one segment cannot.
+     */
+    internal fun doubleFragment(): JSONArray = JSONArray(
+        JSONObject(com.example.panels.BpbFix.FINAL_MASK).getJSONArray("tcp").toString()
+    )
+
     private fun packetFragment(packets: String, length: String): JSONObject = JSONObject().put("type", "fragment").put(
         "settings", JSONObject().put("packets", packets).put("length", length).put("delay", "5-15")
     )
@@ -117,6 +134,9 @@ object StealthVariants {
 
     private fun withTcp(mask: JSONObject, item: JSONObject): JSONObject =
         JSONObject(mask.toString()).put("tcp", JSONArray().put(item))
+
+    private fun withTcpChain(mask: JSONObject, items: JSONArray): JSONObject =
+        JSONObject(mask.toString()).put("tcp", items)
 
     private fun withUdp(mask: JSONObject, item: JSONObject): JSONObject {
         val copy = JSONObject(mask.toString())

@@ -99,7 +99,9 @@ class BpbRecoveryEngine(
             .map { it.first }
         val out = mutableListOf<DerivedRecoveryCandidate>()
         for (rp in usable) {
-            val targets: List<String?> = if (rp.needsEndpoint()) endpoints.filter { familyOf(it) == rp.addressFamily }.distinct().take(2) else listOf(null)
+            val targets: List<String?> = if (rp.needsEndpoint()) {
+                endpoints.filter { familyOf(it) == rp.addressFamily && !ledger.isIntercepted(it, network, now) }.distinct().take(2)
+            } else listOf(null)
             for (endpoint in targets) {
                 if (out.size >= maxCandidates) return out
                 if (ledger.isWithdrawn(fp, rp.key, endpoint, network)) continue
@@ -133,7 +135,14 @@ class BpbRecoveryEngine(
         tested.forEach { c ->
             when (val t = c.test) {
                 is DerivedRecoveryCandidate.TestResult.Passed -> ledger.record(c, success = true, now = clock())
-                is DerivedRecoveryCandidate.TestResult.Failed -> ledger.record(c, success = false, now = clock())
+                is DerivedRecoveryCandidate.TestResult.Failed -> {
+                    ledger.record(c, success = false, now = clock())
+                    // A clean IP that answers with a certificate the config's own name does not accept is
+                    // intercepting (or is not the CDN at all): no recipe on that address can be trusted.
+                    if (c.endpoint != null && FailureStage.fromText(t.reason) == FailureStage.CERTIFICATE_VALIDATION_FAILED) {
+                        ledger.markIntercepted(c.endpoint, c.networkContext, clock())
+                    }
+                }
                 else -> Unit
             }
         }
@@ -294,6 +303,26 @@ class RecoveryLedger(private val load: () -> String?, private val save: (String)
         return es.sumOf { it.successes } == 0 && es.sumOf { it.failures } >= WORSE_AFTER
     }
 
+    /**
+     * Quarantines [endpoint] on [network] for [INTERCEPT_QUARANTINE_MS] after it returned a refused
+     * certificate: every config skips it there, so revival and failover stop retrying an address that
+     * intercepts TLS. Stored as a withdrawn entry under [INTERCEPTED], which no config fingerprint equals.
+     */
+    @Synchronized
+    fun markIntercepted(endpoint: String, network: String?, now: Long) {
+        val all = list()
+        all.removeAll { it.expiresAt <= now || same(it, INTERCEPTED, INTERCEPTED, endpoint, network) }
+        all.add(Entry(INTERCEPTED, INTERCEPTED, endpoint, network, now, now + INTERCEPT_QUARANTINE_MS,
+            failures = 1, withdrawn = true, withdrawnReason = "certificate refused through this address"))
+        while (all.size > MAX_ENTRIES) all.remove(all.minByOrNull { it.lastSuccessAt ?: it.createdAt }!!)
+        persist()
+    }
+
+    /** True while [endpoint] is quarantined on [network] (see [markIntercepted]). */
+    @Synchronized
+    fun isIntercepted(endpoint: String, network: String?, now: Long): Boolean =
+        list().any { same(it, INTERCEPTED, INTERCEPTED, endpoint, network) && it.expiresAt > now }
+
     /** Forgets everything recorded for [fp] (the user deleted the config, or asked to undo recovery). */
     @Synchronized
     fun forget(fp: String) {
@@ -309,5 +338,9 @@ class RecoveryLedger(private val load: () -> String?, private val save: (String)
     companion object {
         const val MAX_ENTRIES = 200
         const val WORSE_AFTER = 3
+        /** How long an address that refused a certificate is skipped on a network. */
+        const val INTERCEPT_QUARANTINE_MS = 24L * 60 * 60 * 1000
+        /** Fingerprint and profile key of quarantine entries; never a real config fingerprint (those are hex). */
+        const val INTERCEPTED = "*intercepted"
     }
 }

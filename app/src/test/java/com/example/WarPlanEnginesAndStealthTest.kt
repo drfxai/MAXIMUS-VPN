@@ -213,6 +213,13 @@ class WarPlanEnginesAndStealthTest {
         assertTrue(StealthVariants.of(cdn).any { it.key == StealthVariants.ECH && it.profile.echConfigList == "edge.example.com+${StealthVariants.ECH_DNS}" })
         val frag = StealthVariants.of(reality).first { it.key == StealthVariants.FRAGMENT }.profile
         assertEquals("tlshello", JSONObject(frag.finalMask).getJSONArray("tcp").getJSONObject(0).getJSONObject("settings").getString("packets"))
+        // The two-stage split: 1-byte TLS records in one write, then that write cut into tiny TCP segments.
+        val double = JSONObject(StealthVariants.of(reality).first { it.key == StealthVariants.DOUBLE_FRAGMENT }.profile.finalMask).getJSONArray("tcp")
+        assertEquals(2, double.length())
+        assertEquals("tlshello", double.getJSONObject(0).getJSONObject("settings").getString("packets"))
+        assertEquals("1", double.getJSONObject(0).getJSONObject("settings").getJSONArray("lengths").getString(1))
+        assertEquals("1-1", double.getJSONObject(1).getJSONObject("settings").getString("packets"))
+        assertTrue(StealthVariants.of(cdn).any { it.key == StealthVariants.DOUBLE_FRAGMENT })
         // Plain VLESS on the Kotlin tunnel has no Xray alternates.
         assertTrue(StealthVariants.of(reality.copy(security = "none", flow = "", publicKey = "")).isEmpty())
     }
