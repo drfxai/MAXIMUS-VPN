@@ -90,4 +90,20 @@ class StopIsInstantTest {
         assertTrue(SmartButtonState.CONNECTING.tapStops)
         assertTrue(SmartButtonState.ON.tapStops)
     }
+
+    @Test fun aLeftBehindCallKnowsItWasStoppedSoItsTestsSendNothingMore() = runBlocking {
+        val sawStop = CountDownLatch(1)
+        val job = async {
+            Abandonable.run {
+                val deadline = System.currentTimeMillis() + 3_000
+                while (!Abandonable.abandoned() && System.currentTimeMillis() < deadline) Thread.sleep(10)
+                if (Abandonable.abandoned()) sawStop.countDown()
+            }
+        }
+        delay(100)
+        assertFalse(Abandonable.abandoned())
+        job.cancel()
+        assertTrue(sawStop.await(2, TimeUnit.SECONDS))
+        assertTrue(Abandonable.awaitIdle(2_000))
+    }
 }

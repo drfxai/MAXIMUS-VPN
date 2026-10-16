@@ -61,4 +61,18 @@ class SmartConnectRankTest {
     @Test fun emptyInEmptyOut() {
         assertTrue(SmartConnect.rankTopNodes(emptyList()).isEmpty())
     }
+
+    @Test fun theCardLeadsWithTheServerInUseAndPutsServersThatFailedHereLast() {
+        val e = com.example.vpn.connectivity.PathEligibility
+        // Phone report 2026-10-16: DE (best rating) failed here, US carried the traffic, yet DE led the card.
+        val de = node("1", 100.0); val ru = node("2", 60.0); val fi = node("3", 50.0); val us = node("4", 10.0)
+        val evidence = mapOf("1" to e.RECENTLY_FAILED, "2" to e.UNTESTED, "3" to e.FRESH_VERIFIED, "4" to e.FRESH_VERIFIED)
+        val card = SmartConnect.rankForCard(listOf(de, ru, fi, us), active = us, evidenceOf = { evidence[it.id] })
+        assertEquals(listOf("4", "3", "2"), card.map { it.profile.id })
+        assertTrue(card[0].inUse)
+        // Not connected: the best server by this network's evidence leads, never one that just failed here.
+        val idle = SmartConnect.rankForCard(listOf(de, ru, fi, us), evidenceOf = { evidence[it.id] }, count = 4)
+        assertEquals(listOf("3", "4", "2", "1"), idle.map { it.profile.id })
+        assertTrue(idle.none { it.inUse })
+    }
 }

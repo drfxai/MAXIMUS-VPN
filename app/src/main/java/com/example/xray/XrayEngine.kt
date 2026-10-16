@@ -43,6 +43,13 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
     override val engineVersion: String = ENGINE_VERSION
 
     private val isRunningFlag = AtomicBoolean(false)
+
+    /**
+     * True from the moment runXray is called until stopXray returns. libXray holds one lock for its core
+     * and for every server test (pingBatch keeps it for the whole test), so a stopXray on a core that is
+     * not running would wait behind every queued test; with nothing running there is nothing to stop.
+     */
+    private val nativeCoreMayRun = AtomicBoolean(false)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var statsJob: Job? = null
 
@@ -154,6 +161,7 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
             lastTxBytes = 0L
             lastRxBytes = 0L
 
+            nativeCoreMayRun.set(true)
             val response = invokeXray("runXray", JSONObject().put("xrayJson", nativeConfig))
             if (!response.optBoolean("success", false)) {
                 throw IllegalStateException(response.optString("error", "libXray rejected the configuration"))
@@ -168,7 +176,7 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
             XrayLogManager.appendLog("Native Xray-core started and attached to Android TUN.", "CORE")
             return AppResult.Success(Unit)
         } catch (e: Exception) {
-            runCatching { invokeXray("stopXray") }
+            if (nativeCoreMayRun.getAndSet(false)) runCatching { invokeXray("stopXray") }
             runCatching { callLibXray("resetDNS") }
             isRunningFlag.set(false)
             XrayLogManager.appendLog("Failed to start Xray engine: ${e.message}", "ERROR")
@@ -182,7 +190,7 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
     override fun stop(): AppResult<Unit> {
         // Liveness checks may clear the flag after a crash. Still stop native resources.
         XrayLogManager.appendLog("Stopping native Xray-core...", "ENGINE")
-        runCatching { invokeXray("stopXray") }
+        if (nativeCoreMayRun.getAndSet(false)) runCatching { invokeXray("stopXray") }
         runCatching { callLibXray("resetDNS") }
         isRunningFlag.set(false)
         statsJob?.cancel()

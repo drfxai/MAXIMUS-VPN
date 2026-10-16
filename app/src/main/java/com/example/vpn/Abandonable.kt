@@ -3,6 +3,7 @@ package com.example.vpn
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.Executors
 import java.util.concurrent.ThreadFactory
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -22,13 +23,25 @@ object Abandonable {
     /** Blocking calls still running, including ones a cancelled caller left behind. */
     val running: Int get() = inFlight.get()
 
+    private val leftBehind = ThreadLocal<AtomicBoolean?>()
+
+    /**
+     * True inside a call whose caller was cancelled. Server tests check it before each request and stop,
+     * so a left-behind call does not keep testing (and holding libXray's lock) after Stop.
+     */
+    fun abandoned(): Boolean = leftBehind.get()?.get() == true
+
     suspend fun <T> run(block: () -> T): T = suspendCancellableCoroutine { cont ->
+        val cancelled = AtomicBoolean(false)
+        cont.invokeOnCancellation { cancelled.set(true) }
         inFlight.incrementAndGet()
         pool.execute {
+            leftBehind.set(cancelled)
             try {
                 // Resuming a cancelled continuation is ignored, so a left-behind result goes nowhere.
                 cont.resumeWith(runCatching(block))
             } finally {
+                leftBehind.remove()
                 inFlight.decrementAndGet()
             }
         }

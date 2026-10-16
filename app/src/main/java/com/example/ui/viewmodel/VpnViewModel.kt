@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -48,9 +50,14 @@ class VpnViewModel(
     /** The Optimal Node agent's ranked shortlist: best first, up to three. */
     val topNodes: StateFlow<List<SmartConnect.SmartSelection>> = combine(
         serverRepository.allProfiles,
-        settingsRepository.settingsFlow
-    ) { profiles, settings ->
-        SmartConnect.rankTopNodes(profiles, settings.scoringProfile, count = 3)
+        settingsRepository.settingsFlow,
+        // Only what changes the list: which server carries traffic, and each connect step (tests finish then).
+        VpnController.connectionState.map { s -> s.status to s.activeProfile?.takeIf { s.status == ConnectionStatus.CONNECTED || s.status == ConnectionStatus.DEGRADED } }.distinctUntilChanged()
+    ) { profiles, settings, (_, active) ->
+        val book = com.example.vpn.connectivity.ConnectivityBrain.book
+        SmartConnect.rankForCard(profiles, settings.scoringProfile, active = active, count = 3, evidenceOf = { p ->
+            runCatching { book.eligibility(com.example.vpn.connectivity.PathRef.of(p)) }.getOrNull()
+        })
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),

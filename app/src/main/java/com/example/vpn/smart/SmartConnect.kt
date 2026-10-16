@@ -13,7 +13,11 @@ object SmartConnect {
         val reasonStability: String,
         val reasonPacketLoss: String,
         val overallScore: Double,
-        val description: String
+        val description: String,
+        /** What this network said about the node: verified, untested, failed here... Null when unknown. */
+        val evidence: com.example.vpn.connectivity.PathEligibility? = null,
+        /** The node is the one carrying traffic right now. */
+        val inUse: Boolean = false
     )
 
     /**
@@ -46,6 +50,32 @@ object SmartConnect {
                 .thenBy { it.lastLatencyMs ?: 9999L }
         )
         return ordered.take(count).map { describe(it, scoringProfile) }
+    }
+
+    /**
+     * The Home card's list: the node carrying traffic first while connected, then nodes in the order this
+     * network's evidence gives (verified here, passed once here, untested, worked before, failed here
+     * moments ago last) and by rating within each class. So the card never names a server that just
+     * failed here as the best one while another server is carrying the traffic.
+     */
+    fun rankForCard(
+        profiles: List<VlessProfile>,
+        scoringProfile: ScoringProfile = ScoringProfile.BALANCED,
+        active: VlessProfile? = null,
+        evidenceOf: (VlessProfile) -> com.example.vpn.connectivity.PathEligibility? = { null },
+        count: Int = 3
+    ): List<SmartSelection> {
+        if (count <= 0) return emptyList()
+        val failed = com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED
+        val rated = rankTopNodes(profiles, scoringProfile, count = profiles.size)
+            .map { it.copy(evidence = evidenceOf(it.profile)) }
+            .sortedBy { (it.evidence ?: com.example.vpn.connectivity.PathEligibility.UNTESTED).let { e -> if (e == failed) Int.MAX_VALUE else e.ordinal } }
+        val inUse = active?.let { a ->
+            val match = profiles.firstOrNull { it.id == a.id } ?: profiles.firstOrNull { it.effectiveFingerprint == a.effectiveFingerprint } ?: a
+            describe(match, scoringProfile).copy(evidence = evidenceOf(match), inUse = true)
+        }
+        val rest = rated.filter { inUse == null || (it.profile.id != inUse.profile.id && it.profile.effectiveFingerprint != inUse.profile.effectiveFingerprint) }
+        return (listOfNotNull(inUse) + rest).take(count)
     }
 
     /**

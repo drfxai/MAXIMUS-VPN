@@ -24,6 +24,9 @@ object RealDelayProbe {
     /** The [Outcome.NotRun] reason while the VPN's own core runs (libXray then refuses a probe). */
     const val CORE_RUNNING = "the VPN's Xray core is running"
 
+    /** The [Outcome.NotRun] reason after the connect attempt that asked for the test was stopped. */
+    const val STOPPED = "the connect attempt was stopped"
+
     /** libXray accepts at most five configs per pingBatch call. */
     const val MAX_BATCH = 5
 
@@ -149,6 +152,8 @@ object RealDelayProbe {
     }
 
     private fun measureBatch(profiles: List<VlessProfile>, timeoutSec: Int, target: ProbeTargets.Target): List<Outcome> {
+        // The caller pressed Stop: send nothing more.
+        if (com.example.vpn.Abandonable.abandoned()) return List(profiles.size) { Outcome.NotRun(STOPPED) }
         // Only the proxy outbound is used, so the user's DNS and routing settings do not matter.
         // Profiles carried by a separate engine program (Mihomo, Psiphon...) cannot be measured by the
         // Xray core alone; they are not failures, just not measured here.
