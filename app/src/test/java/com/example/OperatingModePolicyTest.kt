@@ -40,6 +40,32 @@ class OperatingModePolicyTest {
         assertFalse(OperatingModePolicy.of(OperationalMode.DAILY).lockExit)
         assertFalse(OperatingModePolicy.of(OperationalMode.GOD_MODE).lockExit)
         assertTrue(OperatingModePolicy.of(OperationalMode.TRADE).lockExit)
+        assertFalse(OperatingModePolicy.of(OperationalMode.GHOST_RIDER).lockExit)
+    }
+
+    @Test fun ghostRiderHardensLikeGodAndPrefersTorMultiHop() {
+        val policy = OperatingModePolicy.of(OperationalMode.GHOST_RIDER)
+        // All of GOD MODE's hardening.
+        assertFalse(policy.userRouting)
+        assertFalse(policy.importedDirectRules)
+        assertTrue(policy.alwaysSmartConnect)
+        assertFalse(policy.userIpv6)
+        assertTrue(policy.privateServerLookup)
+        // Plus the Tor multi-hop preference.
+        assertTrue(policy.torMultiHop)
+        // Applied settings match GOD MODE: everything proxied, IPv6 blocked, recovery on.
+        val ghost = policy.apply(userChoices.copy(operationalMode = OperationalMode.GHOST_RIDER))
+        assertEquals(RoutingMode.GLOBAL, ghost.routingMode)
+        assertFalse(ghost.ipv6Enabled)
+        assertTrue(ghost.autoFailoverEnabled)
+        assertTrue(ghost.autoReconnect)
+    }
+
+    @Test fun survivalCoversGodAndGhostRiderOnly() {
+        assertFalse(OperatingModePolicy.of(OperationalMode.DAILY).survival)
+        assertFalse(OperatingModePolicy.of(OperationalMode.TRADE).survival)
+        assertTrue(OperatingModePolicy.of(OperationalMode.GOD_MODE).survival)
+        assertTrue(OperatingModePolicy.of(OperationalMode.GHOST_RIDER).survival)
     }
 
     @Test fun godModeProxiesEverythingBlocksIpv6AndKeepsRecoveryOn() {
