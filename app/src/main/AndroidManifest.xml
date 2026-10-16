@@ -63,6 +63,14 @@
                 android:value="VPN service maintaining secure Xray-core VLESS proxy tunnel" />
         </service>
 
+        <!-- Tor can start only once per process, so it runs in its own process: a restart gets a
+             fresh process (see TorInApp), and a Tor failure can never close the app or the VPN. -->
+        <service
+            android:name="org.torproject.jni.TorService"
+            android:exported="false"
+            android:process=":tor"
+            tools:node="merge" />
+
         <service
             android:name=".vpn.tile.VpnTileService"
             android:exported="true"

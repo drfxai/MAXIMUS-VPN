@@ -214,6 +214,11 @@ class RayApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // Tor's own process only runs TorService; nothing of the app starts there.
+        if (com.example.core.AppProcess.isTorProcess()) return
+
+        // Keep the log of the previous run (a crash or a forced stop would otherwise wipe it).
+        runCatching { XrayLogManager.attachDisk(java.io.File(filesDir, "logs")) }
 
         // Install Global Uncaught Exception Handler to capture any UI/Thread/Coroutine crash for agent diagnostics
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()

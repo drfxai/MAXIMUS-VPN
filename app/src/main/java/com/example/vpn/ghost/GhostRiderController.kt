@@ -55,10 +55,13 @@ object GhostRiderController {
 
     /**
      * Panic: drop the tunnel and wipe the sensitive on-device state at once. [regenerateAtomicId] clears
-     * every secret conversation and rotates the device's secret-chat identity, so nothing links back.
+     * every secret conversation and rotates the device's secret-chat identity, so nothing links back;
+     * the app's log is deleted as well.
      */
     fun panic(context: Context) {
         runCatching { VpnController.stopVpn(context) }
         runCatching { com.example.chat.SecretChatManager(context).regenerateAtomicId() }
+        // The app's own log is kept on the phone across restarts; panic deletes it too.
+        runCatching { com.example.xray.XrayLogManager.wipeDisk() }
     }
 }

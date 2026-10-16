@@ -100,7 +100,79 @@ object XrayLogManager {
             logQueue.pollFirst()
         }
         logQueue.addLast(entry)
+        writeToDisk(entry)
     }
+
+    // The log is also written through to a small file in the app's private storage, so a crash, a
+    // forced stop or Android ending the app does not wipe it: the next run shows the previous run's
+    // tail first. Lines are already redacted. Panic lock deletes the files (see wipeDisk).
+    private const val PREVIOUS_TAIL = 200
+    private const val REWRITE_AFTER = 3_000
+    private var diskDir: java.io.File? = null
+    private var writer: java.io.Writer? = null
+    private var writtenSinceRewrite = 0
+
+    /** Starts writing through to [dir], first moving the last run's file aside and showing its tail. */
+    @Synchronized
+    fun attachDisk(dir: java.io.File) {
+        if (diskDir != null) return
+        dir.mkdirs()
+        val current = java.io.File(dir, SESSION_FILE)
+        val previous = java.io.File(dir, PREVIOUS_FILE)
+        if (current.length() > 0) {
+            previous.delete()
+            if (!current.renameTo(previous)) current.delete()
+        }
+        val tail = runCatching { previous.readLines().takeLast(PREVIOUS_TAIL) }.getOrDefault(emptyList())
+        diskDir = dir
+        openWriter(append = false)
+        if (tail.isNotEmpty()) {
+            val earlier = ArrayList(logQueue)
+            logQueue.clear()
+            logQueue.addLast("──── Previous run (kept across the restart) ────")
+            tail.forEach { if (logQueue.size >= MAX_LOGS) logQueue.pollFirst(); logQueue.addLast(it) }
+            logQueue.addLast("──── This run ────")
+            earlier.forEach { addEntry(it) }
+            _logsFlow.value = ArrayList(logQueue)
+        }
+    }
+
+    /** Deletes the log files and clears the log on screen (panic lock). */
+    @Synchronized
+    fun wipeDisk() {
+        logQueue.clear()
+        _logsFlow.value = emptyList()
+        val dir = diskDir ?: return
+        runCatching { writer?.close() }
+        writer = null
+        java.io.File(dir, SESSION_FILE).delete()
+        java.io.File(dir, PREVIOUS_FILE).delete()
+        openWriter(append = false)
+    }
+
+    private fun openWriter(append: Boolean) {
+        val dir = diskDir ?: return
+        writer = runCatching {
+            java.io.OutputStreamWriter(java.io.FileOutputStream(java.io.File(dir, SESSION_FILE), append), Charsets.UTF_8)
+        }.getOrNull()
+        writtenSinceRewrite = 0
+    }
+
+    private fun writeToDisk(entry: String) {
+        val w = writer ?: return
+        val ok = runCatching { w.write(entry); w.write("\n"); w.flush() }.isSuccess
+        if (!ok) { runCatching { w.close() }; writer = null; return }
+        // Keep the file about as long as the on-screen log.
+        if (++writtenSinceRewrite >= REWRITE_AFTER) {
+            runCatching { w.close() }
+            openWriter(append = false)
+            val lines = ArrayList(logQueue)
+            writer?.let { nw -> runCatching { lines.forEach { nw.write(it); nw.write("\n") }; nw.flush() } }
+        }
+    }
+
+    private const val SESSION_FILE = "session.log"
+    private const val PREVIOUS_FILE = "previous-session.log"
 
     @Synchronized
     fun getLogs(): List<String> = ArrayList(logQueue)
@@ -109,6 +181,8 @@ object XrayLogManager {
     fun clear() {
         logQueue.clear()
         _logsFlow.value = emptyList()
+        // Clearing the log on screen also clears this run's file.
+        if (diskDir != null) { runCatching { writer?.close() }; openWriter(append = false) }
     }
 }
 

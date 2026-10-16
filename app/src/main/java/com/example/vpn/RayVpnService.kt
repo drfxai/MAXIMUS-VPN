@@ -265,6 +265,8 @@ class RayVpnService : VpnService() {
 
                 lifecycle.newIntent()
                 connectJob?.cancel()
+                // Engines of the attempt this Connect replaces stop now, so the new attempt does not wait behind them.
+                com.example.vpn.sidecar.EngineReaper.stopAll()
                 connectJob = serviceScope.launch {
                     val profile = if (!profileId.isNullOrBlank()) {
                         serverRepository.getProfileById(profileId)
@@ -300,6 +302,12 @@ class RayVpnService : VpnService() {
                 lifecycle.newIntent()
                 connectJob?.cancel()
                 connectJob = null
+                // Show the stop at once, and end every engine still starting, so the cancelled attempt
+                // unwinds immediately instead of after its current round of tests (see Abandonable).
+                if (_vpnState.value.status != ConnectionStatus.DISCONNECTED) {
+                    updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING))
+                }
+                com.example.vpn.sidecar.EngineReaper.stopAll()
                 serviceScope.launch {
                     // A second Disconnect while one runs joins it instead of tearing down twice.
                     lifecycle.singleTeardown { disconnect() }
@@ -399,11 +407,14 @@ class RayVpnService : VpnService() {
         XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
         val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
         val raceJob = kotlinx.coroutines.currentCoroutineContext()[Job]
-        com.example.vpn.smart.ServerRace().run(candidates, resolve, timeoutSec, onFailure = {
-            networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
-        }, disguiseOnly = dead, shouldStop = { raceJob?.isActive == false })?.let { return it }
+        // Abandonable: a Stop returns from here at once; the round already running finishes on its own.
+        com.example.vpn.Abandonable.run {
+            com.example.vpn.smart.ServerRace().run(candidates, resolve, timeoutSec, onFailure = {
+                networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
+            }, disguiseOnly = dead, shouldStop = { raceJob?.isActive == false })
+        }?.let { return it }
         val best = candidates.firstOrNull() ?: return null
-        val choice = runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() ?: return null
+        val choice = com.example.vpn.Abandonable.run { runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() } ?: return null
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
     }
 
@@ -438,7 +449,7 @@ class RayVpnService : VpnService() {
         } ?: return null
         val candidate = com.example.panels.CleanIpOptimizer.variant(profile, best)
         if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(candidate) != null) return null
-        val outcome = com.example.xray.RealDelayProbe.measure(candidate, timeoutSec)
+        val outcome = com.example.vpn.Abandonable.run { com.example.xray.RealDelayProbe.measure(candidate, timeoutSec) }
         return (outcome as? com.example.xray.RealDelayProbe.Outcome.Delay)?.let {
             XrayLogManager.i("SMART", "Reached ${com.example.core.SecretRedactor.redact(profile.name)} through a clean address (${it.latencyMs} ms).")
             com.example.vpn.smart.ServerRace.Winner(candidate, profile, it.latencyMs)
@@ -464,7 +475,7 @@ class RayVpnService : VpnService() {
             }
         }.onFailure { XrayLogManager.w("SMART", "Cloudflare WARP registration failed: ${it.message}") }.getOrNull() ?: return null
         if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(warp) != null) return null
-        val outcome = com.example.xray.RealDelayProbe.measure(warp, timeoutSec)
+        val outcome = com.example.vpn.Abandonable.run { com.example.xray.RealDelayProbe.measure(warp, timeoutSec) }
         return (outcome as? com.example.xray.RealDelayProbe.Outcome.Delay)?.let {
             XrayLogManager.i("SMART", "Cloudflare WARP carries traffic (${it.latencyMs} ms).")
             com.example.vpn.smart.ServerRace.Winner(warp, warp, it.latencyMs)
@@ -646,7 +657,7 @@ class RayVpnService : VpnService() {
                 val skip = recentlyFailed(first.profile)
                 if (skip) XrayLogManager.i("SMART", "Selected server skipped: it failed a real request on this network moments ago.")
                 when (val outcome = if (skip) com.example.xray.RealDelayProbe.Outcome.Failed("failed moments ago on this network", request = false)
-                    else com.example.xray.RealDelayProbe.measure(first.profile, timeouts.firstSec)) {
+                    else com.example.vpn.Abandonable.run { com.example.xray.RealDelayProbe.measure(first.profile, timeouts.firstSec) }) {
                     is com.example.xray.RealDelayProbe.Outcome.Delay -> {
                         profile = first.profile
                         raced = true
@@ -670,7 +681,7 @@ class RayVpnService : VpnService() {
                 val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile) }.getOrNull()
                 if (recovery != null) {
                     showForegroundNotification("Trying the recovered settings...")
-                    when (val outcome = com.example.xray.RealDelayProbe.measure(recovery.profile, timeouts.firstSec)) {
+                    when (val outcome = com.example.vpn.Abandonable.run { com.example.xray.RealDelayProbe.measure(recovery.profile, timeouts.firstSec) }) {
                         is com.example.xray.RealDelayProbe.Outcome.Delay -> {
                             profile = recovery.profile
                             raced = true
@@ -695,7 +706,7 @@ class RayVpnService : VpnService() {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.SAFE_VARIANTS)
                 val resolvedRequested = profile
                 val siblings = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
-                val choice = finder.choose(
+                val choice = com.example.vpn.Abandonable.run { finder.choose(
                     requested = requestedProfile,
                     resolve = { p ->
                         if (p.id == requestedProfile.id) resolvedRequested
@@ -704,7 +715,7 @@ class RayVpnService : VpnService() {
                     },
                     siblings = siblings,
                     firstFailed = firstFailed
-                )
+                ) }
                 if (choice.owner.id != requestedProfile.id) {
                     com.example.vless.VlessValidator.validate(choice.profile)
                     com.example.vpn.engine.RuntimeCapabilities.requireSupported(choice.profile)
@@ -781,7 +792,7 @@ class RayVpnService : VpnService() {
                     XrayLogManager.i("SMART", "Selected server not retried: it failed a real request on this network moments ago.")
                 } else {
                     showForegroundNotification("Testing ${profile.name}...")
-                    when (val outcome = com.example.xray.RealDelayProbe.measure(profile, timeouts.firstSec)) {
+                    when (val outcome = com.example.vpn.Abandonable.run { com.example.xray.RealDelayProbe.measure(profile, timeouts.firstSec) }) {
                         is com.example.xray.RealDelayProbe.Outcome.Delay -> {
                             raced = true
                             networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(profile), outcome.latencyMs)
@@ -845,12 +856,14 @@ class RayVpnService : VpnService() {
                 val reviveDeadline = System.currentTimeMillis() + CONFIG_REVIVE_MS
                 val attemptJob = coroutineContext[Job]
                 val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
-                val report = runCatching {
-                    com.example.RayApplication.instance.configRevival.run(
-                        // Stops on its own deadline, and also the moment the user presses Stop (the attempt is cancelled).
-                        saved, network, cancelled = { System.currentTimeMillis() > reviveDeadline || attemptJob?.isActive == false }
-                    ) { p -> p.current?.let { showForegroundNotification(it) } }
-                }.onFailure { XrayLogManager.w("SMART", "Config revival stopped: ${com.example.core.SecretRedactor.redact(it.message.orEmpty())}") }.getOrNull()
+                val report = com.example.vpn.Abandonable.run {
+                    runCatching {
+                        com.example.RayApplication.instance.configRevival.run(
+                            // Stops on its own deadline, and also the moment the user presses Stop (the attempt is cancelled).
+                            saved, network, cancelled = { System.currentTimeMillis() > reviveDeadline || attemptJob?.isActive == false }
+                        ) { p -> if (attemptJob?.isActive != false) p.current?.let { showForegroundNotification(it) } }
+                    }.onFailure { XrayLogManager.w("SMART", "Config revival stopped: ${com.example.core.SecretRedactor.redact(it.message.orEmpty())}") }.getOrNull()
+                }
                 // Results come back revived-first; take the fastest config that was brought back to life.
                 val revived = report?.results
                     ?.filter { it.outcome == com.example.vpn.lab.ConfigRevival.Outcome.REVIVED }
@@ -871,7 +884,7 @@ class RayVpnService : VpnService() {
                         c
                     }.getOrNull()
                     val verified = chosen != null &&
-                        com.example.xray.RealDelayProbe.measure(chosen, timeouts.firstSec) is com.example.xray.RealDelayProbe.Outcome.Delay
+                        com.example.vpn.Abandonable.run { com.example.xray.RealDelayProbe.measure(chosen, timeouts.firstSec) } is com.example.xray.RealDelayProbe.Outcome.Delay
                     if (verified && chosen != null) {
                         requestedProfile = owner
                         activeProfile = owner
@@ -1214,6 +1227,11 @@ class RayVpnService : VpnService() {
             disconnectResources()
             throw e
         } catch (e: Exception) {
+            // An engine stopped by Stop/Disconnect fails its start; that is the cancel, not a connection failure.
+            if (!coroutineContext.isActive) {
+                disconnectResources()
+                throw CancellationException("Connect attempt stopped")
+            }
             XrayLogManager.e("VPN", "Fatal error establishing VPN connection: ${e.message}", e)
             updateState(_vpnState.value.copy(
                 status = ConnectionStatus.FAILED,
@@ -1317,8 +1335,8 @@ class RayVpnService : VpnService() {
         )
         val launch = engine.prepare(profile, settings, context)
         showForegroundNotification("Starting the ${engine.id} engine...")
-        val process = engine.startInApp(launch, context)
-            ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort)
+        val process = com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
+            ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort))
         sidecar = process
         if (!process.awaitReady(launch.readyTimeoutMs)) {
             process.stop()
@@ -1365,8 +1383,8 @@ class RayVpnService : VpnService() {
             start = com.example.vpn.sidecar.ChainRunner.HopStarter { engine, hopProfile, context ->
                 showForegroundNotification("Starting the ${engine.id} engine...")
                 val launch = engine.prepare(hopProfile, settings, context)
-                val process = engine.startInApp(launch, context)
-                    ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort)
+                val process = com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
+                    ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
                 if (!process.awaitReady(launch.readyTimeoutMs)) {
                     process.stop()
                     error("The ${engine.id} engine did not start")
