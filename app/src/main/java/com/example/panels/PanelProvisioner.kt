@@ -553,6 +553,100 @@ class PanelProvisioner(
             throw t
         }
     }
+    private val DOMAIN_RE = Regex("^(?=.{1,253}$)([a-z0-9](-?[a-z0-9])*\\.)+[a-z]{2,}$")
+
+    private fun workerNameOf(panel: ManagedPanel): String =
+        panel.host.ifBlank { android.net.Uri.parse(panel.url).host.orEmpty() }.substringBefore('.')
+
+    private fun requireCfPanel(panel: ManagedPanel): Pair<String, String> {
+        require(panel.type == PanelType.BPB_WORKER) { "Custom domains apply to Cloudflare Worker panels" }
+        val token = panel.apiToken.trim()
+        require(token.isNotBlank()) { "This panel has no stored Cloudflare API token" }
+        require(panel.accountId.matches(Regex("[a-fA-F0-9]{32}"))) { "This panel has no Cloudflare account on record" }
+        return token to panel.accountId
+    }
+
+    /**
+     * Attaches the user's own domain to a deployed BPB worker using Cloudflare's Workers Custom Domains
+     * API. The domain (or its registrable parent) must already be a zone on the same Cloudflare account;
+     * Cloudflare then creates the routing and the TLS certificate, which can take a few minutes. Returns
+     * the panel with the new hostname recorded. The token needs Zone:Read and Workers Routes:Edit.
+     */
+    fun attachCustomDomain(panel: ManagedPanel, domainInput: String, onLog: (String) -> Unit = {}): ManagedPanel {
+        val (token, accountId) = requireCfPanel(panel)
+        val hostname = domainInput.trim().lowercase()
+            .removePrefix("https://").removePrefix("http://").substringBefore('/').trimEnd('.')
+        require(DOMAIN_RE.matches(hostname)) { "Enter a valid domain, e.g. vpn.example.com" }
+        val workerName = workerNameOf(panel)
+        require(workerName.isNotBlank()) { "Could not determine this panel's worker name" }
+
+        onLog("[CLOUDFLARE] Verifying API token")
+        val verify = cfJson(cfGet("user/tokens/verify", token))
+        check(verify.optJSONObject("result")?.optString("status") == "active") { "Cloudflare API token is not active" }
+
+        onLog("[CLOUDFLARE] Locating the Cloudflare zone for $hostname")
+        val zones = cfJson(cfGet("zones?per_page=50&status=active", token)).optJSONArray("result") ?: JSONArray()
+        val zone = (0 until zones.length()).mapNotNull { zones.optJSONObject(it) }
+            .filter { val n = it.optString("name"); hostname == n || hostname.endsWith(".$n") }
+            .maxByOrNull { it.optString("name").length }
+            ?: error("No Cloudflare zone on this account matches $hostname. Add the domain to Cloudflare first.")
+        val zoneId = zone.getString("id")
+
+        onLog("[CLOUDFLARE] Attaching $hostname to worker $workerName")
+        val body = JSONObject()
+            .put("environment", "production")
+            .put("hostname", hostname)
+            .put("service", workerName)
+            .put("zone_id", zoneId)
+        cfJson(
+            Request.Builder()
+                .url("https://api.cloudflare.com/client/v4/accounts/$accountId/workers/domains")
+                .header("Authorization", "Bearer $token")
+                .put(body.toString().toRequestBody(JSON))
+                .build()
+        )
+        onLog("[CLOUDFLARE] Attached. The certificate can take a few minutes to go live.")
+        return panel.copy(customDomains = (panel.customDomains + hostname).distinct())
+    }
+
+    /** Lists the custom domains Cloudflare currently has attached to this panel's worker. */
+    fun listCustomDomains(panel: ManagedPanel): List<CustomDomain> {
+        val (token, accountId) = requireCfPanel(panel)
+        val workerName = workerNameOf(panel)
+        val result = cfJson(cfGet("accounts/$accountId/workers/domains?service=$workerName", token))
+            .optJSONArray("result") ?: JSONArray()
+        return (0 until result.length()).mapNotNull { result.optJSONObject(it) }
+            .filter { it.optString("service") == workerName }
+            .map { CustomDomain(it.optString("id"), it.optString("hostname"), it.optString("zone_name")) }
+    }
+
+    /**
+     * Detaches a custom domain from this panel's worker. Looks the hostname up among the worker's
+     * attached domains, deletes it on Cloudflare, and returns the panel with the hostname removed.
+     */
+    fun removeCustomDomain(panel: ManagedPanel, hostname: String, onLog: (String) -> Unit = {}): ManagedPanel {
+        val (token, accountId) = requireCfPanel(panel)
+        val target = hostname.trim().lowercase()
+        val existing = runCatching { listCustomDomains(panel) }.getOrDefault(emptyList())
+            .firstOrNull { it.hostname.equals(target, ignoreCase = true) }
+        if (existing != null) {
+            onLog("[CLOUDFLARE] Detaching $target from the worker")
+            cfJson(
+                Request.Builder()
+                    .url("https://api.cloudflare.com/client/v4/accounts/$accountId/workers/domains/${existing.id}")
+                    .header("Authorization", "Bearer $token")
+                    .delete().build()
+            )
+        }
+        return panel.copy(customDomains = panel.customDomains.filterNot { it.equals(target, ignoreCase = true) })
+    }
+
+    private fun cfGet(path: String, token: String): Request =
+        Request.Builder()
+            .url("https://api.cloudflare.com/client/v4/$path")
+            .header("Authorization", "Bearer $token")
+            .get().build()
+
     private fun putKv(accountId: String, token: String, namespaceId: String, key: String, value: String) {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("metadata", "{}")

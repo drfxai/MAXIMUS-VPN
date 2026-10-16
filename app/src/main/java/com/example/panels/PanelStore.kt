@@ -32,7 +32,10 @@ class PanelStore(context: Context) {
                             vlessUuid = o.optString("vlessUuid"),
                             securePath = o.optString("securePath"),
                             healthNote = o.optString("healthNote"),
-                            certSha256 = o.optString("certSha256")
+                            certSha256 = o.optString("certSha256"),
+                            customDomains = o.optJSONArray("customDomains")?.let { arr ->
+                                buildList { for (j in 0 until arr.length()) add(arr.getString(j)) }
+                            } ?: emptyList()
                         )
                     )
                 }
@@ -74,6 +77,7 @@ class PanelStore(context: Context) {
                 put("securePath", it.securePath)
                 put("healthNote", it.healthNote)
                 put("certSha256", it.certSha256)
+                put("customDomains", JSONArray(it.customDomains))
             })
         }
         secure.encryptAndSave(KEY, arr.toString())

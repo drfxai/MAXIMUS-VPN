@@ -35,6 +35,9 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.AddLink
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -116,6 +119,8 @@ internal fun CloudflareTab(
     onInstall: (token: String, account: String, username: String, password: String) -> Unit,
     onImportToVpn: (ManagedPanel) -> Unit,
     onFixBpb: (ManagedPanel) -> Unit,
+    onAttachDomain: (ManagedPanel, String) -> Unit,
+    onRemoveDomain: (ManagedPanel, String) -> Unit,
     onOpenUrl: (String) -> Unit,
     onCopy: (label: String, value: String) -> Unit,
     initialLoginExpanded: Boolean = false
@@ -153,11 +158,14 @@ internal fun CloudflareTab(
         if (newlyDeployedPanel != null && !isBusy) {
             DeployedResultCard(
                 panel = newlyDeployedPanel,
+                busy = isBusy,
                 onDismiss = onDismissNewPanel,
                 onOpenUrl = onOpenUrl,
                 onCopy = onCopy,
                 onImportToVpn = onImportToVpn,
-                onFixBpb = onFixBpb
+                onFixBpb = onFixBpb,
+                onAttachDomain = onAttachDomain,
+                onRemoveDomain = onRemoveDomain
             )
         }
 
@@ -166,7 +174,10 @@ internal fun CloudflareTab(
             busy = isBusy,
             onImportToVpn = onImportToVpn,
             onFixBpb = onFixBpb,
-            onOpenUrl = onOpenUrl
+            onAttachDomain = onAttachDomain,
+            onRemoveDomain = onRemoveDomain,
+            onOpenUrl = onOpenUrl,
+            onCopy = onCopy
         )
     }
 }
@@ -673,11 +684,14 @@ private fun DeployProgressCard(isBusy: Boolean, statusText: String, logs: List<S
 @Composable
 private fun DeployedResultCard(
     panel: ManagedPanel,
+    busy: Boolean,
     onDismiss: () -> Unit,
     onOpenUrl: (String) -> Unit,
     onCopy: (label: String, value: String) -> Unit,
     onImportToVpn: (ManagedPanel) -> Unit,
-    onFixBpb: (ManagedPanel) -> Unit
+    onFixBpb: (ManagedPanel) -> Unit,
+    onAttachDomain: (ManagedPanel, String) -> Unit,
+    onRemoveDomain: (ManagedPanel, String) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -728,7 +742,15 @@ private fun DeployedResultCard(
                 Text("Copy link", fontSize = 13.sp)
             }
         }
-        PanelActions(panel = panel, busy = false, onImportToVpn = onImportToVpn, onFixBpb = onFixBpb)
+        PanelActions(panel = panel, busy = busy, onImportToVpn = onImportToVpn, onFixBpb = onFixBpb)
+        CustomDomainSection(
+            panel = panel,
+            busy = busy,
+            onAttachDomain = onAttachDomain,
+            onRemoveDomain = onRemoveDomain,
+            onOpenUrl = onOpenUrl,
+            onCopy = onCopy
+        )
     }
 }
 
@@ -739,7 +761,10 @@ private fun DeployedPanelsCard(
     busy: Boolean,
     onImportToVpn: (ManagedPanel) -> Unit,
     onFixBpb: (ManagedPanel) -> Unit,
-    onOpenUrl: (String) -> Unit
+    onAttachDomain: (ManagedPanel, String) -> Unit,
+    onRemoveDomain: (ManagedPanel, String) -> Unit,
+    onOpenUrl: (String) -> Unit,
+    onCopy: (label: String, value: String) -> Unit
 ) {
     if (panels.isEmpty()) return
     Column(
@@ -801,6 +826,119 @@ private fun DeployedPanelsCard(
                     }
                 }
                 PanelActions(panel = panel, busy = busy, onImportToVpn = onImportToVpn, onFixBpb = onFixBpb)
+                CustomDomainSection(
+                    panel = panel,
+                    busy = busy,
+                    onAttachDomain = onAttachDomain,
+                    onRemoveDomain = onRemoveDomain,
+                    onOpenUrl = onOpenUrl,
+                    onCopy = onCopy
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Lets the user attach their own domain (already a zone on their Cloudflare account) to this worker,
+ * and lists the ones already attached with open/copy/remove. The panel is reachable at the custom
+ * domain on the same secure path once Cloudflare issues the certificate.
+ */
+@Composable
+private fun CustomDomainSection(
+    panel: ManagedPanel,
+    busy: Boolean,
+    onAttachDomain: (ManagedPanel, String) -> Unit,
+    onRemoveDomain: (ManagedPanel, String) -> Unit,
+    onOpenUrl: (String) -> Unit,
+    onCopy: (label: String, value: String) -> Unit
+) {
+    var expanded by remember(panel.id) { mutableStateOf(panel.customDomains.isNotEmpty()) }
+    var domain by remember(panel.id) { mutableStateOf("") }
+    val securePath = panel.securePath
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { expanded = !expanded }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Language, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Custom domain" + if (panel.customDomains.isNotEmpty()) " (${panel.customDomains.size})" else "",
+                color = Cf.Text,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(18.dp)
+            )
+        }
+
+        if (expanded) {
+            Text(
+                "Use a domain already on this Cloudflare account. The token needs Zone and Workers Routes permissions. The certificate can take a few minutes after attaching.",
+                color = Cf.Muted,
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp
+            )
+            panel.customDomains.forEach { host ->
+                val url = "https://$host" + if (securePath.isNotBlank()) "/$securePath/panel" else ""
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Cf.Card)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Cf.Green, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        host,
+                        color = Cf.Text,
+                        fontSize = 12.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    IconButton(onClick = { onOpenUrl(url) }, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open", tint = Cf.Muted, modifier = Modifier.size(15.dp))
+                    }
+                    IconButton(onClick = { onCopy("Panel URL", url) }, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = Cf.Muted, modifier = Modifier.size(15.dp))
+                    }
+                    IconButton(onClick = { onRemoveDomain(panel, host) }, enabled = !busy, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Remove", tint = Cf.Amber, modifier = Modifier.size(15.dp))
+                    }
+                }
+            }
+            CfField(
+                value = domain,
+                onValueChange = { domain = it },
+                placeholder = "vpn.example.com",
+                icon = Icons.Default.Language
+            )
+            Button(
+                onClick = {
+                    val d = domain.trim()
+                    if (d.isNotBlank()) { onAttachDomain(panel, d); domain = "" }
+                },
+                enabled = !busy && domain.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Cf.Orange, contentColor = Color.White)
+            ) {
+                Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Attach domain", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
             }
         }
     }

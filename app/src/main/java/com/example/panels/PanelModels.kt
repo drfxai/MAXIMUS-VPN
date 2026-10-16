@@ -22,7 +22,9 @@ data class ManagedPanel(
     /** Short human-readable result of the post-install checks. */
     val healthNote: String = "",
     /** 3X-UI: SHA-256 of the self-signed panel certificate created at install time. */
-    val certSha256: String = ""
+    val certSha256: String = "",
+    /** BPB: the user's own domains attached to this worker via Cloudflare (besides the workers.dev host). */
+    val customDomains: List<String> = emptyList()
 )
 
 data class XuiInstallRequest(
@@ -42,6 +44,13 @@ data class CloudflareInstallRequest(
     val accountId: String = "",
     val accountEmail: String = "",
     val panelPassword: String = ""
+)
+
+/** A Cloudflare Workers custom domain attached to a BPB worker. */
+data class CustomDomain(
+    val id: String,
+    val hostname: String,
+    val zoneName: String = ""
 )
 
 data class QuickConfigResult(
