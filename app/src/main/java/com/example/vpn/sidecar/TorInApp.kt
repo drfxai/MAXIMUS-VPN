@@ -12,6 +12,8 @@ import org.torproject.jni.TorService
  * closes the app.
  */
 object TorInApp {
+    private const val NOTICE_LOG = "tor-notices.log"
+
     /** Each start gets a number; a late stop of an older run never ends the Tor that runs now. */
     @Volatile private var generation = 0L
 
@@ -19,7 +21,9 @@ object TorInApp {
         val app = context.applicationContext
         val mine = synchronized(this) { ++generation }
         stopProcess(app)
-        TorService.getTorrc(app).writeText(torrc)
+        val notices = java.io.File(app.filesDir, NOTICE_LOG).apply { delete() }
+        TorService.getTorrc(app).writeText(torrc.trimEnd() + "\nLog notice file ${notices.absolutePath}\n")
+        val progress = TorProgress(notices)
         app.startService(Intent(app, TorService::class.java).setAction(TorService.ACTION_START))
         return object : RunningEngine {
             @Volatile private var stopped = false
@@ -29,6 +33,7 @@ object TorInApp {
             override fun awaitReady(timeoutMs: Long): Boolean {
                 val deadline = System.currentTimeMillis() + timeoutMs
                 while (!stopped && System.currentTimeMillis() < deadline) {
+                    progress.newLines().forEach { com.example.xray.XrayLogManager.i("TOR", it) }
                     if (SidecarProcess.portOpen(socksPort) && TorSidecar.carriesTraffic(socksPort)) return true
                     Thread.sleep(500)
                 }
@@ -43,6 +48,11 @@ object TorInApp {
                 stopProcess(app, waitMs = 0)
             }
         }
+    }
+
+    /** Deletes Tor's notice log (panic). */
+    fun wipeNotices(context: Context) {
+        java.io.File(context.applicationContext.filesDir, NOTICE_LOG).delete()
     }
 
     /**
