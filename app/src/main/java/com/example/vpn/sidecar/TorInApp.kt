@@ -33,7 +33,13 @@ object TorInApp {
             override fun awaitReady(timeoutMs: Long): Boolean {
                 val deadline = System.currentTimeMillis() + timeoutMs
                 while (!stopped && System.currentTimeMillis() < deadline) {
-                    progress.newLines().forEach { com.example.xray.XrayLogManager.i("TOR", it) }
+                    var aborted = false
+                    progress.newLines().forEach {
+                        com.example.xray.XrayLogManager.i("TOR", it)
+                        // Tor writes "...; aborting" just before it exits: stop waiting for it.
+                        if (it.contains("aborting")) aborted = true
+                    }
+                    if (aborted) return false
                     if (SidecarProcess.portOpen(socksPort) && TorSidecar.carriesTraffic(socksPort)) return true
                     Thread.sleep(500)
                 }

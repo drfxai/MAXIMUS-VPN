@@ -33,15 +33,28 @@ class TorSidecar(
     override fun problem(profile: VlessProfile): String? = problemOf(profile)
 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
-        val torrc = torrc(bridges(profile), context.socksPort, context.executable, context.upstreamSocks)
-        File(context.workDir, TORRC).writeText(torrc)
+        val bridges = bridges(profile)
+        File(context.workDir, TORRC).writeText(torrc(bridges, context.socksPort, context.executable, context.upstreamSocks))
+        File(context.workDir, BRIDGES_FILE).writeText(bridges.joinToString("\n"))
         // Tor reads the name and password of a SOCKS request as circuit isolation, not as a login.
         return SidecarLaunch(command = emptyList(), readyTimeoutMs = READY_TIMEOUT_MS, socksAuth = false)
     }
 
     override fun startInApp(launch: SidecarLaunch, context: SidecarContext): RunningEngine? {
         val start = starter ?: error("Tor needs Android to run")
-        return start(File(context.workDir, TORRC).readText(), context.socksPort)
+        // The app runs lyrebird itself and hands Tor its SOCKS ports (see PluggableTransports).
+        val bridges = File(context.workDir, BRIDGES_FILE).readLines().filter { it.isNotBlank() }
+        val pt = PluggableTransports.start(context.executable, transportsOf(bridges), File(context.workDir, "pt_state"), context.upstreamSocks)
+        val tor = try {
+            start(torrcWithPorts(bridges, context.socksPort, pt.methods, context.upstreamSocks), context.socksPort)
+        } catch (e: Exception) {
+            pt.stop(); throw e
+        }
+        return object : RunningEngine {
+            override val isAlive: Boolean get() = tor.isAlive && pt.isAlive
+            override fun awaitReady(timeoutMs: Long): Boolean = tor.awaitReady(timeoutMs) && pt.isAlive
+            override fun stop() { tor.stop(); pt.stop() }
+        }
     }
 
     companion object {
@@ -50,6 +63,7 @@ class TorSidecar(
         const val KEY_ENGINE = "engine"
         const val KEY_BRIDGES = "bridges"
         const val TORRC = "torrc"
+        private const val BRIDGES_FILE = "bridges"
         /** Snowflake can need a minute or more to find a volunteer and build a circuit. */
         const val READY_TIMEOUT_MS = 120_000L
 
@@ -112,6 +126,25 @@ class TorSidecar(
             bridges.forEach { appendLine("Bridge $it") }
             // Chain hop: Tor makes its connections through the next hop toward the exit.
             if (upstreamSocks != null) appendLine("Socks5Proxy 127.0.0.1:$upstreamSocks")
+        }
+
+        /** The transports the bridge lines need, e.g. {snowflake}. */
+        fun transportsOf(bridges: List<String>): Set<String> = bridges.map { it.substringBefore(' ') }.filter { it in TRANSPORTS }.toSet()
+
+        /**
+         * The torrc used on phones: every transport points at the SOCKS port lyrebird opened for it,
+         * so Tor manages no proxy process. A bridge whose transport lyrebird could not offer is left out.
+         */
+        fun torrcWithPorts(bridges: List<String>, socksPort: Int, methods: Map<String, Int>, upstreamSocks: Int? = null): String = buildString {
+            appendLine("SocksPort 127.0.0.1:$socksPort")
+            appendLine("ClientOnly 1")
+            appendLine("AvoidDiskWrites 1")
+            appendLine("UseBridges 1")
+            methods.toSortedMap().forEach { (t, port) -> appendLine("ClientTransportPlugin $t socks5 127.0.0.1:$port") }
+            bridges.filter { it.substringBefore(' ') in methods }.forEach { appendLine("Bridge $it") }
+            // lyrebird already sends through the upstream hop (TOR_PT_PROXY); Tor's own proxy setting
+            // is only needed for bridges without a transport, which this engine does not accept.
+            if (upstreamSocks != null && methods.isEmpty()) appendLine("Socks5Proxy 127.0.0.1:$upstreamSocks")
         }
 
         /** True once a request through Tor's SOCKS port reaches the internet, which needs a circuit. */
