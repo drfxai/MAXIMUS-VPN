@@ -2,6 +2,7 @@ package com.example.vpn.smart
 
 import com.example.data.model.ServerCategory
 import com.example.data.model.VlessProfile
+import com.example.vpn.connectivity.PathEligibility
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,10 +64,9 @@ class SmartConnectRankTest {
     }
 
     @Test fun theCardLeadsWithTheServerInUseAndPutsServersThatFailedHereLast() {
-        val e = com.example.vpn.connectivity.PathEligibility
         // Phone report 2026-10-16: DE (best rating) failed here, US carried the traffic, yet DE led the card.
         val de = node("1", 100.0); val ru = node("2", 60.0); val fi = node("3", 50.0); val us = node("4", 10.0)
-        val evidence = mapOf("1" to e.RECENTLY_FAILED, "2" to e.UNTESTED, "3" to e.FRESH_VERIFIED, "4" to e.FRESH_VERIFIED)
+        val evidence = mapOf("1" to PathEligibility.RECENTLY_FAILED, "2" to PathEligibility.UNTESTED, "3" to PathEligibility.FRESH_VERIFIED, "4" to PathEligibility.FRESH_VERIFIED)
         val card = SmartConnect.rankForCard(listOf(de, ru, fi, us), active = us, evidenceOf = { evidence[it.id] })
         assertEquals(listOf("4", "3", "2"), card.map { it.profile.id })
         assertTrue(card[0].inUse)
