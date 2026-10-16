@@ -244,9 +244,11 @@ object ConfigurationAdapter {
         val mainPart = if (queryIdx != -1) beforeFragment.substring(0, queryIdx) else beforeFragment
         val queryString = if (queryIdx != -1) beforeFragment.substring(queryIdx + 1) else ""
 
-        val atIdx = mainPart.indexOf('@')
+        // The last '@' ends the user part: passwords in shared links often contain a raw '@'.
+        val atIdx = mainPart.lastIndexOf('@')
         val userInfo = if (atIdx != -1) mainPart.substring(0, atIdx) else ""
-        val hostPort = if (atIdx != -1) mainPart.substring(atIdx + 1) else mainPart
+        // "host:443/" (a slash before the query) carries no path for these links.
+        val hostPort = (if (atIdx != -1) mainPart.substring(atIdx + 1) else mainPart).substringBefore('/')
 
         val host: String
         val port: Int
