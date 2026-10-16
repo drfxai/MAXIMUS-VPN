@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.NetworkCheck
@@ -73,7 +74,6 @@ import com.example.R
 import com.example.data.model.ConnectionStatus
 import com.example.data.model.TrafficStats
 import com.example.data.model.VlessProfile
-import com.example.ui.components.ConnectionButton
 import com.example.ui.components.LatencyPill
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.ThemeToggleSwitch
@@ -101,7 +101,6 @@ fun HomeScreen(
     val smartRecommendation by vpnViewModel.smartRecommendation.collectAsStateWithLifecycle()
     val topNodes by vpnViewModel.topNodes.collectAsStateWithLifecycle()
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
-    var showLandingTourDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -183,12 +182,6 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Landing & Architecture Hero Banner
-        LandingHeroBanner(
-            onExploreArchitecture = { showLandingTourDialog = true }
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
 
         // Professional Mode Switcher Card (Daily Mode vs GOD Mode)
         Card(
@@ -384,14 +377,53 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Connection State Pill / Badge Sub-header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            StatusBadge(status = connectionState.status)
-            LatencyPill(latencyMs = connectionState.pingMs ?: activeProfile?.lastLatencyMs)
+        // The Earth: shows the connection's state and the route; the power button sits on its edge.
+        val earthMode = when {
+            connectionState.isConnected -> EarthMode.ON
+            connectionState.isBusy -> EarthMode.CONNECTING
+            else -> EarthMode.OFF
+        }
+        val earthAccent = when (earthMode) {
+            EarthMode.OFF -> AppTheme.colors.primary
+            EarthMode.CONNECTING -> AppTheme.colors.statusWarning
+            EarthMode.ON -> AppTheme.colors.statusConnected
+        }
+        EarthHero(mode = earthMode) {
+            GlassPowerButton(
+                accent = earthAccent,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 6.dp),
+                onClick = { vpnViewModel.toggleConnection(context) { onRequestVpnPermission() } }
+            )
+        }
+        Text(
+            text = when (earthMode) {
+                EarthMode.ON -> "Protected"
+                EarthMode.CONNECTING -> "Finding a path…"
+                EarthMode.OFF -> "Not connected"
+            },
+            color = if (earthMode == EarthMode.OFF) AppTheme.colors.textPrimary else earthAccent,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        if (earthMode == EarthMode.ON) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = formatDuration(connectionState.connectedDurationSeconds),
+                    color = AppTheme.colors.textSecondary,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                LatencyPill(latencyMs = connectionState.pingMs ?: activeProfile?.lastLatencyMs)
+            }
+        } else {
+            Text(
+                text = if (earthMode == EarthMode.CONNECTING) "${connectionState.statusLabel} · tap the button to stop" else "Tap the button to connect",
+                color = AppTheme.colors.textSecondary,
+                fontSize = 13.sp
+            )
         }
 
         val connectedProfile = connectionState.activeProfile ?: activeProfile
@@ -509,78 +541,6 @@ fun HomeScreen(
             }
         }
 
-        // Connection Timer & Status HUD Pill
-        val durationFormatted = formatDuration(connectionState.connectedDurationSeconds)
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(vertical = 4.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (connectionState.isConnected) {
-                    AppTheme.colors.statusConnected.copy(alpha = 0.12f)
-                } else {
-                    AppTheme.colors.surfaceElevated.copy(alpha = 0.5f)
-                },
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (connectionState.isConnected) {
-                        AppTheme.colors.statusConnected.copy(alpha = 0.35f)
-                    } else {
-                        AppTheme.colors.borderSubtle
-                    }
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (connectionState.isConnected) AppTheme.colors.statusConnected
-                                else AppTheme.colors.textMuted
-                            )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = connectionState.statusLabel,
-                        color = if (connectionState.isConnected) AppTheme.colors.statusConnected else AppTheme.colors.textSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = if (connectionState.isConnected) durationFormatted else "00:00:00",
-                color = if (connectionState.isConnected) AppTheme.colors.textPrimary else AppTheme.colors.textMuted,
-                fontSize = 36.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 2.5.sp
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Central Power Button
-        ConnectionButton(
-            status = connectionState.status,
-            onClick = {
-                vpnViewModel.toggleConnection(context) {
-                    onRequestVpnPermission()
-                }
-            }
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
         // Active Server Card (exit country and ping are shown inside it while connected)
         ServerSelectorCard(
             profile = activeProfile,
@@ -604,24 +564,23 @@ fun HomeScreen(
             activeProfile = activeProfile
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Promotional Features & Architecture Showcase Carousel
-        PromotionalFeatureShowcase(
-            onNavigateToServers = onNavigateToServers,
-            onNavigateToSecretChat = onNavigateToSecretChat,
-            onNavigateToGodBrowser = onNavigateToGodBrowser,
-            onNavigateToAiAgent = onNavigateToAiAgent
-        )
-
         Spacer(modifier = Modifier.height(24.dp))
     }
+}
 
-    if (showLandingTourDialog) {
-        LandingTourDialog(
-            onDismiss = { showLandingTourDialog = false },
-            onNavigateToServers = onNavigateToServers
-        )
+/** The power button over the Earth: frosted glass with a ring in the state's colour. */
+@Composable
+private fun GlassPowerButton(accent: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .size(64.dp)
+            .clip(CircleShape)
+            .background(AppTheme.colors.surfaceCard.copy(alpha = 0.78f))
+            .border(1.5.dp, accent.copy(alpha = 0.8f), CircleShape)
+            .clickable(onClickLabel = "Connect or disconnect", onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(Icons.Default.PowerSettingsNew, contentDescription = "Connect or disconnect", tint = accent, modifier = Modifier.size(28.dp))
     }
 }
 
