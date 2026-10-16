@@ -690,7 +690,7 @@ class LabController(
                                     com.example.vpn.connectivity.PathRef.of(pk.profile), pk.family.name, r.stage.carriesTraffic, r.latencyMs,
                                     if (r.stage.carriesTraffic) null else r.stage.name, detail = r.engineId)
                             }
-                        } else when (val o = withContext(Dispatchers.IO) { RealDelayProbe.measure(listOf(pk.profile), budget.probeTimeoutSec).first() }) {
+                        } else when (val o = com.example.vpn.Abandonable.run { RealDelayProbe.measure(listOf(pk.profile), budget.probeTimeoutSec).first() }) {
                             is RealDelayProbe.Outcome.Delay -> planner.record(pk.profile.id, listOf(true), o.latencyMs, System.currentTimeMillis())
                             is RealDelayProbe.Outcome.Failed -> planner.record(pk.profile.id, listOf(false), null, System.currentTimeMillis(), o.reason)
                             is RealDelayProbe.Outcome.NotRun -> planner.notTested(pk.profile.id, o.reason)

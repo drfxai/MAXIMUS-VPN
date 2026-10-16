@@ -448,13 +448,14 @@ fun HomeScreen(
         } else smartRecommendation?.let { smart ->
             SmartRecommendationCard(
                 smart = smart,
-                isConnected = connectionState.isConnected,
+                buttonState = SmartButtonState.of(connectionState),
                 runnersUp = topNodes.drop(1),
                 onSmartConnect = {
                     vpnViewModel.connectSmart(context) {
                         onRequestVpnPermission()
                     }
-                }
+                },
+                onStop = { com.example.vpn.VpnController.stopVpn(context) }
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -766,9 +767,10 @@ private fun TradeModeCard(
 @Composable
 private fun SmartRecommendationCard(
     smart: SmartConnect.SmartSelection,
-    isConnected: Boolean,
+    buttonState: SmartButtonState,
     runnersUp: List<SmartConnect.SmartSelection> = emptyList(),
-    onSmartConnect: () -> Unit
+    onSmartConnect: () -> Unit,
+    onStop: () -> Unit
 ) {
     val c = AppTheme.colors
     Card(
@@ -900,21 +902,87 @@ private fun SmartRecommendationCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
-                onClick = onSmartConnect,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .testTag("smart_connect_button"),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = c.primary, contentColor = c.onPrimary)
-            ) {
-                Icon(imageVector = Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(15.dp))
-                Spacer(modifier = Modifier.width(7.dp))
+            SmartConnectButton(
+                state = buttonState,
+                onClick = { if (buttonState.tapStops) onStop() else onSmartConnect() }
+            )
+        }
+    }
+}
+
+/**
+ * Smart connect as a three-state toggle in the main power button's colours: lavender when off, a
+ * pulsing gold while connecting, green when on. While connecting or on, a tap stops the connection.
+ */
+@Composable
+private fun SmartConnectButton(state: SmartButtonState, onClick: () -> Unit) {
+    val dark = AppTheme.colors.isDark
+    val target = when (state) {
+        SmartButtonState.OFF -> if (dark) Color(0xFFD0BCFF) else Color(0xFF6D28D9)
+        SmartButtonState.CONNECTING -> if (dark) Color(0xFFFFB703) else Color(0xFFD97706)
+        SmartButtonState.ON -> if (dark) Color(0xFF00F59B) else Color(0xFF059669)
+    }
+    val content = when (state) {
+        SmartButtonState.OFF -> if (dark) Color(0xFF21134A) else Color.White
+        SmartButtonState.CONNECTING -> if (dark) Color(0xFF2A1A00) else Color.White
+        SmartButtonState.ON -> if (dark) Color(0xFF00281A) else Color.White
+    }
+    val fill by androidx.compose.animation.animateColorAsState(target, label = "smartFill")
+    val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "smartPulse")
+    val glow by pulse.animateFloat(
+        initialValue = 0.18f,
+        targetValue = if (state == SmartButtonState.CONNECTING) 0.45f else 0.18f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(900),
+            androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "smartGlow"
+    )
+    val shape = RoundedCornerShape(11.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (state == SmartButtonState.OFF) Modifier
+                else Modifier.border(3.dp, fill.copy(alpha = glow), shape)
+            )
+            .padding(if (state == SmartButtonState.OFF) 0.dp else 3.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .clip(shape)
+                .background(fill)
+                .clickable(onClick = onClick)
+                .testTag("smart_connect_button"),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            when (state) {
+                SmartButtonState.CONNECTING -> androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp), color = content, strokeWidth = 2.dp,
+                    trackColor = content.copy(alpha = 0.25f)
+                )
+                SmartButtonState.OFF -> Icon(imageVector = Icons.Default.Bolt, contentDescription = null, tint = content, modifier = Modifier.size(15.dp))
+                SmartButtonState.ON -> Box(Modifier.size(8.dp).clip(CircleShape).background(content))
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = when (state) {
+                    SmartButtonState.OFF -> "Smart connect"
+                    SmartButtonState.CONNECTING -> "Connecting…"
+                    SmartButtonState.ON -> "Smart connect on"
+                },
+                color = content,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (state.tapStops) {
                 Text(
-                    text = if (isConnected) "Switch to optimal node" else "Smart connect",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
+                    text = if (state == SmartButtonState.CONNECTING) "  · tap to stop" else "  · tap to disconnect",
+                    color = content.copy(alpha = 0.78f),
+                    fontSize = 11.sp
                 )
             }
         }

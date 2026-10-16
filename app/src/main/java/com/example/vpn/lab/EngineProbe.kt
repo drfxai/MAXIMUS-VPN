@@ -3,6 +3,7 @@ package com.example.vpn.lab
 import android.content.Context
 import com.example.data.model.AppSettings
 import com.example.data.model.VlessProfile
+import com.example.vpn.sidecar.EngineReaper
 import com.example.vpn.sidecar.SidecarChain
 import com.example.vpn.sidecar.SidecarContext
 import com.example.vpn.sidecar.SidecarEngine
@@ -101,7 +102,7 @@ object EngineProbe {
         val launch = runCatching { engine.prepare(profile, AppSettings(), ctx) }.getOrElse {
             return Result(engine.id, ConnectionStage.NOT_TESTED, null, it.message ?: "could not prepare the engine", notTested = true)
         }
-        val running = runCatching { engine.startInApp(launch, ctx) ?: SidecarProcess.start("lab-${engine.id}", launch, workDir, ctx.socksPort) }.getOrElse {
+        val running = runCatching { EngineReaper.track(engine.startInApp(launch, ctx) ?: SidecarProcess.start("lab-${engine.id}", launch, workDir, ctx.socksPort)) }.getOrElse {
             return Result(engine.id, ConnectionStage.NOT_TESTED, null, it.message ?: "the engine did not start", notTested = false)
         }
         try {
