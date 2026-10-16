@@ -63,5 +63,6 @@ object GhostRiderController {
         runCatching { com.example.chat.SecretChatManager(context).regenerateAtomicId() }
         // The app's own log is kept on the phone across restarts; panic deletes it too.
         runCatching { com.example.xray.XrayLogManager.wipeDisk() }
+        runCatching { com.example.vpn.sidecar.TorInApp.wipeNotices(context) }
     }
 }
