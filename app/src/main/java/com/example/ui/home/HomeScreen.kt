@@ -208,7 +208,12 @@ fun HomeScreen(
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 val isGodMode = settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE
                 val isTrade = settings.operationalMode == com.example.data.model.OperationalMode.TRADE
-                val accent = if (isGodMode) Color(0xFFFF5252) else AppTheme.colors.primary
+                val isGhost = settings.operationalMode == com.example.data.model.OperationalMode.GHOST_RIDER
+                val accent = when {
+                    isGodMode -> Color(0xFFFF5252)
+                    isGhost -> Color(0xFF7C5CFF)
+                    else -> AppTheme.colors.primary
+                }
                 val setMode = { nextMode: com.example.data.model.OperationalMode ->
                     settingsViewModel.updateSettings(settings.copy(operationalMode = nextMode))
                     if (nextMode == com.example.data.model.OperationalMode.GOD_MODE) {
@@ -233,6 +238,7 @@ fun HomeScreen(
                         Icon(
                             imageVector = when {
                                 isGodMode -> Icons.Default.Shield
+                                isGhost -> Icons.Default.Shield
                                 isTrade -> Icons.Default.Lock
                                 else -> Icons.Default.Bolt
                             },
@@ -273,7 +279,8 @@ fun HomeScreen(
                     val modes = listOf(
                         com.example.data.model.OperationalMode.DAILY to "Daily",
                         com.example.data.model.OperationalMode.GOD_MODE to "GOD",
-                        com.example.data.model.OperationalMode.TRADE to "Trade"
+                        com.example.data.model.OperationalMode.TRADE to "Trade",
+                        com.example.data.model.OperationalMode.GHOST_RIDER to "Ghost"
                     )
                     modes.forEach { (chipMode, label) ->
                         val selected = settings.operationalMode == chipMode
@@ -416,8 +423,19 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Smart Connect Hero Card — or, in Trade mode, the fixed-exit card.
-        if (settings.operationalMode == com.example.data.model.OperationalMode.TRADE) {
+        // Smart Connect Hero Card — or, in Trade mode, the fixed-exit card, or the Ghost Rider dashboard.
+        if (settings.operationalMode == com.example.data.model.OperationalMode.GHOST_RIDER) {
+            val chainIds = connectionState.activeProfile?.let { com.example.vpn.sidecar.ChainRunner.readChain(it) }?.hops?.map { it.engineId }
+            com.example.ui.ghost.GhostRiderDashboard(
+                model = com.example.vpn.safety.GhostRiderView.of(connectionState, chainIds),
+                onRouteThroughTor = {
+                    if (com.example.vpn.VpnController.isPermissionGranted(context)) com.example.vpn.ghost.GhostRiderController.routeThroughTor(context)
+                    else onRequestVpnPermission()
+                },
+                onPanic = { com.example.vpn.ghost.GhostRiderController.panic(context) }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        } else if (settings.operationalMode == com.example.data.model.OperationalMode.TRADE) {
             TradeModeCard(
                 pinned = activeProfile,
                 isConnected = connectionState.isConnected,
