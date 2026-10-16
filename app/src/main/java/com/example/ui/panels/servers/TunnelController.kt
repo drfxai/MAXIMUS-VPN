@@ -155,7 +155,7 @@ class TunnelController(
             checkedText = status?.let { "Checked ${ago(it.checkedAt)} from the Iran server" }.orEmpty(),
             entryPort = spec.entryPort,
             rotationHours = spec.rotationHours,
-            nextChangeText = next?.let { "Next change in ${duration(it - System.currentTimeMillis())}" } ?: "Move them any time",
+            nextChangeText = next?.let { "Next change in ${duration(it - System.currentTimeMillis())}" } ?: "Fixed ports. Turn on rotation in Update to move them",
             entrySni = spec.entrySni, exitSni = spec.exitSni,
             profileName = TunnelConfigs.name(iran, abroad),
             link = runCatching { TunnelConfigs.entryLink(spec, iran, abroad) }.getOrNull(),
@@ -350,7 +350,11 @@ class TunnelController(
                 }
                 success()
             } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (e is kotlinx.coroutines.CancellationException) {
+                    // Leave the screen closable: a stopped setup is a failed one, not a running one.
+                    _state.update { st -> st.copy(setup = st.setup?.copy(stage = TunnelStage.FAILED, error = "The setup was stopped")) }
+                    throw e
+                }
                 _state.update { st -> st.copy(setup = st.setup?.copy(stage = TunnelStage.FAILED, error = e.message ?: "The setup stopped")) }
             }
         }
