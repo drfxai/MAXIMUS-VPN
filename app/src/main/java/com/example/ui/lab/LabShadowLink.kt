@@ -1,6 +1,7 @@
 package com.example.ui.lab
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,7 +33,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.protocols.LabColors
 import com.example.ui.protocols.LabText
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import com.example.vpn.connectivity.TransportCapabilityEngine.Transport
+import com.example.vpn.coordinator.EngineCoordinator
 import com.example.vpn.lab.ServiceCheck
 import com.example.vpn.shadowlink.Egress
 import com.example.vpn.shadowlink.ShadowLinkReport
@@ -40,7 +43,9 @@ import com.example.vpn.shadowlink.ShadowLinkReport
 /** LAB "ShadowLink": the last discovery pass — one fused read of the network and the path order it suggests. */
 data class ShadowLinkUi(
     val running: Boolean = false,
-    val report: ShadowLinkReport? = null
+    val report: ShadowLinkReport? = null,
+    /** The user's saved configs, ordered to try for this network (empty when none are saved). */
+    val plan: List<EngineCoordinator.PlannedConfig> = emptyList()
 )
 
 private fun egressColor(c: LabColors, e: Egress) = when (e) {
@@ -58,7 +63,7 @@ private fun transportLabel(t: Transport) = when (t) {
 }
 
 @Composable
-internal fun ShadowLinkPage(c: LabColors, s: ShadowLinkUi, vpnOn: Boolean, onRun: () -> Unit, onStop: () -> Unit, relativeTime: (Long) -> String) {
+internal fun ShadowLinkPage(c: LabColors, s: ShadowLinkUi, vpnOn: Boolean, onRun: () -> Unit, onStop: () -> Unit, onSelect: (String, String) -> Unit, relativeTime: (Long) -> String) {
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Panel(c) {
@@ -130,6 +135,30 @@ internal fun ShadowLinkPage(c: LabColors, s: ShadowLinkUi, vpnOn: Boolean, onRun
                             }
                         }
                     }
+                }
+            }
+            // Suggested connect order (the user's own configs, ranked for this network)
+            if (s.plan.isNotEmpty()) item {
+                Column {
+                    GroupLabel(c, "Suggested connect order")
+                    Panel(c) {
+                        s.plan.forEachIndexed { i, p ->
+                            if (i > 0) Hairline(c, 14.dp)
+                            Row(Modifier.fillMaxWidth().clickable { onSelect(p.id, p.label) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(20.dp).clip(RoundedCornerShape(6.dp)).background(c.accent.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+                                    LabText("${i + 1}", c.accent, 11.sp, FontWeight.Bold, maxLines = 1)
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    LabText(p.label, c.text, 13.5.sp, FontWeight.SemiBold, maxLines = 1)
+                                    LabText(p.reason, c.text3, 12.sp, modifier = Modifier.padding(top = 2.dp), maxLines = 2, lineHeight = 16.sp)
+                                }
+                                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = c.text3, modifier = Modifier.padding(start = 4.dp).size(18.dp))
+                            }
+                        }
+                    }
+                    LabText("Tap one to select it on the Servers screen. Nothing connects until you tap Connect there.",
+                        c.text3, 11.5.sp, modifier = Modifier.padding(start = Gutter + 4.dp, top = 8.dp), maxLines = 2, lineHeight = 16.sp)
                 }
             }
             // Recommended path order

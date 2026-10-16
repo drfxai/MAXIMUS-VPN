@@ -160,7 +160,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
             else -> Column(Modifier.fillMaxSize()) {
                 TitleBar(c, s.title, sectionSubtitle(s, state), Icons.AutoMirrored.Rounded.ArrowBack, { actions.onOpen(null) })
                 when (s) {
-                    LabSection.SHADOWLINK -> ShadowLinkPage(c, state.shadowLink, state.vpnOn, actions.onRunShadowLink, actions.onStopShadowLink, relativeTime)
+                    LabSection.SHADOWLINK -> ShadowLinkPage(c, state.shadowLink, state.vpnOn, actions.onRunShadowLink, actions.onStopShadowLink, actions.onUseRecommended, relativeTime)
                     LabSection.REPORT -> ReportPage(c, state, actions, relativeTime)
                     LabSection.NETWORKS -> NetworksPage(c, state.snapshot, relativeTime)
                     LabSection.LIVE -> LivePage(c, state, actions)

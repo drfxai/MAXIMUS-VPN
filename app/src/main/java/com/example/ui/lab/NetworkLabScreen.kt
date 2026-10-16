@@ -172,8 +172,25 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
                     cancelled = { !isActive }
                 )
             }
-            local.update { it.copy(shadowLink = ShadowLinkUi(report = report)) }
+            val plan = withContext(Dispatchers.IO) { runCatching { planConfigs(report) }.getOrDefault(emptyList()) }
+            local.update { it.copy(shadowLink = ShadowLinkUi(report = report, plan = plan)) }
         }.also { job -> job.invokeOnCompletion { local.update { it.copy(shadowLink = it.shadowLink.copy(running = false)) } } }
+    }
+
+    /** Ranks the user's saved configs for this network using ShadowLink's recommended transport order. */
+    private suspend fun planConfigs(report: com.example.vpn.shadowlink.ShadowLinkReport): List<com.example.vpn.coordinator.EngineCoordinator.PlannedConfig> {
+        val profiles = runCatching { RayApplication.instance.serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+        if (profiles.isEmpty()) return emptyList()
+        val candidates = profiles.map { p ->
+            com.example.vpn.coordinator.EngineCoordinator.Candidate(
+                id = p.id,
+                label = p.name.ifBlank { "Config" },
+                transport = com.example.vpn.connectivity.TransportCapabilityEngine.transportOf(p),
+                engineId = com.example.vpn.sidecar.Sidecars.forProfile(p)?.id ?: "xray"
+            )
+        }
+        val recommended = report.recommendedTransports.map { it.transport }
+        return com.example.vpn.coordinator.EngineCoordinator.plan(recommended, candidates).ordered.take(5)
     }
 
     fun stopShadowLink() { shadowJob?.cancel() }
