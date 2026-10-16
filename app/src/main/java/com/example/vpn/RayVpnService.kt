@@ -445,7 +445,7 @@ class RayVpnService : VpnService() {
         if (!fronted) return null
         showForegroundNotification("Looking for a clean address...")
         val best = withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
-            com.example.vpn.Abandonable.run { runCatching { com.example.panels.CleanIpOptimizer.findBestCleanIpSync() }.getOrNull() }
+            runCatching { com.example.panels.CleanIpOptimizer.findBestCleanIpSync() }.getOrNull()
         } ?: return null
         val candidate = com.example.panels.CleanIpOptimizer.variant(profile, best)
         if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(candidate) != null) return null
@@ -469,13 +469,11 @@ class RayVpnService : VpnService() {
                     !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
             } == true
         } ?: return null
-        val warp = com.example.vpn.Abandonable.run {
-            runCatching {
-                com.example.vpn.warp.WarpProvider.profile(this) { url ->
-                    network.openConnection(url, java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
-                }
-            }.onFailure { XrayLogManager.w("SMART", "Cloudflare WARP registration failed: ${it.message}") }.getOrNull()
-        } ?: return null
+        val warp = runCatching {
+            com.example.vpn.warp.WarpProvider.profile(this) { url ->
+                network.openConnection(url, java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
+            }
+        }.onFailure { XrayLogManager.w("SMART", "Cloudflare WARP registration failed: ${it.message}") }.getOrNull() ?: return null
         if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(warp) != null) return null
         val outcome = com.example.vpn.Abandonable.run { com.example.xray.RealDelayProbe.measure(warp, timeoutSec) }
         return (outcome as? com.example.xray.RealDelayProbe.Outcome.Delay)?.let {
@@ -1592,7 +1590,7 @@ class RayVpnService : VpnService() {
                 networkProfileId = com.example.vpn.smart.NetworkCapabilityDetector.last?.key()
             ),
             listOf(com.example.vpn.connectivity.MultiProbeHealthEngine.step(com.example.vpn.connectivity.ProbeStep.HTTP_THROUGH_TUNNEL) {
-                com.example.vpn.Abandonable.run { com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) }
+                com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService)
             }),
             // A result for an older attempt or an earlier network never verifies this one.
             freshness = { _vpnState.value.attemptId == attemptId && _vpnState.value.networkGeneration == generation }
