@@ -449,6 +449,7 @@ fun HomeScreen(
         } else smartRecommendation?.let { smart ->
             SmartRecommendationCard(
                 smart = smart,
+                livePingMs = connectionState.pingMs,
                 buttonState = SmartButtonState.of(connectionState),
                 runnersUp = topNodes.drop(1),
                 onSmartConnect = {
@@ -765,9 +766,38 @@ private fun TradeModeCard(
     }
 }
 
+private val SmartConnect.SmartSelection.failedHere: Boolean
+    get() = !inUse && evidence == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED
+
+/** What this network said about a node, in a word or two, for the Optimal node card. */
+private fun evidenceLabel(node: SmartConnect.SmartSelection): String = when {
+    node.inUse -> "in use"
+    else -> when (node.evidence) {
+        com.example.vpn.connectivity.PathEligibility.FRESH_VERIFIED,
+        com.example.vpn.connectivity.PathEligibility.FRESH_CANDIDATE -> "works here"
+        com.example.vpn.connectivity.PathEligibility.STALE_VERIFIED -> "worked before"
+        com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED -> "failed here"
+        com.example.vpn.connectivity.PathEligibility.UNTESTED, null -> "not tested"
+    }
+}
+
+/** Green: carrying traffic or works here; red: failed here moments ago; gold: not known yet. */
+@Composable
+private fun evidenceColor(node: SmartConnect.SmartSelection): Color {
+    val c = AppTheme.colors
+    return when {
+        node.inUse -> c.statusConnected
+        node.evidence == com.example.vpn.connectivity.PathEligibility.FRESH_VERIFIED ||
+            node.evidence == com.example.vpn.connectivity.PathEligibility.FRESH_CANDIDATE -> c.statusConnected
+        node.failedHere -> c.statusError
+        else -> c.statusWarning
+    }
+}
+
 @Composable
 private fun SmartRecommendationCard(
     smart: SmartConnect.SmartSelection,
+    livePingMs: Long? = null,
     buttonState: SmartButtonState,
     runnersUp: List<SmartConnect.SmartSelection> = emptyList(),
     onSmartConnect: () -> Unit,
@@ -795,7 +825,7 @@ private fun SmartRecommendationCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Optimal node",
+                    text = if (smart.inUse) "In use now" else "Optimal node",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 0.3.sp,
@@ -839,10 +869,12 @@ private fun SmartRecommendationCard(
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(c.statusConnected, 6.dp)
+                    StatusDot(evidenceColor(smart), 6.dp)
                     Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = smart.profile.lastLatencyMs?.let { "$it ms" } ?: "—",
+                        text = (if (smart.inUse) livePingMs else null)?.let { "$it ms" }
+                            ?: smart.profile.lastLatencyMs?.takeIf { it > 0 && !smart.failedHere }?.let { "$it ms" }
+                            ?: evidenceLabel(smart),
                         fontSize = 12.5.sp,
                         fontFamily = FontFamily.Monospace,
                         color = c.textPrimary,
@@ -891,11 +923,15 @@ private fun SmartRecommendationCard(
                             modifier = Modifier.weight(1f)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
+                        StatusDot(evidenceColor(node), 5.dp)
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            text = "%.0f".format(node.overallScore),
+                            text = node.profile.lastLatencyMs?.takeIf { it > 0 && !node.failedHere }?.let { "$it ms" } ?: evidenceLabel(node),
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
-                            color = c.textSecondary
+                            color = c.textSecondary,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
