@@ -82,6 +82,7 @@ import com.example.vpn.lab.VerifiedNetworkProfile
 
 /** The LAB's pages: a minimal home and five detail sections (spec sections 40-46), plus Research. */
 enum class LabSection(val title: String, val icon: ImageVector) {
+    SHADOWLINK("ShadowLink", Icons.Rounded.Shield),
     REPORT("Analysis report", Icons.Rounded.Insights),
     NETWORKS("Networks", Icons.Rounded.CellTower),
     LIVE("Live Tests", Icons.Rounded.MonitorHeart),
@@ -116,6 +117,7 @@ data class NetworkLabUiState(
     val vpnOn: Boolean = false,
     val revival: RevivalUi = RevivalUi(),
     val services: ServicesUi = ServicesUi(),
+    val shadowLink: ShadowLinkUi = ShadowLinkUi(),
     val chain: ChainUi = ChainUi()
 )
 
@@ -142,6 +144,8 @@ class NetworkLabActions(
     val onFirewall: (com.example.vpn.connectivity.NetworkFirewalls.Firewall?) -> Unit = {},
     val onCheckServices: () -> Unit = {},
     val onStopServices: () -> Unit = {},
+    val onRunShadowLink: () -> Unit = {},
+    val onStopShadowLink: () -> Unit = {},
     val onChainOrder: (ChainOrder) -> Unit = {},
     val onChainRegion: (String) -> Unit = {},
     val onSaveChain: () -> Unit = {}
@@ -156,6 +160,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
             else -> Column(Modifier.fillMaxSize()) {
                 TitleBar(c, s.title, sectionSubtitle(s, state), Icons.AutoMirrored.Rounded.ArrowBack, { actions.onOpen(null) })
                 when (s) {
+                    LabSection.SHADOWLINK -> ShadowLinkPage(c, state.shadowLink, state.vpnOn, actions.onRunShadowLink, actions.onStopShadowLink, relativeTime)
                     LabSection.REPORT -> ReportPage(c, state, actions, relativeTime)
                     LabSection.NETWORKS -> NetworksPage(c, state.snapshot, relativeTime)
                     LabSection.LIVE -> LivePage(c, state, actions)
@@ -175,6 +180,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
 }
 
 private fun sectionSubtitle(s: LabSection, state: NetworkLabUiState): String = when (s) {
+    LabSection.SHADOWLINK -> state.shadowLink.report?.let { "${it.networkLabel} · ${it.egress.title}" } ?: "One fused read of the network and the path to try"
     LabSection.REPORT -> state.snapshot.analysis?.let { "${it.networkLabel} · ${it.state}" } ?: "No full analysis on this network yet"
     LabSection.NETWORKS -> "Only the current network is measured live"
     LabSection.LIVE -> state.snapshot.running?.let { "${it.experimentId} · ${it.networkLabel}" }
@@ -379,6 +385,19 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
         item {
             Panel(c) {
                 val rows = listOf(
+                    state.shadowLink.let { sl ->
+                        when {
+                            sl.running -> Triple(LabSection.SHADOWLINK, "Running", c.okay)
+                            sl.report != null -> Triple(LabSection.SHADOWLINK, sl.report.egress.title,
+                                when (sl.report.egress) {
+                                    com.example.vpn.shadowlink.Egress.OPEN -> c.good
+                                    com.example.vpn.shadowlink.Egress.BLOCKED -> c.bad
+                                    com.example.vpn.shadowlink.Egress.UNKNOWN -> null
+                                    else -> c.okay
+                                })
+                            else -> Triple(LabSection.SHADOWLINK, "", null)
+                        }
+                    },
                     Triple(LabSection.NETWORKS, "${s.networks.size} seen", null),
                     Triple(LabSection.LIVE, if (s.running != null) "Running" else "Idle", if (s.running != null) c.okay else null),
                     Triple(LabSection.EXPERIMENTS, "${s.experiments.size}", null),
