@@ -142,6 +142,42 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopServices() { servicesJob?.cancel() }
 
+    private var shadowJob: Job? = null
+
+    /** Runs one ShadowLink discovery pass (reuses the service HTTP client) and keeps the report on the ShadowLink page. */
+    fun runShadowLink() {
+        if (shadowJob?.isActive == true) return
+        val throughVpn = _state.value.vpnOn
+        shadowJob = viewModelScope.launch {
+            local.update { it.copy(shadowLink = it.shadowLink.copy(running = true)) }
+            val report = withContext(Dispatchers.IO) {
+                val networkKey = NetworkKey.current(getApplication<Application>())
+                val prior = runCatching {
+                    val prefs = getApplication<Application>().getSharedPreferences("network_memory", Application.MODE_PRIVATE)
+                    com.example.vpn.smart.NetworkMemory(load = { prefs.getString("v1", null) }, save = {}).workingKinds(networkKey)
+                }.getOrDefault(emptyList())
+                com.example.vpn.shadowlink.ShadowLink.discover(
+                    context = getApplication(),
+                    fetch = { url ->
+                        val start = System.nanoTime()
+                        serviceHttp.newCall(okhttp3.Request.Builder().url(url)
+                            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36")
+                            .header("Accept-Language", "en-US,en;q=0.9").build()).execute().use { r ->
+                            com.example.vpn.lab.ServiceCheck.Response(r.code, r.request.url.toString(), r.peekBody(65_536).string(),
+                                (System.nanoTime() - start) / 1_000_000)
+                        }
+                    },
+                    throughVpn = throughVpn,
+                    priorWorkingKinds = prior,
+                    cancelled = { !isActive }
+                )
+            }
+            local.update { it.copy(shadowLink = ShadowLinkUi(report = report)) }
+        }.also { job -> job.invokeOnCompletion { local.update { it.copy(shadowLink = it.shadowLink.copy(running = false)) } } }
+    }
+
+    fun stopShadowLink() { shadowJob?.cancel() }
+
     fun chainOrder(order: ChainOrder) = local.update { it.copy(chain = it.chain.copy(order = order, savedName = null)) }
     fun chainRegion(code: String) = local.update { it.copy(chain = it.chain.copy(region = code, savedName = null)) }
 
@@ -249,6 +285,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onResearchRefresh = { viewModel.refreshResearch() }, onAskAgent = viewModel::askAgent, onTestSuggestion = viewModel::testSuggestion,
                 onUseRecommended = viewModel::useRecommended, onRevive = viewModel::revive, onStopRevive = viewModel::stopRevive,
                 onFirewall = viewModel::chooseFirewall, onCheckServices = viewModel::checkServices, onStopServices = viewModel::stopServices,
+                onRunShadowLink = viewModel::runShadowLink, onStopShadowLink = viewModel::stopShadowLink,
                 onChainOrder = viewModel::chainOrder, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain
             )
         },
