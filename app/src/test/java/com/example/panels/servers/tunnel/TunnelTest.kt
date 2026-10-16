@@ -55,6 +55,28 @@ class TunnelTest {
         assertEquals(listOf(46491, TunnelPorts.derive("00112233445566778899aabbccddeeff", "xhttp", 19999, setOf(22, 443, 25366))), rotating)
     }
 
+    @Test fun transportsNeverShareAPort() {
+        val day = 86_400_000L
+        repeat(400) { i ->
+            val s = spec().copy(seed = "%032x".format(i))
+            val e = TunnelPorts.epoch(24, (20_000L + i) * day)
+            val now = TunnelPorts.portsAt(s, e)
+            assertEquals(now.size, now.values.toSet().size)
+            // The previous period's port is only kept when no other transport listens on it now.
+            val all = TunnelTransport.ROTATING.flatMap { TunnelPorts.current(s, it, (20_000L + i) * day) }
+            assertEquals(all.size, all.toSet().size)
+        }
+    }
+
+    @Test fun updatesSaveAndRestoreThePreviousSetup() {
+        val s = spec()
+        val script = TunnelScripts.abroadInstall(s, "amd64", abroad.host, renewKeys = false).text
+        assertTrue(script.contains("cp -a \"/etc/maximus/tunnel\" \"/etc/maximus/tunnel-backup/dir\""))
+        assertTrue(script.contains("restore_prev"))
+        assertFalse(script.contains("@@"))
+        assertTrue(TunnelScripts.restorePrevious().text.contains("restore_prev"))
+    }
+
     @Test fun settingsRoundTrip() {
         val s = spec()
         assertEquals(s, TunnelSpec.fromSettings(s.toSettings(TunnelSpec.ROLE_IRAN)))
@@ -91,7 +113,14 @@ class TunnelTest {
         assertFalse(base.has("outbounds"))
         assertEquals("blackhole", JSONObject(TunnelConfigs.iranDefaultBlock()).getJSONArray("outbounds").getJSONObject(0).getString("protocol"))
         assertTrue(TunnelConfigs.IRAN_BLOCK_FILE > "30-t-hy2.json" && TunnelConfigs.IRAN_BLOCK_FILE > "21-t-xhttp-prev.json")
-        assertEquals("IPIfNonMatch", JSONObject(TunnelConfigs.abroadBase()).getJSONObject("routing").getString("domainStrategy"))
+        val exitRouting = JSONObject(TunnelConfigs.abroadBase()).getJSONObject("routing")
+        assertEquals("IPOnDemand", exitRouting.getString("domainStrategy"))
+        val exitRules = exitRouting.getJSONArray("rules")
+        // Names are blocked or resolved before the catch-all: localhost first, private IPs next, "direct" last.
+        assertEquals("block", exitRules.getJSONObject(0).getString("outboundTag"))
+        assertTrue(exitRules.getJSONObject(0).getJSONArray("domain").toString().contains("localhost"))
+        assertTrue(exitRules.getJSONObject(1).has("ip"))
+        assertEquals("direct", exitRules.getJSONObject(exitRules.length() - 1).getString("outboundTag"))
         assertEquals("t-reality-now", base.getJSONObject("routing").getJSONArray("balancers").getJSONObject(0).getString("fallbackTag"))
         assertEquals("t-hy2", TunnelConfigs.fallbackTag(spec(transports = setOf(TunnelTransport.HYSTERIA2))))
         val client = TunnelConfigs.iranHysteriaClient(s, abroad.host, "/etc/maximus/tunnel/hy")
@@ -118,7 +147,8 @@ class TunnelTest {
         TunnelScripts.restart(), TunnelScripts.logs(),
         TunnelScripts.abroadInstall(spec(transports = setOf(TunnelTransport.REVERSE)), "amd64", abroad.host, renewKeys = false),
         TunnelScripts.iranInstall(spec(transports = setOf(TunnelTransport.REVERSE)), "amd64", abroad.host, renewKeys = false, oldEntryPort = null),
-        TunnelScripts.abroadReverse(spec(), iran.host)
+        TunnelScripts.abroadReverse(spec(), iran.host),
+        TunnelScripts.restorePrevious()
     )
 
     @Test fun scriptsAreValidShellWithPinnedPrograms() {

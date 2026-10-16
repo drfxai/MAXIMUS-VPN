@@ -148,7 +148,8 @@ class TunnelManager(
         val abroadUsed = abFacts.tcpPorts + abFacts.udpPorts
         val iranUsed = irFacts.tcpPorts + irFacts.udpPorts
         val avoid = previous?.avoidPorts ?: (abroadUsed + iranUsed + setOf(checks.iran.sshPort, checks.abroad.sshPort))
-        val entryPort = previous?.entryPort ?: ServerRandom.port(iranUsed)
+        // The status check borrows 39000-40999 on the Iran server for its short-lived test proxies.
+        val entryPort = previous?.entryPort ?: ServerRandom.port(iranUsed, exclude = STATUS_PROBE_PORTS)
         val hyPort = previous?.hyPort ?: ServerRandom.port(abroadUsed, exclude = avoid)
         val fixed = mutableMapOf<TunnelTransport, Int>()
         TunnelTransport.ROTATING.forEach { t ->
@@ -220,7 +221,10 @@ class TunnelManager(
         }
         val iranScript = { s: TunnelSpec -> TunnelScripts.iranInstall(s, iranArch, abroadServer.host, renewKeys, iranServer.tool(ServerToolCatalog.MAXIMUS_TUNNEL)?.port) }
         var installed: Map<String, String>? = null
-        connect(iranServer).use { shell ->
+        // An update changed the server abroad already (maybe a new key); if the Iran server fails,
+        // put the server abroad back so the running pair keeps working.
+        val isUpdate = planned.exitPublicKey.isNotEmpty()
+        try { connect(iranServer).use { shell ->
             progress.step(4)
             installed = try {
                 run(shell, iranScript(spec), progress)
@@ -232,6 +236,13 @@ class TunnelManager(
                 progress.step(4)
                 run(shell, iranScript(spec), progress)
             }
+        } } catch (e: Exception) {
+            if (isUpdate) {
+                progress.log("The Iran server failed; putting the server abroad back to its previous setup")
+                val undone = runCatching { connect(abroadServer).use { run(it, TunnelScripts.restorePrevious(), progress) } }.isSuccess
+                progress.log(if (undone) "The server abroad is back on its previous setup" else "Could not put the server abroad back; run the update again")
+            }
+            throw e
         }
         val r = installed!!
         val entryPub = r["PUBKEY"].orEmpty()
@@ -289,16 +300,29 @@ class TunnelManager(
                 k.removePrefix("PATH_") to (if (v.startsWith("ok:")) v.removePrefix("ok:").toLongOrNull() else null)
             }.toMap(),
             ports = r["PORTS"].orEmpty().split(' ').mapNotNull { it.toIntOrNull() },
-            running = r["SVC_maximus-tunnel"] == "active",
+            // Both units must run; Hysteria2's reports "off" when the tunnel does not use it.
+            running = r["SVC_maximus-tunnel"] == "active" && r["SVC_maximus-tunnel-hy"].let { it == null || it == "active" || it == "off" },
             serverTime = r["TIME"]?.toLongOrNull() ?: 0L
         )
     }
 
-    /** Moves every rotating port right now with a new seed: abroad first, then Iran. */
+    /**
+     * Moves every rotating port right now with a new seed: abroad first, then Iran. If the Iran
+     * server cannot take the new seed, the server abroad goes back to the old one, so the two
+     * never listen and dial on different ports.
+     */
     fun reseed(iran: ManagedServer, abroad: ManagedServer, spec: TunnelSpec): Pair<ManagedServer, ManagedServer> {
+        require(spec.rotationHours > 0) { "The ports are fixed. Turn on rotation to move them." }
         val next = spec.copy(seed = TunnelRandom.hex(16))
         connect(abroad).use { run(it, TunnelScripts.reseed(next.seed), null) }
-        connect(iran).use { run(it, TunnelScripts.reseed(next.seed), null) }
+        try {
+            connect(iran).use { run(it, TunnelScripts.reseed(next.seed), null) }
+        } catch (e: Exception) {
+            val undone = runCatching { connect(abroad).use { run(it, TunnelScripts.reseed(spec.seed), null) } }.isSuccess
+            throw IllegalStateException(
+                "The Iran server could not move its ports (${e.message}). " +
+                    if (undone) "The server abroad was moved back, so nothing changed." else "The server abroad could not be moved back; try again.", e)
+        }
         return iran.withTool(iran.tool(ServerToolCatalog.MAXIMUS_TUNNEL)!!.copy(settings = next.toSettings(TunnelSpec.ROLE_IRAN))) to
             abroad.withTool(abroad.tool(ServerToolCatalog.MAXIMUS_TUNNEL)!!.copy(settings = next.toSettings(TunnelSpec.ROLE_ABROAD)))
     }
@@ -327,3 +351,5 @@ class TunnelManager(
 private const val REVERSE_SETTLE_MS = 4_000L
 
 class TunnelScriptException(val exitCode: Int, message: String) : IllegalStateException(message)
+/** Ports the status check uses on the Iran server for its test proxies (39000 + up to 999 + a few). */
+private val STATUS_PROBE_PORTS: Set<Int> = (39_000..40_999).toSet()

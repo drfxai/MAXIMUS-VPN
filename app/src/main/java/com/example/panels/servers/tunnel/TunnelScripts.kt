@@ -102,6 +102,8 @@ object TunnelScripts {
         # Maximus Tunnel: writes this period's Xray port files (see TunnelPorts in the app).
         set -eu
         D=$DIR
+        # One run at a time: the timer, a reseed and an install all call this script.
+        if command -v flock >/dev/null 2>&1; then exec 9>"§D/.rotate.lock"; flock 9; fi
         . "§D/rotate.env"
         umask 027
         port_for() {
@@ -110,8 +112,13 @@ object TunnelScripts {
             if [ "§n" -eq 0 ]; then m="§1:§2"; else m="§1:§2:§n"; fi
             h=§(printf '%s' "§m" | openssl dgst -sha256 -hmac "§SEED" | awk '{print §NF}' | cut -c1-8)
             p=§((20000 + 0x§h % 40000))
-            case " §AVOID " in *" §p "*) n=§((n + 1)) ;; *) echo "§p"; return 0 ;; esac
+            case " §AVOID §3 " in *" §p "*) n=§((n + 1)) ;; *) echo "§p"; return 0 ;; esac
           done
+        }
+        # Every transport's port for one period, each avoiding the ones picked before it (P_<name>).
+        ports_at() {
+          taken=""
+          for t in §NAMES; do q=§(port_for "§t" "§1" "§taken"); eval "P_§t=§q"; taken="§taken §q"; done
         }
         fw() {
           if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
@@ -127,16 +134,25 @@ object TunnelScripts {
         trap 'rm -rf "§new"' EXIT
         ports=""
         now=§(date +%s)
+        if [ "§HOURS" -gt 0 ]; then
+          e=§((now / (HOURS * 3600)))
+          ports_at §((e - 1)); for t in §NAMES; do eval "PP_§t=\§P_§t"; done
+          ports_at "§e"
+        fi
+        nowall=""
+        for t in §NAMES; do
+          if [ "§HOURS" -gt 0 ]; then eval "nowall=\"§nowall \§P_§t\""; else eval "nowall=\"§nowall \§FIXED_§t\""; fi
+        done
         for t in §NAMES; do
           if [ "§HOURS" -gt 0 ]; then
-            e=§((now / (HOURS * 3600)))
-            pn=§(port_for "§t" "§e"); pp=§(port_for "§t" §((e - 1)))
+            eval "pn=\§P_§t; pp=\§PP_§t"
           else
             eval "pn=\§FIXED_§t"; pp="§pn"
           fi
           sed -e "s/@PORT@/§pn/" -e "s/@TAG@/t-§t-now/" "§D/tpl/§t.json" > "§new/20-t-§t-now.json"
           ports="§ports §pn"
-          if [ "§pp" != "§pn" ]; then
+          # The previous period's port stays open too, unless another transport listens on it now.
+          if [ "§pp" != "§pn" ] && case " §nowall " in *" §pp "*) false ;; *) true ;; esac; then
             sed -e "s/@PORT@/§pp/" -e "s/@TAG@/t-§t-prev/" "§D/tpl/§t.json" > "§new/21-t-§t-prev.json"
             ports="§ports §pp"
           fi
@@ -150,6 +166,14 @@ object TunnelScripts {
         for f in "§new"/*.json; do cmp -s "§f" "§D/conf.d/§(basename "§f")" || changed=1; done
         for f in "§D"/conf.d/2*-t-*.json; do [ -e "§f" ] || continue; [ -e "§new/§(basename "§f")" ] || changed=1; done
         if [ "§changed" = 1 ]; then
+          # Check the whole new set with Xray before it replaces the running one.
+          chk=§(mktemp -d)
+          for f in "§D"/conf.d/*.json; do case "§(basename "§f")" in 2*-t-*) ;; *) cp "§f" "§chk/" ;; esac; done
+          cp "§new"/*.json "§chk/"
+          if ! XRAY_LOCATION_ASSET="§D" $BIN/xray run -test -confdir "§chk" >/dev/null 2>&1; then
+            rm -rf "§chk"; echo "Xray rejected the new port files; keeping the current ones" >&2; exit 32
+          fi
+          rm -rf "§chk"
           rm -f "§D"/conf.d/2*-t-*.json
           for f in "§new"/*.json; do install -m 0640 -g maximus "§f" "§D/conf.d/§(basename "§f")"; done
           echo "§ports" > "§D/ports"
@@ -215,7 +239,50 @@ object TunnelScripts {
           §SUDO rm -rf "$DIR" "$BIN"
           §SUDO systemctl daemon-reload >/dev/null 2>&1 || true
         }
-        trap 'rc=§?; if [ §rc -ne 0 ] && [ "§FRESH" = 1 ]; then echo "Setup failed, undoing its changes" >&2; rollback; fi' EXIT
+        # An update first saves what runs now, and puts it back if the update fails. The copy is kept
+        # afterwards, so the app can also put it back when the other server's update fails.
+        if [ "§FRESH" = 0 ]; then
+          @@BACKUP@@
+        fi
+        trap 'rc=§?; if [ §rc -ne 0 ]; then
+          if [ "§FRESH" = 1 ]; then echo "Setup failed, undoing its changes" >&2; rollback
+          else echo "Update failed, putting the previous setup back" >&2; @@RESTORE@@; fi
+        fi' EXIT
+    """.trimIndent()
+
+    private const val BACKUP_DIR = "/etc/maximus/tunnel-backup"
+    private val UNIT_FILES = listOf("maximus-tunnel.service", "maximus-tunnel-hy.service", "maximus-tunnel-rotate.service", "maximus-tunnel-rotate.timer")
+
+    private val BACKUP_BLOCK = """
+        §SUDO rm -rf "$BACKUP_DIR"
+        §SUDO mkdir -p "$BACKUP_DIR/units"
+        §SUDO chmod 700 "$BACKUP_DIR"
+        §SUDO cp -a "$DIR" "$BACKUP_DIR/dir"
+        for u in ${UNIT_FILES.joinToString(" ")}; do
+          if §SUDO test -f "/etc/systemd/system/§u"; then §SUDO cp -a "/etc/systemd/system/§u" "$BACKUP_DIR/units/"; fi
+        done
+        if §SUDO test -f $ROTATE; then §SUDO cp -a $ROTATE "$BACKUP_DIR/rotate"; fi
+    """.trimIndent()
+
+    /** Puts the copy from [BACKUP_BLOCK] back and restarts what was running. Defines and calls restore_prev. */
+    private val RESTORE_BLOCK = """
+        restore_prev() {
+          §SUDO test -d "$BACKUP_DIR/dir" || return 0
+          §SUDO rm -rf "$DIR"
+          §SUDO cp -a "$BACKUP_DIR/dir" "$DIR"
+          for u in ${UNIT_FILES.joinToString(" ")}; do
+            if §SUDO test -f "$BACKUP_DIR/units/§u"; then §SUDO cp -a "$BACKUP_DIR/units/§u" /etc/systemd/system/
+            else §SUDO systemctl disable --now "§u" >/dev/null 2>&1 || true; §SUDO rm -f "/etc/systemd/system/§u"; fi
+          done
+          if §SUDO test -f "$BACKUP_DIR/rotate"; then §SUDO cp -a "$BACKUP_DIR/rotate" $ROTATE; fi
+          §SUDO systemctl daemon-reload >/dev/null 2>&1 || true
+          for u in maximus-tunnel maximus-tunnel-hy; do
+            if §SUDO test -f "/etc/systemd/system/§u.service" && systemctl is-enabled --quiet "§u" 2>/dev/null; then
+              §SUDO systemctl restart "§u" >/dev/null 2>&1 || true
+            fi
+          done
+        }
+        restore_prev
     """.trimIndent()
 
     private fun startBlock(spec: TunnelSpec) = """
@@ -290,6 +357,8 @@ object TunnelScripts {
                          keyFile: String, keyTargets: String, renew: Boolean, files: Map<String, String>): ToolScript {
         val inserts = linkedMapOf(
             "ROLLBACK" to rollbackBlock(),
+            "BACKUP" to BACKUP_BLOCK,
+            "RESTORE" to RESTORE_BLOCK.replace("\n", "\n  "),
             "PREPARE" to prepareBlock(spec, arch),
             "WRITE_COMMON" to WRITE_COMMON,
             "KEYS" to keyBlock(keyFile, renew, keyTargets),
@@ -496,7 +565,12 @@ object TunnelScripts {
         step 1
         result TIME "§(date +%s)"
         result PORTS "§(cat $DIR/ports 2>/dev/null | tr -s ' ' | sed 's/^ //')"
-        for u in ${UNITS.joinToString(" ")}; do result "SVC_§u" "§(systemctl is-active §u 2>/dev/null || true)"; done
+        for u in ${UNITS.joinToString(" ")}; do
+          st=§(systemctl is-active §u 2>/dev/null || true)
+          # A unit this tunnel does not use (Hysteria2 turned off) reports "off", not a failure.
+          if [ "§st" != active ] && ! systemctl is-enabled --quiet §u 2>/dev/null; then st=off; fi
+          result "SVC_§u" "§st"
+        done
         step 2
         work=§(mktemp -d)
         pid=""
@@ -540,6 +614,21 @@ object TunnelScripts {
         fi
         """,
         STATUS_STEPS
+    )
+
+    /**
+     * Puts back the setup this server ran before its last update (saved by the update itself). Used
+     * when the server abroad was updated but the Iran server then failed, so the pair stays matched.
+     */
+    fun restorePrevious(): ToolScript = ToolScripts.script(
+        """
+        step 1
+        if ! §SUDO test -d "$BACKUP_DIR/dir"; then echo 'No saved setup to put back' >&2; exit 33; fi
+        @@RESTORE@@
+        result RESTORED tunnel
+        """,
+        listOf("Put the previous setup back"),
+        mapOf("RESTORE" to RESTORE_BLOCK)
     )
 
     /** A new rotation seed: every rotating port moves now, without waiting for the next period. */

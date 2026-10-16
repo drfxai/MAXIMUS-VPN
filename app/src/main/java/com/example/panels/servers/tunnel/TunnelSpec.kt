@@ -167,11 +167,28 @@ object TunnelPorts {
         }
     }
 
-    /** The ports a rotating transport listens on now: this period's and, during rotation, the previous one's. */
+    /**
+     * Every rotating transport's port for one period, in [TunnelTransport.ROTATING] order, each
+     * avoiding the ones picked before it so two transports never share a port.
+     */
+    fun portsAt(spec: TunnelSpec, epoch: Long): Map<TunnelTransport, Int> {
+        val taken = mutableSetOf<Int>()
+        return TunnelTransport.ROTATING.filter { it in spec.transports }.associateWith { t ->
+            derive(spec.seed, t.id, epoch, spec.avoidPorts + taken).also { taken += it }
+        }
+    }
+
+    /**
+     * The ports a rotating transport listens on now: this period's and, during rotation, the previous
+     * one's, unless another transport listens on that port now.
+     */
     fun current(spec: TunnelSpec, t: TunnelTransport, nowMs: Long = System.currentTimeMillis()): List<Int> {
         if (spec.rotationHours <= 0) return listOfNotNull(spec.fixedPorts[t])
         val e = epoch(spec.rotationHours, nowMs)
-        return listOf(derive(spec.seed, t.id, e, spec.avoidPorts), derive(spec.seed, t.id, e - 1, spec.avoidPorts)).distinct()
+        val now = portsAt(spec, e)
+        val port = now[t] ?: return emptyList()
+        val prev = portsAt(spec, e - 1)[t]
+        return if (prev == null || prev == port || prev in now.values) listOf(port) else listOf(port, prev)
     }
 
     /** When the ports change next, in epoch milliseconds; null without rotation. */

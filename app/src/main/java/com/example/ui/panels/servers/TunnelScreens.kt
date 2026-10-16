@@ -793,7 +793,8 @@ internal fun TunnelDetailScreen(ui: TunnelDetailUi, actions: TunnelActions) {
         GroupCard {
             ListRow(rotationLabel(ui.rotationHours), subtitle = ui.nextChangeText,
                 leading = { IconTile(Icons.Rounded.Shuffle, 32.dp) },
-                trailing = { TextAction("Move now", actions.onReseed, enabled = ui.busy.isBlank()) })
+                // Moving needs rotation: with fixed ports a new seed would change nothing.
+                trailing = if (ui.rotationHours > 0) { { TextAction("Move now", actions.onReseed, enabled = ui.busy.isBlank()) } } else null)
             RowDivider(58.dp)
             ListRow("Phone port on the Iran server", subtitle = "TCP ${ui.entryPort}", subtitleMono = true,
                 leading = { IconTile(Icons.Rounded.Smartphone, 32.dp) })

@@ -41,11 +41,17 @@ object TunnelConfigs {
     fun abroadBase(): String = JSONObject()
         .put("log", JSONObject().put("loglevel", "warning"))
         .put("outbounds", JSONArray()
-            .put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
+            .put(JSONObject().put("tag", "direct").put("protocol", "freedom")
+                // Resolve through Xray's own DNS, whose cached answer the routing check above already used.
+                .put("settings", JSONObject().put("domainStrategy", "UseIP")))
             .put(JSONObject().put("tag", "block").put("protocol", "blackhole")))
-        // IPIfNonMatch resolves names, so a name pointing at 127.0.0.1 or a private network is blocked too.
+        // IPOnDemand resolves a name as soon as the first IP rule is checked, so a name pointing at 127.0.0.1,
+        // a private network or the cloud metadata address is blocked too. (IPIfNonMatch never resolved here:
+        // the catch-all network rule always matched first.) "localhost" is blocked by name as well.
         // The last rule names "direct" because the reverse link's outbound (a later file) would otherwise become the default.
-        .put("routing", JSONObject().put("domainStrategy", "IPIfNonMatch").put("rules", JSONArray().put(blockPrivate())
+        .put("routing", JSONObject().put("domainStrategy", "IPOnDemand").put("rules", JSONArray()
+            .put(JSONObject().put("domain", JSONArray().put("full:localhost").put("domain:localhost")).put("outboundTag", "block"))
+            .put(blockPrivate())
             .put(JSONObject().put("network", "tcp,udp").put("outboundTag", "direct"))))
         .text()
 
