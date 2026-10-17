@@ -63,7 +63,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -73,6 +75,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -80,7 +83,10 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.example.panels.ManagedPanel
+import com.example.panels.cloudflare.TokenTemplate
+import kotlinx.coroutines.delay
 
 /** Cloudflare tab palette: the Panels screen's navy with Cloudflare orange as the accent. */
 private object Cf {
@@ -316,6 +322,20 @@ private fun SetupCard(
     var password by remember { mutableStateOf("") }
     val tokenReady = token.isNotBlank()
     val currentStep = if (tokenReady) 3 else 1
+    val context = LocalContext.current
+    // Coming back from Cloudflare's page: offer a copied token in one tap. Only a masked hint is kept.
+    var resumes by remember { mutableIntStateOf(0) }
+    var copiedHint by remember { mutableStateOf<String?>(null) }
+    LifecycleResumeEffect(Unit) {
+        resumes++
+        onPauseOrDispose { }
+    }
+    LaunchedEffect(resumes, tokenReady) {
+        copiedHint = if (tokenReady) null else {
+            delay(300) // Android 10+ only hands the clipboard to the app once its window has focus.
+            copiedToken(context)?.let(TokenTemplate::masked)
+        }
+    }
 
     CfCard {
         Row(
@@ -369,22 +389,23 @@ private fun SetupCard(
             onAction = onSignUp
         )
         HorizontalDivider(color = Cf.CardBorder, modifier = Modifier.padding(start = 60.dp))
-        StepRow(
-            number = 2,
-            done = tokenReady,
-            title = "API token",
-            subtitle = "Workers Scripts and Workers KV are pre-selected",
-            action = "Create",
-            primary = !tokenReady,
-            onAction = onCreateToken
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Text(
-                "On Cloudflare tap Continue to summary, then Create Token, and copy it.",
-                color = Cf.Dim,
-                fontSize = 12.sp,
-                lineHeight = 16.sp,
-                modifier = Modifier.padding(top = 6.dp)
-            )
+            StepBadge(number = 2, done = tokenReady, active = !tokenReady)
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Create token", color = Cf.Text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                CloudflarePageText(CfStepColors)
+                TokenChips(TokenTemplate.WORKER_NAME, TokenTemplate.WORKER.map { it.label } + "Your accounts", CfStepColors)
+                CfOrangeButton(
+                    text = "Create token in Cloudflare",
+                    icon = Icons.AutoMirrored.Filled.OpenInNew,
+                    filled = !tokenReady,
+                    onClick = onCreateToken
+                )
+            }
         }
         HorizontalDivider(color = Cf.CardBorder, modifier = Modifier.padding(start = 60.dp))
 
@@ -393,9 +414,27 @@ private fun SetupCard(
                 StepBadge(number = 3, done = false, active = tokenReady)
                 Spacer(Modifier.width(16.dp))
                 Column {
-                    Text("Paste token and install", color = Cf.Text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Your login details appear here when done", color = Cf.Muted, fontSize = 12.5.sp)
+                    Text("Paste it back and install", color = Cf.Text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "When you come back, Maximus offers the copied token. Your login details appear here when done.",
+                        color = Cf.Muted, fontSize = 12.5.sp, lineHeight = 17.sp
+                    )
                 }
+            }
+            if (copiedHint != null && !tokenReady) {
+                CfOrangeButton(
+                    text = "Use copied token $copiedHint",
+                    icon = Icons.Default.ContentPaste,
+                    filled = true,
+                    onClick = {
+                        val copied = copiedToken(context)
+                        if (copied != null) {
+                            onTokenChange(copied)
+                        } else {
+                            copiedHint = null
+                        }
+                    }
+                )
             }
             CfField(
                 value = token,
@@ -470,6 +509,41 @@ private fun SetupCard(
                 busy = isBusy,
                 onClick = { onInstall(token.trim(), account.trim(), username.trim(), password.trim()) }
             )
+            TokenFootnote("The token is limited to Workers and Workers KV on your account.", CfStepColors)
+        }
+    }
+}
+
+/** The step colours of [CloudflarePageText], [TokenChips] and [TokenFootnote] in this tab's palette. */
+private val CfStepColors = StepColors(
+    text = Cf.Text, muted = Cf.Muted, dim = Cf.Dim, accent = Cf.Orange, accentSoft = Cf.Orange.copy(alpha = 0.14f), raised = Cf.Inset
+)
+
+/** A full-width orange action: filled while it is the next step, outlined after. */
+@Composable
+private fun CfOrangeButton(text: String, icon: ImageVector, filled: Boolean, onClick: () -> Unit) {
+    if (filled) {
+        Button(
+            onClick = onClick,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Cf.Orange, contentColor = Color.White),
+            modifier = Modifier.fillMaxWidth().height(44.dp)
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Cf.CardBorder),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Cf.Text),
+            modifier = Modifier.fillMaxWidth().height(44.dp)
+        ) {
+            Icon(icon, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         }
     }
 }

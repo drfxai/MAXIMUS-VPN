@@ -1,8 +1,6 @@
 package com.example.ui.panels
 
 import android.app.Application
-import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,6 +12,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -22,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
@@ -34,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -48,16 +49,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.RayApplication
+import com.example.data.model.ProfileType
+import com.example.panels.CloudflareTokenHelper
 import com.example.panels.cloudflare.CloudflareDnsApi
 import com.example.panels.cloudflare.SmartDomains
 import com.example.panels.cloudflare.SmartDomains.Action
 import com.example.panels.cloudflare.SmartDomains.Use
 import com.example.panels.cloudflare.SmartDomains.Zone
 import com.example.panels.cloudflare.SmartDomainsStore
+import com.example.panels.cloudflare.SmartFill
 import com.example.panels.cloudflare.SmartNames
+import com.example.panels.cloudflare.TokenTemplate
 import com.example.ui.panels.servers.Badge
 import com.example.ui.panels.servers.GhostButton
 import com.example.ui.panels.servers.GroupCard
@@ -75,14 +82,13 @@ import com.example.ui.panels.servers.SvField
 import com.example.ui.panels.servers.TextAction
 import com.example.ui.panels.servers.Tone
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-private const val API_TOKENS_URL = "https://dash.cloudflare.com/profile/api-tokens"
 
 /** What the Smart domains screen shows. The token itself is never held here, only what is being typed. */
 data class SmartDomainsUi(
@@ -101,7 +107,9 @@ data class SmartDomainsUi(
     val outcome: String = "",
     /** Name to plain-words reason, when the last create found the name in use. */
     val conflict: Pair<String, String>? = null,
-    val error: String = ""
+    val error: String = "",
+    /** What was filled in from the selected config once the token worked; null shows the form. */
+    val fill: SmartFill.Fill? = null
 ) {
     val connected get() = zone != null
 }
@@ -139,22 +147,54 @@ class SmartDomainsViewModel(app: Application) : AndroidViewModel(app) {
                     val zones = api.zones(token)
                     check(zones.isNotEmpty()) { "This token sees no domains. Give it Zone Read on your domain." }
                     if (typed.isNotEmpty()) store.saveToken(typed)
-                    zones to store.zoneId()
+                    // Fill in only for a new token or before the first name; later opens go straight to the list.
+                    val fill = if (typed.isNotEmpty() || _state.value.names.isEmpty()) SmartFill.fill(selectedServer()) else null
+                    Triple(zones, store.zoneId(), fill)
                 }
             }
             result.fold(
-                onSuccess = { (zones, savedId) ->
-                    val zone = zones.firstOrNull { it.id == savedId } ?: zones.firstOrNull { it.status == "active" } ?: zones.first()
+                onSuccess = { (zones, savedId, fill) ->
+                    val zone = SmartFill.zone(zones, savedId) ?: zones.first()
                     _state.update {
-                        it.copy(
-                            checking = false, hasToken = true, tokenInput = "", zones = zones, zone = zone,
-                            label = it.label.ifBlank { SmartDomains.randomLabel(SmartNames.prefix(it.use)) }
-                        )
+                        if (fill != null) {
+                            it.copy(
+                                checking = false, hasToken = true, tokenInput = "", zones = zones, zone = zone, fill = fill,
+                                use = fill.use, label = fill.label, address = fill.server.address, port = fill.server.port.toString()
+                            )
+                        } else {
+                            it.copy(
+                                checking = false, hasToken = true, tokenInput = "", zones = zones, zone = zone,
+                                label = it.label.ifBlank { SmartDomains.randomLabel(SmartNames.prefix(it.use)) }
+                            )
+                        }
                     }
                 },
                 onFailure = { e -> _state.update { it.copy(checking = false, error = e.message ?: "Could not reach Cloudflare") } }
             )
         }
+    }
+
+    /** "Use copied token": the token from the clipboard, checked straight away. It is not kept unless it works. */
+    fun useCopiedToken(token: String) {
+        if (_state.value.checking || !TokenTemplate.looksLikeToken(token)) return
+        _state.update { it.copy(tokenInput = token.trim(), error = "") }
+        checkToken()
+    }
+
+    /** "Edit details": the form, with what was filled in. */
+    fun editDetails() = _state.update { it.copy(fill = null) }
+
+    /**
+     * The config selected in Nodes, as the fill needs it, or null. A subscription entry has no single
+     * server, so it fills nothing. Runs on [Dispatchers.IO].
+     */
+    private suspend fun selectedServer(): SmartFill.Server? {
+        val p = runCatching {
+            val app = RayApplication.instance
+            app.settingsRepository.getSettings().selectedProfileId?.let { app.serverRepository.getProfileById(it) }
+        }.getOrNull() ?: return null
+        if (p.profileType == ProfileType.SUBSCRIPTION) return null
+        return SmartFill.Server(p.name, p.protocolType.displayName, p.transport, p.security, p.address, p.port, p.countryCode)
     }
 
     fun pickZone(zone: Zone) {
@@ -195,13 +235,13 @@ class SmartDomainsViewModel(app: Application) : AndroidViewModel(app) {
             result.fold(
                 onSuccess = { (want, action) ->
                     if (action is Action.Conflict) {
-                        _state.update { it.copy(busy = "", conflict = want.name to SmartNames.conflict(want.name, action.why)) }
+                        _state.update { it.copy(busy = "", fill = null, conflict = want.name to SmartNames.conflict(want.name, action.why)) }
                     } else {
                         val saved = SmartNames.Saved(zone.id, zone.name, want.name, want.type, want.content, port, s.use, want.proxied)
                         val names = SmartNames.upsert(_state.value.names, saved)
                         withContext(Dispatchers.IO) { store.saveNames(names) }
                         _state.update {
-                            it.copy(busy = "", names = names, outcome = SmartNames.outcome(want.name, action),
+                            it.copy(busy = "", fill = null, names = names, outcome = SmartNames.outcome(want.name, action),
                                 label = SmartDomains.randomLabel(SmartNames.prefix(it.use)))
                         }
                     }
@@ -254,7 +294,8 @@ class SmartDomainsViewModel(app: Application) : AndroidViewModel(app) {
 
 /**
  * Panels → Cloudflare → Smart domains: connect a DNS token, then make names on the user's own domain
- * with the right proxy setting for each use. Without a token it shows the two connect steps.
+ * with the right proxy setting for each use. Without a token it shows the three one-tap steps; right
+ * after the token works it shows what was filled in from the selected config, to confirm in one tap.
  */
 @Composable
 internal fun SmartDomainsScreen(onBack: () -> Unit, vm: SmartDomainsViewModel = viewModel()) {
@@ -262,22 +303,53 @@ internal fun SmartDomainsScreen(onBack: () -> Unit, vm: SmartDomainsViewModel = 
     val context = LocalContext.current
     var confirmRemove by remember { mutableStateOf<SmartNames.Saved?>(null) }
     var confirmForget by remember { mutableStateOf(false) }
+    // The clipboard is looked at each time the screen comes back (from Cloudflare's page). Only a short
+    // masked hint is kept here; the token is read again when the user taps "Use copied token".
+    var resumes by remember { mutableIntStateOf(0) }
+    var copiedHint by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { vm.open() }
+    LifecycleResumeEffect(Unit) {
+        resumes++
+        onPauseOrDispose { }
+    }
+    LaunchedEffect(resumes, ui.connected) {
+        if (ui.connected) {
+            copiedHint = null
+        } else {
+            delay(300) // Android 10+ only hands the clipboard to the app once its window has focus.
+            copiedHint = copiedToken(context)?.let(TokenTemplate::masked)
+        }
+    }
 
-    val openTokens = {
-        runCatching {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(API_TOKENS_URL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure { Toast.makeText(context, "Cannot open $API_TOKENS_URL", Toast.LENGTH_SHORT).show() }
+    val openTokenPage = {
+        runCatching { CloudflareTokenHelper.openTokenUrl(context, CloudflareTokenHelper.buildSmartDomainsTokenUrl()) }
+            .onFailure { Toast.makeText(context, "Cannot open Cloudflare in a browser", Toast.LENGTH_SHORT).show() }
         Unit
+    }
+    val useCopied = {
+        val token = copiedToken(context)
+        if (token != null) vm.useCopiedToken(token)
+        else {
+            copiedHint = null
+            Toast.makeText(context, "No token on the clipboard. Copy it in Cloudflare first.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     ScreenFrame(
         title = "Smart domains",
-        subtitle = if (ui.connected) "Names on your own Cloudflare domain" else "Connect your Cloudflare domain",
+        subtitle = when {
+            ui.connected && ui.fill != null -> "Ready to create"
+            ui.connected -> "Names on your own Cloudflare domain"
+            else -> "Panels → Cloudflare"
+        },
         onBack = onBack
     ) {
-        if (ui.connected) ConnectedContent(ui, vm, onRemove = { confirmRemove = it }, onForget = { confirmForget = true })
-        else ConnectContent(ui, vm, openTokens, onForget = { confirmForget = true })
+        val fill = ui.fill
+        when {
+            ui.connected && fill != null -> FillContent(ui, fill, vm)
+            ui.connected -> ConnectedContent(ui, vm, onRemove = { confirmRemove = it }, onForget = { confirmForget = true })
+            else -> ConnectContent(ui, vm, copiedHint, openTokenPage, useCopied, onForget = { confirmForget = true })
+        }
     }
 
     confirmRemove?.let { n ->
@@ -300,37 +372,120 @@ internal fun SmartDomainsScreen(onBack: () -> Unit, vm: SmartDomainsViewModel = 
     }
 }
 
-/** No working token yet: make one, paste it, check it. */
+/** No working token yet: create it on Cloudflare's page, paste it back in one tap, confirm. */
 @Composable
-private fun ConnectContent(ui: SmartDomainsUi, vm: SmartDomainsViewModel, openTokens: () -> Unit, onForget: () -> Unit) {
-    SvCard {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("1. Make a token", color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                "In Cloudflare: My Profile → API Tokens → Create Custom Token.\n" +
-                    "Permissions: Zone · Zone · Read and Zone · DNS · Edit.\n" +
-                    "Zone resources: only your domain.",
-                color = Sv.Muted, fontSize = 13.sp, lineHeight = 18.sp
-            )
+private fun ConnectContent(
+    ui: SmartDomainsUi,
+    vm: SmartDomainsViewModel,
+    copiedHint: String?,
+    openTokenPage: () -> Unit,
+    useCopied: () -> Unit,
+    onForget: () -> Unit
+) {
+    var manual by remember { mutableStateOf(false) }
+    GroupCard {
+        TokenStep(1, "Create token", active = true) {
+            CloudflarePageText()
+            TokenChips(TokenTemplate.SMART_DOMAINS_NAME, TokenTemplate.SMART_DOMAINS.map { it.label } + "Your zones")
+            PrimaryButton("Create token in Cloudflare", openTokenPage, Modifier.fillMaxWidth(), icon = Icons.AutoMirrored.Rounded.OpenInNew)
         }
-    }
-    GhostButton("Open Cloudflare API tokens", openTokens, Modifier.fillMaxWidth(), icon = Icons.AutoMirrored.Rounded.OpenInNew)
-    SvCard {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("2. Paste it here", color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            SvField(
-                value = ui.tokenInput, onValueChange = vm::setToken, label = "API token", secret = true,
-                placeholder = if (ui.hasToken) "A token is saved; paste a new one to replace it" else ""
-            )
-            Text("Kept encrypted on this phone. Sent only to api.cloudflare.com.", color = Sv.Muted, fontSize = 12.5.sp, lineHeight = 17.sp)
+        RowDivider(0.dp)
+        TokenStep(2, "Paste it back", active = copiedHint != null) {
+            StepText("When you come back, Maximus offers the copied token. Tap once to check it.")
+            if (copiedHint != null) {
+                PrimaryButton(
+                    if (ui.checking) "Checking…" else "Use copied token $copiedHint", useCopied, Modifier.fillMaxWidth(),
+                    icon = Icons.Rounded.ContentPaste, enabled = !ui.checking
+                )
+            }
+            if (manual || ui.tokenInput.isNotBlank() || ui.hasToken) {
+                SvField(
+                    value = ui.tokenInput, onValueChange = vm::setToken, label = "API token", secret = true,
+                    placeholder = if (ui.hasToken) "A token is saved; paste a new one to replace it" else ""
+                )
+                GhostButton(
+                    if (ui.checking) "Checking…" else "Check token", vm::checkToken, Modifier.fillMaxWidth(),
+                    enabled = !ui.checking && (ui.tokenInput.isNotBlank() || ui.hasToken)
+                )
+            } else {
+                TextAction("Paste it yourself", { manual = true }, color = Sv.Muted)
+            }
+        }
+        RowDivider(0.dp)
+        TokenStep(3, "Confirm", active = false) {
+            StepText("Maximus fills in the domain, the subdomain, the server and the Cloudflare setting. You tap Confirm.")
         }
     }
     if (ui.error.isNotBlank()) Notice(ui.error, NoticeKind.ERROR)
-    PrimaryButton(
-        if (ui.checking) "Checking…" else "Check token", vm::checkToken, Modifier.fillMaxWidth(),
-        enabled = !ui.checking && (ui.tokenInput.isNotBlank() || ui.hasToken)
-    )
+    TokenFootnote("The token is limited to DNS on your domains and is stored encrypted on the phone. It is sent only to api.cloudflare.com.")
     if (ui.hasToken) TextAction("Forget token", onForget, color = Sv.Muted, enabled = !ui.checking)
+}
+
+/** Step 3: the token works; what was filled in, with one Confirm and a way to the full form. */
+@Composable
+private fun FillContent(ui: SmartDomainsUi, fill: SmartFill.Fill, vm: SmartDomainsViewModel) {
+    val zone = ui.zone ?: return
+    val idle = ui.busy.isBlank()
+    val active = ui.zones.filter { it.status == "active" }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Sv.GreenSoft)
+            .border(1.dp, Sv.Green.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Badge("Token works", Tone.GOOD, dot = true)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            val count = ui.zones.size
+            Text(if (count == 1) "1 domain found" else "$count domains found", color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "${zone.name} · ${SmartNames.zoneStatus(zone.status).lowercase()}", color = Sv.Muted, fontSize = 13.sp,
+                fontFamily = Mono, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+    if (ui.zones.size > 1 && active.size != 1) {
+        Text("This token sees ${ui.zones.size} domains. Pick one:", color = Sv.Muted, fontSize = 12.5.sp)
+        Choices(ui.zones, zone, { it.name }, mono = true, enabled = idle) { vm.pickZone(it) }
+    }
+
+    SectionLabel("Filled in for you")
+    GroupCard {
+        FillRow("Server", fill.title) { Text(fill.server.address, color = Sv.Muted, fontSize = 13.sp, fontFamily = Mono, maxLines = 1) }
+        RowDivider()
+        FillRow("Subdomain", "${ui.label}.${zone.name}", mono = true) { TextAction("change", vm::newLabel, color = Sv.Muted, enabled = idle) }
+        RowDivider()
+        FillRow("Cloudflare setting", if (ui.use.proxied) "Proxied (orange cloud)" else "DNS only (grey cloud)") {
+            Badge(SmartNames.chip(ui.use), if (ui.use.proxied) Tone.ACCENT else Tone.NEUTRAL, dot = true)
+        }
+        RowDivider()
+        FillRow(SmartFill.recordCaption(fill), SmartFill.recordLine(fill), mono = true) { }
+    }
+    Text(fill.reason, color = Sv.Muted, fontSize = 12.5.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 2.dp))
+    if (ui.error.isNotBlank()) Notice(ui.error, NoticeKind.ERROR)
+    PrimaryButton(
+        ui.busy.ifBlank { "Confirm" }, vm::create, Modifier.fillMaxWidth(),
+        enabled = idle && SmartDomainsViewModel.formProblem(ui) == null
+    )
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        TextAction("Edit details", vm::editDetails, color = Sv.Muted, enabled = idle)
+    }
+}
+
+/** One line of the filled-in summary: a small caption, the value, and something on the right. */
+@Composable
+private fun FillRow(caption: String, value: String, mono: Boolean = false, trailing: @Composable RowScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(caption, color = Sv.Muted, fontSize = 13.sp)
+            Text(
+                value, color = Sv.Text, fontSize = if (mono) 14.sp else 15.sp, fontWeight = FontWeight.SemiBold,
+                fontFamily = if (mono) Mono else null, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        trailing()
+    }
 }
 
 /** A working token: the zone, the names made, and the New name form. */

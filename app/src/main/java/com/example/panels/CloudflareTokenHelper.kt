@@ -3,6 +3,7 @@ package com.example.panels
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.example.panels.cloudflare.TokenTemplate
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -16,26 +17,26 @@ data class CloudflareAccountInfo(
 object CloudflareTokenHelper {
     const val CLOUDFLARE_SIGNUP_URL = "https://dash.cloudflare.com/sign-up"
 
-    /** Open token creation without silently granting all accounts/zones or unrelated edits.
-     * A scoped template is available only after an account has been explicitly selected.
+    /**
+     * Cloudflare's own user-token template link for the Worker panel. Cloudflare pre-fills the permissions
+     * and resources; the user only reviews and confirms creation on Cloudflare's page.
      */
-    fun buildOneClickTokenUrl(tokenName: String = "Maximus-BPB-Worker"): String {
-        // Official Cloudflare user-token template URL. Cloudflare pre-fills the
-        // permissions/resources; the user only reviews and confirms creation.
-        val permissions = """[{"key":"workers_scripts","type":"edit"},{"key":"workers_kv_storage","type":"edit"},{"key":"account_settings","type":"read"}]"""
-        return "https://dash.cloudflare.com/profile/api-tokens" +
-            "?permissionGroupKeys=${Uri.encode(permissions)}" +
-            "&accountId=%2A" +
-            "&zoneId=all" +
-            "&name=${Uri.encode(tokenName)}"
-    }
+    fun buildOneClickTokenUrl(tokenName: String = TokenTemplate.WORKER_NAME): String =
+        TokenTemplate.url(TokenTemplate.WORKER, tokenName)
 
+    /** The same kind of link for Smart domains: Zone Read and DNS Edit on the user's zones, nothing else. */
+    fun buildSmartDomainsTokenUrl(): String =
+        TokenTemplate.url(TokenTemplate.SMART_DOMAINS, TokenTemplate.SMART_DOMAINS_NAME)
 
     /**
      * Opens the 1-Click Cloudflare token creation screen directly in the default browser.
      */
-    fun openOneClickTokenUrl(context: Context, tokenName: String = "Maximus-BPB-Worker") {
-        val url = buildOneClickTokenUrl(tokenName)
+    fun openOneClickTokenUrl(context: Context, tokenName: String = TokenTemplate.WORKER_NAME) {
+        openTokenUrl(context, buildOneClickTokenUrl(tokenName))
+    }
+
+    /** Opens a token template link (see [TokenTemplate]) in the default browser. */
+    fun openTokenUrl(context: Context, url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
