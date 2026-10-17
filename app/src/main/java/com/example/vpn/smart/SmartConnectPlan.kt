@@ -45,8 +45,10 @@ data class SmartConnectPlan(
     data class Input(
         /** GOD MODE: the emergency engines may be started directly. */
         val godMode: Boolean,
-        /** Trade mode: the exit is pinned to the selected server. */
+        /** Trade mode or the power button: the exit is pinned to the selected server. */
         val lockExit: Boolean,
+        /** The power button (not Trade mode): only the config selected in Nodes, as saved. */
+        val exact: Boolean = false,
         /** "Connect anyway": the user's choice, started without a search. */
         val force: Boolean,
         /** Smart Connect, or automatic failover, may move the session to another server. */
@@ -61,7 +63,8 @@ data class SmartConnectPlan(
             val off = linkedMapOf<EmergencyTransport, String>()
             when {
                 input.lockExit -> SearchStage.values().filter { it != SearchStage.SELECTED }
-                    .forEach { skipped[it] = "Trade mode keeps the exit on the selected server" }
+                    .forEach { skipped[it] = if (input.exact) "Power button: only the config selected in Nodes; Smart Connect searches"
+                        else "Trade mode keeps the exit on the selected server" }
                 !input.mayMove -> listOf(SearchStage.OTHER_SERVERS, SearchStage.RECOVERY, SearchStage.REVIVAL)
                     .forEach { skipped[it] = "Smart Connect and automatic failover are off" }
             }

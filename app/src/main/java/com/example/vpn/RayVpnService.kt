@@ -67,6 +67,13 @@ class RayVpnService : VpnService() {
         const val EXTRA_SMART = "com.drfxai.maximusvpn.EXTRA_SMART"
         /** "Connect anyway": start the selected server even though its real pre-flight failed. */
         const val EXTRA_FORCE = "com.drfxai.maximusvpn.EXTRA_FORCE"
+        /**
+         * The power button: connect the config selected in Nodes exactly as saved. No remembered route,
+         * disguise, other server, emergency transport, recovery or revival replaces it, and it is started
+         * without a pre-flight; the traffic check after start reports whether it carries traffic.
+         * Smart Connect is the separate, explicit search ([EXTRA_SMART]).
+         */
+        const val EXTRA_EXACT = "com.drfxai.maximusvpn.EXTRA_EXACT"
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
         /** How long a connect may spend in the LAB's fast recovery before it reports no verified path. */
         internal const val FAST_RECOVERY_MS = 90_000L
@@ -320,6 +327,7 @@ class RayVpnService : VpnService() {
         val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
         val smart = intent?.getBooleanExtra(EXTRA_SMART, false) == true
         val force = intent?.getBooleanExtra(EXTRA_FORCE, false) == true
+        val exact = intent?.getBooleanExtra(EXTRA_EXACT, false) == true && !smart
 
         when (action) {
             ACTION_CONNECT -> {
@@ -335,6 +343,8 @@ class RayVpnService : VpnService() {
                 }
 
                 lifecycle.newIntent()
+                // The user's choice for this session: reconnects and mode switches keep it until the next Connect.
+                exactSession = exact
                 connectJob?.cancel()
                 // Engines of the attempt this Connect replaces stop now, so the new attempt does not wait behind them.
                 com.example.vpn.sidecar.EngineReaper.stopAll()
@@ -432,6 +442,9 @@ class RayVpnService : VpnService() {
         }
         connectLocked(profile, smart, exclude, startedByUser, force)
     }
+
+    /** The session was started with the power button: only the selected config, as saved (see [EXTRA_EXACT]). */
+    @Volatile private var exactSession = false
 
     /** What worked on each carrier or Wi-Fi: stealth alternates, kinds of connection, probe time limits. */
     private val networkMemory: com.example.vpn.smart.NetworkMemory get() = com.example.RayApplication.instance.networkMemory
@@ -619,8 +632,10 @@ class RayVpnService : VpnService() {
             dnsPoisoned = false
             privateServerLookup = policy.privateServerLookup
             val settings = policy.apply(settingsRepository.getSettings())
-            // Trade mode pins the exit: never race, never switch the chosen config for anything.
-            val raceFirst = !policy.lockExit && (smart || policy.alwaysSmartConnect)
+            // Trade mode and the power button pin the config: never race, never switch it for anything.
+            val exact = exactSession
+            val lockExit = policy.lockExit || exact
+            val raceFirst = !lockExit && (smart || policy.alwaysSmartConnect)
 
             updateState(fresh(ConnectionStatus.PREPARING))
 
@@ -716,7 +731,7 @@ class RayVpnService : VpnService() {
             // Which stages this connect may run, steered by what was measured on this network (not by guesses).
             val plan = com.example.vpn.smart.SmartConnectPlan.of(com.example.vpn.smart.SmartConnectPlan.Input(
                 godMode = policy.mode == com.example.data.model.OperationalMode.GOD_MODE,
-                lockExit = policy.lockExit, force = force, mayMove = raceFirst || settings.autoFailoverEnabled,
+                lockExit = lockExit, exact = exact && !policy.lockExit, force = force, mayMove = raceFirst || settings.autoFailoverEnabled,
                 reading = com.example.vpn.smart.SmartConnectPlan.freshReading(
                     com.example.vpn.smart.NetworkCapabilityDetector.last, network, System.currentTimeMillis())
             ))
@@ -773,7 +788,7 @@ class RayVpnService : VpnService() {
             // Stage A: the exact route that carried verified traffic on this network before. The chosen
             // config's own route first; with Smart Connect, then the best other remembered route. Each has
             // to carry a real request here now; a failure counts against it and the normal search goes on.
-            if (!policy.lockExit && !force) {
+            if (!lockExit && !force) {
                 val remembered = networkMemory.routes.forNetwork(routeNetwork)
                 val ordered = remembered.filter { it.profileId == requestedProfile.id } +
                     if (raceFirst) remembered.filter { it.profileId != requestedProfile.id && it.profileId !in exclude }.take(1) else emptyList()
@@ -859,7 +874,7 @@ class RayVpnService : VpnService() {
             // 3a. A recovery candidate that carried traffic for this config on this network before (FIX BPB
             // or earlier recovery): a derived copy, the saved config itself is unchanged. One request decides;
             // a failure counts towards its rollback and the normal path search continues.
-            if (!raced && !policy.lockExit) {
+            if (!raced && !lockExit) {
                 val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile) }.getOrNull()
                 if (recovery != null) {
                     showForegroundNotification("Trying the recovered settings...")
@@ -885,7 +900,7 @@ class RayVpnService : VpnService() {
             // 3b. Find a path that carries traffic before the core starts: the saved profile, its stealth
             // alternates (split handshake, other fingerprint, ECH, UDP junk) or another kind on the same
             // server. The probe's sockets bypass the traffic-blocking interface (RealDelayProbe.socketProtector).
-            if (!raced && !policy.lockExit && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
+            if (!raced && !lockExit && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
                 showForegroundNotification("Finding a working route...")
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.SAFE_VARIANTS)
                 // Without Smart Connect the finder's first test is the selected server itself (stage B).
@@ -980,7 +995,8 @@ class RayVpnService : VpnService() {
 
             // Always a pre-flight: a server that was not tested above (no Smart Connect, no stealth variants)
             // gets one real request now, so a dead server is never started blindly.
-            if (!raced && !provenDead && !engineAdopted && !force && !com.example.vpn.sidecar.Sidecars.isEngineProfile(profile)) {
+            // The power button skips it: the user's config is started as chosen and checked after start.
+            if (!raced && !provenDead && !engineAdopted && !force && !exact && !com.example.vpn.sidecar.Sidecars.isEngineProfile(profile)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.ORDINARY_PREFLIGHT)
                 tracker.start(com.example.vpn.smart.SearchStage.SELECTED)
                 if (recentlyFailed(profile)) {
@@ -1010,7 +1026,7 @@ class RayVpnService : VpnService() {
             // Escalation before giving up: the LAB's fast recovery (Connect goal) over every other saved family
             // and the built-in recovery engines, stopping at the first path that carries a real request.
             var recoveryExhausted = false
-            if (!raced && !engineAdopted && provenDead && !force && !policy.lockExit && (raceFirst || settings.autoFailoverEnabled)) {
+            if (!raced && !engineAdopted && provenDead && !force && !lockExit && (raceFirst || settings.autoFailoverEnabled)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.RECOVERY_ENGINES)
                 showForegroundNotification("No server answered; trying recovery methods...")
                 tracker.start(com.example.vpn.smart.SearchStage.RECOVERY)
@@ -1049,7 +1065,7 @@ class RayVpnService : VpnService() {
             // that comes back. Bounded in time; never in Trade (its exit is pinned). The winning recipe is
             // saved to the ledger, so even a cut-short run helps the next connect.
             coroutineContext.ensureActive()
-            if (!raced && !engineAdopted && provenDead && !force && !policy.lockExit && recoveryExhausted &&
+            if (!raced && !engineAdopted && provenDead && !force && !lockExit && recoveryExhausted &&
                 (raceFirst || settings.autoFailoverEnabled)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.RECOVERY_ENGINES)
                 showForegroundNotification("Reviving configurations...")
@@ -1123,7 +1139,7 @@ class RayVpnService : VpnService() {
             // No blind connections: a server whose real request just failed here, with nothing verified in
             // its place, is not started (PathGate). The user can still choose "Connect anyway".
             val gate = com.example.vpn.smart.PathGate.decide(verified = raced, provenDead = provenDead,
-                engineAdopted = engineAdopted, forced = force)
+                engineAdopted = engineAdopted, forced = force || exact)
             if (!com.example.vpn.smart.PathGate.mayStart(gate)) {
                 val name = com.example.core.SecretRedactor.redact(requestedProfile.name)
                 XrayLogManager.w("SMART", "No verified path: '$name' carried no real traffic on this network and no alternative did. " +
@@ -1415,7 +1431,12 @@ class RayVpnService : VpnService() {
                 tunnelProbe = { routeLatency() },
                 // Only the native core's own sockets carry the tunnel's data; other engines are always checked.
                 passive = if (activeEngine is NativeTunVpnEngine) com.example.vpn.smart.PassiveHealth() else null,
-                onTriggerSwitch = { newProfile, reason ->
+                onTriggerSwitch = onTriggerSwitch@{ newProfile, reason ->
+                    if (exactSession) {
+                        XrayLogManager.w("FAILOVER", "The connection stopped carrying traffic ($reason). Staying on the selected config: " +
+                            "it was connected with the power button. Use Smart Connect to search for another.")
+                        return@onTriggerSwitch
+                    }
                     // A recovered path that stopped carrying traffic counts towards its rollback.
                     activeRecovery?.let { com.example.RayApplication.instance.bpbRecovery.recordOutcome(it, success = false) }
                     activeRoute?.let { (net, id) -> networkMemory.routes.recordFailure(net, id) }

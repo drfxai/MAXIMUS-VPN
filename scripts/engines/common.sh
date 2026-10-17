@@ -20,21 +20,23 @@ case "$ABI" in
   *) echo "Unsupported ABI: $ABI" >&2; exit 2 ;;
 esac
 
-export GOOS=android CGO_ENABLED=0
-# Go links android/arm64 programs itself; for the other ABIs it needs the NDK's C linker (cgo).
-if [ "$ABI" != arm64-v8a ]; then
-  ndk="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}}"
-  if [ -z "$ndk" ] || [ ! -d "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
-    echo "Building for $ABI needs the Android NDK (set ANDROID_NDK_HOME)" >&2
-    exit 2
-  fi
-  case "$ABI" in
-    armeabi-v7a) triple=armv7a-linux-androideabi ;;
-    x86_64)      triple=x86_64-linux-android ;;
-  esac
-  # API 24 is the app's minSdk.
-  export CGO_ENABLED=1 CC="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/${triple}24-clang"
+export GOOS=android
+# Every ABI is linked with the NDK's C toolchain (cgo). Without cgo, Go's own DNS resolver reads
+# /etc/resolv.conf, which Android does not have, so every lookup goes to localhost:53 and is refused
+# (Snowflake's broker lookups failed exactly so). With cgo, Go uses Android's resolver, as net/conf.go
+# prefers on android.
+ndk="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}}"
+if [ -z "$ndk" ] || [ ! -d "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
+  echo "Building for $ABI needs the Android NDK (set ANDROID_NDK_HOME)" >&2
+  exit 2
 fi
+case "$ABI" in
+  arm64-v8a)   triple=aarch64-linux-android ;;
+  armeabi-v7a) triple=armv7a-linux-androideabi ;;
+  x86_64)      triple=x86_64-linux-android ;;
+esac
+# API 24 is the app's minSdk.
+export CGO_ENABLED=1 CC="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/${triple}24-clang"
 # One pinned Go toolchain for every engine, fetched through the Go proxy and checked like a module
 # when the local Go differs. psiphon-tunnel-core needs at least go 1.26.0.
 export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.26.8}"
