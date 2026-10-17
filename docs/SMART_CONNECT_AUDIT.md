@@ -48,7 +48,7 @@ The order is fixed; evidence changes the order inside a stage but not which stag
 | Unified orchestrator with stage counts | Partial (inline ladder, D9) | `SmartConnectPlan` + `SearchTracker`: stages A–G with tested/verified/failed counts in `ConnectionState.search`; order and budgets unchanged |
 | Measured network state steering connect | Partial (D5) | The plan skips WARP and MASQUE when UDP or QUIC was measured blocked on this network in the last 10 minutes; nothing is skipped on a guess |
 | Failure-classified revival | Partial (D7) | `RevivalTriage` reads the plain failure first: a name that does not resolve or an address that refuses gets address recipes only; a cut handshake moves fragment, ECH and fingerprint up; a refused certificate moves other addresses up (the check stays on). Ambiguous errors limit nothing. Still Cloudflare-fronted configs only |
-| MTU stall diagnosis | Missing (D8) | A/B the TUN MTU only when the bulk check stalls |
+| MTU stall diagnosis | Missing (D8) | `TunMtuTrial`: after a bulk stall through the tunnel, the next connect on that network uses MTU 1280; its bulk check keeps it (3 days) or restores the configured MTU and does not retest. The running tunnel is never rebuilt |
 | MASQUE HTTP/3 | Sidecar present, never run against Cloudflare | Needs a phone run |
 | MASQUE HTTP/2 | Missing | Not built: see "Not built" |
 | Slipstream | Sidecar present; CI host self-test carries traffic both ways | Needs the user's own server and a phone run |
