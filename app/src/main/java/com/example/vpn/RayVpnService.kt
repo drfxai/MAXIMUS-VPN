@@ -1431,10 +1431,10 @@ class RayVpnService : VpnService() {
                 tunnelProbe = { routeLatency() },
                 // Only the native core's own sockets carry the tunnel's data; other engines are always checked.
                 passive = if (activeEngine is NativeTunVpnEngine) com.example.vpn.smart.PassiveHealth() else null,
+                staysOnSelected = { exactSession },
                 onTriggerSwitch = onTriggerSwitch@{ newProfile, reason ->
                     if (exactSession) {
-                        XrayLogManager.w("FAILOVER", "The connection stopped carrying traffic ($reason). Staying on the selected config: " +
-                            "it was connected with the power button. Use Smart Connect to search for another.")
+                        // Failover checks staysOnSelected first; this only catches a switch already under way.
                         return@onTriggerSwitch
                     }
                     // A recovered path that stopped carrying traffic counts towards its rollback.

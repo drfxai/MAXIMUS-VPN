@@ -45,3 +45,36 @@ class TorProgress(private val file: File) {
         }
     }
 }
+
+/**
+ * How long a Tor start may take. Over Snowflake on a filtered network Tor can still be loading relay
+ * descriptors when the first [baseMs] run out, so each higher bootstrap percentage buys [stallMs] more
+ * from that moment, never past [capMs] from the start. A start that stops advancing ends as before.
+ */
+class TorStartDeadline(
+    private val startedAt: Long,
+    baseMs: Long,
+    private val stallMs: Long = STALL_MS,
+    private val capMs: Long = CAP_MS
+) {
+    private var deadline = startedAt + baseMs
+    private var best = -1
+
+    /** Reads one line from [TorProgress.newLines]; a higher "Tor N%" moves the deadline out. */
+    fun saw(line: String, now: Long) {
+        val percent = percentOf(line) ?: return
+        if (percent <= best) return
+        best = percent
+        deadline = maxOf(deadline, minOf(now + stallMs, startedAt + capMs))
+    }
+
+    fun expired(now: Long): Boolean = now >= deadline
+
+    companion object {
+        const val STALL_MS = 150_000L
+        const val CAP_MS = 360_000L
+
+        internal fun percentOf(line: String): Int? =
+            Regex("^Tor (\\d{1,3})%:").find(line)?.groupValues?.get(1)?.toIntOrNull()
+    }
+}

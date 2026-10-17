@@ -43,6 +43,8 @@ class FailoverManager(
     private val tunnelProbe: (suspend () -> Long)? = null,
     /** Passive evidence that lets a busy, recently verified connection skip a check (null: always check). */
     private val passive: PassiveHealth? = null,
+    /** True while the session must stay on the config the user picked (the power button): nothing is switched. */
+    private val staysOnSelected: () -> Boolean = { false },
     private val onTriggerSwitch: (VlessProfile, String) -> Unit
 ) {
     enum class CascadeTier(val stageNumber: Int, val title: String, val badge: String) {
@@ -268,6 +270,12 @@ class FailoverManager(
     }
 
     private suspend fun attemptFailover(degradedProfile: VlessProfile, settings: AppSettings) {
+        if (staysOnSelected()) {
+            consecutiveFailures.set(0)
+            XrayLogManager.w("FAILOVER", "${SecretRedactor.redact(degradedProfile.name)} stopped carrying traffic. Staying on it: it was " +
+                "connected with the power button. Use Smart Connect to search for another.")
+            return
+        }
         val allProfiles = try {
             serverRepository.allProfiles.first()
         } catch (e: CancellationException) {
