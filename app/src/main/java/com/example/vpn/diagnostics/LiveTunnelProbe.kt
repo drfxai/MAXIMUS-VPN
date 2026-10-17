@@ -44,7 +44,7 @@ object LiveTunnelProbe {
         return Sample(latency, country)
     }
 
-    private fun vpnNetwork(context: Context): android.net.Network {
+    internal fun vpnNetwork(context: Context): android.net.Network {
         val manager = requireNotNull(context.getSystemService(ConnectivityManager::class.java))
         return manager.allNetworks.firstOrNull {
             manager.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true

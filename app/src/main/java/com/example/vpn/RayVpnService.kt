@@ -144,6 +144,15 @@ class RayVpnService : VpnService() {
     private var tunnelManager: TunnelManager? = null
     /** The separate engine program carrying traffic for the current profile, if any. */
     @Volatile private var sidecar: com.example.vpn.sidecar.RunningEngine? = null
+
+    /**
+     * The local port of the engine program this session forwards to, when there is one. The app is left
+     * out of its own tunnel then (Android refuses it the VPN network), so checks go through this port.
+     */
+    @Volatile private var engineEndpoint: com.example.vpn.verify.Socks5.Endpoint? = null
+
+    /** The upload and download check of the current attempt. */
+    private var trafficCheckJob: Job? = null
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
     private var failoverManager: com.example.vpn.smart.FailoverManager? = null
     private val serviceTxBytes = java.util.concurrent.atomic.AtomicLong(0)
@@ -853,6 +862,7 @@ class RayVpnService : VpnService() {
                 (raceFirst || settings.autoFailoverEnabled)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.RECOVERY_ENGINES)
                 showForegroundNotification("Reviving configurations...")
+                mutateState { if (it.attemptId == attemptId) it.copy(reviving = true) else it }
                 val reviveDeadline = System.currentTimeMillis() + CONFIG_REVIVE_MS
                 val attemptJob = coroutineContext[Job]
                 val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
@@ -903,6 +913,7 @@ class RayVpnService : VpnService() {
                 } else if (report != null) {
                     XrayLogManager.w("SMART", "Config revival brought nothing back (${report.results.size} eligible).")
                 }
+                mutateState { if (it.attemptId == attemptId) it.copy(reviving = false) else it }
             }
 
             // No blind connections: a server whose real request just failed here, with nothing verified in
@@ -926,7 +937,7 @@ class RayVpnService : VpnService() {
                     else "No verified path: $name carried no traffic on this network, and no other server or method did.") +
                         if (release) "" else " Traffic stays blocked; disconnect to use the network without the VPN.",
                     com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED
-                ).copy(canConnectAnyway = true, recoveryStage = ladder.stage.title))
+                ).copy(canConnectAnyway = true, recoveryStage = ladder.stage.title, recoveryExhausted = recoveryExhausted))
                 if (release) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
@@ -1037,6 +1048,7 @@ class RayVpnService : VpnService() {
             }
             if (engineChain != null) profile = startChain(engineChain, settings)
             else if (sidecarEngine != null) profile = startSidecar(sidecarEngine, profile, settings)
+            engineEndpoint = if (engineChain != null || sidecarEngine != null) com.example.vpn.verify.Socks5.endpointOf(profile) else null
             val runtime = EngineSelectionPolicy.select(profile)
             val engineId = com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
             if (!engineBreaker.allows(engineId)) {
@@ -1137,7 +1149,10 @@ class RayVpnService : VpnService() {
             // 10. Only real traffic through the tunnel makes the connection CONNECTED. Until a request
             // goes through, the state says the tunnel is up but unverified.
             val startTime = System.currentTimeMillis()
-            mutateState { if (it.attemptId == attemptId) it.copy(status = ConnectionStatus.VERIFYING, vpnIp = "172.19.0.1", errorMessage = null) else it }
+            mutateState {
+                if (it.attemptId == attemptId) it.copy(status = ConnectionStatus.VERIFYING, vpnIp = "172.19.0.1", errorMessage = null,
+                    revived = activeRecovery != null) else it
+            }
             showForegroundNotification("Verifying traffic through ${profile.name}...")
             val check = verifyTraffic()
             book.recordPath(com.example.vpn.connectivity.EvidenceSource.SMART_CONNECT, com.example.vpn.connectivity.MeasurementType.TUNNEL_TRAFFIC,
@@ -1155,6 +1170,7 @@ class RayVpnService : VpnService() {
                 com.example.vpn.diagnostics.ConnectionMetrics.recordConnectTime(connectMs)
                 XrayLogManager.i("VPN", "Time from connect to verified traffic: $connectMs ms.")
                 onTrafficVerified(requestedProfile, check.first)
+                launchTrafficCheck()
             } else {
                 val stage = check.second ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN
                 showForegroundNotification("Tunnel up, no traffic yet (${stage.name})")
@@ -1185,7 +1201,7 @@ class RayVpnService : VpnService() {
             failoverManager = com.example.vpn.smart.FailoverManager(
                 serverRepository = serverRepository,
                 protectSocket = { socket -> safeProtectSocket(socket) },
-                tunnelProbe = { com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService) },
+                tunnelProbe = { routeLatency() },
                 // Only the native core's own sockets carry the tunnel's data; other engines are always checked.
                 passive = if (activeEngine is NativeTunVpnEngine) com.example.vpn.smart.PassiveHealth() else null,
                 onTriggerSwitch = { newProfile, reason ->
@@ -1529,7 +1545,8 @@ class RayVpnService : VpnService() {
                 }
                 try {
                     com.example.vpn.diagnostics.ConnectionMetrics.activeTunnelChecks.incrementAndGet()
-                    val sample = com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService)
+                    val sample = if (engineEndpoint != null) com.example.vpn.diagnostics.LiveTunnelProbe.Sample(routeLatency(), null)
+                        else com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService)
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     if (_vpnState.value.attemptId == attemptId) passEvent("tunnel.recheck", sample.latencyMs)
                     passive?.recordActiveSuccess()
@@ -1590,7 +1607,7 @@ class RayVpnService : VpnService() {
                 networkProfileId = com.example.vpn.smart.NetworkCapabilityDetector.last?.key()
             ),
             listOf(com.example.vpn.connectivity.MultiProbeHealthEngine.step(com.example.vpn.connectivity.ProbeStep.HTTP_THROUGH_TUNNEL) {
-                com.example.vpn.diagnostics.LiveTunnelProbe.latency(this@RayVpnService)
+                routeLatency()
             }),
             // A result for an older attempt or an earlier network never verifies this one.
             freshness = { _vpnState.value.attemptId == attemptId && _vpnState.value.networkGeneration == generation }
@@ -1603,6 +1620,48 @@ class RayVpnService : VpnService() {
         }
         XrayLogManager.w("VPN", "Traffic check through the tunnel failed: ${report.observation()}. ${report.assessment()}")
         return null to (report.failureStage ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN)
+    }
+
+    /**
+     * One real request along the current route: through the VPN network, or through the engine program's
+     * local port when the app is left out of its own tunnel (see [engineEndpoint]).
+     */
+    private suspend fun routeLatency(): Long {
+        val endpoint = engineEndpoint ?: return com.example.vpn.diagnostics.LiveTunnelProbe.latency(this)
+        return withContext(Dispatchers.IO) {
+            com.example.vpn.verify.TrafficCheck(com.example.vpn.verify.RouteDialers.engine(endpoint), stepTimeoutMs = 5_000).smallRequest()
+        }
+    }
+
+    /**
+     * After the first verified request: a download counted byte for byte and an upload the far side echoes,
+     * along the same route. Runs in the background so it never delays the connection, and its result only
+     * counts for the attempt and network it was measured on. A stalled bulk transfer is reported, not acted on.
+     */
+    private fun launchTrafficCheck() {
+        val state = _vpnState.value
+        val attemptId = state.attemptId ?: return
+        val generation = state.networkGeneration
+        val endpoint = engineEndpoint
+        val dialer = endpoint?.let { com.example.vpn.verify.RouteDialers.engine(it) } ?: com.example.vpn.verify.RouteDialers.vpn(this)
+        val path = if (endpoint != null) com.example.vpn.verify.ProbePath.ENGINE_PROXY else com.example.vpn.verify.ProbePath.TUN
+        trafficCheckJob?.cancel()
+        trafficCheckJob = serviceScope.launch(Dispatchers.IO) {
+            val evidence = runCatching { com.example.vpn.verify.TrafficCheck(dialer).both(attemptId, generation, path) }
+                .onFailure { XrayLogManager.w("VPN", "Upload/download check could not run: ${it.javaClass.simpleName}") }
+                .getOrNull() ?: return@launch
+            if (!isActive) return@launch
+            mutateState { if (evidence.appliesTo(it)) it.copy(trafficEvidence = evidence) else it }
+            XrayLogManager.i("VPN", "Upload/download check: ${evidence.describe()}.")
+            if (evidence.bulkStalled) {
+                XrayLogManager.w("VPN", "Small requests pass but a bulk transfer stalled: a path MTU black hole or throttling is suspected.")
+            }
+            com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
+                "result" to if (evidence.bidirectional) "verified" else if (evidence.bulkStalled) "stalled" else "partial",
+                "path" to path.name,
+                "detail" to evidence.describe()
+            ))
+        }
     }
 
     /** A request that went through the tunnel, recorded so the PASS can be checked later. */
@@ -1693,6 +1752,9 @@ class RayVpnService : VpnService() {
         durationJob = null
         pingJob?.cancel()
         pingJob = null
+        trafficCheckJob?.cancel()
+        trafficCheckJob = null
+        engineEndpoint = null
 
         serviceTxBytes.set(0)
         serviceRxBytes.set(0)
