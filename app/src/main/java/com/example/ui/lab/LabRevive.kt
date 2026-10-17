@@ -52,11 +52,12 @@ private fun resolverName(url: String) = when {
     else -> url.substringAfter("//").substringBefore('/')
 }
 
-private fun revivalColor(c: LabColors, o: ConfigRevival.Outcome) = when (o) {
-    ConfigRevival.Outcome.REVIVED -> c.good
-    ConfigRevival.Outcome.ALREADY_WORKING -> c.info
-    ConfigRevival.Outcome.NOT_REVIVED -> c.bad
-    ConfigRevival.Outcome.NOT_TESTED -> c.text3
+private fun toneColor(c: LabColors, t: ReviveLines.Tone) = when (t) {
+    ReviveLines.Tone.GOOD -> c.good
+    ReviveLines.Tone.INFO -> c.info
+    ReviveLines.Tone.WARN -> c.okay
+    ReviveLines.Tone.BAD -> c.bad
+    ReviveLines.Tone.MUTED -> c.text3
 }
 
 @Composable
@@ -165,14 +166,16 @@ internal fun RevivePage(
                 Panel(c) {
                     r.results.forEachIndexed { i, res ->
                         if (i > 0) Hairline(c, 14.dp)
+                        // Why it failed as it was, and what was done about it.
+                        val line = ReviveLines.of(res)
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 LabText(res.name, c.text, 14.sp, FontWeight.Medium, maxLines = 1)
-                                LabText(res.detail, c.text3, 12.sp, maxLines = 2, lineHeight = 16.sp)
+                                LabText(line.text, c.text3, 12.sp, maxLines = 3, lineHeight = 16.sp)
                             }
                             Spacer(Modifier.width(10.dp))
                             Column(horizontalAlignment = Alignment.End) {
-                                Badge(res.outcome.title, revivalColor(c, res.outcome))
+                                Badge(line.badge, toneColor(c, line.tone))
                                 res.latencyMs?.let { LabText("$it ms", c.text2, 11.5.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1) }
                             }
                         }
@@ -189,8 +192,8 @@ internal fun RevivePage(
             }
         }
         item {
-            Footnote(c, "Saved configs are never changed. A revived config uses its working recipe the next time it connects, " +
-                "and goes back to its saved settings if the recipe stops working. Certificates are always checked.")
+            Footnote(c, ReviveLines.FOOTER + " A revived config uses its working recipe the next time it connects, " +
+                "and goes back to its saved settings if the recipe stops working.")
         }
     }
 }

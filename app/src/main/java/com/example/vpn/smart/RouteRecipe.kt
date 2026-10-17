@@ -93,6 +93,11 @@ class RouteBook(private val load: () -> String?, private val save: (String) -> U
         routes.filter { it.network == network && it.expiresAt > now }
             .sortedWith(compareByDescending<RouteRecipe> { it.bidirectional }.thenBy { it.failures }.thenByDescending { it.verifiedAt })
 
+    /** How many unexpired routes each network has, for Settings: network keys and counts only. */
+    @Synchronized
+    fun countsByNetwork(now: Long = System.currentTimeMillis()): Map<String, Int> =
+        routes.filter { it.expiresAt > now }.groupingBy { it.network }.eachCount()
+
     /** [recipe] carried verified traffic: it replaces the same route and becomes the newest. */
     @Synchronized
     fun recordVerified(recipe: RouteRecipe) {

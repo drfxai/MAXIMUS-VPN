@@ -69,10 +69,10 @@ class RayVpnService : VpnService() {
         const val EXTRA_FORCE = "com.drfxai.maximusvpn.EXTRA_FORCE"
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
         /** How long a connect may spend in the LAB's fast recovery before it reports no verified path. */
-        private const val FAST_RECOVERY_MS = 90_000L
+        internal const val FAST_RECOVERY_MS = 90_000L
         // The agent's last resort: revive dead Cloudflare-fronted configs. Bounded so a failed connect
         // does not hang; revival keeps the winning recipe for next time even if this run is cut short.
-        private const val CONFIG_REVIVE_MS = 60_000L
+        internal const val CONFIG_REVIVE_MS = 60_000L
         /** Re-check interval for a connection whose last checks all passed. */
         private const val PING_HEALTHY_MS = 30_000L
         /** How long a clean-address scan may take before the connect goes on without one. */
@@ -434,17 +434,7 @@ class RayVpnService : VpnService() {
     }
 
     /** What worked on each carrier or Wi-Fi: stealth alternates, kinds of connection, probe time limits. */
-    private val networkMemory by lazy {
-        val prefs = getSharedPreferences("network_memory", Context.MODE_PRIVATE)
-        com.example.vpn.smart.NetworkMemory(
-            load = { prefs.getString("v1", null) },
-            save = { prefs.edit().putString("v1", it).apply() },
-            loadRoutes = { prefs.getString("routes", null) },
-            saveRoutes = { prefs.edit().putString("routes", it).apply() },
-            loadMtu = { prefs.getString("mtu", null) },
-            saveMtu = { prefs.edit().putString("mtu", it).apply() }
-        )
-    }
+    private val networkMemory: com.example.vpn.smart.NetworkMemory get() = com.example.RayApplication.instance.networkMemory
 
     /**
      * Races the saved servers other than [exclude] (see ServerRace) and returns the fastest that works.

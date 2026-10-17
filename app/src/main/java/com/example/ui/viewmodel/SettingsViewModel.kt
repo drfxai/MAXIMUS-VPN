@@ -13,8 +13,11 @@ import com.example.data.repository.ServerRepository
 import com.example.data.repository.SettingsRepository
 import com.example.xray.XrayConfigBuilder
 import com.example.xray.XrayLogManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -187,5 +190,27 @@ class SettingsViewModel(
 
     fun resetToDefaults() {
         settingsRepository.updateSettings(AppSettings())
+    }
+
+    private val _learnedNetworks = MutableStateFlow<List<com.example.ui.settings.LearnedNetworks.Row>>(emptyList())
+    /** Settings → Smart Connect → "Learned network data": remembered routes per network, from the route book. */
+    val learnedNetworks: StateFlow<List<com.example.ui.settings.LearnedNetworks.Row>> = _learnedNetworks.asStateFlow()
+
+    fun refreshLearnedNetworks() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _learnedNetworks.value = runCatching {
+                com.example.ui.settings.LearnedNetworks.rows(RayApplication.instance.networkMemory.routes.countsByNetwork())
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    /** Forgets what Smart Connect learned on every network; saved servers and settings are untouched. */
+    fun clearLearnedNetworks() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { RayApplication.instance.networkMemory.clear() }
+                .onSuccess { XrayLogManager.i("SETTINGS", "Learned network data cleared.") }
+                .onFailure { XrayLogManager.w("SETTINGS", "Could not clear learned network data: ${it.javaClass.simpleName}") }
+            refreshLearnedNetworks()
+        }
     }
 }

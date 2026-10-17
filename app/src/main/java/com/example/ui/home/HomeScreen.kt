@@ -454,6 +454,25 @@ fun HomeScreen(
             }
         }
 
+        // Smart Connect's search for this attempt: where it stands, and the sheet with every stage.
+        val smartMode = smartConnectMode(connectionState)
+        var showSearch by remember { mutableStateOf(false) }
+        if (smartMode != null) {
+            SmartConnectEntry(connectionState, smartMode, onOpen = { showSearch = true })
+            if (showSearch) {
+                SmartConnectSheet(
+                    state = connectionState,
+                    mode = smartMode,
+                    selectedName = selectedProfile?.takeIf { it.id == connectionState.selectedProfileId }?.name,
+                    onStop = {
+                        showSearch = false
+                        com.example.vpn.VpnController.stopVpn(context)
+                    },
+                    onDismiss = { showSearch = false }
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         // Smart Connect Hero Card — or, in Trade mode, the fixed-exit card, or the Ghost Rider dashboard.

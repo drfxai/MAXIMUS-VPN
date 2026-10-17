@@ -115,6 +115,9 @@ fun SettingsScreen(
     var showConfigPreview by remember { mutableStateOf(false) }
     var previewJson by remember { mutableStateOf("") }
     var showResetConfirm by remember { mutableStateOf(false) }
+    var showLearnedNetworks by remember { mutableStateOf(false) }
+    val learnedNetworks by viewModel.learnedNetworks.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { viewModel.refreshLearnedNetworks() }
     var dnsDropdownExpanded by remember { mutableStateOf(false) }
 
     // APP UPDATE section: looks up public release info only. Nothing is downloaded or installed here;
@@ -317,6 +320,20 @@ fun SettingsScreen(
                     subtitle = "Automatically switches to the next best node if packet loss > 30% or latency > 800ms",
                     checked = settings.autoFailoverEnabled,
                     onCheckedChange = { viewModel.setAutoFailover(it) }
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // What Smart Connect remembers per network, and the way to forget it.
+                SettingsRow(
+                    title = "Learned network data",
+                    subtitle = when (val routes = learnedNetworks.sumOf { it.routes }) {
+                        0 -> "Nothing learned yet"
+                        else -> "${if (routes == 1) "1 route" else "$routes routes"} on " +
+                            if (learnedNetworks.size == 1) "1 network" else "${learnedNetworks.size} networks"
+                    },
+                    leading = { SettingsIconBox(Icons.Default.Route, AppTheme.colors.primary) },
+                    onClick = { viewModel.refreshLearnedNetworks(); showLearnedNetworks = true }
                 )
             }
         }
@@ -1036,6 +1053,17 @@ fun SettingsScreen(
         ConfigPreviewDialog(
             configJson = previewJson,
             onDismiss = { showConfigPreview = false }
+        )
+    }
+
+    if (showLearnedNetworks) {
+        LearnedNetworkPage(
+            rows = learnedNetworks,
+            onClear = {
+                viewModel.clearLearnedNetworks()
+                Toast.makeText(context, "Learned network data cleared", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { showLearnedNetworks = false }
         )
     }
 
