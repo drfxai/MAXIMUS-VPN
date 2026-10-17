@@ -64,6 +64,20 @@ class RayApplication : Application() {
         )
     }
 
+    /**
+     * What worked on each carrier or Wi-Fi (see NetworkMemory). One instance for the VPN and Settings, so
+     * clearing it in Settings clears what the next connect uses.
+     */
+    val networkMemory: com.example.vpn.smart.NetworkMemory by lazy {
+        val prefs = getSharedPreferences("network_memory", MODE_PRIVATE)
+        com.example.vpn.smart.NetworkMemory(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() },
+            loadRoutes = { prefs.getString("routes", null) },
+            saveRoutes = { prefs.edit().putString("routes", it).apply() }
+        )
+    }
+
     /** Recovers degraded BPB / Cloudflare-fronted configs with derived copies; originals are never changed. */
     val bpbRecovery: com.example.vpn.connectivity.BpbRecoveryEngine by lazy {
         com.example.vpn.connectivity.BpbRecoveryEngine(ledger = recoveryLedger, fragmentReverted = { key, network ->

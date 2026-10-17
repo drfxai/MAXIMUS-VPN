@@ -89,6 +89,16 @@ class RouteBookTest {
         assertTrue(memory.workingKinds("cell:43235").isEmpty())
         assertTrue(memory.routes.forNetwork("cell:43235", now = 2_000).isEmpty())
         assertTrue(book().forNetwork("cell:43235", now = 2_000).isEmpty())
+        assertTrue(memory.routes.countsByNetwork(now = 2_000).isEmpty())
+    }
+
+    @Test fun countsPerNetworkLeaveOutExpiredRoutes() {
+        val b = book()
+        b.recordVerified(recipe(profile = "p1"))
+        b.recordVerified(recipe(profile = "p2"))
+        b.recordVerified(recipe(network = "wifi:aaaa11112222", profile = "p1", at = 5_000))
+        assertEquals(mapOf("cell:43235" to 2, "wifi:aaaa11112222" to 1), b.countsByNetwork(now = 6_000))
+        assertEquals(mapOf("wifi:aaaa11112222" to 1), b.countsByNetwork(now = 1_000 + RouteBook.TTL_MS + 1))
     }
 
     @Test fun aRecipeHoldsNoCredential() {

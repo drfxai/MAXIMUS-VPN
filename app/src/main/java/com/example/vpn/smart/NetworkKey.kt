@@ -11,14 +11,6 @@ import android.telephony.TelephonyManager
  * that needs the location permission.
  */
 object NetworkKey {
-    private val CARRIERS = mapOf(
-        "43211" to "Hamrah-e Aval (MCI)",
-        "43235" to "Irancell",
-        "43220" to "Rightel",
-        "43232" to "Taliya",
-        "43270" to "TCI mobile"
-    )
-
     @Suppress("DEPRECATION")
     fun current(context: Context): String {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return "other"
@@ -40,7 +32,7 @@ object NetworkKey {
 
     /** A readable name for logs. */
     fun describe(key: String): String = when {
-        key.startsWith("cell:") -> CARRIERS[key.removePrefix("cell:")]?.let { "$it ($key)" } ?: key
+        key.startsWith("cell:") -> NetworkNames.carrier(key.removePrefix("cell:"))?.let { "$it ($key)" } ?: key
         else -> key
     }
 }
