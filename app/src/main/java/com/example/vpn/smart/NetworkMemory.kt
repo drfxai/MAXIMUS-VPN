@@ -16,7 +16,15 @@ import kotlin.math.ceil
  *
  * [load] and [save] hold the JSON (SharedPreferences in the app, memory in tests).
  */
-class NetworkMemory(private val load: () -> String?, private val save: (String) -> Unit) {
+class NetworkMemory(
+    private val load: () -> String?,
+    private val save: (String) -> Unit,
+    loadRoutes: () -> String? = { null },
+    saveRoutes: (String) -> Unit = {}
+) {
+    /** The exact routes that carried verified traffic, per network (see [RouteRecipe]). */
+    val routes = RouteBook(loadRoutes, saveRoutes)
+
     private class Entry(
         val variants: ConcurrentHashMap<String, String> = ConcurrentHashMap(),
         val kinds: MutableList<String> = mutableListOf(),
@@ -66,6 +74,14 @@ class NetworkMemory(private val load: () -> String?, private val save: (String) 
         while (e.kinds.size > MAX_KINDS) e.kinds.removeAt(e.kinds.size - 1)
         e.latencyMs = e.latencyMs?.let { (it * (1 - ALPHA) + latencyMs * ALPHA).toLong() } ?: latencyMs
         persist()
+    }
+
+    /** Forgets everything learned about every network: kinds, alternates, latencies and routes. */
+    @Synchronized
+    fun clear() {
+        entries.clear()
+        persist()
+        routes.clear()
     }
 
     @Synchronized
