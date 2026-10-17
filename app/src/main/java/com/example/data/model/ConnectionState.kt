@@ -49,6 +49,8 @@ data class ConnectionState(
     val downloadSpeedBps: Long = 0,
     val pingMs: Long? = null,
     val exitCountryCode: String? = null,
+    /** The exit address websites see, measured through the tunnel; null until measured. */
+    val exitIp: String? = null,
     val pingCheckedAt: Long? = null,
     val vpnIp: String? = null,
     val errorMessage: String? = null,

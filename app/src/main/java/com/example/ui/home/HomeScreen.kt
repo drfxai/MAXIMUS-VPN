@@ -26,18 +26,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.NetworkCheck
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -388,7 +383,17 @@ fun HomeScreen(
             EarthMode.CONNECTING -> AppTheme.colors.statusWarning
             EarthMode.ON -> AppTheme.colors.statusConnected
         }
-        EarthHero(mode = earthMode) {
+        val phoneCountry = remember { phoneCountry(context) }
+        val exitCode = connectionState.exitCountryCode?.uppercase(Locale.US)?.takeIf { connectionState.isConnected && it.length == 2 }
+        val route = EarthRoute(
+            from = phoneCountry,
+            fromTitle = phoneCountry?.let { "${ActiveCardModel.flag(it)} ${ActiveCardModel.countryName(it)}" } ?: "",
+            fromSub = "You",
+            to = exitCode,
+            toTitle = exitCode?.let { "${ActiveCardModel.flag(it)} ${ActiveCardModel.countryName(it)}" } ?: "",
+            toSub = connectionState.pingMs?.takeIf { it > 0 }?.let { "Exit · $it ms" } ?: "Exit"
+        )
+        EarthHero(mode = earthMode, route = route) {
             GlassPowerButton(
                 accent = earthAccent,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 6.dp),
@@ -497,12 +502,10 @@ fun HomeScreen(
                 }
             )
             Spacer(modifier = Modifier.height(16.dp))
-        } else smartRecommendation?.let { smart ->
-            SmartRecommendationCard(
-                smart = smart,
-                livePingMs = connectionState.pingMs,
+        } else ActiveCardModel.of(connectionState, selectedProfile)?.let { model ->
+            ActiveConnectionCard(
+                model = model,
                 buttonState = SmartButtonState.of(connectionState),
-                runnersUp = topNodes.drop(1),
                 onSmartConnect = {
                     vpnViewModel.connectSmart(context) {
                         onRequestVpnPermission()
@@ -568,19 +571,6 @@ fun HomeScreen(
                 ?.uppercase(Locale.US)
                 ?.takeIf { connectionState.isConnected && it.length == 2 },
             onClick = onNavigateToServers
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Real-Time Traffic Dashboard Grid
-        TrafficDashboardCard(
-            uploadBytes = connectionState.uploadBytes,
-            downloadBytes = connectionState.downloadBytes,
-            uploadSpeedBps = connectionState.uploadSpeedBps,
-            downloadSpeedBps = connectionState.downloadSpeedBps,
-            vpnIp = connectionState.vpnIp ?: "172.19.0.1",
-            isConnected = connectionState.isConnected,
-            activeProfile = activeProfile
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -744,44 +734,20 @@ private fun TradeModeCard(
     }
 }
 
-private val SmartConnect.SmartSelection.failedHere: Boolean
-    get() = !inUse && evidence == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED
-
-/** What this network said about a node, in a word or two, for the Optimal node card. */
-private fun evidenceLabel(node: SmartConnect.SmartSelection): String = when {
-    node.inUse -> "in use"
-    else -> when (node.evidence) {
-        com.example.vpn.connectivity.PathEligibility.FRESH_VERIFIED,
-        com.example.vpn.connectivity.PathEligibility.FRESH_CANDIDATE -> "works here"
-        com.example.vpn.connectivity.PathEligibility.STALE_VERIFIED -> "worked before"
-        com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED -> "failed here"
-        com.example.vpn.connectivity.PathEligibility.UNTESTED, null -> "not tested"
-    }
-}
-
-/** Green: carrying traffic or works here; red: failed here moments ago; gold: not known yet. */
+/** The main card: the exit country, exit IP, ping and speeds while connected; the Nodes choice otherwise. */
 @Composable
-private fun evidenceColor(node: SmartConnect.SmartSelection): Color {
-    val c = AppTheme.colors
-    return when {
-        node.inUse -> c.statusConnected
-        node.evidence == com.example.vpn.connectivity.PathEligibility.FRESH_VERIFIED ||
-            node.evidence == com.example.vpn.connectivity.PathEligibility.FRESH_CANDIDATE -> c.statusConnected
-        node.failedHere -> c.statusError
-        else -> c.statusWarning
-    }
-}
-
-@Composable
-private fun SmartRecommendationCard(
-    smart: SmartConnect.SmartSelection,
-    livePingMs: Long? = null,
+private fun ActiveConnectionCard(
+    model: ActiveCardModel,
     buttonState: SmartButtonState,
-    runnersUp: List<SmartConnect.SmartSelection> = emptyList(),
     onSmartConnect: () -> Unit,
     onStop: () -> Unit
 ) {
     val c = AppTheme.colors
+    val toneColor = when (model.tone) {
+        ActiveCardModel.Tone.OK -> c.statusConnected
+        ActiveCardModel.Tone.WARN -> c.statusWarning
+        ActiveCardModel.Tone.MUTED -> c.textMuted
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -791,137 +757,69 @@ private fun SmartRecommendationCard(
         border = androidx.compose.foundation.BorderStroke(1.dp, c.borderSubtle)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    tint = c.primary,
-                    modifier = Modifier.size(13.dp)
-                )
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                StatusDot(if (model.live) toneColor else c.textMuted, 6.dp)
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (smart.inUse) "In use now" else "Optimal node",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.3.sp,
-                    color = c.textSecondary
-                )
+                Text(text = model.label, fontSize = 11.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.3.sp, color = c.textSecondary)
                 Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "Score ${"%.0f".format(smart.overallScore)}",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = c.textMuted,
-                    maxLines = 1,
-                    softWrap = false
-                )
+                model.configName?.let {
+                    Text(
+                        text = it, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = c.textMuted,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp)
+                    )
+                }
             }
-
             Spacer(modifier = Modifier.height(12.dp))
-
-            // Primary node: name + metrics on the left, measured ping with a live dot on the right.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(42.dp).clip(CircleShape).background(c.surfaceCardHighlight),
+                    contentAlignment = Alignment.Center
+                ) { Text(text = model.flag, fontSize = 22.sp) }
+                Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = smart.profile.name,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = c.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = "${smart.reasonDownload} · ${smart.reasonStability}",
-                        fontSize = 12.sp,
-                        color = c.textSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(evidenceColor(smart), 6.dp)
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = (if (smart.inUse) livePingMs else null)?.let { "$it ms" }
-                            ?: smart.profile.lastLatencyMs?.takeIf { it > 0 && !smart.failedHere }?.let { "$it ms" }
-                            ?: evidenceLabel(smart),
-                        fontSize = 12.5.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = c.textPrimary,
-                        maxLines = 1,
-                        softWrap = false
-                    )
+                    Text(text = model.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = model.subtitle, fontSize = 12.sp, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-
-            if (runnersUp.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(14.dp))
-                HairlineDivider()
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "If it drops, switches to",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.3.sp,
-                    color = c.textSecondary
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                runnersUp.forEachIndexed { index, node ->
-                    if (index > 0) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        HairlineDivider()
-                        Spacer(modifier = Modifier.height(10.dp))
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${index + 2}",
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = c.textMuted,
-                            modifier = Modifier.width(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = node.profile.name,
-                            fontSize = 14.sp,
-                            color = c.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        StatusDot(evidenceColor(node), 5.dp)
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(
-                            text = node.profile.lastLatencyMs?.takeIf { it > 0 && !node.failedHere }?.let { "$it ms" } ?: evidenceLabel(node),
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = c.textSecondary,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                }
+            Spacer(modifier = Modifier.height(14.dp))
+            val valueColor = if (model.live) c.textPrimary else c.textMuted
+            MetricCell("Exit IP", model.exitIp, valueColor, mono = model.live, modifier = Modifier.fillMaxWidth())
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MetricCell("Ping", model.ping, valueColor, mono = true, modifier = Modifier.weight(1f))
+                MetricCell("Status", model.status, if (model.live) toneColor else c.textMuted, mono = false, modifier = Modifier.weight(1f))
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MetricCell("↓ Download", model.download, valueColor, mono = true, modifier = Modifier.weight(1f))
+                MetricCell("↑ Upload", model.upload, valueColor, mono = true, modifier = Modifier.weight(1f))
+            }
+            Spacer(modifier = Modifier.height(14.dp))
             SmartConnectButton(
                 state = buttonState,
                 onClick = { if (buttonState.tapStops) onStop() else onSmartConnect() }
             )
         }
+    }
+}
+
+@Composable
+private fun MetricCell(label: String, value: String, valueColor: Color, mono: Boolean, modifier: Modifier = Modifier) {
+    val c = AppTheme.colors
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(11.dp))
+            .background(c.surfaceCardHighlight)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Text(text = label, fontSize = 11.sp, color = c.textSecondary)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = valueColor,
+            fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1078,131 +976,11 @@ private fun ServerSelectorCard(
     }
 }
 
-@Composable
-private fun TrafficDashboardCard(
-    uploadBytes: Long,
-    downloadBytes: Long,
-    uploadSpeedBps: Long,
-    downloadSpeedBps: Long,
-    vpnIp: String,
-    isConnected: Boolean,
-    activeProfile: VlessProfile?
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = AppTheme.colors.surfaceCard,
-        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle)
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TrafficMetric(
-                    icon = Icons.Default.ArrowDownward,
-                    tint = AppTheme.colors.metricDownload,
-                    label = "Download",
-                    speed = if (isConnected) TrafficStats.formatSpeed(downloadSpeedBps) else "0 B/s",
-                    total = TrafficStats.formatBytes(downloadBytes),
-                    modifier = Modifier.weight(1f)
-                )
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(34.dp)
-                        .background(AppTheme.colors.borderSubtle)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                TrafficMetric(
-                    icon = Icons.Default.ArrowUpward,
-                    tint = AppTheme.colors.metricUpload,
-                    label = "Upload",
-                    speed = if (isConnected) TrafficStats.formatSpeed(uploadSpeedBps) else "0 B/s",
-                    total = TrafficStats.formatBytes(uploadBytes),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Protocol and tunnel address
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(AppTheme.colors.surfaceElevated.copy(alpha = 0.6f))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TelemetryDetail(
-                    icon = Icons.Default.Lock,
-                    tint = AppTheme.colors.primary,
-                    text = activeProfile?.protocolType?.displayName ?: "VLESS"
-                )
-                TelemetryDetail(
-                    icon = Icons.Default.Dns,
-                    tint = AppTheme.colors.metricDownload,
-                    text = vpnIp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TrafficMetric(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: Color,
-    label: String,
-    speed: String,
-    total: String,
-    modifier: Modifier = Modifier
-) {
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(30.dp)
-                .clip(CircleShape)
-                .background(tint.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(imageVector = icon, contentDescription = label, tint = tint, modifier = Modifier.size(16.dp))
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        Column {
-            Text(
-                text = speed,
-                color = AppTheme.colors.textPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1
-            )
-            Text(
-                text = "$label • $total",
-                color = AppTheme.colors.textMuted,
-                fontSize = 10.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun TelemetryDetail(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: Color,
-    text: String
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(12.dp))
-        Spacer(modifier = Modifier.width(5.dp))
-        Text(text = text, color = AppTheme.colors.textSecondary, fontSize = 10.5.sp, maxLines = 1)
-    }
-}
+/** The country of the mobile network the phone is on, else its SIM's; null on Wi-Fi-only devices. */
+private fun phoneCountry(context: Context): String? = runCatching {
+    val tm = context.getSystemService(android.telephony.TelephonyManager::class.java)
+    listOf(tm?.networkCountryIso, tm?.simCountryIso).firstOrNull { !it.isNullOrBlank() && it.length == 2 }?.uppercase(Locale.US)
+}.getOrNull()
 
 private fun countryFlag(code: String): String {
     if (code.length != 2 || code == "--") return "🌐"

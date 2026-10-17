@@ -28,8 +28,16 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import com.example.ui.theme.AppTheme
 import kotlin.math.PI
@@ -47,20 +55,36 @@ import kotlin.math.sqrt
 enum class EarthMode { OFF, CONNECTING, ON }
 
 /**
+ * The route the globe draws while connected: where the phone is ([from]) and where traffic leaves
+ * ([to], measured through the tunnel), as ISO country codes, each with a two-line label. A code the
+ * globe does not know keeps the default point and draws no label.
+ */
+data class EarthRoute(
+    val from: String?,
+    val fromTitle: String,
+    val fromSub: String,
+    val to: String?,
+    val toTitle: String,
+    val toSub: String
+)
+
+/**
  * The home screen's centrepiece: a dotted Earth (Natural Earth land, public domain) with
  * sunlight, city lights, an atmosphere and four satellites. While connecting it turns faster
- * and draws trails from Iran to candidate exits; once connected it faces the route and pulses
+ * and draws trails from the phone to candidate exits; once connected it faces the measured route and pulses
  * along it. [overlay] sits on top (the power button).
  */
 @Composable
 fun EarthHero(
     mode: EarthMode,
+    route: EarthRoute? = null,
     modifier: Modifier = Modifier,
     overlay: @Composable BoxScope.() -> Unit = {}
 ) {
     val context = LocalContext.current
     val land = remember { EarthData.landDots(context) }
     val anim = remember { EarthAnim() }
+    val measurer = rememberTextMeasurer()
     var clock by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
         val start = withFrameNanos { it }
@@ -75,8 +99,9 @@ fun EarthHero(
     }
     Box(modifier.fillMaxWidth().widthIn(max = 360.dp).aspectRatio(1f), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxWidth().aspectRatio(1f)) {
+            anim.route(route)
             anim.step(clock, mode, accent)
-            drawEarth(anim, land, dark)
+            drawEarth(anim, land, dark, measurer)
         }
         overlay()
     }
@@ -91,6 +116,27 @@ private class EarthAnim {
     var color: Color = Color.Unspecified
     var mode = EarthMode.OFF
     var burst = -1f
+    var home = EarthData.HOME
+    var exit = EarthData.EXIT
+    var face = FACE
+    var labels: EarthRoute? = null
+    private var routeKey: String? = null
+
+    /** Moves the pins to [r]'s countries and turns the globe to face the middle of the route. */
+    fun route(r: EarthRoute?) {
+        val from = EarthPlaces.of(r?.from); val to = EarthPlaces.of(r?.to)
+        labels = r?.let {
+            it.copy(fromTitle = if (from != null) it.fromTitle else "", toTitle = if (to != null) it.toTitle else "")
+        }
+        val key = "${r?.from}>${r?.to}"
+        if (key == routeKey) return
+        routeKey = key
+        home = from?.let { ll(it.first, it.second) } ?: EarthData.HOME
+        exit = to?.let { ll(it.first, it.second) } ?: EarthData.EXIT
+        val mx = home[0] + exit[0]; val mz = home[2] + exit[2]
+        // A point at longitude L faces the viewer when rot = -90° - L.
+        face = if (hypot(mx, mz) < 1e-3f) FACE else -PI.toFloat() / 2 - atan2(-mz, mx)
+    }
 
     fun step(clock: Float, newMode: EarthMode, accent: Color) {
         dt = (clock - t).coerceIn(0f, 0.05f)
@@ -99,8 +145,8 @@ private class EarthAnim {
         mode = newMode
         color = if (color == Color.Unspecified) accent else lerp(color, accent, min(1f, dt * 2.5f))
         if (mode == EarthMode.ON) {
-            // Turn to face Iran and Europe, then hold.
-            var d = FACE - rot
+            // Turn to face the middle of the route, then hold.
+            var d = face - rot
             d = atan2(sin(d), cos(d))
             rot += d * min(1f, dt * 1.4f)
         } else {
@@ -173,7 +219,7 @@ internal object EarthData {
 /** A point projected to the canvas: x, y and depth (z > 0 faces the viewer). */
 private class P(val x: Float, val y: Float, val z: Float, val vx: Float, val vy: Float)
 
-private fun DrawScope.drawEarth(a: EarthAnim, land: List<FloatArray>, dark: Boolean) {
+private fun DrawScope.drawEarth(a: EarthAnim, land: List<FloatArray>, dark: Boolean, measurer: TextMeasurer) {
     val c = Offset(size.width / 2, size.height / 2)
     val r = size.minDimension * 0.34f
     val col = a.color
@@ -212,7 +258,7 @@ private fun DrawScope.drawEarth(a: EarthAnim, land: List<FloatArray>, dark: Bool
         drawCircle(Brush.radialGradient(listOf(color.copy(alpha = alpha * 0.55f), Color.Transparent), at, radius * 4.5f), radius * 4.5f, at)
         drawCircle(color.copy(alpha = alpha), radius, at)
     }
-    fun arc(p0: FloatArray, p1: FloatArray, head: Float, tail: Float, alpha: Float, w: Float) {
+    fun arc(p0: FloatArray, p1: FloatArray, head: Float, tail: Float, alpha: Float, w: Float, dot: Boolean = true) {
         val n = 40
         for (k in 0 until n) {
             val k0 = tail + (head - tail) * k / n; val k1 = tail + (head - tail) * (k + 1) / n
@@ -222,7 +268,7 @@ private fun DrawScope.drawEarth(a: EarthAnim, land: List<FloatArray>, dark: Bool
             drawLine(col.copy(alpha = alpha * (0.2f + 0.8f * k / n)), Offset(a0.x, a0.y), Offset(a1.x, a1.y), w, StrokeCap.Round)
         }
         val h = proj(slerp(p0, p1, head.coerceIn(0f, 1f)))
-        if (!hidden(h)) glowDot(Offset(h.x, h.y), w * 1.1f, Color.White, alpha)
+        if (dot && !hidden(h)) glowDot(Offset(h.x, h.y), w * 1.1f, Color.White, alpha)
     }
     fun pin(v: FloatArray, sz: Float, alpha: Float, pulse: Float?) {
         val p = proj(v); if (p.z < 0.05f) return
@@ -342,26 +388,34 @@ private fun DrawScope.drawEarth(a: EarthAnim, land: List<FloatArray>, dark: Bool
             }
             EarthData.CANDIDATES.forEachIndexed { i, cand ->
                 val ph = (t * 0.65f + i.toFloat() / EarthData.CANDIDATES.size) % 1f
-                arc(EarthData.HOME, cand, ph * 1.35f, ph * 1.35f - 0.5f, 0.9f, 1.4f.dp.toPx() * 0.8f)
+                arc(a.home, cand, ph * 1.35f, ph * 1.35f - 0.5f, 0.9f, 1.4f.dp.toPx() * 0.8f)
                 pin(cand, 1.6f.dp.toPx() * 0.8f, 0.85f, null)
             }
         }
         EarthMode.ON -> {
-            arc(EarthData.HOME, EarthData.EXIT, 1f, 0f, 0.55f, 1.4f.dp.toPx() * 0.8f)
-            val k = (t * 0.5f) % 1f
-            arc(EarthData.HOME, EarthData.EXIT, k, k - 0.3f, 1f, 2.2f.dp.toPx() * 0.8f)
-            pin(EarthData.EXIT, 2.6f.dp.toPx() * 0.8f, 1f, (t * 0.8f) % 1f)
+            // A soft wide glow under a bright core, then packets: out to the exit in white, back in the accent.
+            arc(a.home, a.exit, 1f, 0f, 0.16f, 7f.dp.toPx() * 0.8f, dot = false)
+            arc(a.home, a.exit, 1f, 0f, 0.85f, 1.8f.dp.toPx() * 0.8f, dot = false)
+            for (o in listOf(0f, 0.33f, 0.66f)) {
+                val h = proj(slerp(a.home, a.exit, (t * 0.45f + o) % 1f))
+                if (!hidden(h)) glowDot(Offset(h.x, h.y), 1.7f.dp.toPx() * 0.8f, Color.White, 1f)
+            }
+            for (o in listOf(0.15f, 0.6f)) {
+                val h = proj(slerp(a.home, a.exit, 1f - (t * 0.6f + o) % 1f))
+                if (!hidden(h)) glowDot(Offset(h.x, h.y), 1.3f.dp.toPx() * 0.8f, col, 0.95f)
+            }
+            pin(a.exit, 2.8f.dp.toPx() * 0.8f, 1f, (t * 0.8f) % 1f)
         }
         EarthMode.OFF -> EarthData.CANDIDATES.forEach { pin(it, 1.3f.dp.toPx() * 0.8f, 0.4f, null) }
     }
-    pin(EarthData.HOME, 2.6f.dp.toPx() * 0.8f, 1f, if (a.mode == EarthMode.OFF) null else (t * 1.1f) % 1f)
+    pin(a.home, 2.6f.dp.toPx() * 0.8f, 1f, if (a.mode == EarthMode.OFF) null else (t * 1.1f) % 1f)
 
     // satellites in front, with signal beams to the ground while connecting or connected
     EarthData.SATELLITES.forEachIndexed { i, s ->
         val p = satPos(s, satAngles[i]); if (p.z < 0) return@forEachIndexed
         val q = satPos(s, satAngles[i] + 0.05f)
         if (a.mode != EarthMode.OFF) {
-            val g = proj(if (i % 2 == 1) EarthData.HOME else EarthData.EXIT)
+            val g = proj(if (i % 2 == 1) a.home else a.exit)
             if (g.z > 0.1f) {
                 val pulse = (t * 1.5f + i * 0.37f) % 1f
                 drawLine(col.copy(alpha = (if (a.mode == EarthMode.ON) 0.22f else 0.35f) * (1 - pulse * 0.6f)), Offset(p.x, p.y), Offset(g.x, g.y), 0.8f.dp.toPx(),
@@ -372,6 +426,39 @@ private fun DrawScope.drawEarth(a: EarthAnim, land: List<FloatArray>, dark: Bool
         drawSat(p, atan2(q.y - p.y, q.x - p.x) + PI.toFloat() / 2, 1f)
     }
     EarthData.SATELLITES.forEach { drawPath(orbitPath(it, front = true), col.copy(alpha = 0.22f), style = Stroke(0.8f.dp.toPx())) }
+
+    // where the phone is and where traffic leaves, once connected
+    a.labels?.takeIf { a.mode == EarthMode.ON }?.let { route ->
+        val pad = 8.dp.toPx(); val gap = 12.dp.toPx(); val edge = 6.dp.toPx()
+        val panel = if (dark) Color(0xD9161720) else Color(0xEBFFFFFF)
+        val border = if (dark) Color(0xFF2C2E3E) else Color(0xFFE2E8F0)
+        val titleStyle = TextStyle(color = if (dark) Color(0xFFF3F4F8) else Color(0xFF0F172A), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        val subStyle = TextStyle(color = if (dark) Color(0xFF989AA8) else Color(0xFF475569), fontSize = 10.sp)
+        fun box(v: FloatArray, title: String, sub: String): Pair<androidx.compose.ui.geometry.Rect, () -> Unit>? {
+            if (title.isEmpty()) return null
+            val p = proj(v); if (p.z < 0.05f) return null
+            val t1 = measurer.measure(title, titleStyle); val t2 = measurer.measure(sub, subStyle)
+            val w = max(t1.size.width, t2.size.width) + pad * 2; val h = t1.size.height + t2.size.height + pad * 1.2f
+            val left = (p.x - w / 2).coerceIn(edge, max(edge, size.width - w - edge))
+            val rect = androidx.compose.ui.geometry.Rect(left, p.y + gap, left + w, p.y + gap + h)
+            return rect to {
+                drawRoundRect(panel, rect.topLeft, rect.size, CornerRadius(9.dp.toPx()))
+                drawRoundRect(border, rect.topLeft, rect.size, CornerRadius(9.dp.toPx()), style = Stroke(1f))
+                drawText(t1, topLeft = Offset(rect.left + pad, rect.top + pad * 0.6f))
+                drawText(t2, topLeft = Offset(rect.left + pad, rect.top + pad * 0.6f + t1.size.height))
+            }
+        }
+        val to = box(a.exit, route.toTitle, route.toSub)
+        var from = box(a.home, route.fromTitle, route.fromSub)
+        // Two countries close together: the phone's label goes above its pin instead.
+        if (from != null && to != null && from.first.overlaps(to.first)) {
+            val p = proj(a.home); val r0 = from.first; val hgt = r0.height
+            val moved = androidx.compose.ui.geometry.Rect(r0.left, p.y - gap - hgt, r0.right, p.y - gap)
+            val draw = from.second
+            from = moved to { translate(0f, moved.top - r0.top) { draw() } }
+        }
+        to?.second?.invoke(); from?.second?.invoke()
+    }
 
     // shockwave when the tunnel comes up
     if (a.burst >= 0f) {
