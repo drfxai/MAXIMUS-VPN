@@ -79,7 +79,7 @@ class StopIsInstantTest {
     }
 
     @Test fun smartButtonHasThreeStatesInThePowerButtonsMeaning() {
-        fun of(s: ConnectionStatus) = SmartButtonState.of(ConnectionState(status = s))
+        fun of(s: ConnectionStatus) = SmartButtonState.of(ConnectionState(status = s, smartSession = true))
         assertEquals(SmartButtonState.OFF, of(ConnectionStatus.DISCONNECTED))
         assertEquals(SmartButtonState.OFF, of(ConnectionStatus.FAILED))
         assertEquals(SmartButtonState.OFF, of(ConnectionStatus.DISCONNECTING))
@@ -89,6 +89,12 @@ class StopIsInstantTest {
         assertFalse(SmartButtonState.OFF.tapStops)
         assertTrue(SmartButtonState.CONNECTING.tapStops)
         assertTrue(SmartButtonState.ON.tapStops)
+    }
+
+    @Test fun aPowerButtonSessionLeavesTheSmartButtonOff() {
+        for (s in listOf(ConnectionStatus.PREPARING, ConnectionStatus.VERIFYING, ConnectionStatus.CONNECTED, ConnectionStatus.DEGRADED)) {
+            assertEquals(SmartButtonState.OFF, SmartButtonState.of(ConnectionState(status = s)))
+        }
     }
 
     @Test fun aLeftBehindCallKnowsItWasStoppedSoItsTestsSendNothingMore() = runBlocking {

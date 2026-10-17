@@ -82,7 +82,9 @@ data class ConnectionState(
     /** The upload and download check for this attempt; ignored once the attempt or network changes. */
     val trafficEvidence: com.example.vpn.verify.TrafficEvidence? = null,
     /** The Smart Connect search of this attempt, stage by stage: what was tested and what carried traffic. */
-    val search: com.example.vpn.smart.SearchProgress? = null
+    val search: com.example.vpn.smart.SearchProgress? = null,
+    /** The session was started with the Smart Connect button (not the power button or a tile). */
+    val smartSession: Boolean = false
 ) {
     val isConnected: Boolean get() = status == ConnectionStatus.CONNECTED
 

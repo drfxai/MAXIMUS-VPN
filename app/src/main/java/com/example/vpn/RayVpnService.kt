@@ -94,15 +94,24 @@ class RayVpnService : VpnService() {
         private val _vpnState = MutableStateFlow(ConnectionState())
         val vpnState: StateFlow<ConnectionState> = _vpnState.asStateFlow()
 
+        /** Set at each Connect: true only when the Smart Connect button started the session. */
+        @Volatile private var smartStarted = false
+
+        /** Every published state says whether Smart Connect owns the session, so only its button lights up. */
+        private fun stamped(state: ConnectionState): ConnectionState {
+            val smart = smartStarted && state.status != ConnectionStatus.DISCONNECTED
+            return if (state.smartSession == smart) state else state.copy(smartSession = smart)
+        }
+
         fun updateState(state: ConnectionState) {
-            _vpnState.value = state
+            _vpnState.value = stamped(state)
         }
 
         /** Changes the state atomically, so concurrent watchers never overwrite each other's fields. */
         fun mutateState(change: (ConnectionState) -> ConnectionState) {
             while (true) {
                 val current = _vpnState.value
-                if (_vpnState.compareAndSet(current, change(current))) return
+                if (_vpnState.compareAndSet(current, stamped(change(current)))) return
             }
         }
 
@@ -345,6 +354,7 @@ class RayVpnService : VpnService() {
                 lifecycle.newIntent()
                 // The user's choice for this session: reconnects and mode switches keep it until the next Connect.
                 exactSession = exact
+                smartStarted = smart
                 connectJob?.cancel()
                 // Engines of the attempt this Connect replaces stop now, so the new attempt does not wait behind them.
                 com.example.vpn.sidecar.EngineReaper.stopAll()
@@ -1431,10 +1441,10 @@ class RayVpnService : VpnService() {
                 tunnelProbe = { routeLatency() },
                 // Only the native core's own sockets carry the tunnel's data; other engines are always checked.
                 passive = if (activeEngine is NativeTunVpnEngine) com.example.vpn.smart.PassiveHealth() else null,
+                staysOnSelected = { exactSession },
                 onTriggerSwitch = onTriggerSwitch@{ newProfile, reason ->
                     if (exactSession) {
-                        XrayLogManager.w("FAILOVER", "The connection stopped carrying traffic ($reason). Staying on the selected config: " +
-                            "it was connected with the power button. Use Smart Connect to search for another.")
+                        // Failover checks staysOnSelected first; this only catches a switch already under way.
                         return@onTriggerSwitch
                     }
                     // A recovered path that stopped carrying traffic counts towards its rollback.
