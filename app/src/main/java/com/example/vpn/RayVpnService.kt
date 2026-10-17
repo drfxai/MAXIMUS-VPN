@@ -153,6 +153,64 @@ class RayVpnService : VpnService() {
 
     /** The upload and download check of the current attempt. */
     private var trafficCheckJob: Job? = null
+
+    /** The remembered route (network, recipe id) the current session runs on, once verified. */
+    @Volatile private var activeRoute: Pair<String, String>? = null
+
+    private class Replay(val owner: VlessProfile, val profile: VlessProfile, val recovery: com.example.vpn.connectivity.DerivedRecoveryCandidate?)
+
+    /**
+     * Rebuilds the exact path of [recipe] from the saved config it names, or null when that config was
+     * deleted or changed, or the alternate or recovered copy no longer applies. [resolved] is the config
+     * with its name already resolved, when the caller has it. Engine programs are never replayed this way:
+     * they cannot be tested before they start.
+     */
+    private suspend fun replayRoute(recipe: com.example.vpn.smart.RouteRecipe, network: String, resolved: VlessProfile?): Replay? {
+        val owner = serverRepository.getAllProfilesOnce().firstOrNull { it.id == recipe.profileId } ?: return null
+        if (owner.effectiveFingerprint != recipe.profileFingerprint) return null
+        if (com.example.vpn.sidecar.Sidecars.isEngineProfile(owner) || owner.profileType == ProfileType.XRAY_JSON) return null
+        val base = when {
+            recipe.endpoint != null && !isLiteralIp(owner.address) -> com.example.vpn.smart.RouteRecipe.pinEndpoint(owner, recipe.endpoint)
+            resolved != null -> resolved
+            isLiteralIp(owner.address) -> owner
+            else -> resolveEndpoint(owner)
+        }
+        var recovery: com.example.vpn.connectivity.DerivedRecoveryCandidate? = null
+        val path = when {
+            recipe.recoveryKey != null -> {
+                recovery = com.example.RayApplication.instance.bpbRecovery.active(owner, network, base = base)
+                    ?.takeIf { it.recoveryProfileKey == recipe.recoveryKey } ?: return null
+                recovery.profile
+            }
+            recipe.variantKey != null -> com.example.vpn.stealth.StealthVariants.of(base).firstOrNull { it.key == recipe.variantKey }?.profile ?: return null
+            else -> base
+        }
+        com.example.vless.VlessValidator.validate(path)
+        com.example.vpn.engine.RuntimeCapabilities.requireSupported(path)
+        return Replay(owner, path, recovery)
+    }
+
+    /**
+     * Remembers the path that just carried verified traffic as a route for [network]: references and
+     * non-secret settings only. Returns its key, or null for paths that cannot be replayed (engine
+     * programs, configs that are not in the server list).
+     */
+    private suspend fun recordRoute(network: String, owner: VlessProfile, path: VlessProfile, variant: String?, latencyMs: Long): Pair<String, String>? = runCatching {
+        if (com.example.vpn.sidecar.Sidecars.isEngineProfile(owner) || owner.profileType == ProfileType.XRAY_JSON) return@runCatching null
+        if (serverRepository.getAllProfilesOnce().none { it.id == owner.id }) return@runCatching null
+        val recovery = activeRecovery
+        val now = System.currentTimeMillis()
+        val recipe = com.example.vpn.smart.RouteRecipe(
+            network = network, profileId = owner.id, profileFingerprint = owner.effectiveFingerprint,
+            variantKey = if (recovery == null) variant else null,
+            recoveryKey = recovery?.recoveryProfileKey,
+            endpoint = path.address.takeIf { recovery == null && isLiteralIp(it) && !isLiteralIp(owner.address) },
+            kind = com.example.vpn.stealth.ConnectionKind.of(path),
+            latencyMs = latencyMs, verifiedAt = now, expiresAt = now + com.example.vpn.smart.RouteBook.TTL_MS
+        )
+        networkMemory.routes.recordVerified(recipe)
+        network to recipe.id
+    }.onFailure { XrayLogManager.w("SMART", "Could not remember the route: ${it.javaClass.simpleName}") }.getOrNull()
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
     private var failoverManager: com.example.vpn.smart.FailoverManager? = null
     private val serviceTxBytes = java.util.concurrent.atomic.AtomicLong(0)
@@ -376,7 +434,9 @@ class RayVpnService : VpnService() {
         val prefs = getSharedPreferences("network_memory", Context.MODE_PRIVATE)
         com.example.vpn.smart.NetworkMemory(
             load = { prefs.getString("v1", null) },
-            save = { prefs.edit().putString("v1", it).apply() }
+            save = { prefs.edit().putString("v1", it).apply() },
+            loadRoutes = { prefs.getString("routes", null) },
+            saveRoutes = { prefs.edit().putString("routes", it).apply() }
         )
     }
 
@@ -564,6 +624,12 @@ class RayVpnService : VpnService() {
             }
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 2. Foreground service started successfully.")
 
+            // Routes are remembered per network, telling Wi-Fi networks apart (NetworkIdentity); a route
+            // learned on one network is only ever a candidate on it, never on another.
+            val routeNetwork = runCatching { com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService) }
+                .getOrElse { com.example.vpn.smart.NetworkKey.current(this@RayVpnService) }
+            activeRoute = null
+
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
             var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
             try {
@@ -573,7 +639,19 @@ class RayVpnService : VpnService() {
                     // Resolve outside the tunnel: once traffic is captured, DNS for the proxy itself
                     // would loop back into the VPN.
                     failure = com.example.vpn.safety.FailClosedPolicy.Failure.UNRESOLVABLE_SERVER
-                    profile = resolveEndpoint(profile)
+                    profile = try {
+                        resolveEndpoint(profile)
+                    } catch (e: Exception) {
+                        // The name does not resolve here now (DNS blocked or poisoned), but an address it
+                        // resolved to carried verified traffic on this network: dial that address. TLS still
+                        // checks the server's name; the pre-flight below still has to pass.
+                        val known = if (policy.lockExit) null else networkMemory.routes.forNetwork(routeNetwork)
+                            .firstOrNull { it.profileId == requestedProfile.id && it.endpoint != null &&
+                                it.profileFingerprint == requestedProfile.effectiveFingerprint }?.endpoint
+                        known ?: throw e
+                        XrayLogManager.w("VPN", "[DIAGNOSTICS] Server name did not resolve; using the address that worked on this network before.")
+                        com.example.vpn.smart.RouteRecipe.pinEndpoint(profile, known)
+                    }
                     failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
                     XrayLogManager.i("VPN", "[DIAGNOSTICS] 3. Server host resolved outside the tunnel")
                 }
@@ -628,6 +706,8 @@ class RayVpnService : VpnService() {
             // engine that can only be judged after it starts was chosen.
             var provenDead = false
             var engineAdopted = false
+            // Which stealth alternate carried the traffic, for the route recipe recorded once it is verified.
+            var chosenVariant: String? = null
             activeRecovery = null
             fun adopt(win: com.example.vpn.smart.ServerRace.Winner) {
                 com.example.vless.VlessValidator.validate(win.profile)
@@ -636,6 +716,7 @@ class RayVpnService : VpnService() {
                 activeProfile = win.owner
                 profile = win.profile
                 raced = true
+                chosenVariant = win.variantKey
                 win.variantKey?.let { networkMemory.variants(network)[win.owner.id] = it }
                 networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(win.profile), win.latencyMs)
                 mutateState { it.copy(activeProfile = win.owner, attemptedProfileId = win.owner.id) }
@@ -656,13 +737,61 @@ class RayVpnService : VpnService() {
                 firstTimeoutSec = timeouts.firstSec,
                 alternateTimeoutSec = timeouts.alternateSec
             )
+            // Stage A: the exact route that carried verified traffic on this network before. The chosen
+            // config's own route first; with Smart Connect, then the best other remembered route. Each has
+            // to carry a real request here now; a failure counts against it and the normal search goes on.
+            if (!policy.lockExit && !force) {
+                val remembered = networkMemory.routes.forNetwork(routeNetwork)
+                val ordered = remembered.filter { it.profileId == requestedProfile.id } +
+                    if (raceFirst) remembered.filter { it.profileId != requestedProfile.id && it.profileId !in exclude }.take(1) else emptyList()
+                if (ordered.isNotEmpty()) showForegroundNotification("Trying the route that worked here before...")
+                for (recipe in ordered.take(2)) {
+                    if (raced) break
+                    coroutineContext.ensureActive()
+                    // An error (the name does not resolve right now) skips the route; only a config that changed,
+                    // was deleted, or lost its alternate drops it.
+                    val rebuilt = runCatching { replayRoute(recipe, network, if (recipe.profileId == requestedProfile.id) profile else null) }
+                    val replay = rebuilt.getOrNull()
+                    if (replay == null) {
+                        if (rebuilt.isSuccess) networkMemory.routes.drop(routeNetwork, recipe.id)
+                        continue
+                    }
+                    if (recentlyFailed(replay.profile)) continue
+                    val outcome = com.example.vpn.Abandonable.run { com.example.xray.RealDelayProbe.measure(replay.profile, timeouts.firstSec) }
+                    // A network change during the request makes its answer describe another network.
+                    val still = runCatching { com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService) }.getOrNull() == routeNetwork
+                    when {
+                        !still -> break
+                        outcome is com.example.xray.RealDelayProbe.Outcome.Delay -> {
+                            requestedProfile = replay.owner
+                            activeProfile = replay.owner
+                            profile = replay.profile
+                            raced = true
+                            chosenVariant = recipe.variantKey
+                            activeRecovery = replay.recovery
+                            networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(replay.profile), outcome.latencyMs)
+                            mutateState { it.copy(activeProfile = replay.owner, attemptedProfileId = replay.owner.id) }
+                            XrayLogManager.i("SMART", "The route that worked on this network before carried traffic again " +
+                                "(${recipe.kind}, ${outcome.latencyMs} ms).")
+                        }
+                        outcome is com.example.xray.RealDelayProbe.Outcome.Failed -> {
+                            networkMemory.routes.recordFailure(routeNetwork, recipe.id)
+                            networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(replay.profile))
+                            XrayLogManager.i("SMART", "The route that worked here before carried no traffic now; searching.")
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+
             var firstFailed = false
-            if (raceFirst) {
+            if (raceFirst && !raced) {
                 // The chosen server alone first, so a working one costs a single request; only when it
                 // carries no traffic are the other servers raced (several kinds of connection per round).
                 showForegroundNotification("Finding the fastest server...")
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.ORDINARY_PREFLIGHT)
                 val first = finder.firstPath(requestedProfile, profile)
+                chosenVariant = first.variantKey
                 val skip = recentlyFailed(first.profile)
                 if (skip) XrayLogManager.i("SMART", "Selected server skipped: it failed a real request on this network moments ago.")
                 when (val outcome = if (skip) com.example.xray.RealDelayProbe.Outcome.Failed("failed moments ago on this network", request = false)
@@ -733,6 +862,7 @@ class RayVpnService : VpnService() {
                     mutateState { it.copy(activeProfile = choice.owner, attemptedProfileId = choice.owner.id) }
                 }
                 profile = choice.profile
+                chosenVariant = choice.variantKey
                 choice.latencyMs?.let {
                     raced = true
                     networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(choice.profile), it)
@@ -1170,6 +1300,7 @@ class RayVpnService : VpnService() {
                 com.example.vpn.diagnostics.ConnectionMetrics.recordConnectTime(connectMs)
                 XrayLogManager.i("VPN", "Time from connect to verified traffic: $connectMs ms.")
                 onTrafficVerified(requestedProfile, check.first)
+                activeRoute = recordRoute(routeNetwork, requestedProfile, profile, chosenVariant, check.first ?: 0L)
                 launchTrafficCheck()
             } else {
                 val stage = check.second ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN
@@ -1207,6 +1338,8 @@ class RayVpnService : VpnService() {
                 onTriggerSwitch = { newProfile, reason ->
                     // A recovered path that stopped carrying traffic counts towards its rollback.
                     activeRecovery?.let { com.example.RayApplication.instance.bpbRecovery.recordOutcome(it, success = false) }
+                    activeRoute?.let { (net, id) -> networkMemory.routes.recordFailure(net, id) }
+                    activeRoute = null
                     activeRecovery = null
                     val degraded = requestedProfile.id
                     // The kind that just stopped carrying traffic goes last in the race.
@@ -1312,14 +1445,7 @@ class RayVpnService : VpnService() {
                     // Without TLS the login (UUID, password) would go to whoever holds that address.
                     check(usesTls) { "the network's DNS points the server at a filtering address" }
                 }
-                val usesHostHeader = profile.transport.lowercase() in setOf("ws", "xhttp", "httpupgrade", "splithttp", "h2", "http")
-                return profile.copy(
-                    address = resolved.address,
-                    // The copy is the same path: evidence about it belongs to the saved config.
-                    canonicalFingerprint = profile.effectiveFingerprint,
-                    sni = if (usesTls && profile.sni.isBlank()) hostName else profile.sni,
-                    host = if (usesHostHeader && profile.host.isBlank()) hostName else profile.host
-                )
+                return com.example.vpn.smart.RouteRecipe.pinEndpoint(profile, resolved.address)
             } catch (e: Exception) {
                 lastError = e
             }
@@ -1652,6 +1778,9 @@ class RayVpnService : VpnService() {
                 .getOrNull() ?: return@launch
             if (!isActive) return@launch
             mutateState { if (evidence.appliesTo(it)) it.copy(trafficEvidence = evidence) else it }
+            if (evidence.bidirectional && _vpnState.value.attemptId == attemptId) {
+                activeRoute?.let { (net, id) -> networkMemory.routes.markBidirectional(net, id) }
+            }
             XrayLogManager.i("VPN", "Upload/download check: ${evidence.describe()}.")
             if (evidence.bulkStalled) {
                 XrayLogManager.w("VPN", "Small requests pass but a bulk transfer stalled: a path MTU black hole or throttling is suspected.")
