@@ -1790,7 +1790,7 @@ class RayVpnService : VpnService() {
                     okStreak++
                     mutateState {
                         com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, true, sample.latencyMs, System.currentTimeMillis())
-                            .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = sample.country) else s }
+                            .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = sample.country, exitIp = sample.ip ?: s.exitIp) else s }
                     }
                     if (!wasConnected && _vpnState.value.isConnected && _vpnState.value.attemptId == attemptId) {
                         XrayLogManager.i("VPN", "Traffic now goes through the tunnel (${sample.latencyMs} ms): CONNECTED.")
@@ -1804,7 +1804,7 @@ class RayVpnService : VpnService() {
                     okStreak = 0
                     mutateState {
                         com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, false, null, System.currentTimeMillis(), stage)
-                            .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = null) else s }
+                            .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = null, exitIp = null) else s }
                     }
                     if (wasConnected && _vpnState.value.status == ConnectionStatus.DEGRADED) {
                         XrayLogManager.w("VPN", "Checks through the tunnel failed ${_vpnState.value.probeFailures} times in a row (${stage.name}): DEGRADED.")

@@ -9,7 +9,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 object LiveTunnelProbe {
-    data class Sample(val latencyMs: Long, val country: String?)
+    /** [ip] is the exit address websites see, from the same trace page as [country]. */
+    data class Sample(val latencyMs: Long, val country: String?, val ip: String? = null)
 
     /**
      * Latency of a real HTTPS request through the tunnel. It uses a non-Cloudflare URL: a Cloudflare
@@ -31,17 +32,27 @@ object LiveTunnelProbe {
         } finally { connection.disconnect() }
     }
 
-    /** Latency through the tunnel, plus the exit country when Cloudflare's trace page is reachable. */
+    /** Latency through the tunnel, plus the exit country and address when Cloudflare's trace page is reachable. */
     suspend fun measure(context: Context): Sample {
         val latency = latency(context)
-        val country = try {
-            country(context)
+        val exit = try {
+            trace(context)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (_: Exception) {
             null
         }
-        return Sample(latency, country)
+        return Sample(latency, exit?.country, exit?.ip)
+    }
+
+    data class Exit(val country: String?, val ip: String?)
+
+    /** The `loc=` and `ip=` lines of a trace page; anything that is not a country code or an IP address is dropped. */
+    internal fun parseTrace(trace: String): Exit {
+        fun field(key: String) = trace.lineSequence().firstOrNull { it.startsWith("$key=") }?.substringAfter('=')?.trim()
+        val country = field("loc")?.takeIf { it.matches(Regex("[A-Z]{2}")) }
+        val ip = field("ip")?.takeIf { it.length <= 45 && (it.matches(Regex("\\d{1,3}(\\.\\d{1,3}){3}")) || it.matches(Regex("[0-9a-fA-F:]{2,45}")) && ':' in it) }
+        return Exit(country, ip)
     }
 
     internal fun vpnNetwork(context: Context): android.net.Network {
@@ -51,7 +62,7 @@ object LiveTunnelProbe {
         } ?: error("VPN network unavailable")
     }
 
-    private suspend fun country(context: Context): String? = withContext(Dispatchers.IO) {
+    private suspend fun trace(context: Context): Exit = withContext(Dispatchers.IO) {
         val vpn = vpnNetwork(context)
         val connection = vpn.openConnection(URL("https://www.cloudflare.com/cdn-cgi/trace")) as HttpURLConnection
         try {
@@ -68,8 +79,7 @@ object LiveTunnelProbe {
                 val count = reader.read(chars)
                 if (count > 0) String(chars, 0, count) else ""
             }
-            trace.lineSequence().firstOrNull { it.startsWith("loc=") }?.substringAfter('=')
-                ?.takeIf { it.matches(Regex("[A-Z]{2}")) }
+            parseTrace(trace)
         } finally { connection.disconnect() }
     }
 }
