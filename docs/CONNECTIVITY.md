@@ -134,7 +134,7 @@ None of these has been run on a real phone in Iran for this release. CI covers u
 | ECH works / fragment fails, and the reverse | NOT TESTED |
 | IPv4 fails, IPv6 works | NOT TESTED |
 | UDP blocked, TCP/H2 works; UDP/H3 works | NOT TESTED |
-| Download works, upload constrained | NOT TESTED (no upload measurement yet) |
+| Download works, upload constrained | upload and download now measured after connect (unit-tested); NOT field-tested |
 | Clean Cloudflare address goes bad | NOT TESTED |
 | Wi-Fi signal updates keep one LAB session | code fix; field check pending (diagnostics report counts sessions) |
 | Subscription origin blocked, tunnel works | unit-tested (signed mirror path), not field-tested |

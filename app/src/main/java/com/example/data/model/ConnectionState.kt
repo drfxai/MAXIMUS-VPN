@@ -72,9 +72,20 @@ data class ConnectionState(
     /** The last connect stopped because the server failed its real test; "Connect anyway" may override. */
     val canConnectAnyway: Boolean = false,
     /** Where the connect's recovery escalation stands (RecoveryStage title), for display only. */
-    val recoveryStage: String? = null
+    val recoveryStage: String? = null,
+    /** Config revival is running for this attempt. */
+    val reviving: Boolean = false,
+    /** This attempt runs on a revived (derived) copy of a dead configuration. */
+    val revived: Boolean = false,
+    /** The attempt failed after every available recovery method was tested on this network. */
+    val recoveryExhausted: Boolean = false,
+    /** The upload and download check for this attempt; ignored once the attempt or network changes. */
+    val trafficEvidence: com.example.vpn.verify.TrafficEvidence? = null
 ) {
     val isConnected: Boolean get() = status == ConnectionStatus.CONNECTED
+
+    /** How strongly the route is proven (see RouteVerification); never stronger than the checks. */
+    val verification: com.example.vpn.verify.RouteVerification get() = com.example.vpn.verify.RouteVerification.of(this)
 
     /** A tunnel exists (verified or not); the user is protected and can disconnect. */
     val isTunnelUp: Boolean get() = status in TUNNEL_UP
