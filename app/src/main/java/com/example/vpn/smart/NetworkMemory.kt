@@ -20,10 +20,15 @@ class NetworkMemory(
     private val load: () -> String?,
     private val save: (String) -> Unit,
     loadRoutes: () -> String? = { null },
-    saveRoutes: (String) -> Unit = {}
+    saveRoutes: (String) -> Unit = {},
+    loadMtu: () -> String? = { null },
+    saveMtu: (String) -> Unit = {}
 ) {
     /** The exact routes that carried verified traffic, per network (see [RouteRecipe]). */
     val routes = RouteBook(loadRoutes, saveRoutes)
+
+    /** The tunnel MTU test after a bulk stall, per network (see [TunMtuTrial]). */
+    val mtu = TunMtuTrial(loadMtu, saveMtu)
 
     private class Entry(
         val variants: ConcurrentHashMap<String, String> = ConcurrentHashMap(),
@@ -82,6 +87,7 @@ class NetworkMemory(
         entries.clear()
         persist()
         routes.clear()
+        mtu.clear()
     }
 
     @Synchronized

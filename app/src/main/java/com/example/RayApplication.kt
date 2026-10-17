@@ -74,7 +74,9 @@ class RayApplication : Application() {
             load = { prefs.getString("v1", null) },
             save = { prefs.edit().putString("v1", it).apply() },
             loadRoutes = { prefs.getString("routes", null) },
-            saveRoutes = { prefs.edit().putString("routes", it).apply() }
+            saveRoutes = { prefs.edit().putString("routes", it).apply() },
+            loadMtu = { prefs.getString("mtu", null) },
+            saveMtu = { prefs.edit().putString("mtu", it).apply() }
         )
     }
 

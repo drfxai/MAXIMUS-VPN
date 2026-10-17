@@ -152,6 +152,8 @@ class RayVpnService : VpnService() {
     @Volatile private var engineEndpoint: com.example.vpn.verify.Socks5.Endpoint? = null
     /** The Smart Connect search of the current attempt: what each stage tested and verified. */
     @Volatile private var search: com.example.vpn.smart.SearchTracker? = null
+    /** Network, MTU the tunnel was built with, and the configured MTU, for the MTU test (TunMtuTrial). */
+    @Volatile private var tunMtu: Triple<String, Int, Int>? = null
 
     /** The upload and download check of the current attempt. */
     private var trafficCheckJob: Job? = null
@@ -1167,7 +1169,13 @@ class RayVpnService : VpnService() {
             }
 
             // 4. Diagnostic step 4 & 5: Configure and establish Android VpnService TUN interface
-            val safeMtu = settings.mtu.coerceIn(1280, 1500)
+            val configuredMtu = settings.mtu.coerceIn(1280, 1500)
+            // A bulk transfer stalled on this network last time while small requests passed: this connect
+            // tests the lower MTU (TunMtuTrial); its own bulk check decides whether it stays.
+            val safeMtu = networkMemory.mtu.mtuFor(routeNetwork, configuredMtu)
+            if (safeMtu != configuredMtu) XrayLogManager.i("VPN", "Tunnel MTU $safeMtu on this network instead of $configuredMtu: " +
+                "a bulk transfer stalled here before (testing whether MTU is the cause).")
+            tunMtu = Triple(routeNetwork, safeMtu, configuredMtu)
             val primaryDns = com.example.vpn.safety.VpnRoutePolicy.DNS_SERVER
             val builder = Builder()
                 .setSession("Maximus - ${profile.name}")
@@ -1857,6 +1865,19 @@ class RayVpnService : VpnService() {
             if (evidence.bulkStalled) {
                 XrayLogManager.w("VPN", "Small requests pass but a bulk transfer stalled: a path MTU black hole or throttling is suspected.")
             }
+            // Only a check through the tunnel itself says anything about the tunnel's MTU.
+            val mtuTest = tunMtu
+            if (path == com.example.vpn.verify.ProbePath.TUN && mtuTest != null && _vpnState.value.attemptId == attemptId) {
+                val (net, used, configured) = mtuTest
+                networkMemory.mtu.onBulkCheck(net, used, configured, stalled = evidence.bulkStalled, passed = evidence.bidirectional)?.let { st ->
+                    XrayLogManager.i("VPN", when (st) {
+                        com.example.vpn.smart.TunMtuTrial.State.TRYING_LOW -> "The next connect on this network tests MTU ${com.example.vpn.smart.TunMtuTrial.LOW_MTU}."
+                        com.example.vpn.smart.TunMtuTrial.State.LOW_HELPED -> "MTU $used fixed the bulk stall on this network; it is kept here."
+                        com.example.vpn.smart.TunMtuTrial.State.LOW_DID_NOT_HELP -> "The bulk transfer stalled at MTU $used too: MTU is not the cause; back to $configured."
+                    })
+                    com.example.vpn.diagnostics.events.EventLog.event("tunnel.mtu.trial", attributes = mapOf("state" to st.name, "mtu" to used.toString()))
+                }
+            }
             com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
                 "result" to if (evidence.bidirectional) "verified" else if (evidence.bulkStalled) "stalled" else "partial",
                 "path" to path.name,
@@ -1956,6 +1977,7 @@ class RayVpnService : VpnService() {
         trafficCheckJob?.cancel()
         trafficCheckJob = null
         engineEndpoint = null
+        tunMtu = null
 
         serviceTxBytes.set(0)
         serviceRxBytes.set(0)
