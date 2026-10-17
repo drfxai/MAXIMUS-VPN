@@ -253,4 +253,37 @@ class ConfigRevivalTest {
         assertTrue(RecoverySecurityGate.check(p, d).passed)
         assertTrue(CandidateMutationPolicy.check(p, d).allowed)
     }
+
+    @Test fun aNameThatDoesNotResolveGetsOnlyAddressRecipes() {
+        val dead = cf("d", "d.example.workers.dev")
+        val tried = mutableListOf<VlessProfile>()
+        fun run(ips: List<String>) = ConfigRevival(engine, endpoints = { ips }, probe = { ps ->
+            ps.map { p ->
+                tried += p
+                if (p.address == dead.address) TestResult.Failed("dial tcp: lookup d.example.workers.dev: no such host")
+                else TestResult.Failed("timeout")
+            }
+        }).run(listOf(dead), net).results.single()
+        // No validated address: nothing else can fix a name, so no recipe is spent.
+        val none = run(emptyList())
+        assertEquals(ConfigRevival.Outcome.NOT_REVIVED, none.outcome)
+        assertEquals(RevivalTriage.Cause.NAME_NOT_RESOLVED, none.cause)
+        assertEquals(0, none.tried)
+        assertEquals(1, tried.size)
+        tried.clear()
+        val withIps = run(listOf("188.114.97.3"))
+        assertTrue(withIps.tried > 0)
+        assertTrue("every recipe dials another address", tried.drop(1).all { it.address == "188.114.97.3" })
+        assertTrue("TLS still checks the server name", tried.drop(1).all { it.sni == dead.sni })
+    }
+
+    @Test fun anAmbiguousFailureStillTriesEveryKindOfRecipe() {
+        val dead = cf("u", "u.example.workers.dev")
+        val tried = mutableListOf<VlessProfile>()
+        val result = ConfigRevival(engine, probe = { ps -> ps.map { tried += it; TestResult.Failed("no response through the proxy") } })
+            .run(listOf(dead), net).results.single()
+        assertEquals(RevivalTriage.Cause.UNKNOWN, result.cause)
+        assertTrue(tried.drop(1).any { it.finalMask.isNotBlank() })
+        assertTrue(tried.drop(1).any { it.echConfigList.isNotBlank() })
+    }
 }

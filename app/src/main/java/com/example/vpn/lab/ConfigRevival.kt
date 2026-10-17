@@ -56,7 +56,9 @@ class ConfigRevival(
         val latencyMs: Long? = null,
         /** Recipes tried on this config (0 when it already worked). */
         val tried: Int = 0,
-        val recipe: String? = null
+        val recipe: String? = null,
+        /** Why the config failed as it is, read from its error before any recipe was tried. */
+        val cause: RevivalTriage.Cause? = null
     )
 
     data class Progress(val done: Int, val total: Int, val current: String?)
@@ -125,7 +127,8 @@ class ConfigRevival(
                     results += Result(p.id, name, Outcome.NOT_TESTED, before.reason)
                 else -> {
                     onProgress(Progress(i, pool.size, name))
-                    results += revive(p, name, network, ips, bias)
+                    val cause = RevivalTriage.cause((before as? DerivedRecoveryCandidate.TestResult.Failed)?.reason)
+                    results += revive(p, name, network, ips, bias, cause).copy(cause = cause)
                 }
             }
             onProgress(Progress(i + 1, pool.size, null))
@@ -133,10 +136,18 @@ class ConfigRevival(
         return Report(results.sortedBy { it.outcome.ordinal }, wall, ech, ips, scanned)
     }
 
-    private fun revive(p: VlessProfile, name: String, network: String?, ips: List<String>, bias: (RecoveryProfile) -> Double?): Result {
-        // Failure stage unknown: every strategy is allowed; the gate and the real request decide.
-        val candidates = engine.generate(p, null, network, ips, bias)
-        if (candidates.isEmpty()) return Result(p.id, name, Outcome.NOT_REVIVED, "no recipe applies to this config (or all were withdrawn on this network)")
+    private fun revive(
+        p: VlessProfile, name: String, network: String?, ips: List<String>, bias: (RecoveryProfile) -> Double?,
+        cause: RevivalTriage.Cause = RevivalTriage.Cause.UNKNOWN
+    ): Result {
+        // The cause limits the recipes only when the error says it plainly (a name or address problem);
+        // otherwise every strategy is allowed and the cause only orders them. The gate and the real request decide.
+        val candidates = engine.generate(p, RevivalTriage.stage(cause), network, ips) { rp -> bias(rp)?.plus(RevivalTriage.boost(cause, rp)) }
+        if (candidates.isEmpty()) return Result(p.id, name, Outcome.NOT_REVIVED, when (cause) {
+            RevivalTriage.Cause.NAME_NOT_RESOLVED, RevivalTriage.Cause.ADDRESS_UNREACHABLE ->
+                "${cause.title.replaceFirstChar(Char::lowercase)}; only another address could help and none is validated on this network"
+            else -> "no recipe applies to this config (or all were withdrawn on this network)"
+        })
         val tested = engine.test(candidates, probe)
         val ran = tested.count { it.test is DerivedRecoveryCandidate.TestResult.Passed || it.test is DerivedRecoveryCandidate.TestResult.Failed }
         val winner = tested.firstOrNull { it.test is DerivedRecoveryCandidate.TestResult.Passed }

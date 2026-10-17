@@ -47,7 +47,7 @@ The order is fixed; evidence changes the order inside a stage but not which stag
 | Exact route recipe + replay per network | Missing (D3, D4) | Done in PR #86: `RouteRecipe`/`RouteBook`, per-network, expiry, clear in `NetworkMemory` (button with the UI work) |
 | Unified orchestrator with stage counts | Partial (inline ladder, D9) | `SmartConnectPlan` + `SearchTracker`: stages A–G with tested/verified/failed counts in `ConnectionState.search`; order and budgets unchanged |
 | Measured network state steering connect | Partial (D5) | The plan skips WARP and MASQUE when UDP or QUIC was measured blocked on this network in the last 10 minutes; nothing is skipped on a guess |
-| Failure-classified revival | Partial (D7) | Classify first, then pick recipes |
+| Failure-classified revival | Partial (D7) | `RevivalTriage` reads the plain failure first: a name that does not resolve or an address that refuses gets address recipes only; a cut handshake moves fragment, ECH and fingerprint up; a refused certificate moves other addresses up (the check stays on). Ambiguous errors limit nothing. Still Cloudflare-fronted configs only |
 | MTU stall diagnosis | Missing (D8) | A/B the TUN MTU only when the bulk check stalls |
 | MASQUE HTTP/3 | Sidecar present, never run against Cloudflare | Needs a phone run |
 | MASQUE HTTP/2 | Missing | Not built: see "Not built" |
