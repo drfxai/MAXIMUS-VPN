@@ -16,8 +16,9 @@ object VlessValidator {
      * Validates a VlessProfile thoroughly and throws specific VpnExceptions on violation.
      */
     fun validate(profile: VlessProfile) {
-        // Profiles a separate engine program carries are checked by that engine (RuntimeCapabilities).
-        if (com.example.vpn.sidecar.Sidecars.forProfile(profile) != null) return
+        // Profiles a separate engine program carries, alone or as a chain (Ghost Rider's Psiphon -> Tor),
+        // are checked by that engine (RuntimeCapabilities); they have no server address or port of their own.
+        if (com.example.vpn.sidecar.Sidecars.isEngineProfile(profile)) return
         if (profile.address.isBlank()) {
             throw VpnException.MissingHost()
         }

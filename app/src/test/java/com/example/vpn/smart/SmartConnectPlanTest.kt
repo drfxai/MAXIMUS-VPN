@@ -54,6 +54,14 @@ class SmartConnectPlanTest {
         assertTrue(plan.transports.isEmpty())
     }
 
+    @Test fun thePowerButtonOnlyConnectsTheSelectedConfigEvenInGodMode() {
+        val plan = SmartConnectPlan.of(SmartConnectPlan.Input(godMode = true, lockExit = true, exact = true,
+            force = false, mayMove = true, reading = null))
+        assertEquals(listOf(SearchStage.SELECTED), SearchStage.values().filter { plan.allows(it) })
+        assertTrue(plan.transports.isEmpty())
+        assertTrue(plan.skipped.getValue(SearchStage.EMERGENCY).startsWith("Power button"))
+    }
+
     @Test fun withoutFailoverTheSessionStaysOnTheChosenServer() {
         val plan = SmartConnectPlan.of(input(mayMove = false))
         assertFalse(plan.allows(SearchStage.OTHER_SERVERS))

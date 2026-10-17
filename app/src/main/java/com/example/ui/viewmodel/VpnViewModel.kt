@@ -33,6 +33,9 @@ class VpnViewModel(
 
     private val _pendingProfile = MutableStateFlow<VlessProfile?>(null)
     val pendingProfile: StateFlow<VlessProfile?> = _pendingProfile.asStateFlow()
+    /** How the connect waiting for the VPN permission was asked for: Smart Connect, or the power button. */
+    private var pendingSmart = false
+    private var pendingExact = false
 
     val selectedProfile: StateFlow<VlessProfile?> = combine(
         serverRepository.allProfiles,
@@ -86,6 +89,8 @@ class VpnViewModel(
         context: Context,
         profile: VlessProfile?,
         smart: Boolean = false,
+        /** The power button: only [profile], as saved (see RayVpnService.EXTRA_EXACT). */
+        exact: Boolean = false,
         onRequestPermission: (Intent) -> Unit
     ) {
         val targetProfile = profile ?: selectedProfile.value ?: smartRecommendation.value?.profile
@@ -93,14 +98,16 @@ class VpnViewModel(
         if (prepareIntent != null) {
             XrayLogManager.i("VPN", "VPN permission required before connecting '${targetProfile?.name ?: "default"}'")
             prepareConnect(targetProfile)
+            pendingSmart = smart
+            pendingExact = exact
             onRequestPermission(prepareIntent)
         } else if (targetProfile != null) {
-            VpnController.startVpn(context, targetProfile, smart)
+            VpnController.startVpn(context, targetProfile, smart = smart, exact = exact)
         } else {
             viewModelScope.launch {
                 val fallback = serverRepository.getAllProfilesOnce().firstOrNull()
                 if (fallback != null) {
-                    VpnController.startVpn(context, fallback)
+                    VpnController.startVpn(context, fallback, smart = smart, exact = exact)
                 } else {
                     RayVpnService.updateState(
                         VpnController.connectionState.value.copy(
@@ -121,10 +128,14 @@ class VpnViewModel(
                 ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
             _pendingProfile.value = null
+            val smart = pendingSmart
+            val exact = pendingExact
+            pendingSmart = false
+            pendingExact = false
 
             if (profileToConnect != null) {
                 XrayLogManager.i("VPN", "Permission granted by user. Explicitly starting VPN tunnel for '${profileToConnect.name}'")
-                VpnController.startVpn(context, profileToConnect)
+                VpnController.startVpn(context, profileToConnect, smart = smart, exact = exact)
             } else {
                 XrayLogManager.w("VPN", "Permission granted but no profile available.")
                 RayVpnService.updateState(
@@ -155,8 +166,10 @@ class VpnViewModel(
         if (currentState.isTunnelUp || currentState.isBusy || currentState.status == ConnectionStatus.FAILED) {
             VpnController.stopVpn(context)
         } else {
+            // The power button connects the config selected in Nodes and only that one; Smart Connect is
+            // the separate button that searches.
             val targetProfile = selectedProfile.value ?: smartRecommendation.value?.profile
-            startOrRequestPermission(context, targetProfile) { intent ->
+            startOrRequestPermission(context, targetProfile, exact = true) { intent ->
                 onRequestPermission?.invoke(intent)
             }
         }
@@ -178,15 +191,14 @@ class VpnViewModel(
         VpnController.startVpn(context, profile, force = true)
     }
 
+    /**
+     * Smart Connect: the search across saved servers, disguises, recovery and revival, led by the optimal
+     * node. It leaves the Nodes selection alone, so the power button still connects the user's own choice.
+     */
     fun connectSmart(context: Context, onRequestPermission: ((Intent) -> Unit)? = null) {
-        val smartProfile = smartRecommendation.value?.profile
-        if (smartProfile != null) {
-            selectServer(smartProfile)
-            startOrRequestPermission(context, smartProfile, smart = true) { intent ->
-                onRequestPermission?.invoke(intent)
-            }
-        } else {
-            toggleConnection(context, onRequestPermission)
+        val lead = smartRecommendation.value?.profile ?: selectedProfile.value
+        startOrRequestPermission(context, lead, smart = true) { intent ->
+            onRequestPermission?.invoke(intent)
         }
     }
 
