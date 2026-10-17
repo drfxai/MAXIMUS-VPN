@@ -3,6 +3,9 @@
 The Panels screen has five tabs: **Servers**, **Install**, **Cloudflare**, **Clean IP** and
 **Tunnel**.
 
+Names on your own Cloudflare domain for your servers (CDN or direct, set up safely): see
+[MAXIMUS_SMART_DOMAINS.md](MAXIMUS_SMART_DOMAINS.md).
+
 ## My Servers
 
 - Servers are grouped by where they are. Servers in Iran carry the Iranian flag, servers abroad
