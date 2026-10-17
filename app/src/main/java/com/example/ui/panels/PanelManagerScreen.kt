@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PersistableBundle
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -186,6 +187,7 @@ fun PanelManagerScreen(
     var selectedReviveTargetProfileId by remember { mutableStateOf<String?>(null) }
     var reviveAsClone by remember { mutableStateOf(true) }
     var cleanIpSortOption by remember { mutableIntStateOf(0) } // 0: Quality, 1: Latency, 2: Jitter
+    var showSmartDomains by remember { mutableStateOf(false) }
 
     // Forms
     var cfToken by remember { mutableStateOf("") }
@@ -222,6 +224,13 @@ fun PanelManagerScreen(
             onInstallCenter = { selectedPanelId = null; selectedTab = 1 }
         )
     ) return
+
+    // Cloudflare → Smart domains, full screen over the tabs.
+    if (showSmartDomains) {
+        BackHandler { showSmartDomains = false }
+        SmartDomainsScreen(onBack = { showSmartDomains = false })
+        return
+    }
 
     Column(
         modifier = Modifier
@@ -408,7 +417,8 @@ fun PanelManagerScreen(
                         onAttachDomain = { panel, domain -> viewModel.attachCustomDomain(panel, domain) },
                         onRemoveDomain = { panel, domain -> viewModel.removeCustomDomain(panel, domain) },
                         onOpenUrl = openUrl,
-                        onCopy = { label, value -> copyWithToast(value, label) }
+                        onCopy = { label, value -> copyWithToast(value, label) },
+                        onOpenSmartDomains = { showSmartDomains = true }
                     )
                 }
 
