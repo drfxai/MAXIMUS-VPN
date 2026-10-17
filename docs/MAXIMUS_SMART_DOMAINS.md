@@ -48,12 +48,36 @@ exist are unchanged.
 
 ## Making the API token
 
-1. Go to **My Profile → API Tokens → Create Token → Create Custom Token**.
-2. Permissions: **Zone → Zone → Read** and **Zone → DNS → Edit**.
-3. Zone resources: **Include → Specific zone →** your domain.
-4. Optional: limit the token to your own IP address and give it an expiry date.
-5. Create it and paste it into Maximus. The token is kept encrypted on the phone, the same way as the
-   Worker token. It is never logged and never sent anywhere but `api.cloudflare.com`.
+Smart domains makes the token in three taps:
+
+1. **Create token.** **Create token in Cloudflare** opens Cloudflare's own token template page with
+   everything filled in: the name **Maximus smart domains**, the permissions **Zone · Read** and
+   **DNS · Edit** (permission group keys `zone` read and `dns` edit), and your zones as the resources.
+   On Cloudflare you tap **Continue to summary**, then **Create Token**, and copy it.
+2. **Paste it back.** When you come back to Maximus, it looks at the clipboard. If it holds something
+   shaped like a Cloudflare token (40 characters of `A–Z`, `a–z`, `0–9`, `_` and `-`), it offers
+   **Use copied token** with only the last four characters shown. One tap checks it. You can still
+   paste it yourself with **Paste it yourself**.
+3. **Confirm.** Once the token works, Maximus fills in the rest from the config selected in Nodes:
+   - the domain: the only active zone, or the one you pick when the token sees several;
+   - the server address and port from the config (the record is `A`/`AAAA` to that address, and the
+     config keeps its own port);
+   - the Cloudflare setting from the protocol: proxied for WebSocket, XHTTP, gRPC or HTTPUpgrade over
+     TLS on one of Cloudflare's HTTPS ports; DNS only for REALITY, Hysteria2, TUIC, WireGuard, SSH and
+     anything else;
+   - a random, hard-to-guess subdomain (tap **change** for another).
+
+   **Confirm** creates it the same way as the form below, so an existing record is never overwritten.
+   **Edit details** opens the full form with these values. When no config is selected, or its
+   address is a host name rather than an IP address, the form opens straight away.
+
+Cloudflare does not let any app create a token by itself, so the last tap on Cloudflare's own page is
+always yours. The token is kept encrypted on the phone, the same way as the Worker token. It is never
+logged and never sent anywhere but `api.cloudflare.com`.
+
+To make the token by hand instead: **My Profile → API Tokens → Create Token → Create Custom Token**,
+permissions **Zone → Zone → Read** and **Zone → DNS → Edit**, zone resources **Include → Specific
+zone →** your domain. You can also limit it to your own IP address and give it an expiry date.
 
 The Worker token that Panels already uses has no DNS permission, so it cannot create these records.
 That separation is deliberate.
