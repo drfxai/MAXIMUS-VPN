@@ -80,7 +80,9 @@ data class ConnectionState(
     /** The attempt failed after every available recovery method was tested on this network. */
     val recoveryExhausted: Boolean = false,
     /** The upload and download check for this attempt; ignored once the attempt or network changes. */
-    val trafficEvidence: com.example.vpn.verify.TrafficEvidence? = null
+    val trafficEvidence: com.example.vpn.verify.TrafficEvidence? = null,
+    /** The Smart Connect search of this attempt, stage by stage: what was tested and what carried traffic. */
+    val search: com.example.vpn.smart.SearchProgress? = null
 ) {
     val isConnected: Boolean get() = status == ConnectionStatus.CONNECTED
 

@@ -44,9 +44,9 @@ The order is fixed; evidence changes the order inside a stage but not which stag
 | Upload and download verification | Missing | Added: byte-counted download, echoed upload, stall detection — this PR |
 | Strict verification states | Partial (`ConnectionStatus`) | `RouteVerification` derived from state + evidence — this PR |
 | Saved-server race, stealth variants, recovery copy | Implemented, untested on a phone | Keep; feed from the orchestrator |
-| Exact route recipe + replay per network | Missing (D3, D4) | Next PR: recipe in `NetworkMemory`, epoch, expiry, clear control |
-| Unified orchestrator with stage counts | Partial (inline ladder, D9) | Extract a pure planner from `connectLocked`, keep its order and budgets |
-| Measured network state steering connect | Partial (D5) | Use `NetworkStateClassifier` states in the planner |
+| Exact route recipe + replay per network | Missing (D3, D4) | Done in PR #86: `RouteRecipe`/`RouteBook`, per-network, expiry, clear in `NetworkMemory` (button with the UI work) |
+| Unified orchestrator with stage counts | Partial (inline ladder, D9) | `SmartConnectPlan` + `SearchTracker`: stages A–G with tested/verified/failed counts in `ConnectionState.search`; order and budgets unchanged |
+| Measured network state steering connect | Partial (D5) | The plan skips WARP and MASQUE when UDP or QUIC was measured blocked on this network in the last 10 minutes; nothing is skipped on a guess |
 | Failure-classified revival | Partial (D7) | Classify first, then pick recipes |
 | MTU stall diagnosis | Missing (D8) | A/B the TUN MTU only when the bulk check stalls |
 | MASQUE HTTP/3 | Sidecar present, never run against Cloudflare | Needs a phone run |
@@ -56,6 +56,22 @@ The order is fixed; evidence changes the order inside a stage but not which stag
 | Psiphon | Present, off | Needs the `PSIPHON_CONFIG` secret |
 | Tor (Snowflake via lyrebird) | Present, untested on a phone | Phone run |
 | AmneziaWG, CottenDNS, TUIC | Not bundled | Blocked: no compatible peer, no pinned build |
+
+## Search stages (Phase 3)
+
+| Stage | What runs | Counted from |
+|---|---|---|
+| A | Route that worked on this network before (up to 2) | each replay request |
+| B | Selected server (its remembered disguise first) | the single pre-flight request |
+| C | Recovered copy, disguises and other kinds on the same server | each request in the finder after B |
+| D | Other saved servers, raced in bounded rounds | each request in the race |
+| E | Clean Cloudflare address; in GOD MODE also WARP, MASQUE, Psiphon, Tor | requests; an engine chosen unmeasured is shown as "chosen", never verified |
+| F | LAB fast recovery (90 s) | the LAB's own tested count |
+| G | Config revival (60 s) | recipes tried per config |
+
+Finding while wiring this: in GOD MODE, when MASQUE, Psiphon and Tor are all available, each later step
+replaces the earlier choice, so Tor is the one started. Behaviour is unchanged here; it needs a decision
+and a phone run before changing which engine starts.
 
 ## Not built
 
