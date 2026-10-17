@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
@@ -123,6 +124,7 @@ internal fun CloudflareTab(
     onRemoveDomain: (ManagedPanel, String) -> Unit,
     onOpenUrl: (String) -> Unit,
     onCopy: (label: String, value: String) -> Unit,
+    onOpenSmartDomains: () -> Unit,
     initialLoginExpanded: Boolean = false
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -179,6 +181,35 @@ internal fun CloudflareTab(
             onOpenUrl = onOpenUrl,
             onCopy = onCopy
         )
+
+        SmartDomainsEntry(onOpen = onOpenSmartDomains)
+    }
+}
+
+/** Opens Smart domains: names on the user's own Cloudflare domain for their own servers. */
+@Composable
+private fun SmartDomainsEntry(onOpen: () -> Unit) {
+    CfCard {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Cf.Orange.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Language, contentDescription = null, tint = Cf.Orange, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Smart domains", color = Cf.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("Names on your own Cloudflare domain for your servers", color = Cf.Muted, fontSize = 12.5.sp, lineHeight = 17.sp)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(20.dp))
+        }
     }
 }
 

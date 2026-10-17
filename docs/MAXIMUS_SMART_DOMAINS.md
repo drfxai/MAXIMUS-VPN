@@ -4,8 +4,18 @@ Smart domains give each of your servers a name on **your own domain** in **your 
 Each name gets the right Cloudflare setting for its connection type. The app makes the DNS records
 through the Cloudflare API with a token you create. Nothing is made on anyone else's domain.
 
-Code: `panels/cloudflare/SmartDomains.kt` (rules, pure) and `panels/cloudflare/CloudflareDnsApi.kt` (API calls).
-Tests: `SmartDomainsTest`.
+Where: **Panels → Cloudflare → Smart domains**. Without a token the screen shows how to make one and a
+**Check token** button. Once the token works it shows your zone, the names you made, and a form for a new
+name. **Forget token** deletes the token from the phone; the names stay in Cloudflare.
+
+Code: `panels/cloudflare/SmartDomains.kt` (rules, pure), `panels/cloudflare/CloudflareDnsApi.kt` (API calls),
+`panels/cloudflare/SmartNames.kt` (the saved names and the screen's text, pure), `panels/cloudflare/SmartDomainsStore.kt`
+(token and names on the phone) and `ui/panels/SmartDomainsScreen.kt` (the screen).
+Tests: `SmartDomainsTest`, `SmartNamesTest`.
+
+The list of names is kept on the phone only: zone, full name, record type, address, port, use and proxy
+setting. It holds no secrets. The app cannot read the zone's SSL/TLS mode with this token, so the screen
+asks you to set Full (strict) yourself and never shows it as checked.
 
 ## Using domains safely
 
