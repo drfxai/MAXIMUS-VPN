@@ -10,22 +10,22 @@
     {
       "screen": "Tunnel",
       "file": "tunnel.png",
-      "sha256": "9a23c7f8d56c92dec4c4b0fb3418273860d302df2d703b9bb633468be9932479"
+      "sha256": "43fbc8d5cb3a5d8264b1fdd683595aeb46302f4503152c98ffb115458697f26a"
     },
     {
       "screen": "Nodes",
       "file": "nodes.png",
-      "sha256": "b6750e19957ce8770e9df7e2ab30c7f5c5d36fc28a53723a206fc19b0a2283a0"
+      "sha256": "93dfec7c43788ba66193570a19adf45d781dc1c3d93251111f790d7d6cbe3317"
     },
     {
       "screen": "LAB",
       "file": "lab.png",
-      "sha256": "7f3a4d028c99f9e9d3599af8337441031c51044c908047c673125af0b34b78e9"
+      "sha256": "bd7eaf54981b96c720a4945cbd928bade2c5ab2a01cfd374fcf1926862d3efce"
     },
     {
       "screen": "Panels",
       "file": "panels.png",
-      "sha256": "3f13ead4b6c3531e47a213fb110b4668420b9a6ab2b460bf7f0eb7f613745dda"
+      "sha256": "236402d76480c0a9acf42d0ceffddd9eb3ce7c0789fba446051c27a08fa9e2f6"
     }
   ]
 }
