@@ -539,7 +539,7 @@ class RayVpnService : VpnService() {
                 }
             })
         }.orEmpty()
-        val attempt = coroutineContext[Job]
+        val attempt = kotlinx.coroutines.currentCoroutineContext()[Job]
         return com.example.vpn.Abandonable.run {
             com.example.vpn.smart.CleanPathRace.select(profile, candidates.map { it.ip },
                 probe = { paths -> probeAll(paths, timeoutSec) },
