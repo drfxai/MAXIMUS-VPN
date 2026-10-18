@@ -75,7 +75,9 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
         item { GroupLabel(c, "Order") }
         item {
             Column(Modifier.padding(horizontal = Gutter)) {
-                Segmented(c, ChainOrder.entries.toList(), s.order, { it.title }, onOrder)
+                ChainOrder.entries.toList().chunked(2).forEach { choices ->
+                    Segmented(c, choices, s.order, { it.title }, onOrder)
+                }
                 LabText(
                     when (s.order) {
                         ChainOrder.PSIPHON_TOR -> "Psiphon is the way in; Tor is the exit the site sees."

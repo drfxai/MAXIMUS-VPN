@@ -52,7 +52,9 @@ data class NetworkCapabilityProfile(
     val sniPairs: Int? = null,
     val sniCut: Int? = null,
     /** International TLS over IPv6 (only measured when the network has IPv6). */
-    val ipv6TlsOk: Boolean? = null
+    val ipv6TlsOk: Boolean? = null,
+    /** Local salted network identity, used only to reject measurements from a different link. */
+    val networkIdentity: String? = null
 ) {
     /** True when at least one international reference completed TLS; false only when all were tried and failed. */
     val internationalReachable: Boolean? get() = when {
@@ -95,6 +97,7 @@ data class NetworkCapabilityProfile(
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("transport", transport)
+        networkIdentity?.let { put("networkIdentity", it) }
         fun opt(name: String, v: Boolean?) = put(name, v ?: JSONObject.NULL)
         opt("ipv4Available", ipv4Available)
         opt("ipv6Available", ipv6Available)
@@ -132,6 +135,7 @@ data class NetworkCapabilityProfile(
             fun i(name: String): Int? = if (!o.has(name) || o.isNull(name)) null else o.optInt(name)
             return NetworkCapabilityProfile(
                 transport = o.optString("transport", "other"),
+                networkIdentity = o.optString("networkIdentity").takeIf { it.isNotBlank() },
                 ipv4Available = b("ipv4Available"), ipv6Available = b("ipv6Available"),
                 udpAvailable = b("udpAvailable"), tcpAvailable = b("tcpAvailable"), tlsAvailable = b("tlsAvailable"),
                 http2Available = b("http2Available"), quicAvailable = b("quicAvailable"),

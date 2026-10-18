@@ -145,4 +145,12 @@ class SmartConnectPlanTest {
         assertEquals(7, r.failed)
         assertEquals("every family failed", r.note)
     }
+    @Test fun anotherWifiCannotInheritARecentUdpOrQuicFailure() {
+        val measured = NetworkCapabilityProfile(transport = "wifi", measuredAt = 1000L,
+            networkIdentity = "wifi:aaa", udpAvailable = false, tlsAvailable = true)
+        assertNotNull(SmartConnectPlan.freshReading(measured, "wifi:aaa", 1001L))
+        assertNull(SmartConnectPlan.freshReading(measured, "wifi:bbb", 1001L))
+        assertEquals(measured, NetworkCapabilityProfile.fromJson(measured.toJson()))
+    }
+
 }

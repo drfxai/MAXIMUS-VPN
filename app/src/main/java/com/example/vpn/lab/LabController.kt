@@ -311,7 +311,7 @@ class LabController(
                         publishLive()
                         val engine = Sidecars.forProfile(pk.profile)
                         if (pk.family.engine || engine != null) {
-                            val r = if (!Sidecars.isEngineProfile(pk.profile)) null else withContext(Dispatchers.IO) {
+                            val r = if (!Sidecars.isEngineProfile(pk.profile)) null else kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
                                 EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2)
                             }
                             when {
@@ -644,8 +644,12 @@ class LabController(
         try {
             val book = com.example.vpn.connectivity.ConnectivityBrain.book
             com.example.vpn.connectivity.ConnectivityBrain.refreshSession()
-            val cap = NetworkCapabilityDetector.last?.takeIf { System.currentTimeMillis() - it.measuredAt < 10 * 60_000L }
-            val reading = stateTracker.current() ?: cap?.let { NetworkStateClassifier.classify(it) }
+            val currentIdentity = com.example.vpn.smart.NetworkIdentity.current(context)
+            val cap = NetworkCapabilityDetector.last?.takeIf {
+                System.currentTimeMillis() - it.measuredAt in 0 until 10 * 60_000L &&
+                    (it.networkIdentity == null || it.networkIdentity == currentIdentity)
+            }
+            val reading = cap?.let { NetworkStateClassifier.classify(it) }
             val device = deviceState(userStarted = true)
             val plan = ExperimentPlanner.plan(reading, cap, ExperimentPlanner.budget(
                 ExperimentPlanner.Budget(true, device.batteryPercent, device.charging, device.metered)))

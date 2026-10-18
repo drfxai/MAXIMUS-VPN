@@ -171,6 +171,7 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
                 val urls = obj.optJSONArray(key) ?: continue
                 for (i in 0 until urls.length()) {
                     val item = urls.opt(i)
+                    if (item is JSONObject && item.optBoolean("SkipVerify")) return "Psiphon list TLS verification cannot be disabled."
                     val value = if (item is JSONObject) item.optString("URL") else item?.toString().orEmpty()
                     val uri = runCatching { java.net.URI(value) }.getOrNull()
                     if (uri?.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null)
@@ -209,6 +210,9 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
             config.put("EmitSensitiveNetworkParameters", false)
             if (!config.has("EmitDiagnosticNotices")) config.put("EmitDiagnosticNotices", false)
             if (tcpOnly) {
+                config.remove("InitialLimitTunnelProtocols")
+                config.remove("InitialLimitTunnelProtocolsCandidateCount")
+                config.remove("TunnelProtocol")
                 val previous = config.optJSONArray("LimitTunnelProtocols")
                 val restricted = previous?.let { (0 until it.length()).map { i -> it.optString(i) } }.orEmpty()
                 val protocols = if (restricted.isEmpty()) TCP_PROTOCOLS.toList() else restricted.filter { it in TCP_PROTOCOLS }

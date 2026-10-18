@@ -72,6 +72,7 @@ object NetworkCapabilityDetector {
     suspend fun detect(context: Context): NetworkCapabilityProfile? = withContext(Dispatchers.IO) {
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return@withContext null
         val network = physical(cm) ?: return@withContext null
+        val measuredIdentity = NetworkIdentity.current(context)
         val caps = cm.getNetworkCapabilities(network)
         val link = cm.getLinkProperties(network)
         val addresses = link?.linkAddresses.orEmpty().map { it.address }
@@ -107,6 +108,7 @@ object NetworkCapabilityDetector {
             val quicStatus = quicStatus(quic.map { it.await() }, udpResult, measuredIntl.any { it == TlsOutcome.COMPLETED })
             NetworkCapabilityProfile(
                 transport = transport,
+                networkIdentity = measuredIdentity,
                 ipv4Available = addresses.any { it is Inet4Address },
                 ipv6Available = addresses.any { it is Inet6Address && !it.isLinkLocalAddress && !it.isSiteLocalAddress },
                 udpAvailable = udpResult,
@@ -134,7 +136,7 @@ object NetworkCapabilityDetector {
                 sniPairs = sni.pairs,
                 sniCut = sni.cut,
                 ipv6TlsOk = v6?.await()?.let { if (it == TlsOutcome.NOT_RUN) null else it == TlsOutcome.COMPLETED }
-            ).also { last = it }
+            ).takeIf { NetworkIdentity.current(context) == measuredIdentity }?.also { last = it }
         }
     }
 

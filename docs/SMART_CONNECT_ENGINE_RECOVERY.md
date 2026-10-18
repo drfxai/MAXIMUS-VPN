@@ -7,7 +7,9 @@ Reference supplied: UAC-SNI-Spoofer-Android archive at
 MAXIMUS reuses its Xray, Psiphon, Tor/lyrebird and usque runtimes. A separate
 Aether-derived executable, Matrix Transport, is built from this immutable source
 with the local TLS policy patch. No third-party application identity, account
-settings, public bridge catalog or prebuilt binary is copied into MAXIMUS.
+settings or prebuilt binary is copied into MAXIMUS. Public WebTunnel bridge metadata
+from the supplied archive is included as unverified bootstrap data, in bounded groups;
+users can import their own bridges as alternatives.
 
 ## Path mapping
 
@@ -15,7 +17,7 @@ settings, public bridge catalog or prebuilt binary is copied into MAXIMUS.
 | --- | --- | --- |
 | Saved Xray configs and ECH variants | Existing config transport | User's working server/config |
 | Psiphon direct | TCP-only automatic recipe; explicit saved configs retain their settings | Valid application network settings |
-| Tor WebTunnel / obfs4 / meek | TCP/HTTPS bridge | Imported private bridge lines |
+| Tor WebTunnel / obfs4 / meek | TCP/HTTPS bridge | Imported bridge lines or bundled unverified public seeds |
 | Tor Snowflake | Its own WebRTC transport, not advertised as TCP-only | Bundled lyrebird and reachable broker/volunteer |
 | WARP direct | WireGuard UDP | Registered device; protected API connection |
 | WARP MASQUE (usque) | HTTP/3/QUIC | Bundled executable and authenticated registration |
@@ -32,6 +34,7 @@ are preserved. Trade and exact/manual sessions do not switch exits automatically
 
 - A bounded recovery catalog includes available engines and distinct saved bridges.
   Stable IDs and path-based deduplication preserve separate carrier/bridge settings.
+  Public WebTunnel seeds are tested exactly like private imports; no seed is assumed healthy.
 - Engines are tested serially through the LAB, with real requests and rechecks. No
   untested engine selection can be overwritten by a later Tor branch.
 - WARP recovery is available in DAILY and survival modes. Sidecar availability is

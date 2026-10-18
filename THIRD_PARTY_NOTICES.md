@@ -550,3 +550,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 - Changes: mandatory MASQUE SPKI authentication, authenticated direct account registration, separate product name and native policy self-test.
 - Reproduction and complete corresponding source: `scripts/engines/matrix-transport.sh`, `scripts/transport/harden-source.py`, and `MatrixTransport-source.tar.gz` accompanying releases that contain this executable.
 - Upstream copyright, license and trademark notices are preserved in the source archive. No affiliation or endorsement is implied. No upstream logo or branding is used.
+
+## Public WebTunnel bridge metadata
+
+- Bootstrap bridge lines from the user-supplied UAC-SNI-Spoofer-Android source archive, revision b784ebd149336f4463906509738d354dd9850e23, app/src/main/assets/tor/bridges-webtunnel.txt.
+- Public network configuration data only. No uptime, operator affiliation or endorsement is claimed. The app tests traffic before using a path.

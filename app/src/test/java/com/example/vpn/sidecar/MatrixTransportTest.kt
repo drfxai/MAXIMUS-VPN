@@ -37,9 +37,13 @@ class MatrixTransportTest {
     }
     @Test fun tcpOnlyPsiphonNeverAddsQuicOrBroadensAnExplicitRestriction() {
         val cfg = org.json.JSONObject().put("LimitTunnelProtocols", org.json.JSONArray().put("SSH").put("QUIC-OSSH"))
+            .put("InitialLimitTunnelProtocols", org.json.JSONArray().put("QUIC-OSSH"))
+            .put("InitialLimitTunnelProtocolsCandidateCount", 10)
         val out = PsiphonSidecar.buildConfig(cfg, "", 9000, File("/private/data"), tcpOnly = true)
         assertEquals("[\"SSH\"]", out.getJSONArray("LimitTunnelProtocols").toString())
         assertFalse(out.getBoolean("EmitSensitiveNetworkParameters"))
+        assertFalse(out.has("InitialLimitTunnelProtocols"))
+        assertFalse(out.has("InitialLimitTunnelProtocolsCandidateCount"))
     }
 
 }
