@@ -115,7 +115,7 @@ Rollback is always "use the saved config unchanged". The recovery ledger's exist
   AmneziaWG/WireGuard when UDP is not dead), ordinary configs are tried last with a low prior, and no config
   copies are made. Nothing stops the run before the recovery families were tried. Everything else → ORDINARY.
 - TRUE_PHYSICAL_ISOLATION is never produced by the classifier; only `EmergencyRecovery.conclude` after a full
-  analysis, from strong negative evidence across every available family (see docs/MAXIMUS_AUTONOMOUS_LAB_V5.md).
+  analysis, from strong negative evidence across every available family.
 - Automatic (background) experiments do not start in those states; the message points to Full Analysis.
 - UDP blocked skips UDP families; QUIC/UDP trouble or SNI/TLS interference puts REALITY, XHTTP and other TCP
   transports first. Engine families (Psiphon, Tor) go last.
