@@ -3,7 +3,7 @@ name: Signed Android release
 on:
   push:
     branches: [main]
-    paths: [release-version.txt]
+    paths: [release-version.txt, release-request.txt]
   workflow_dispatch:
     inputs:
       tag:
@@ -186,20 +186,26 @@ jobs:
         # A test build (tag starting with "dry-run") checks everything above and publishes nothing.
         if: ${{ !startsWith(inputs.tag, 'dry-run') }}
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           MAXIMUS_RELEASE_BUILD: ${{ github.run_number }}
         run: |
           if [ -z "$RELEASE_TAG" ]; then RELEASE_TAG=$(cat release-version.txt); fi
           case "$RELEASE_TAG" in [vV][0-9]*.[0-9]*.[0-9]*) ;; *) echo 'Expected semver tag such as V1.0.0'; exit 1 ;; esac
           test "$RELEASE_TAG" = "$(cat release-version.txt)" || { echo 'Tag/version mismatch'; exit 1; }
-          # Replace an existing release for this exact version so corrected verified assets can be republished.
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release delete "$RELEASE_TAG" --yes --cleanup-tag
+          # Keep published downloads available while staging replacements.
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "Android version $RELEASE_TAG" --draft
           fi
           # The hidden maximus-build line is what the in-app update check reads.
           notes=$(printf 'Build %s\n\n<!-- maximus-build: %s -->' "$MAXIMUS_RELEASE_BUILD" "$MAXIMUS_RELEASE_BUILD")
-          gh release create "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS build/transport-offer/MatrixTransport-source.tar.gz --target "$GITHUB_SHA" --title "Android version $RELEASE_TAG" --notes "$notes" --latest
+          gh release upload "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS build/transport-offer/MatrixTransport-source.tar.gz --clobber
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" -F force=true
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA"
+          fi
+          gh release edit "$RELEASE_TAG" --title "Android version $RELEASE_TAG" --notes "$notes" --draft=false --prerelease=false --latest
           actual="$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | sort | join(",")')"
           test "$actual" = "MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,MatrixTransport-source.tar.gz,SHA256SUMS" || { echo "Unexpected assets: $actual"; exit 1; }
           echo 'Published APKs, checksums and the native transport corresponding-source archive.'
@@ -208,7 +214,7 @@ jobs:
         # api.github.com is blocked. Written only after the release itself is published.
         if: ${{ !startsWith(inputs.tag, 'dry-run') }}
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           MAXIMUS_RELEASE_BUILD: ${{ github.run_number }}
         run: |
