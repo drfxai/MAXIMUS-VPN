@@ -223,7 +223,9 @@ class LabController(
         val device = deviceState(userStarted = true)
         val plan = ExperimentPlanner.plan(reading, cap, ExperimentPlanner.budget(
             ExperimentPlanner.Budget(true, device.batteryPercent, device.charging, device.metered)))
-        val profiles = loadAllProfiles()
+        val savedProfiles = loadAllProfiles()
+        val profiles = (savedProfiles + com.example.vpn.smart.RecoveryEngineCatalog.candidates(savedProfiles))
+            .distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
         val families = profiles.map { it to familyOf(it) }
         val available = families.filter { !it.first.allowInsecure }.map { it.second }.toSet()
         val now0 = System.currentTimeMillis()
@@ -311,8 +313,8 @@ class LabController(
                         publishLive()
                         val engine = Sidecars.forProfile(pk.profile)
                         if (pk.family.engine || engine != null) {
-                            val r = if (engine == null) null else withContext(Dispatchers.IO) {
-                                EngineProbe.test(context, engine, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2)
+                            val r = if (!Sidecars.isEngineProfile(pk.profile)) null else withContext(Dispatchers.IO) {
+                                EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2)
                             }
                             when {
                                 r == null -> planner.notTested(pk.profile.id, "no engine in this build carries it")
@@ -650,12 +652,9 @@ class LabController(
             val plan = ExperimentPlanner.plan(reading, cap, ExperimentPlanner.budget(
                 ExperimentPlanner.Budget(true, device.batteryPercent, device.charging, device.metered)))
             val saved = loadAllProfiles().filter { !it.allowInsecure && com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
-            // The engines that need nothing of the user's, when this build carries them.
-            val builtIn = listOfNotNull(
-                runCatching { com.example.vpn.sidecar.PsiphonSidecar.profile() }.getOrNull(),
-                runCatching { TorSidecar.profile() }.getOrNull()
-            ).filter { b -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(b) == null && saved.none { s -> familyOf(s) == familyOf(b) } }
-            val all = (saved + builtIn).filter { it.id !in exclude && com.example.vpn.connectivity.PathRef.of(it) !in exclude }
+            val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(saved)
+            val all = (saved + builtIn).distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
+                .filter { it.id !in exclude && com.example.vpn.connectivity.PathRef.of(it) !in exclude }
             if (all.isEmpty()) return FastRecoveryOutcome(null, 0, true, "no other saved config or recovery engine is available")
             val families = all.map { it to familyOf(it) }
             val recent = all.mapNotNull { p ->
@@ -681,8 +680,8 @@ class LabController(
                         val pk = byId[d.candidate.id] ?: continue@loop
                         onProgress("${pk.family.title}: ${if (d.recheck) "rechecking" else "testing"} ${pk.profile.name}")
                         val engine = Sidecars.forProfile(pk.profile)
-                        if (engine != null) {
-                            val r = engineWindow { EngineProbe.test(context, engine, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2) }
+                        if (Sidecars.isEngineProfile(pk.profile)) {
+                            val r = engineWindow { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2) }
                             if (r.notTested) planner.notTested(pk.profile.id, r.failure ?: "not measured")
                             else {
                                 planner.record(pk.profile.id, r.outcomes, r.latencyMs, System.currentTimeMillis(), r.failure ?: r.stage.title, r.spanMs)
@@ -704,7 +703,7 @@ class LabController(
                 val pk = byId.getValue(best.candidate.id)
                 XrayLogManager.i("LAB", "Connect recovery: ${pk.profile.name} (${pk.family.title}) carried real traffic after $tested test(s).")
                 return FastRecoveryOutcome(FastRecoveryResult(pk.profile, pk.family, best.bestLatency, best.status,
-                    Sidecars.forProfile(pk.profile) != null, tested), tested, false, "")
+                    Sidecars.isEngineProfile(pk.profile), tested), tested, false, "")
             }
             val available = families.map { it.second }.filter { it !in plan.skip }.toSet()
             val exhausted = EmergencyRecovery.conclude(cap, planner.tracks(), available) != null
@@ -722,8 +721,10 @@ class LabController(
 
     /** The family of a saved config from its fields: Tor by its bridge transport, Mihomo by its proxy type. */
     private fun familyOf(p: VlessProfile): PathFamily {
-        val engine = Sidecars.forProfile(p)?.id
+        val chain = com.example.vpn.sidecar.ChainRunner.readChain(p)
+        val engine = if (chain != null) "chain" else Sidecars.forProfile(p)?.id
         val detail = when (engine) {
+            "chain" -> chain!!.hops.joinToString(",") { it.engineId }
             "tor" -> runCatching { TorSidecar.bridges(p).firstOrNull()?.substringBefore(' ') }.getOrNull() ?: "invalid"
             "mihomo" -> MihomoSidecar.proxyOf(p)?.let { o ->
                 val type = o.optString("type").lowercase()

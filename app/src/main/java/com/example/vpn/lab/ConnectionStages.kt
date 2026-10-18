@@ -74,6 +74,9 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
     /** AmneziaWG through the bundled Mihomo (amnezia-wg-option). */
     AMNEZIAWG("AmneziaWG", udp = true, engine = true),
     PSIPHON("Psiphon", engine = true),
+    MASQUE("WARP MASQUE (HTTP/3)", udp = true, engine = true),
+    PSIPHON_MASQUE("Psiphon over WARP MASQUE", udp = true, engine = true),
+    ENGINE_CHAIN("Engine chain", engine = true),
     TOR_WEBTUNNEL("Tor WebTunnel", engine = true),
     TOR_OBFS4("Tor obfs4", engine = true),
     TOR_SNOWFLAKE("Tor Snowflake", engine = true),
@@ -93,6 +96,8 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
          * "wireguard+awg", "hysteria2"...).
          */
         fun of(p: VlessProfile, engineId: String? = null, detail: String? = null): PathFamily = when {
+            engineId == "masque" -> MASQUE
+            engineId == "chain" -> if (detail == "psiphon,masque") PSIPHON_MASQUE else ENGINE_CHAIN
             engineId == "psiphon" -> PSIPHON
             engineId == "tor" -> when (detail) {
                 "webtunnel" -> TOR_WEBTUNNEL

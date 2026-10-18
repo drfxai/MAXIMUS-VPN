@@ -216,7 +216,7 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     private fun hop(engineId: String, region: String) =
         com.example.vpn.sidecar.EngineChain.Hop(engineId, region = if (engineId == "psiphon") region else "")
 
-    private fun titleOf(engineId: String) = if (engineId == "psiphon") "Psiphon" else "Tor"
+    private fun titleOf(engineId: String) = when (engineId) { "psiphon" -> "Psiphon"; "masque" -> "WARP MASQUE"; else -> "Tor" }
     fun chooseFirewall(f: com.example.vpn.connectivity.NetworkFirewalls.Firewall?) = local.update { it.copy(revival = it.revival.copy(chosen = f)) }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }

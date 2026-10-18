@@ -97,6 +97,55 @@ object EngineProbe {
         }
     }
 
+    /** Tests either a lone sidecar or every hop of a saved chain, with identical request criteria. */
+    fun testProfile(context: Context, profile: VlessProfile, timeoutSec: Int, requests: Int = 1): Result {
+        val chain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
+        if (chain == null) {
+            val engine = Sidecars.forProfile(profile)
+                ?: return Result("unknown", ConnectionStage.NOT_TESTED, null, "no engine carries this profile", true)
+            return test(context, engine, profile, timeoutSec, requests)
+        }
+        com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(profile)?.let {
+            return Result("chain", ConnectionStage.NOT_TESTED, null, it, true)
+        }
+        val workDir = File(context.noBackupFilesDir, "lab-engines/chain-${Sidecars.randomToken(6)}").apply { mkdirs() }
+        var running: com.example.vpn.sidecar.ChainRunner.Running? = null
+        try {
+            val settings = AppSettings()
+            running = com.example.vpn.sidecar.ChainRunner.start(chain,
+                engineFor = { id -> Sidecars.ENGINES.firstOrNull { it.id == id } },
+                freePort = { Sidecars.freeLoopbackPort() },
+                context = { id, port, upstream ->
+                    val engine = Sidecars.ENGINES.first { it.id == id }
+                    SidecarContext(File(workDir, id).apply { mkdirs() }, Sidecars.executable(engine)!!,
+                        port, Sidecars.randomToken(9), Sidecars.randomToken(), settings.operationalMode, upstream)
+                },
+                start = { engine, hop, ctx ->
+                    val launch = engine.prepare(hop, settings, ctx)
+                    val process = EngineReaper.track(engine.startInApp(launch, ctx)
+                        ?: SidecarProcess.start("lab-${engine.id}", launch, ctx.workDir, ctx.socksPort))
+                    try {
+                        if (!process.awaitReady(minOf(launch.readyTimeoutMs, 45_000L))) error("${engine.id} was not ready")
+                        process to launch
+                    } catch (t: Throwable) { process.stop(); throw t }
+                })
+            val chained = SidecarChain.xrayProfile(profile, running.entryContext, running.entryLaunch)
+            val started = System.currentTimeMillis()
+            val first = judge("chain", true, RealDelayProbe.measure(chained, timeoutSec))
+            if (!first.stage.carriesTraffic || requests <= 1) return first
+            val more = (2..requests).map {
+                Thread.sleep(FullAnalysis.STABLE_WINDOW_MS)
+                RealDelayProbe.measure(chained, timeoutSec) to (System.currentTimeMillis() - started)
+            }
+            return combine(first, more)
+        } catch (e: Exception) {
+            return Result("chain", ConnectionStage.NOT_TESTED, null, "chain start or request failed: ${e.javaClass.simpleName}", false)
+        } finally {
+            running?.stop()
+            cleanup(workDir)
+        }
+    }
+
     private fun runIsolated(engine: SidecarEngine, profile: VlessProfile, executable: File, workDir: File, timeoutSec: Int, requests: Int, gapMs: Long): Result {
         val ctx = SidecarContext(workDir, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9), Sidecars.randomToken(), AppSettings().operationalMode)
         val launch = runCatching { engine.prepare(profile, AppSettings(), ctx) }.getOrElse {

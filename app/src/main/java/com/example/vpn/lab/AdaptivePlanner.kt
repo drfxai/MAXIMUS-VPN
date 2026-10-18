@@ -42,13 +42,13 @@ class AdaptivePlanner(
 
         companion object {
             fun of(f: PathFamily): FailureDomain = when (f) {
-                PathFamily.HYSTERIA2, PathFamily.TUIC -> UDP_QUIC
+                PathFamily.HYSTERIA2, PathFamily.TUIC, PathFamily.MASQUE, PathFamily.PSIPHON_MASQUE -> UDP_QUIC
                 PathFamily.WIREGUARD, PathFamily.AMNEZIAWG -> UDP_WIREGUARD
                 PathFamily.DNS_TUNNEL -> DNS
                 PathFamily.PSIPHON -> PSIPHON
                 PathFamily.TOR, PathFamily.TOR_WEBTUNNEL, PathFamily.TOR_OBFS4, PathFamily.TOR_SNOWFLAKE -> TOR
                 PathFamily.MIHOMO -> MIHOMO
-                PathFamily.OTHER -> OTHER
+                PathFamily.OTHER, PathFamily.ENGINE_CHAIN -> OTHER
                 else -> TCP_TLS
             }
         }

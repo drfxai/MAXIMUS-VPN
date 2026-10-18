@@ -11,7 +11,8 @@ import com.example.data.model.VlessProfile
  * Only engines that both accept a local SOCKS5 inbound (Xray proxies to it) and can dial out through
  * an upstream SOCKS5 proxy can be chained. Here that is Psiphon (`UpstreamProxyURL`) and Tor
  * (`Socks5Proxy`), so either may sit at either position: Psiphon then Tor, or Tor then Psiphon.
- * Cloudflare WARP is an Xray WireGuard outbound rather than a SOCKS sidecar, so it is not a hop here.
+ * WARP MASQUE offers an authenticated SOCKS port and may carry Psiphon as the final proxy hop.
+ * It cannot dial an upstream proxy, so it is never placed before another hop.
  *
  * Nothing about security changes: each hop still offers its SOCKS port on 127.0.0.1 with a random
  * per-connection login, Xray still owns the TUN, the DNS and the kill switch, and every hop's own
@@ -25,7 +26,7 @@ object EngineChain {
     data class Chain(val hops: List<Hop>)
 
     /** Engine ids that can be chained, in a stable order for the picker. */
-    val CHAINABLE: List<String> = listOf("psiphon", "tor")
+    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque")
 
     const val MIN_HOPS = 2
     const val MAX_HOPS = 2
@@ -36,6 +37,9 @@ object EngineChain {
         if (hops.size < MIN_HOPS) return "A chain needs at least $MIN_HOPS engines."
         if (hops.size > MAX_HOPS) return "A chain can hold at most $MAX_HOPS engines."
         if (hops.map { it.engineId }.distinct().size != hops.size) return "Each engine can appear once in a chain."
+        if (hops.any { it.engineId == "masque" } && (hops.last().engineId != "masque" || hops.first().engineId != "psiphon")) {
+            return "MASQUE can only be the outer carrier for Psiphon."
+        }
         for (hop in hops) {
             if (hop.engineId !in CHAINABLE) return "${hop.engineId} cannot be part of a chain."
         }
@@ -46,6 +50,7 @@ object EngineChain {
     fun hopProfile(hop: Hop): VlessProfile = when (hop.engineId) {
         "psiphon" -> PsiphonSidecar.profile(hop.region)
         "tor" -> TorSidecar.profile(hop.bridges)
+        "masque" -> MasqueSidecar.profile()
         else -> throw IllegalArgumentException("${hop.engineId} cannot be part of a chain.")
     }
 

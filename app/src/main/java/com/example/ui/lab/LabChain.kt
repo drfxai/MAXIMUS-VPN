@@ -24,7 +24,8 @@ import com.example.ui.protocols.LabText
 /** The two orders a Psiphon/Tor chain can run in. */
 enum class ChainOrder(val first: String, val second: String, val title: String) {
     PSIPHON_TOR("psiphon", "tor", "Psiphon → Tor"),
-    TOR_PSIPHON("tor", "psiphon", "Tor → Psiphon")
+    TOR_PSIPHON("tor", "psiphon", "Tor → Psiphon"),
+    PSIPHON_MASQUE("psiphon", "masque", "Psiphon / WARP")
 }
 
 /** LAB "Engine chain": builds a two-hop Psiphon/Tor chain and saves it as a server to connect to. */
@@ -60,8 +61,11 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
             Column(Modifier.padding(horizontal = Gutter)) {
                 Segmented(c, ChainOrder.entries.toList(), s.order, { it.title }, onOrder)
                 LabText(
-                    if (s.order == ChainOrder.PSIPHON_TOR) "Psiphon is the way in; Tor is the exit the site sees."
-                    else "Tor is the way in; Psiphon is the exit the site sees.",
+                    when (s.order) {
+                        ChainOrder.PSIPHON_TOR -> "Psiphon is the way in; Tor is the exit the site sees."
+                        ChainOrder.TOR_PSIPHON -> "Tor is the way in; Psiphon is the exit the site sees."
+                        ChainOrder.PSIPHON_MASQUE -> "Psiphon reaches its servers through WARP MASQUE (HTTP/3). The final exit is Psiphon."
+                    },
                     c.text3, 12.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp), maxLines = 2, lineHeight = 16.sp
                 )
             }
