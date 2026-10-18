@@ -223,9 +223,7 @@ class LabController(
         val device = deviceState(userStarted = true)
         val plan = ExperimentPlanner.plan(reading, cap, ExperimentPlanner.budget(
             ExperimentPlanner.Budget(true, device.batteryPercent, device.charging, device.metered)))
-        val savedProfiles = loadAllProfiles()
-        val profiles = (savedProfiles + com.example.vpn.smart.RecoveryEngineCatalog.candidates(savedProfiles))
-            .distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
+        val profiles = loadAllProfiles()
         val families = profiles.map { it to familyOf(it) }
         val available = families.filter { !it.first.allowInsecure }.map { it.second }.toSet()
         val now0 = System.currentTimeMillis()

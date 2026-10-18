@@ -696,7 +696,7 @@ class RayVpnService : VpnService() {
                         } else throw e
                     }
                     failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
-                    XrayLogManager.i("VPN", "[DIAGNOSTICS] 3. Server host resolved outside the tunnel")
+                    if (!initialResolutionFailed) XrayLogManager.i("VPN", "[DIAGNOSTICS] 3. Server host resolved outside the tunnel")
                 }
                 com.example.vless.VlessValidator.validate(profile)
                 com.example.vpn.engine.RuntimeCapabilities.requireSupported(profile)
@@ -761,7 +761,6 @@ class RayVpnService : VpnService() {
             // What the pre-flight proved (PathGate): a real request failed on the selected path, or an
             // engine that can only be judged after it starts was chosen.
             var provenDead = initialResolutionFailed
-            val engineAdopted = false
             // Which stealth alternate carried the traffic, for the route recipe recorded once it is verified.
             var chosenVariant: String? = null
             activeRecovery = null
@@ -851,7 +850,8 @@ class RayVpnService : VpnService() {
                 chosenVariant = first.variantKey
                 val skip = recentlyFailed(first.profile)
                 if (skip) XrayLogManager.i("SMART", "Selected server skipped: it failed a real request on this network moments ago.")
-                when (val outcome = if (skip) com.example.xray.RealDelayProbe.Outcome.Failed("failed moments ago on this network", request = false)
+                when (val outcome = if (initialResolutionFailed) com.example.xray.RealDelayProbe.Outcome.Failed("selected server DNS resolution failed", request = false)
+                    else if (skip) com.example.xray.RealDelayProbe.Outcome.Failed("failed moments ago on this network", request = false)
                     else com.example.vpn.Abandonable.run { probe(first.profile, timeouts.firstSec) }) {
                     is com.example.xray.RealDelayProbe.Outcome.Delay -> {
                         profile = first.profile
@@ -959,13 +959,13 @@ class RayVpnService : VpnService() {
                 // Sidecar engines must carry requests before selection. The shared recovery pool below
                 // tests MASQUE, Psiphon, saved Tor bridges and chains serially in DAILY and GOD MODE;
                 // choosing several untested engines here used to overwrite the earlier choices with Tor.
-                if (choice.nothingWorked && !engineAdopted) tracker.finish(com.example.vpn.smart.SearchStage.EMERGENCY, verified = raced)
+                if (choice.nothingWorked) tracker.finish(com.example.vpn.smart.SearchStage.EMERGENCY, verified = raced)
             }
 
             // Always a pre-flight: a server that was not tested above (no Smart Connect, no stealth variants)
             // gets one real request now, so a dead server is never started blindly.
             // The power button skips it: the user's config is started as chosen and checked after start.
-            if (!raced && !provenDead && !engineAdopted && !force && !exact && !com.example.vpn.sidecar.Sidecars.isEngineProfile(profile)) {
+            if (!raced && !provenDead && !force && !exact && !com.example.vpn.sidecar.Sidecars.isEngineProfile(profile)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.ORDINARY_PREFLIGHT)
                 tracker.start(com.example.vpn.smart.SearchStage.SELECTED)
                 if (recentlyFailed(profile)) {
@@ -995,7 +995,7 @@ class RayVpnService : VpnService() {
             // Escalation before giving up: the LAB's fast recovery (Connect goal) over every other saved family
             // and the built-in recovery engines, stopping at the first path that carries a real request.
             var recoveryExhausted = false
-            if (!raced && !engineAdopted && provenDead && !force && !lockExit && (raceFirst || settings.autoFailoverEnabled)) {
+            if (!raced && provenDead && !force && !lockExit && (raceFirst || settings.autoFailoverEnabled)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.RECOVERY_ENGINES)
                 showForegroundNotification("No server answered; trying recovery methods...")
                 tracker.start(com.example.vpn.smart.SearchStage.RECOVERY)
@@ -1034,7 +1034,7 @@ class RayVpnService : VpnService() {
             // that comes back. Bounded in time; never in Trade (its exit is pinned). The winning recipe is
             // saved to the ledger, so even a cut-short run helps the next connect.
             coroutineContext.ensureActive()
-            if (!raced && !engineAdopted && provenDead && !force && !lockExit && recoveryExhausted &&
+            if (!raced && provenDead && !force && !lockExit && recoveryExhausted &&
                 (raceFirst || settings.autoFailoverEnabled)) {
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.RECOVERY_ENGINES)
                 showForegroundNotification("Reviving configurations...")
@@ -1108,7 +1108,7 @@ class RayVpnService : VpnService() {
             // No blind connections: a server whose real request just failed here, with nothing verified in
             // its place, is not started (PathGate). The user can still choose "Connect anyway".
             val gate = com.example.vpn.smart.PathGate.decide(verified = raced, provenDead = provenDead,
-                engineAdopted = engineAdopted, forced = force || exact)
+                engineAdopted = false, forced = force || exact)
             if (!com.example.vpn.smart.PathGate.mayStart(gate)) {
                 val name = com.example.core.SecretRedactor.redact(requestedProfile.name)
                 XrayLogManager.w("SMART", "No verified path: '$name' carried no real traffic on this network and no alternative did. " +

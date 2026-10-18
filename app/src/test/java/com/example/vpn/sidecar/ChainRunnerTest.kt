@@ -122,4 +122,11 @@ class ChainRunnerTest {
         assertFalse(running.isAlive)
     }
 
+    @Test fun differentChainsDoNotReplaceEachOtherInTheServerDatabase() {
+        val a = ChainRunner.profile(chain) { it }
+        val b = ChainRunner.profile(EngineChain.Chain(listOf(EngineChain.Hop("psiphon"), EngineChain.Hop("masque")))) { it }
+        assertFalse(a.effectiveFingerprint == b.effectiveFingerprint)
+        assertEquals(a.effectiveFingerprint, ChainRunner.profile(chain) { "another display name" }.effectiveFingerprint)
+    }
+
 }

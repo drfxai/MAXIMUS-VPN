@@ -67,9 +67,10 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         val detected = com.example.vpn.connectivity.NetworkFirewalls.detect(NetworkKey.current(getApplication<Application>()))
         val sc = com.example.vpn.sidecar.Sidecars
         val psiphonReady = runCatching { sc.psiphon().let { sc.isBundled(it) && it.problem(com.example.vpn.sidecar.PsiphonSidecar.profile()) == null } }.getOrDefault(true)
+        val masqueReady = runCatching { sc.isBundled(com.example.vpn.sidecar.MasqueSidecar) }.getOrDefault(false)
         val torReady = runCatching { sc.ENGINES.first { it.id == "tor" }.let { sc.isBundled(it) } }.getOrDefault(true)
         local.update { it.copy(revival = it.revival.copy(eligible = eligible, detected = detected),
-            chain = it.chain.copy(psiphonReady = psiphonReady, torReady = torReady)) }
+            chain = it.chain.copy(psiphonReady = psiphonReady, torReady = torReady, masqueReady = masqueReady)) }
         local.value = local.value.copy(configs = configs.map { p ->
             LabConfigOption(p.id, p.name.ifBlank { "Config" }, listOf(p.protocolType.displayName, p.transport.uppercase().ifBlank { null }, p.security.uppercase().ifBlank { null })
                 .filterNotNull().filter { it != "NONE" }.joinToString(" · "))

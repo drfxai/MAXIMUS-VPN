@@ -35,6 +35,7 @@ data class ChainUi(
     val region: String = "",
     val psiphonReady: Boolean = true,
     val torReady: Boolean = true,
+    val masqueReady: Boolean = false,
     val saving: Boolean = false,
     /** Name of the chain last saved this session, for the confirmation line. */
     val savedName: String? = null
@@ -78,7 +79,12 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
                     modifier = Modifier.padding(start = 4.dp, top = 8.dp), maxLines = 1)
             }
         }
-        val missing = buildList { if (!s.psiphonReady) add("Psiphon"); if (!s.torReady) add("Tor") }
+        val missing = buildList {
+            if (!s.psiphonReady) add("Psiphon")
+            if (s.order == ChainOrder.PSIPHON_MASQUE) {
+                if (!s.masqueReady) add("WARP MASQUE")
+            } else if (!s.torReady) add("Tor")
+        }
         if (missing.isNotEmpty()) item {
             Panel(c) {
                 Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {

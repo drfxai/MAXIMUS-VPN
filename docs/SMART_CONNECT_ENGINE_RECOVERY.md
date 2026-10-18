@@ -10,7 +10,7 @@ account material or application identifiers are copied.
 
 ## Implemented
 
-- A shared recovery catalog for Smart Connect and Full Analysis: saved sidecar profiles,
+- A recovery catalog for Smart Connect, using the LAB experiment machinery: saved sidecar profiles,
   including user-imported WebTunnel and obfs4 bridges, plus available MASQUE, Psiphon,
   Snowflake and Psiphon-over-MASQUE defaults.
 - Stable default IDs; path-based deduplication includes engine settings. One private

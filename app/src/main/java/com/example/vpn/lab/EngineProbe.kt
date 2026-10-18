@@ -141,8 +141,7 @@ object EngineProbe {
         } catch (e: Exception) {
             return Result("chain", ConnectionStage.NOT_TESTED, null, "chain start or request failed: ${e.javaClass.simpleName}", false)
         } finally {
-            running?.stop()
-            cleanup(workDir)
+            try { running?.stop() } finally { cleanup(workDir) }
         }
     }
 

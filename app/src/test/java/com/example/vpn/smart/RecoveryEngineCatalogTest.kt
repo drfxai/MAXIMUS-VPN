@@ -50,12 +50,14 @@ class RecoveryEngineCatalogTest {
 
     @Test fun measuredUdpFailureSkipsBothMasquePathsButKeepsTcpBridges() {
         val net = NetworkCapabilityProfile(udpAvailable = false, quicAvailable = false)
-        val plan = ExperimentPlanner.plan(null, net, 10)
+        val plan = ExperimentPlanner.plan(com.example.vpn.lab.NetworkStateClassifier.classify(net), net, 10)
         // The emergency order must never prefer a UDP carrier when UDP has no answer.
         val order = ExperimentPlanner.emergencyOrder(net)
         assertFalse(PathFamily.MASQUE in order)
         assertFalse(PathFamily.PSIPHON_MASQUE in order)
         assertTrue(PathFamily.TOR_WEBTUNNEL in order)
         assertFalse(PathFamily.TOR_WEBTUNNEL in plan.skip)
+        assertTrue(PathFamily.MASQUE in plan.skip)
+        assertTrue(PathFamily.PSIPHON_MASQUE in plan.skip)
     }
 }
