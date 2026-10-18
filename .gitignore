@@ -34,3 +34,7 @@ app/src/main/assets/psiphon/
 tools/aggregator/output/*
 !tools/aggregator/output/.gitkeep
 __pycache__/
+
+# Local benchmark output and diagnostic captures
+tools/censorsim/results/
+*.log

@@ -1,4 +1,4 @@
-# Network state classification (LAB V4, autonomous LAB update)
+# Network state classification
 
 ## Measurements (physical network only)
 

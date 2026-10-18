@@ -59,6 +59,13 @@ adb('shell', 'settings', 'put', 'global', 'transition_animation_scale', '0')
 adb('shell', 'settings', 'put', 'global', 'animator_duration_scale', '0')
 adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/com.example.MainActivity')
 time.sleep(12)
+# Dismiss the normal first-run community dialog without opening any external links.
+for node in tree().iter('node'):
+    if node.get('text') == "Don't show again":
+        x1, y1, x2, y2 = map(int, re.findall(r'\d+', node.get('bounds')))
+        adb('shell', 'input', 'tap', str((x1 + x2) // 2), str((y1 + y2) // 2))
+        time.sleep(2)
+        break
 shots = []
 for label, name in [('Tunnel', 'tunnel'), ('Nodes', 'nodes'), ('LAB', 'lab'), ('Panels', 'panels')]:
     tab(label)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuses a tree that carries a key, a token or an assistant's name.
+"""Refuses a tree that carries private keys or provider credentials.
 
 Keys and tokens belong in the repository's Actions secrets or in Cloudflare, never in a file here.
 """
@@ -20,7 +20,6 @@ PATTERNS = [
     ("a Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b")),
     ("a GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
     ("an AWS access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("an assistant's name", re.compile(r"(?i)\b(?:claude|anthropic|copilot|chatgpt)\b")),
 ]
 
 

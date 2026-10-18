@@ -16,7 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.InetAddress
 
-/** V1.0.1 step 2: the leaks and gaps found by the step 1 audit (docs/V101_AUDIT.md) stay closed. */
+/** Regression coverage for DNS, routing and configuration security. */
 class SecurityBaselineTest {
     private val settings = AppSettings(dnsServer = "https://8.8.8.8/dns-query")
 

@@ -1,145 +1,90 @@
 <div align="center">
 
+<img src="docs/media/cover.webp" alt="MAXIMUS VPN — Your network. Your control." width="100%">
+
 # MAXIMUS VPN
 
-### Your own servers. Your own rules. One app.
+**An Android network toolkit. One place to connect, investigate and recover.**
 
-**A next-generation Android VPN client that connects, builds and manages your private network — from a single tap.**
+[English](README.md) · [فارسی](README.fa.md)
 
-[![Latest release](https://img.shields.io/github/v/release/drfxai/MAXIMUS-VPN?style=for-the-badge&color=6C4CF1&label=Release)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/drfxai/MAXIMUS-VPN/total?style=for-the-badge&color=1E6BFF)](https://github.com/drfxai/MAXIMUS-VPN/releases)
-[![Android](https://img.shields.io/badge/Android-7.0%2B-00C853?style=for-the-badge&logo=android&logoColor=white)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
-[![Xray](https://img.shields.io/badge/Core-Xray-111827?style=for-the-badge)](THIRD_PARTY_NOTICES.md)
+[![Release](https://img.shields.io/github/v/release/drfxai/MAXIMUS-VPN?style=flat-square&color=d4a843)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+[![Android 7+](https://img.shields.io/badge/Android-7.0%2B-38bdb0?style=flat-square)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+[![Checks](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml/badge.svg)](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml)
+[![License](https://img.shields.io/badge/License-Source--available-d4a843?style=flat-square)](LICENSE)
 
-### [⬇ Download MAXIMUS VPN](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+### [Download for Android ↗](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+
+Smart Connect · Network LAB · Clean IP discovery · Private server tools
 
 </div>
 
----
+## See the app
 
-## Why MAXIMUS VPN?
-
-Most VPN apps give you a connect button and someone else's servers. **MAXIMUS VPN gives you the whole stack.**
-Install a panel on your own server, deploy a private Cloudflare endpoint, generate working configurations,
-find the fastest clean IPs and connect — all without opening a terminal.
+Actual captures of the published **V1.0.2** APK on Android 15. These show a clean installation, with no imported servers or active tunnel. No connection results or user data have been added to the images.
 
 <table>
 <tr>
-<td width="50%" valign="top">
-
-### ⚡ One-tap server setup
-Enter your VPS address and password. MAXIMUS VPN installs **3X-UI**, secures it with HTTPS,
-opens the firewall, generates the login and verifies everything works.
-
-</td>
-<td width="50%" valign="top">
-
-### ☁️ Private Cloudflare endpoint
-Deploy a **BPB panel** to your own Cloudflare account in seconds. Username, password and the private
-login link are created for you and shown ready to copy.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### 🛡️ Configs that actually work
-**Quick Config** creates a VLESS + Reality + Vision inbound on your server, checks it on the panel,
-tests the port and pings it — then adds it to the app automatically.
-
-</td>
-<td valign="top">
-
-### 🌐 Clean IP scanner
-Scan Cloudflare's edge, rank addresses by latency and stability, and bind the best one to your
-configuration with a single tap.
-
-</td>
+<td align="center" width="25%"><img src="docs/media/screenshots/tunnel.png" alt="Actual MAXIMUS VPN Tunnel screen" width="240"><br><b>Tunnel</b><br>Your connection workspace</td>
+<td align="center" width="25%"><img src="docs/media/screenshots/nodes.png" alt="Actual MAXIMUS VPN Nodes screen" width="240"><br><b>Nodes</b><br>Profiles and subscriptions</td>
+<td align="center" width="25%"><img src="docs/media/screenshots/lab.png" alt="Actual MAXIMUS VPN LAB screen" width="240"><br><b>Network LAB</b><br>Measure before choosing</td>
+<td align="center" width="25%"><img src="docs/media/screenshots/panels.png" alt="Actual MAXIMUS VPN Panels screen" width="240"><br><b>Panels</b><br>Your infrastructure tools</td>
 </tr>
 </table>
 
----
+[Capture details](docs/media/screenshots/capture.json) · [Media gallery](docs/media/README.md)
 
-## Features
+## Built for changing networks
 
-**Connectivity**
-- VLESS, VMess, Trojan and Shadowsocks with the native **Xray** core
-- Reality, TLS, WebSocket, gRPC, HTTP/2 and xHTTP transports
-- Works with hostname and IP servers, including Cloudflare Workers endpoints
-- Hysteria2, WireGuard and AmneziaWG (junk packets) on the same core
-- Universal import: links, Base64 subscriptions, Xray JSON, Clash/Mihomo YAML and WireGuard `.conf` files
-- Finds a working route before connecting: split TLS handshake, another browser fingerprint, ECH, UDP junk packets, or another protocol on the same server
-- Subscriptions that survive blocking: mirrors, CDN copies of GitHub-hosted files, DoH lookups, an offline copy, and a refresh through the tunnel after connecting
-- Telegram bot for distribution (`tools/telegram-bot`, a Cloudflare Worker)
+| Explore | What MAXIMUS provides |
+| :--- | :--- |
+| **Smart Connect** | Tries eligible paths with real requests and rechecks; adapts recovery choices to measured network conditions. |
+| **Network LAB** | Network diagnosis, configuration experiments, service checks and evidence for choosing a route. |
+| **Clean IP discovery** | Uses TCP timing to shortlist addresses, then validates candidates with the actual configuration. |
+| **Multiple engines** | Xray, Mihomo, Psiphon, Tor, WARP/MASQUE, Matrix Transport, dnstt and Slipstream adapters. |
+| **Your infrastructure** | 3X-UI installation, Cloudflare/BPB workflows, configuration import and server management. |
+| **Connection controls** | DNS and routing settings, diagnostics, failover controls and Android Always-on VPN integration. |
 
-**Server & panel workspace**
-- 3X-UI installer with pinned HTTPS, generated credentials and firewall setup
-- BPB Worker deployment on Cloudflare with generated login and subscription import
-- Quick Config and Custom Inbound builder (Reality, WebSocket, xHTTP, RAW)
-- Live server status and panel management from your phone
+### Find a better path
 
-**Performance**
-- Clean IP scanner with ranked results
-- Server benchmarking, latency tests and automatic failover
-- Top-10 ranking of your fastest nodes
+<img src="docs/media/smart-connect.webp" alt="Promotional artwork — Find a better path. Smart Connect + Network LAB." width="100%">
 
-**Protection**
-- Built on Android `VpnService` with Always-on VPN and lockdown support
-- Traffic protection while connecting, with a one-tap reset
-- DNS and routing controls, live diagnostics and connection logs
-- Panel credentials and tokens encrypted with the Android Keystore
+Transport support depends on the engine and configuration. **WARP over TCP uses Matrix Transport HTTP/2; WireGuard uses UDP.** Psiphon requires valid network settings; Tor bridges and DNS tunnels need reachable infrastructure. A bundled engine or successful handshake alone does not prove internet access on your network. See the [engine guide](docs/SMART_CONNECT_ENGINE_RECOVERY.md).
 
-**Smart tools**
-- AI Agent for network diagnostics and guidance
-- Light and dark themes, modern Jetpack Compose interface
+## Get started
 
----
+1. Download the APK from [official Releases](https://github.com/drfxai/MAXIMUS-VPN/releases/latest).
+2. Import a profile or subscription in **Nodes**, or configure your own infrastructure in **Panels**.
+3. Open **Tunnel**, choose a profile and connect. Use **LAB** when a route needs investigation.
 
-## Download
+| Download | Choose this when… |
+| :--- | :--- |
+| [ARM64 APK](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) | You use a modern ARM64 Android phone. Recommended for most users. |
+| [Universal APK](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) | You need ARM32 or x86_64 support, or are unsure about your device. |
+| `SHA256SUMS` | You want to check the downloaded files. |
 
-| File | For |
-|---|---|
-| `MAXIMUSVPN-V1.0.1-arm64-v8a.apk` | Most modern Android phones (recommended) |
-| `MAXIMUSVPN-V1.0.1-universal.apk` | Any supported Android device |
-| `SHA256SUMS` | Verify your download |
+Android **7.0 or later** is required. To update, install the official APK over your current installation. Keep your profiles backed up. For protection when the app is not running, configure Android **Always-on VPN** and **Block connections without VPN**.
 
-**[Get the latest release →](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)**
+## Documentation
 
-> Official builds are published **only** on this repository's Releases page. Avoid APK mirrors and repackaged copies.
+- [Documentation hub](docs/README.md) — user guides, engines and infrastructure.
+- [Build from source](docs/BUILDING.md) — toolchains, native runtimes and validation.
+- [Contributing](CONTRIBUTING.md) — issues, focused changes and checks.
+- [Security policy](SECURITY.md) — limitations and private vulnerability reports.
+- [Third-party notices](THIRD_PARTY_NOTICES.md) — upstream components and source requirements.
 
-## Get started in three steps
+## License & support
 
-1. **Install** the APK and allow the VPN permission.
-2. **Add servers** — import a link or subscription, or open **Panels** to install your own 3X-UI or BPB panel.
-3. **Connect** — pick a node, tap the power button, done.
+MAXIMUS VPN is **source-available**, under a non-commercial license requiring prior permission for use of the source. It is not offered under a standard open-source license. Read [LICENSE](LICENSE) before copying, modifying, building or redistributing it. Third-party components retain their own licenses.
 
----
-
-## Build from source
-
-Requirements: JDK 17 and the Android SDK (platform 36.1, build-tools 36.0.0).
-
-```bash
-bash scripts/fetch-libxray-android.sh   # fetch and verify the native Xray runtime
-bash gradlew :app:testDebugUnitTest
-bash gradlew :app:assembleDebug
-bash gradlew -PtargetAbi=arm64-v8a :app:assembleDebug   # ARM64-only build
-```
-
-## Security
-
-Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).
-Third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Panel automation details: [docs/PANELS.md](docs/PANELS.md).
-
----
+Report reproducible bugs through [Issues](https://github.com/drfxai/MAXIMUS-VPN/issues). Remove tokens, private keys, subscription URLs and server credentials from reports. For vulnerabilities, follow [SECURITY.md](SECURITY.md).
 
 <div align="center">
 
-### MAXIMUS VPN
+**MAXIMUS VPN · DrFXAi**
 
-**Connect intelligently. Build freely. Stay in control.**
+Your network. Your control.
 
-Made by **DrFXAi**
+[Download](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) · [فارسی](README.fa.md) · [Documentation](docs/README.md)
 
 </div>

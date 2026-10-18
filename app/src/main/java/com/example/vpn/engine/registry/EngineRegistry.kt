@@ -7,7 +7,7 @@ import com.example.vpn.engine.EngineSelectionPolicy
  * (Mihomo, AmneziaWG, Psiphon, Tor, DNS tunnels...) are added here first, as [EngineDescriptor.bundled]
  * false, and become selectable only once bundled, license-reviewed and pinned.
  *
- * [CAPABILITIES] is the protocol matrix from the V1.0.1 audit (docs/V101_AUDIT.md); a test keeps the
+ * [CAPABILITIES] is the runtime protocol capability matrix; a test keeps the
  * two from drifting from what RuntimeCapabilities actually accepts.
  */
 object EngineRegistry {

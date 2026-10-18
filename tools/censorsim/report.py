@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarises results.jsonl into the KPI tables of docs/WAR_PLAN.md (Markdown on stdout)."""
+"""Summarises results.jsonl into Markdown KPI tables on stdout."""
 import json, statistics, sys
 from collections import defaultdict
 
