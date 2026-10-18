@@ -11,7 +11,7 @@ import org.junit.Test
 class RecoveryEngineCatalogTest {
     @Test fun privateWebTunnelAndSnowflakeFallbackAreBothKept() {
         val privateBridge = TorSidecar.profile("webtunnel 192.0.2.10:443 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA url=https://bridge.example/path ver=0.0.1")
-        val candidates = RecoveryEngineCatalog.candidates(listOf(privateBridge)) { true }
+        val candidates = RecoveryEngineCatalog.candidates(listOf(privateBridge), seedBridges = emptyList()) { true }
         assertTrue(candidates.any { it.id == privateBridge.id })
         assertTrue(candidates.any { it.id == "recovery-tor-snowflake" })
         assertEquals(candidates.size, candidates.map { PathRef.of(it) }.distinct().size)
@@ -19,7 +19,7 @@ class RecoveryEngineCatalogTest {
 
     @Test fun savedSnowflakeWinsItsDuplicateWithoutHidingOtherEngines() {
         val saved = TorSidecar.profile()
-        val candidates = RecoveryEngineCatalog.candidates(listOf(saved)) { true }
+        val candidates = RecoveryEngineCatalog.candidates(listOf(saved), seedBridges = emptyList()) { true }
         assertTrue(candidates.any { it.id == saved.id })
         assertFalse(candidates.any { it.id == "recovery-tor-snowflake" })
         assertEquals(9, candidates.size)
@@ -27,14 +27,14 @@ class RecoveryEngineCatalogTest {
 
     @Test fun availabilityAndSecurityAreGates() {
         val insecure = TorSidecar.profile().copy(allowInsecure = true)
-        val candidates = RecoveryEngineCatalog.candidates(listOf(insecure)) { it.id == "recovery-masque" }
+        val candidates = RecoveryEngineCatalog.candidates(listOf(insecure), seedBridges = emptyList()) { it.id == "recovery-masque" }
         assertEquals(listOf("recovery-masque"), candidates.map { it.id })
-        assertTrue(RecoveryEngineCatalog.candidates(emptyList()) { false }.isEmpty())
+        assertTrue(RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList()) { false }.isEmpty())
     }
 
     @Test fun defaultIdentitiesStayStableBetweenSearches() {
-        val a = RecoveryEngineCatalog.candidates(emptyList()) { true }
-        val b = RecoveryEngineCatalog.candidates(emptyList()) { true }
+        val a = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList()) { true }
+        val b = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList()) { true }
         assertEquals(a.map { it.id }, b.map { it.id })
         assertEquals(a.map { PathRef.of(it) }, b.map { PathRef.of(it) })
         val chain = ChainRunner.readChain(a.first { it.id == "recovery-psiphon-masque" })!!
@@ -42,7 +42,7 @@ class RecoveryEngineCatalogTest {
     }
 
     @Test fun masqueIsNotMisclassifiedAsMihomo() {
-        val p = RecoveryEngineCatalog.candidates(emptyList()) { true }.first { it.id == "recovery-masque" }
+        val p = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList()) { true }.first { it.id == "recovery-masque" }
         assertEquals(PathFamily.MASQUE, PathFamily.of(p, "masque"))
         assertTrue(PathFamily.MASQUE.udp)
         assertEquals(PathFamily.PSIPHON_MASQUE, PathFamily.of(p, "chain", "psiphon,masque"))
@@ -60,4 +60,13 @@ class RecoveryEngineCatalogTest {
         assertTrue(PathFamily.MASQUE in plan.skip)
         assertTrue(PathFamily.PSIPHON_MASQUE in plan.skip)
     }
+    @Test fun publicWebTunnelSeedsAreSeparateCandidatesAndNeverMarkThemselvesVerified() {
+        val lines = listOf("webtunnel 192.0.2.3:443 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA url=https://bridge.example/path ver=0.0.1")
+        val candidates = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = lines) { true }
+        val seed = candidates.single { it.id == "recovery-webtunnel-0" }
+        assertEquals(lines, TorSidecar.bridges(seed))
+        assertNull(seed.lastLatencyMs)
+        assertTrue(candidates.any { it.id == "recovery-tor-snowflake" })
+    }
+
 }

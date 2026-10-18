@@ -3,7 +3,7 @@ name: Signed Android release
 on:
   push:
     branches: [main]
-    paths: [release-version.txt, .github/workflows/release.yml]
+    paths: [release-version.txt]
   workflow_dispatch:
     inputs:
       tag:
