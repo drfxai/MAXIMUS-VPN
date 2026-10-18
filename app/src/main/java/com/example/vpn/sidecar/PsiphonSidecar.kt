@@ -51,7 +51,7 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
         problem(profile)?.let { throw IllegalStateException(it) }
         val dataDir = File(context.workDir, DATA_DIR).apply { mkdirs() }
-        val config = buildConfig(networkSettings()!!, region(profile), context.socksPort, dataDir, context.upstreamSocks)
+        val config = buildConfig(networkSettings()!!, region(profile), context.socksPort, dataDir, context.upstreamSocks, context.upstreamUser, context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null)
         val configFile = File(context.workDir, CONFIG_FILE)
         configFile.writeText(config.toString())
         // The settings are not secret in the cryptographic sense, but no other app needs to read them.
@@ -113,9 +113,10 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
         )
 
         /** A new Psiphon profile; [region] is a two-letter country code, or empty for any. */
-        fun profile(region: String = ""): VlessProfile {
+        fun profile(region: String = "", tcpOnly: Boolean = false): VlessProfile {
             val code = region.trim().uppercase()
             val extras = JSONObject().put(KEY_ENGINE, ID).put(KEY_REGION, code)
+            if (tcpOnly) extras.put("tcpOnly", true)
             return VlessProfile(
                 name = if (code.isEmpty()) "Psiphon" else "Psiphon ($code)",
                 address = "psiphon",
@@ -126,6 +127,13 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
                 extraSettings = extras.toString()
             )
         }
+
+        fun tcpOnly(profile: VlessProfile): Boolean = ProfileExtras.read(profile).optBoolean("tcpOnly")
+
+        // Protocol identifiers from the pinned Psiphon common/protocol source. QUIC and refraction
+        // transports are deliberately absent from the TCP-only / upstream-SOCKS recipe.
+        val TCP_PROTOCOLS = setOf("SSH", "OSSH", "TLS-OSSH", "SHADOWSOCKS-OSSH", "UNFRONTED-MEEK-OSSH",
+            "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH")
 
         fun region(profile: VlessProfile): String =
             ProfileExtras.read(profile).optString(KEY_REGION).trim().uppercase()
@@ -155,11 +163,28 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
             return null
         }
 
+        fun validateNetworkSettings(raw: String): String? {
+            if (raw.length > 512 * 1024) return "Psiphon settings exceed 512 KiB."
+            val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return "Psiphon settings must be a JSON object."
+            incompleteReason(obj)?.let { return it }
+            for (key in listOf("RemoteServerListURLs", "ObfuscatedServerListRootURLs")) {
+                val urls = obj.optJSONArray(key) ?: continue
+                for (i in 0 until urls.length()) {
+                    val item = urls.opt(i)
+                    val value = if (item is JSONObject) item.optString("URL") else item?.toString().orEmpty()
+                    val uri = runCatching { java.net.URI(value) }.getOrNull()
+                    if (uri?.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null)
+                        return "Psiphon server lists must use HTTPS without URL credentials."
+                }
+            }
+            return null
+        }
+
         private fun hasUrls(settings: JSONObject, key: String): Boolean =
             (settings.opt(key) as? JSONArray)?.length()?.let { it > 0 } == true
 
         /** The config file ConsoleClient reads: the build's settings plus what this connection needs. */
-        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null): JSONObject {
+        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false): JSONObject {
             val config = JSONObject(networkSettings.toString())
             LOCAL_FIELDS.forEach { config.remove(it) }
             config.put("LocalSocksProxyPort", socksPort)
@@ -173,9 +198,23 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
                 config.put("DNSResolverAlternateServers", JSONArray(DEFAULT_DNS_SERVERS))
             }
             // Chain hop: Psiphon reaches its own servers through the next hop toward the exit.
-            if (upstreamSocks != null) config.put("UpstreamProxyURL", "socks5://127.0.0.1:$upstreamSocks")
+            if (upstreamSocks != null) {
+                val auth = if (upstreamUser != null && upstreamPass != null) {
+                    fun encode(value: String) = java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+                    "${encode(upstreamUser)}:${encode(upstreamPass)}@"
+                } else ""
+                config.put("UpstreamProxyURL", "socks5://${auth}127.0.0.1:$upstreamSocks")
+            }
             if (!config.has("ClientPlatform")) config.put("ClientPlatform", "Android")
+            config.put("EmitSensitiveNetworkParameters", false)
             if (!config.has("EmitDiagnosticNotices")) config.put("EmitDiagnosticNotices", false)
+            if (tcpOnly) {
+                val previous = config.optJSONArray("LimitTunnelProtocols")
+                val restricted = previous?.let { (0 until it.length()).map { i -> it.optString(i) } }.orEmpty()
+                val protocols = if (restricted.isEmpty()) TCP_PROTOCOLS.toList() else restricted.filter { it in TCP_PROTOCOLS }
+                require(protocols.isNotEmpty()) { "These settings allow no TCP Psiphon protocol." }
+                config.put("LimitTunnelProtocols", JSONArray(protocols))
+            }
             return config
         }
     }

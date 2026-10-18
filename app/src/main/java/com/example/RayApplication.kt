@@ -232,6 +232,12 @@ class RayApplication : Application() {
         instance = this
         // Tor's own process only runs TorService; nothing of the app starts there.
         if (com.example.core.AppProcess.isTorProcess()) return
+        com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
+        com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
+        com.example.vpn.sidecar.Sidecars.torStarter = { torrc, port -> com.example.vpn.sidecar.TorInApp.start(this, torrc, port) }
+        com.example.vpn.sidecar.Sidecars.psiphonSettings = {
+            com.example.data.security.SecureStorage(this).getAndDecrypt("psiphon_network_settings_v1")?.takeIf { it.isNotBlank() }
+        }
 
         // Keep the log of the previous run (a crash or a forced stop would otherwise wipe it).
         runCatching { XrayLogManager.attachDisk(java.io.File(filesDir, "logs")) }

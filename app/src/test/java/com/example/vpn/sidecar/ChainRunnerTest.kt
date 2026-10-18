@@ -104,4 +104,29 @@ class ChainRunnerTest {
         assertFalse(ChainRunner.isChain(VlessProfile(name = "s", address = "1.2.3.4", port = 443, uuid = "x")))
         assertNull(ChainRunner.readChain(VlessProfile(name = "s", address = "1.2.3.4", port = 443, uuid = "x")))
     }
+    @Test fun psiphonReceivesTheAuthenticatedMasquePortAndCredentials() {
+        val chain = EngineChain.Chain(listOf(EngineChain.Hop("psiphon"), EngineChain.Hop("masque")))
+        var next = 3000
+        var entry: SidecarContext? = null
+        val running = ChainRunner.start(chain, engineFor = { FakeEngine(it) }, freePort = { next++ },
+            context = { id, port, upstream ->
+                SidecarContext(File("/tmp/$id"), File("/tmp/$id/bin"), port, "user-$id", "pass-$id", OperationalMode.DAILY, upstream)
+            }, start = { engine, _, ctx ->
+                if (engine.id == "psiphon") entry = ctx
+                FakeRunning() to SidecarLaunch(emptyList(), socksAuth = engine.id == "masque")
+            })
+        assertEquals(3000, entry!!.upstreamSocks)
+        assertEquals("user-masque", entry!!.upstreamUser)
+        assertEquals("pass-masque", entry!!.upstreamPass)
+        running.stop()
+        assertFalse(running.isAlive)
+    }
+
+    @Test fun differentChainsDoNotReplaceEachOtherInTheServerDatabase() {
+        val a = ChainRunner.profile(chain) { it }
+        val b = ChainRunner.profile(EngineChain.Chain(listOf(EngineChain.Hop("psiphon"), EngineChain.Hop("masque")))) { it }
+        assertFalse(a.effectiveFingerprint == b.effectiveFingerprint)
+        assertEquals(a.effectiveFingerprint, ChainRunner.profile(chain) { "another display name" }.effectiveFingerprint)
+    }
+
 }

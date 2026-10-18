@@ -33,7 +33,7 @@ import kotlin.random.Random
  * 3. End-to-end TLS SNI & RFC 6455 WebSocket Upgrade validation against the real target domain.
  * 4. Active CDN verification & real download throughput / speed testing (like CFScanner).
  */
-class CleanIpOptimizer {
+class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
 
     data class Result(
         val ip: String,
@@ -45,7 +45,7 @@ class CleanIpOptimizer {
         val flagEmoji: String = "🌐",
         val operatorTag: String = "Cloudflare CDN",
         val downloadSpeedKbps: Long = 0L,
-        val verificationStatus: String = "Verified",
+        val verificationStatus: String = "TCP only; traffic not verified",
         val originVerified: Boolean = false
     ) {
         val lossPercent: Double
@@ -247,16 +247,19 @@ class CleanIpOptimizer {
          * Three TCP pings per address, so the latency, jitter and loss are measured rather than
          * assumed; the lowest median among the addresses that answered at least twice wins.
          */
-        suspend fun findBestCleanIpSync(region: String = "Iran"): Result? = withContext(Dispatchers.IO) {
+        suspend fun findBestCleanIpSync(region: String = "Iran"): Result? = findCleanIpsSync(region).firstOrNull()
+
+        suspend fun findCleanIpsSync(region: String = "Iran", port: Int = 443, openSocket: () -> Socket = { Socket() }): List<Result> = withContext(Dispatchers.IO) {
+            require(port in 1..65535)
             val candidates = generateCandidates(region, 24)
             val results = mutableListOf<Result>()
-            val optimizer = CleanIpOptimizer()
+            val optimizer = CleanIpOptimizer(openSocket)
             for (batch in candidates.chunked(8)) {
                 val batchRes = coroutineScope {
                     batch.map { (ip, country, meta) ->
                         async(Dispatchers.IO) {
                             val tries = 3
-                            val latencies = (1..tries).mapNotNull { optimizer.tcpPing(ip, 443, 1000) }.sorted()
+                            val latencies = (1..tries).mapNotNull { optimizer.tcpPing(ip, port, 1000) }.sorted()
                             if (latencies.size < 2) return@async null
                             Result(
                                 ip = ip,
@@ -274,7 +277,7 @@ class CleanIpOptimizer {
                 results.addAll(batchRes)
                 if (results.size >= 3) break
             }
-            results.minByOrNull { it.medianMs }
+            ranked(results, limit = 8)
         }
 
         fun parseCustomSubnet(input: String, count: Int = 30): List<Triple<String, String, Pair<String, String>>> {
@@ -393,7 +396,7 @@ class CleanIpOptimizer {
             }
 
             val ipToProbe = resolved.firstOrNull()?.hostAddress ?: targetHost
-            Socket().use { rawSocket ->
+            openSocket().use { rawSocket ->
                 rawSocket.tcpNoDelay = true
                 rawSocket.soTimeout = 4000
                 rawSocket.connect(InetSocketAddress(ipToProbe, port), 4000)
@@ -402,6 +405,7 @@ class CleanIpOptimizer {
                     val ssl = probeSslSocketFactory.createSocket(rawSocket, targetHost, port, true) as SSLSocket
                     ssl.soTimeout = 4000
                     val sslParams = ssl.sslParameters ?: SSLParameters()
+                    sslParams.endpointIdentificationAlgorithm = "HTTPS"
                     runCatching { sslParams.serverNames = listOf(SNIHostName(targetHost)) }
                     ssl.sslParameters = sslParams
                     ssl.startHandshake()
@@ -580,7 +584,7 @@ class CleanIpOptimizer {
     private fun tcpPing(ip: String, port: Int, timeoutMs: Int): Long? {
         val start = System.currentTimeMillis()
         return try {
-            Socket().use { socket ->
+            openSocket().use { socket ->
                 socket.tcpNoDelay = true
                 socket.connect(InetSocketAddress(ip, port), timeoutMs)
                 val duration = System.currentTimeMillis() - start
@@ -594,14 +598,15 @@ class CleanIpOptimizer {
     private fun tlsHandshakePing(ip: String, port: Int, sniHost: String, timeoutMs: Int): Long? {
         val start = System.currentTimeMillis()
         return try {
-            Socket().use { rawSocket ->
+            openSocket().use { rawSocket ->
                 rawSocket.tcpNoDelay = true
                 rawSocket.connect(InetSocketAddress(ip, port), timeoutMs)
 
-                val sslSocket = probeSslSocketFactory.createSocket(rawSocket, ip, port, true) as SSLSocket
+                val sslSocket = probeSslSocketFactory.createSocket(rawSocket, sniHost, port, true) as SSLSocket
                 sslSocket.soTimeout = timeoutMs
 
                 val sslParams = sslSocket.sslParameters ?: SSLParameters()
+                sslParams.endpointIdentificationAlgorithm = "HTTPS"
                 if (sniHost.isNotBlank() && !sniHost.matches(Regex("^[0-9.]+$"))) {
                     runCatching {
                         sslParams.serverNames = listOf(SNIHostName(sniHost))
@@ -634,15 +639,16 @@ class CleanIpOptimizer {
     ): Triple<String, Boolean, Long>? {
         val start = System.currentTimeMillis()
         return try {
-            Socket().use { rawSocket ->
+            openSocket().use { rawSocket ->
                 rawSocket.tcpNoDelay = true
                 rawSocket.soTimeout = 2000
                 rawSocket.connect(InetSocketAddress(ip, port), 2000)
 
                 val socket: Socket = if (isTls) {
-                    val ssl = probeSslSocketFactory.createSocket(rawSocket, ip, port, true) as SSLSocket
+                    val ssl = probeSslSocketFactory.createSocket(rawSocket, sniHost, port, true) as SSLSocket
                     ssl.soTimeout = 2000
                     val sslParams = ssl.sslParameters ?: SSLParameters()
+                    sslParams.endpointIdentificationAlgorithm = "HTTPS"
                     if (sniHost.isNotBlank() && !sniHost.matches(Regex("^[0-9.]+$"))) {
                         runCatching { sslParams.serverNames = listOf(SNIHostName(sniHost)) }
                     }
@@ -699,7 +705,7 @@ class CleanIpOptimizer {
     private fun downloadSpeedTest(ip: String, port: Int, isTls: Boolean, timeoutMs: Int = 2500): Long? {
         val start = System.currentTimeMillis()
         return try {
-            Socket().use { rawSocket ->
+            openSocket().use { rawSocket ->
                 rawSocket.tcpNoDelay = true
                 rawSocket.soTimeout = timeoutMs
                 rawSocket.connect(InetSocketAddress(ip, port), timeoutMs)
@@ -708,6 +714,7 @@ class CleanIpOptimizer {
                     val ssl = probeSslSocketFactory.createSocket(rawSocket, "speed.cloudflare.com", port, true) as SSLSocket
                     ssl.soTimeout = timeoutMs
                     val sslParams = ssl.sslParameters ?: SSLParameters()
+                    sslParams.endpointIdentificationAlgorithm = "HTTPS"
                     runCatching { sslParams.serverNames = listOf(SNIHostName("speed.cloudflare.com")) }
                     ssl.sslParameters = sslParams
                     ssl.startHandshake()

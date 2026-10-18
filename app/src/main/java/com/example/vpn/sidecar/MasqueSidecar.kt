@@ -65,14 +65,17 @@ object MasqueSidecar : SidecarEngine {
         }, "usque-register").apply { isDaemon = true; start() }
         // Process.waitFor(timeout) and destroyForcibly need API 26; the app supports 24, so poll exitValue().
         val deadline = System.currentTimeMillis() + REGISTER_TIMEOUT_MS
-        while (isRunning(process) && System.currentTimeMillis() < deadline) Thread.sleep(100)
-        if (isRunning(process)) {
-            process.destroy()
-            throw java.io.IOException("MASQUE registration timed out")
-        }
-        reader.join(500)
-        if (process.exitValue() != 0 || !config.isFile || config.length() == 0L) {
-            throw java.io.IOException("MASQUE registration failed: ${SecretRedactor.redact(log.toString().take(200)).trim()}")
+        try {
+            while (isRunning(process) && System.currentTimeMillis() < deadline) Thread.sleep(100)
+            if (isRunning(process)) throw java.io.IOException("MASQUE registration timed out")
+            reader.join(500)
+            if (process.exitValue() != 0 || !config.isFile || config.length() == 0L) {
+                throw java.io.IOException("MASQUE registration failed: ${SecretRedactor.redact(log.toString().take(200)).trim()}")
+            }
+        } finally {
+            // Cancellation interrupts the wait. Do not leave the registration child holding credentials
+            // and writing into the LAB work directory after its owner has been stopped.
+            if (isRunning(process)) process.destroy()
         }
     }
 

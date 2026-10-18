@@ -56,6 +56,8 @@ object ChainRunner {
         try {
             // Port per hop index, filled as each hop is started (exit first).
             val ports = IntArray(chain.hops.size)
+            val contexts = arrayOfNulls<SidecarContext>(chain.hops.size)
+            val launches = arrayOfNulls<SidecarLaunch>(chain.hops.size)
             var entryContext: SidecarContext? = null
             var entryLaunch: SidecarLaunch? = null
             for (step in EngineChain.plan(chain)) {
@@ -64,9 +66,17 @@ object ChainRunner {
                 val port = freePort()
                 ports[step.index] = port
                 val upstream = step.upstreamHop?.let { ports[it] }
-                val ctx = context.create(step.hop.engineId, port, upstream)
+                val next = step.upstreamHop
+                val nextContext = next?.let { contexts[it] }
+                val nextAuth = next?.let { launches[it]?.socksAuth } == true
+                val ctx = context.create(step.hop.engineId, port, upstream).copy(
+                    upstreamUser = if (nextAuth) nextContext?.socksUser else null,
+                    upstreamPass = if (nextAuth) nextContext?.socksPass else null
+                )
+                contexts[step.index] = ctx
                 val (running, launch) = start.start(engine, EngineChain.hopProfile(step.hop), ctx)
                 started += running
+                launches[step.index] = launch
                 if (step.index == 0) {
                     entryContext = ctx
                     entryLaunch = launch
@@ -105,6 +115,8 @@ object ChainRunner {
             address = "chain",
             port = 0,
             uuid = "",
+            canonicalFingerprint = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(extras.toString().toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) },
             extraSettings = extras.toString()
         )
     }

@@ -11,17 +11,23 @@ object Sidecars {
     val ENGINES: List<SidecarEngine> by lazy {
         listOf(
             MihomoSidecar,
-            PsiphonSidecar(PsiphonSidecar.assetProvider { name ->
-                openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
-            }),
+            PsiphonSidecar {
+                psiphonSettings?.invoke() ?: PsiphonSidecar.assetProvider { name ->
+                    openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
+                }.invoke()
+            },
             DnsttSidecar(),
             SlipstreamSidecar(),
             MasqueSidecar,
+            MatrixTransportSidecar,
             TorSidecar { torrc, port -> (torStarter ?: error("Tor needs Android to run")).invoke(torrc, port) }
         )
     }
 
     /** Starts the Tor library; set once by the VPN service. */
+    /** Optional per-install settings, encrypted by the application; never written to an APK. */
+    @Volatile var psiphonSettings: (() -> String?)? = null
+
     @Volatile var torStarter: ((String, Int) -> RunningEngine)? = null
 
     /** Directory Android extracted the APK's native libraries to; set once by the app. */

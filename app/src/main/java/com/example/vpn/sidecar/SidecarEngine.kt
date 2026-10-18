@@ -57,7 +57,10 @@ data class SidecarContext(
      * hop toward the exit. The engine dials the internet through it instead of directly. Null for a
      * lone engine or the exit hop.
      */
-    val upstreamSocks: Int? = null
+    val upstreamSocks: Int? = null,
+    /** Credentials of an authenticated next hop, kept only in the private work directory. */
+    val upstreamUser: String? = null,
+    val upstreamPass: String? = null
 )
 
 data class SidecarLaunch(

@@ -45,4 +45,17 @@ class EngineChainTest {
         val tor = EngineChain.hopProfile(EngineChain.Hop("tor", bridges = "obfs4 1.2.3.4:443 CERT cert=x iat-mode=0"))
         assertTrue(TorSidecar.bridges(tor).isNotEmpty())
     }
+    @Test fun masqueCanCarryPsiphonButCannotDialAnotherHop() {
+        assertNull(EngineChain.problem(chain("psiphon", "masque")))
+        assertTrue(EngineChain.problem(chain("masque", "psiphon")) != null)
+        assertTrue(EngineChain.problem(chain("tor", "masque")) != null)
+        assertEquals(listOf(1, 0), EngineChain.plan(chain("psiphon", "masque")).map { it.index })
+    }
+
+    @Test fun upstreamCredentialsAreEncodedInThePrivatePsiphonConfig() {
+        val config = PsiphonSidecar.buildConfig(org.json.JSONObject(), "", 9010, java.io.File("/tmp/data"),
+            9011, "u@ser", "p:a ss")
+        assertEquals("socks5://u%40ser:p%3Aa%20ss@127.0.0.1:9011", config.getString("UpstreamProxyURL"))
+    }
+
 }

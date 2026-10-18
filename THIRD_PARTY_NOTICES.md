@@ -542,3 +542,11 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
+
+## Matrix Transport (Aether-derived, separate executable)
+
+- Upstream source: https://github.com/Floxu1/UAC-SNI-Spoofer-Android/tree/b784ebd149336f4463906509738d354dd9850e23/core/aether
+- Upstream Aether crate version: 1.6.0, AGPL-3.0-only. Cloudflare quiche components retain their upstream licenses.
+- Changes: mandatory MASQUE SPKI authentication, authenticated direct account registration, separate product name and native policy self-test.
+- Reproduction and complete corresponding source: `scripts/engines/matrix-transport.sh`, `scripts/transport/harden-source.py`, and `MatrixTransport-source.tar.gz` accompanying releases that contain this executable.
+- Upstream copyright, license and trademark notices are preserved in the source archive. No affiliation or endorsement is implied. No upstream logo or branding is used.

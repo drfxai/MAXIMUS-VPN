@@ -55,7 +55,10 @@ object ExperimentPlanner {
     fun emergencyOrder(net: NetworkCapabilityProfile?): List<PathFamily> = buildList {
         val dnsAlive = net?.recursiveDnsEgress == true || net?.dnsWorking == true || net?.udpAvailable == true
         if (dnsAlive) add(PathFamily.DNS_TUNNEL)
+        add(PathFamily.MATRIX_H2)
         add(PathFamily.PSIPHON)
+        add(PathFamily.PSIPHON_MATRIX)
+        if (!udpDead(net)) addAll(listOf(PathFamily.MASQUE, PathFamily.PSIPHON_MASQUE, PathFamily.MATRIX_H3, PathFamily.MATRIX_WG, PathFamily.MATRIX_GOOL))
         addAll(PathFamily.TOR_FAMILIES)
         if (!dnsAlive) add(PathFamily.DNS_TUNNEL)
         add(PathFamily.MIHOMO)
@@ -114,7 +117,10 @@ object ExperimentPlanner {
             if (NetworkState.IPV6_DEGRADED in restrictions) reasons += "IPv6 fails abroad: IPv6 endpoints are avoided."
             if (state == NetworkState.IPV4_DEGRADED) reasons += "IPv4 fails abroad while IPv6 works: IPv6 endpoints go first."
             // Engine families cost the most (start-up, battery); they go after the Xray families.
-            prefer += listOf(PathFamily.PSIPHON) + PathFamily.TOR_FAMILIES
+            prefer += listOf(PathFamily.MATRIX_H2, PathFamily.PSIPHON_MATRIX) + listOf(PathFamily.PSIPHON) + PathFamily.TOR_FAMILIES
+        }
+        if (NetworkState.QUIC_BLOCKED_SUSPECTED in restrictions) {
+            listOf(PathFamily.MASQUE, PathFamily.PSIPHON_MASQUE, PathFamily.MATRIX_H3).forEach { skip[it] = "MASQUE HTTP/3 needs QUIC on this network" }
         }
         if (reasons.isEmpty()) reasons += "No restriction measured: every family is tried, one config each first."
         return Plan(mode, prefer.distinct(), skip, budget, reasons, lowPrior)

@@ -7,6 +7,11 @@ import com.example.data.model.VlessProfile
 /** Import compatibility is broader than the Xray-core and Kotlin forwarding runtimes. */
 object RuntimeCapabilities {
     fun unsupportedReason(profile: VlessProfile): String? {
+        if (com.example.vpn.sidecar.ChainRunner.isChain(profile)) {
+            val chain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
+                ?: return "The engine chain is invalid."
+            return chain.hops.firstNotNullOfOrNull { unsupportedReason(com.example.vpn.sidecar.EngineChain.hopProfile(it)) }
+        }
         // Profiles a separate engine program carries (Mihomo, Psiphon, Tor, DNS tunnel) are checked by it.
         com.example.vpn.sidecar.Sidecars.forProfile(profile)?.let { engine ->
             return engine.problem(profile) ?: if (com.example.vpn.sidecar.Sidecars.isBundled(engine)) null

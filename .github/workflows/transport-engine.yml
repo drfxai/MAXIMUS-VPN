@@ -1,0 +1,73 @@
+name: Transport engine
+on:
+  push:
+    branches: ['**']
+    paths: ['scripts/transport/**', 'scripts/engines/matrix-transport.sh', '.github/workflows/transport-engine.yml']
+  pull_request:
+    paths: ['scripts/transport/**', 'scripts/engines/matrix-transport.sh', '.github/workflows/transport-engine.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: transport-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    name: Native transport (${{ matrix.abi }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake ninja-build pkg-config
+          sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkmanager_bin=$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager -print -quit)
+          test -n "$sdkmanager_bin"
+          "$sdkmanager_bin" 'ndk;26.3.11579264' 'cmake;3.22.1'
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          libclang=$(find /usr/lib/llvm-* -name libclang.so -print -quit)
+          test -n "$libclang"
+          echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
+      - name: Build pinned source with mandatory TLS verification
+        env:
+          ABI: ${{ matrix.abi }}
+          OUT: build/transport/${{ matrix.abi }}
+        run: bash scripts/engines/matrix-transport.sh
+      - name: Verify ELF and keep checksums
+        env:
+          ABI: ${{ matrix.abi }}
+        run: |
+          file "build/transport/$ABI/libmatrixtransport.so"
+          readelf -h "build/transport/$ABI/libmatrixtransport.so" | grep -q 'DYN'
+          sha256sum "build/transport/$ABI/libmatrixtransport.so" > "build/transport/$ABI/SHA256SUMS"
+      - name: Enable KVM
+        if: matrix.abi == 'x86_64'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Execute runtime TLS policy self-test on Android
+        if: matrix.abi == 'x86_64'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          script: |
+            adb push build/transport/x86_64/. /data/local/tmp/
+            adb shell cp /data/local/tmp/libmatrixtransport.so /data/local/tmp/matrix-transport
+            adb shell chmod 755 /data/local/tmp/matrix-transport
+            adb shell LD_LIBRARY_PATH=/data/local/tmp /data/local/tmp/matrix-transport --version | grep 'secure-v1'
+            adb shell LD_LIBRARY_PATH=/data/local/tmp /data/local/tmp/matrix-transport --self-test | grep 'self-test passed'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: matrix-transport-${{ matrix.abi }}
+          path: |
+            build/transport/${{ matrix.abi }}/
+            build/transport-offer/MatrixTransport-source.tar.gz
