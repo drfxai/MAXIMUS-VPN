@@ -684,6 +684,9 @@ class LabController(
                         val engine = Sidecars.forProfile(pk.profile)
                         if (Sidecars.isEngineProfile(pk.profile)) {
                             val remaining = (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1)
+                            // No engine can start and carry a request in a few seconds; starting one now
+                            // only logs a "timed out after 0s" test at the very end of the search.
+                            if (remaining < MIN_ENGINE_WINDOW_MS) break@loop
                             // A transport gets time to bootstrap, but cannot consume the entire search.
                             // Timeout is a measured unsuccessful attempt, not "not run". User cancellation
                             // still propagates through runInterruptible and stops the child processes.
@@ -1181,6 +1184,7 @@ class LabController(
         const val STEP_DONE = "Experiment completed"
         const val STEP_RECHECK = "Known network: rechecking what worked"
         const val ENGINE_TIMEOUT_SEC = 20
+        private const val MIN_ENGINE_WINDOW_MS = 20_000L
         /** Configs in the candidate pool of one analysis; the planner tests only as many as the budget allows. */
         const val MAX_POOL = 24
         /** Tests after which, with nothing passed, the AI checkpoint is asked again. */
