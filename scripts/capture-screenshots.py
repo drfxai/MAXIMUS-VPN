@@ -29,8 +29,13 @@ def tree():
 
 
 def tab(label):
-    nodes = [n for n in tree().iter('node') if n.get('text') == label]
+    root = tree()
+    nodes = [n for n in root.iter('node') if label in [n.get('text'), n.get('content-desc')]]
     if not nodes:
+        print(ET.tostring(root, encoding='unicode'))
+        (OUT / 'capture-failure.png').write_bytes(adb('exec-out', 'screencap', '-p', binary=True))
+        print(adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/com.example.MainActivity'))
+        print(adb('logcat', '-d', '-b', 'crash'))
         raise RuntimeError('Navigation label missing: ' + label)
     n = max(nodes, key=lambda n: int(re.findall(r'\d+', n.get('bounds'))[1]))
     x1, y1, x2, y2 = map(int, re.findall(r'\d+', n.get('bounds')))
@@ -40,7 +45,7 @@ def tab(label):
     # A selected ancestor identifies the actual navigation destination.
     def selected(node, active=False):
         active = active or node.get('selected') == 'true'
-        return (active and node.get('text') == label) or any(selected(c, active) for c in node)
+        return (active and label in [node.get('text'), node.get('content-desc')]) or any(selected(c, active) for c in node)
     if not selected(root):
         raise RuntimeError('Destination was not selected: ' + label)
 
@@ -53,7 +58,7 @@ adb('shell', 'settings', 'put', 'global', 'window_animation_scale', '0')
 adb('shell', 'settings', 'put', 'global', 'transition_animation_scale', '0')
 adb('shell', 'settings', 'put', 'global', 'animator_duration_scale', '0')
 adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/com.example.MainActivity')
-time.sleep(6)
+time.sleep(12)
 shots = []
 for label, name in [('Tunnel', 'tunnel'), ('Nodes', 'nodes'), ('LAB', 'lab'), ('Panels', 'panels')]:
     tab(label)
