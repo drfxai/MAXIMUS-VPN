@@ -1,0 +1,31 @@
+{
+  "package": "com.drfxai.maximusvpn",
+  "version": "1.0.2",
+  "versionCode": "30",
+  "android": "15",
+  "device": "Android emulator, x86_64, 1080x2400",
+  "state": "Clean install; no user accounts, servers, credentials or active VPN",
+  "capture": "adb exec-out screencap -p; original pixels, no UI retouching",
+  "screens": [
+    {
+      "screen": "Tunnel",
+      "file": "tunnel.png",
+      "sha256": "9a23c7f8d56c92dec4c4b0fb3418273860d302df2d703b9bb633468be9932479"
+    },
+    {
+      "screen": "Nodes",
+      "file": "nodes.png",
+      "sha256": "b6750e19957ce8770e9df7e2ab30c7f5c5d36fc28a53723a206fc19b0a2283a0"
+    },
+    {
+      "screen": "LAB",
+      "file": "lab.png",
+      "sha256": "7f3a4d028c99f9e9d3599af8337441031c51044c908047c673125af0b34b78e9"
+    },
+    {
+      "screen": "Panels",
+      "file": "panels.png",
+      "sha256": "3f13ead4b6c3531e47a213fb110b4668420b9a6ab2b460bf7f0eb7f613745dda"
+    }
+  ]
+}
