@@ -1,0 +1,55 @@
+name: Repository screenshots
+on:
+  push:
+    branches: [main]
+    paths: [scripts/capture-screenshots.py, .github/workflows/repository-media.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download and verify the published APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download V1.0.2 --pattern '*universal.apk' --pattern SHA256SUMS --dir /tmp/maximus-release
+          cd /tmp/maximus-release
+          grep 'universal.apk$' SHA256SUMS | sha256sum --check -
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Capture real application screens
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            adb install /tmp/maximus-release/MAXIMUSVPN-V1.0.2-universal.apk
+            python3 scripts/capture-screenshots.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: application-screenshots
+          path: docs/media/screenshots/
+      - name: Save verified screenshots
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/media/screenshots
+          if ! git diff --cached --quiet; then
+            git commit -m 'Refresh real application screenshots from the published APK'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
