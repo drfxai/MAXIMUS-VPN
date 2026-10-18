@@ -64,4 +64,15 @@ class ActiveCardModelTest {
         assertNull(bad.ip)
         assertNull(bad.country)
     }
+
+    @Test fun signalBarsFollowThePingAndStayEmptyWhenUnmeasured() {
+        assertEquals(0, ActiveCardModel.signalBars(null))
+        assertEquals(4, ActiveCardModel.signalBars(120))
+        assertEquals(3, ActiveCardModel.signalBars(692))
+        assertEquals(2, ActiveCardModel.signalBars(1499))
+        assertEquals(1, ActiveCardModel.signalBars(2400))
+        val off = ActiveCardModel.of(ConnectionState(), vless15)!!
+        assertEquals(0, off.bars)
+        assertEquals("Selected in Nodes · last test 777 ms", ActiveCardModel.offLine(off))
+    }
 }

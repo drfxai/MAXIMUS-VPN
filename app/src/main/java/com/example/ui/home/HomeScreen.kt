@@ -505,6 +505,8 @@ fun HomeScreen(
         } else ActiveCardModel.of(connectionState, selectedProfile)?.let { model ->
             ActiveConnectionCard(
                 model = model,
+                downloadBps = connectionState.downloadSpeedBps,
+                uploadBps = connectionState.uploadSpeedBps,
                 buttonState = SmartButtonState.of(connectionState),
                 onSmartConnect = {
                     vpnViewModel.connectSmart(context) {
@@ -734,10 +736,16 @@ private fun TradeModeCard(
     }
 }
 
-/** The main card: the exit country, exit IP, ping and speeds while connected; the Nodes choice otherwise. */
+/**
+ * The main card, compact: flag, exit country and exit IP, ping with signal bars and status, then a live
+ * line of the last 30 s of download and upload speed. Off, it is one row with the config selected in Nodes.
+ * While traffic is verified a ring pulses out from the flag.
+ */
 @Composable
 private fun ActiveConnectionCard(
     model: ActiveCardModel,
+    downloadBps: Long,
+    uploadBps: Long,
     buttonState: SmartButtonState,
     onSmartConnect: () -> Unit,
     onStop: () -> Unit
@@ -748,80 +756,161 @@ private fun ActiveConnectionCard(
         ActiveCardModel.Tone.WARN -> c.statusWarning
         ActiveCardModel.Tone.MUTED -> c.textMuted
     }
+    Column(modifier = Modifier.fillMaxWidth().testTag("smart_connect_card")) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("smart_connect_card"),
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = c.surfaceCard),
         border = androidx.compose.foundation.BorderStroke(1.dp, c.borderSubtle)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(if (model.live) toneColor else c.textMuted, 6.dp)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(text = model.label, fontSize = 11.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.3.sp, color = c.textSecondary)
-                Spacer(modifier = Modifier.weight(1f))
-                model.configName?.let {
+                FlagRing(model.flag, if (model.live) toneColor else c.textMuted, pulse = model.live && model.tone == ActiveCardModel.Tone.OK)
+                Spacer(modifier = Modifier.width(11.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = model.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        text = it, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = c.textMuted,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp)
+                        text = if (model.live) model.exitIp else ActiveCardModel.offLine(model),
+                        fontSize = 12.5.sp, color = c.textSecondary,
+                        fontFamily = if (model.live) FontFamily.Monospace else FontFamily.Default,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (model.live) {
+                    Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(start = 8.dp)) {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(text = model.ping, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, color = c.textPrimary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            SignalBars(model.bars, toneColor, c.textMuted)
+                        }
+                        Text(text = model.status, fontSize = 11.5.sp, color = toneColor)
+                    }
+                } else {
+                    Text(
+                        text = model.status, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textMuted,
+                        modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(c.surfaceCardHighlight).padding(horizontal = 9.dp, vertical = 3.dp)
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier.size(42.dp).clip(CircleShape).background(c.surfaceCardHighlight),
-                    contentAlignment = Alignment.Center
-                ) { Text(text = model.flag, fontSize = 22.sp) }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = model.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = model.subtitle, fontSize = 12.sp, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (model.live) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SpeedLine(
+                        live = model.download != ActiveCardModel.DASH,
+                        downloadBps = downloadBps, uploadBps = uploadBps,
+                        modifier = Modifier.weight(1f).height(34.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(text = "↓ ${model.download}", fontSize = 12.5.sp, fontFamily = FontFamily.Monospace, color = c.textPrimary, maxLines = 1)
+                        Text(text = "↑ ${model.upload}", fontSize = 12.5.sp, fontFamily = FontFamily.Monospace, color = c.textSecondary, maxLines = 1)
+                    }
                 }
             }
-            Spacer(modifier = Modifier.height(14.dp))
-            val valueColor = if (model.live) c.textPrimary else c.textMuted
-            MetricCell("Exit IP", model.exitIp, valueColor, mono = model.live, modifier = Modifier.fillMaxWidth())
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MetricCell("Ping", model.ping, valueColor, mono = true, modifier = Modifier.weight(1f))
-                MetricCell("Status", model.status, if (model.live) toneColor else c.textMuted, mono = false, modifier = Modifier.weight(1f))
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MetricCell("↓ Download", model.download, valueColor, mono = true, modifier = Modifier.weight(1f))
-                MetricCell("↑ Upload", model.upload, valueColor, mono = true, modifier = Modifier.weight(1f))
-            }
-            Spacer(modifier = Modifier.height(14.dp))
-            SmartConnectButton(
-                state = buttonState,
-                onClick = { if (buttonState.tapStops) onStop() else onSmartConnect() }
+        }
+    }
+    Spacer(modifier = Modifier.height(10.dp))
+    SmartConnectButton(
+        state = buttonState,
+        onClick = { if (buttonState.tapStops) onStop() else onSmartConnect() }
+    )
+    }
+}
+
+/** The flag in a ring of the state's colour; while [pulse], a second ring grows and fades every 2 s. */
+@Composable
+private fun FlagRing(flag: String, color: Color, pulse: Boolean) {
+    val c = AppTheme.colors
+    val t = if (pulse) {
+        androidx.compose.animation.core.rememberInfiniteTransition(label = "flagPulse").animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                androidx.compose.animation.core.tween(2000, easing = androidx.compose.animation.core.LinearOutSlowInEasing)
+            ),
+            label = "flagPulseT"
+        ).value
+    } else 0f
+    Box(modifier = Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.size(44.dp)) {
+            val r = size.minDimension / 2f - 2.dp.toPx()
+            if (pulse) drawCircle(color.copy(alpha = 0.45f * (1f - t)), radius = r * (0.9f + 0.25f * t),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx()))
+            drawCircle(color.copy(alpha = 0.6f), radius = r * 0.9f, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx()))
+        }
+        Box(
+            modifier = Modifier.size(32.dp).clip(CircleShape).background(c.surfaceCardHighlight),
+            contentAlignment = Alignment.Center
+        ) { Text(text = flag, fontSize = 17.sp) }
+    }
+}
+
+/** Four bars; the first [filled] in [on], the rest in [off]. */
+@Composable
+private fun SignalBars(filled: Int, on: Color, off: Color) {
+    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(bottom = 3.dp)) {
+        listOf(4, 7, 10, 13).forEachIndexed { i, h ->
+            Box(
+                modifier = Modifier.width(3.dp).height(h.dp).clip(RoundedCornerShape(1.dp))
+                    .background(if (i < filled) on else off.copy(alpha = 0.35f))
             )
         }
     }
 }
 
+/**
+ * The last [SPEED_SAMPLES] seconds of measured speed, sampled once a second: download as a filled
+ * line in the accent colour, upload as a thin blue line. Flat while traffic is not verified.
+ */
 @Composable
-private fun MetricCell(label: String, value: String, valueColor: Color, mono: Boolean, modifier: Modifier = Modifier) {
+private fun SpeedLine(live: Boolean, downloadBps: Long, uploadBps: Long, modifier: Modifier = Modifier) {
     val c = AppTheme.colors
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(11.dp))
-            .background(c.surfaceCardHighlight)
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-    ) {
-        Text(text = label, fontSize = 11.sp, color = c.textSecondary)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = valueColor,
-            fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-            maxLines = 1, overflow = TextOverflow.Ellipsis
-        )
+    val down = remember { androidx.compose.runtime.mutableStateListOf<Float>() }
+    val up = remember { androidx.compose.runtime.mutableStateListOf<Float>() }
+    val latestDown = androidx.compose.runtime.rememberUpdatedState(downloadBps)
+    val latestUp = androidx.compose.runtime.rememberUpdatedState(uploadBps)
+    androidx.compose.runtime.LaunchedEffect(live) {
+        down.clear(); up.clear()
+        while (live) {
+            down.add(latestDown.value.toFloat()); up.add(latestUp.value.toFloat())
+            while (down.size > SPEED_SAMPLES) down.removeAt(0)
+            while (up.size > SPEED_SAMPLES) up.removeAt(0)
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    val accent = c.primary
+    val upColor = Color(0xFF7AA7F7)
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val peak = maxOf(down.maxOrNull() ?: 0f, up.maxOrNull() ?: 0f, 1f)
+        fun pathOf(values: List<Float>): androidx.compose.ui.graphics.Path = androidx.compose.ui.graphics.Path().apply {
+            val step = w / (SPEED_SAMPLES - 1)
+            val start = SPEED_SAMPLES - values.size
+            values.forEachIndexed { i, v ->
+                val x = (start + i) * step
+                val y = h - 2.dp.toPx() - (v / peak) * (h - 6.dp.toPx())
+                if (i == 0) moveTo(x, y) else lineTo(x, y)
+            }
+        }
+        if (down.size < 2) {
+            drawLine(c.borderSubtle, androidx.compose.ui.geometry.Offset(0f, h - 2.dp.toPx()),
+                androidx.compose.ui.geometry.Offset(w, h - 2.dp.toPx()), strokeWidth = 1.dp.toPx())
+            return@Canvas
+        }
+        val line = pathOf(down)
+        val firstX = (SPEED_SAMPLES - down.size) * (w / (SPEED_SAMPLES - 1))
+        val fill = androidx.compose.ui.graphics.Path().apply {
+            addPath(line); lineTo(w, h); lineTo(firstX, h); close()
+        }
+        drawPath(fill, Brush.verticalGradient(listOf(accent.copy(alpha = 0.32f), accent.copy(alpha = 0f))))
+        drawPath(line, accent, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.6.dp.toPx()))
+        drawPath(pathOf(up), upColor.copy(alpha = 0.8f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx()))
+        val lastY = h - 2.dp.toPx() - (down.last() / peak) * (h - 6.dp.toPx())
+        drawCircle(accent, radius = 2.6.dp.toPx(), center = androidx.compose.ui.geometry.Offset(w, lastY))
     }
 }
+
+private const val SPEED_SAMPLES = 30
 
 /**
  * Smart connect as a three-state toggle in the main power button's colours: lavender when off, a
