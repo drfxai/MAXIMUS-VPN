@@ -302,6 +302,13 @@ class RayVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
+        if (action == ACTION_CONNECT && !_vpnState.value.isTunnelUp && !_vpnState.value.isBusy) {
+            // Show "connecting" the moment the button is tapped. The protective interface, the stop of
+            // the previous engine and the connect lock below can take a while, and until now the button
+            // looked unresponsive during them.
+            smartStarted = intent.getBooleanExtra(EXTRA_SMART, false)
+            updateState(_vpnState.value.copy(status = ConnectionStatus.PREPARING, errorMessage = null))
+        }
         if (action == null || action == ACTION_CONNECT || action == ACTION_RECONNECT) {
             supervisor.requestProtection()
             checkLockdown()

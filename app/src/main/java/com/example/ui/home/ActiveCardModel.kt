@@ -25,7 +25,9 @@ data class ActiveCardModel(
     val status: String,
     val tone: Tone,
     val download: String,
-    val upload: String
+    val upload: String,
+    /** 0 when not measured, else 1 to 4 by ping (see [signalBars]). */
+    val bars: Int = 0
 ) {
     enum class Tone { OK, WARN, MUTED }
 
@@ -71,9 +73,22 @@ data class ActiveCardModel(
                 status = status,
                 tone = tone,
                 download = if (verified) TrafficStats.formatSpeed(state.downloadSpeedBps) else DASH,
-                upload = if (verified) TrafficStats.formatSpeed(state.uploadSpeedBps) else DASH
+                upload = if (verified) TrafficStats.formatSpeed(state.uploadSpeedBps) else DASH,
+                bars = signalBars(state.pingMs)
             )
         }
+
+        /** Signal bars for a measured ping: 4 under 300 ms, 3 under 700, 2 under 1500, else 1; 0 when unmeasured. */
+        fun signalBars(pingMs: Long?): Int = when {
+            pingMs == null || pingMs <= 0 -> 0
+            pingMs < 300 -> 4
+            pingMs < 700 -> 3
+            pingMs < 1500 -> 2
+            else -> 1
+        }
+
+        /** The off-state subtitle on one line: where the config comes from and its last test. */
+        fun offLine(model: ActiveCardModel): String = "Selected in Nodes · " + model.subtitle.replaceFirstChar { it.lowercase() }
 
         /** The country's English name, or the code itself when the JVM does not know it. */
         fun countryName(code: String): String =
