@@ -101,6 +101,7 @@ data class SmartConnectPlan(
          */
         fun freshReading(measured: NetworkCapabilityProfile?, networkKey: String, now: Long): NetworkStateReading? {
             val p = measured ?: return null
+            if (p.networkIdentity != null && p.networkIdentity != networkKey) return null
             if (now - p.measuredAt !in 0 until READING_MAX_AGE_MS) return null
             val kind = networkKey.substringBefore(':')
             val sameKind = when (kind) {

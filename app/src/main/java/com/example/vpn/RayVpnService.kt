@@ -754,7 +754,7 @@ class RayVpnService : VpnService() {
                 godMode = policy.mode == com.example.data.model.OperationalMode.GOD_MODE,
                 lockExit = lockExit, exact = exact && !policy.lockExit, force = force, mayMove = raceFirst || settings.autoFailoverEnabled,
                 reading = com.example.vpn.smart.SmartConnectPlan.freshReading(
-                    com.example.vpn.smart.NetworkCapabilityDetector.last, network, System.currentTimeMillis())
+                    com.example.vpn.smart.NetworkCapabilityDetector.last, routeNetwork, System.currentTimeMillis())
             ))
             val tracker = com.example.vpn.smart.SearchTracker(attemptId, plan) { p ->
                 mutateState { if (it.attemptId == attemptId) it.copy(search = p) else it }
