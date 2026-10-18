@@ -10,7 +10,7 @@ import com.example.vpn.sidecar.Sidecars
 import com.example.vpn.sidecar.TorSidecar
 
 /** Shared recovery pool. Imported WebTunnel/obfs4 bridges stay distinct from the Snowflake fallback.
- * No bridge addresses, third-party account settings or relaxed TLS settings are supplied here.
+ * Public bridge seeds remain unverified; no third-party account settings or relaxed TLS settings are supplied.
  */
 object RecoveryEngineCatalog {
     fun candidates(

@@ -311,7 +311,7 @@ class LabController(
                         publishLive()
                         val engine = Sidecars.forProfile(pk.profile)
                         if (pk.family.engine || engine != null) {
-                            val r = if (!Sidecars.isEngineProfile(pk.profile)) null else withContext(Dispatchers.IO) {
+                            val r = if (!Sidecars.isEngineProfile(pk.profile)) null else kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
                                 EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2)
                             }
                             when {
