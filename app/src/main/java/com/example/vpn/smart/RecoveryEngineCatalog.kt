@@ -19,7 +19,7 @@ object RecoveryEngineCatalog {
     ): List<VlessProfile> {
         val defaults = listOf(
             MasqueSidecar.profile().copy(id = "recovery-masque"),
-            PsiphonSidecar.profile().copy(id = "recovery-psiphon"),
+            PsiphonSidecar.profile(tcpOnly = true).copy(id = "recovery-psiphon", name = "Psiphon direct (TCP)"),
             TorSidecar.profile().copy(id = "recovery-tor-snowflake"),
             ChainRunner.profile(EngineChain.Chain(listOf(EngineChain.Hop("psiphon"), EngineChain.Hop("masque")))) {
                 if (it == "masque") "WARP MASQUE" else "Psiphon"

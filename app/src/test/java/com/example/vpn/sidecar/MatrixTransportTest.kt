@@ -35,4 +35,11 @@ class MatrixTransportTest {
         assertNotNull(PsiphonSidecar.validateNetworkSettings(good.toString()))
         assertNotNull(PsiphonSidecar.validateNetworkSettings("{}"))
     }
+    @Test fun tcpOnlyPsiphonNeverAddsQuicOrBroadensAnExplicitRestriction() {
+        val cfg = org.json.JSONObject().put("LimitTunnelProtocols", org.json.JSONArray().put("SSH").put("QUIC-OSSH"))
+        val out = PsiphonSidecar.buildConfig(cfg, "", 9000, File("/private/data"), tcpOnly = true)
+        assertEquals("[\"SSH\"]", out.getJSONArray("LimitTunnelProtocols").toString())
+        assertFalse(out.getBoolean("EmitSensitiveNetworkParameters"))
+    }
+
 }

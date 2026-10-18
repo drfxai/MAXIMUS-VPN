@@ -94,6 +94,8 @@ class TorSidecar(
                 uuid = "",
                 profileType = ProfileType.VLESS,
                 protocolType = ProtocolType.MIXED,
+                canonicalFingerprint = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(extras.toString().toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) },
                 extraSettings = extras.toString()
             )
         }

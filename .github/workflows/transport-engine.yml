@@ -26,7 +26,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang libclang-dev cmake ninja-build pkg-config
-          sdkmanager 'ndk;26.3.11579264' 'cmake;3.22.1'
+          sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkmanager_bin=$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager -print -quit)
+          test -n "$sdkmanager_bin"
+          "$sdkmanager_bin" 'ndk;26.3.11579264' 'cmake;3.22.1'
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
           libclang=$(find /usr/lib/llvm-* -name libclang.so -print -quit)
           test -n "$libclang"
           echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"

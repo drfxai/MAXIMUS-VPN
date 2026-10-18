@@ -69,7 +69,6 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
                     minLines = 2, maxLines = 5)
                 SecondaryButton(c, "Save Psiphon settings", Icons.Rounded.Save, enabled = settings.value.isNotBlank()) {
                     onPsiphonSettings(settings.value)
-                    settings.value = ""
                 }
             }
         }

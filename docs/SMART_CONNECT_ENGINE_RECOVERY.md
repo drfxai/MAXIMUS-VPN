@@ -1,51 +1,75 @@
 # Smart Connect engine recovery
 
-## Source review
+## Source and implementation
 
-Reference supplied for this work: UAC-SNI-Spoofer-Android archive at
+Reference supplied: UAC-SNI-Spoofer-Android archive at
 `b784ebd149336f4463906509738d354dd9850e23` (2.0.8 / 451).
-It demonstrates separate Xray, Tor WebTunnel and WARP/Psiphon paths. This implementation
-reuses MAXIMUS's existing runtimes; no UAC source, binaries, public bridge catalog,
-account material or application identifiers are copied.
+MAXIMUS reuses its Xray, Psiphon, Tor/lyrebird and usque runtimes. A separate
+Aether-derived executable, Matrix Transport, is built from this immutable source
+with the local TLS policy patch. No third-party application identity, account
+settings, public bridge catalog or prebuilt binary is copied into MAXIMUS.
 
-## Implemented
+## Path mapping
 
-- A recovery catalog for Smart Connect, using the LAB experiment machinery: saved sidecar profiles,
-  including user-imported WebTunnel and obfs4 bridges, plus available MASQUE, Psiphon,
-  Snowflake and Psiphon-over-MASQUE defaults.
-- Stable default IDs; path-based deduplication includes engine settings. One private
-  bridge no longer suppresses a distinct Snowflake fallback. Saved bridge URLs and
-  Psiphon regions are retained.
-- Smart Connect uses LAB real-request testing before choosing a recovery engine, in
-  DAILY and GOD MODE. Unmeasured MASQUE/Psiphon choices can no longer be overwritten
-  by the later Tor branch. Existing Xray server races, ECH and safe variants remain.
-- Psiphon over WARP MASQUE (HTTP/3) using the bundled usque carrier. MASQUE starts
-  first; Psiphon dials through its authenticated loopback SOCKS port. Psiphon remains
-  the final exit seen by destinations. Both programs stop if a chain hop fails.
-- The chain is available in the existing LAB chain picker and the automatic pool.
-  Missing Psiphon settings or executables make it unavailable, never a tested failure.
-- MASQUE and this chain have separate UDP/QUIC families. A measured QUIC block skips
-  these HTTP/3 paths without skipping WebTunnel. Ordinary WireGuard is a separate path.
-- A selected-host DNS failure can continue into recovery when exit switching is
-  allowed. Trade mode and exact/manual connections retain their selected exit.
-- Cancellation interrupts isolated engine waits and executes their cleanup paths.
-- APK validation requires the usque executable alongside the other engine programs.
+| Path | Outer transport | Requirements |
+| --- | --- | --- |
+| Saved Xray configs and ECH variants | Existing config transport | User's working server/config |
+| Psiphon direct | TCP-only automatic recipe; explicit saved configs retain their settings | Valid application network settings |
+| Tor WebTunnel / obfs4 / meek | TCP/HTTPS bridge | Imported private bridge lines |
+| Tor Snowflake | Its own WebRTC transport, not advertised as TCP-only | Bundled lyrebird and reachable broker/volunteer |
+| WARP direct | WireGuard UDP | Registered device; protected API connection |
+| WARP MASQUE (usque) | HTTP/3/QUIC | Bundled executable and authenticated registration |
+| Matrix Transport | Pinned MASQUE HTTP/2/TCP or HTTP/3/QUIC; WireGuard UDP; WARP-in-WARP | Built native runtime and authenticated registration |
+| Layered recovery (UAC PoW pattern) | Psiphon through usque or Matrix HTTP/2 | Both runtimes and own Psiphon settings; final exit is Psiphon |
 
-## Prerequisites and limits
+"Direct" means an engine connects without an intermediate carrier; it never means
+silently bypassing VPN protection. WireGuard and Snowflake are not labelled as TCP.
+No proof-of-work mining is added. HTTP/2 comes from an authenticated carrier, not
+from relabelling WireGuard. Imported endpoint credentials, TLS identity and ports
+are preserved. Trade and exact/manual sessions do not switch exits automatically.
 
-Import private Tor bridge lines through the existing universal importer. WebTunnel
-is already built into the pinned lyrebird executable; it requires a reachable bridge.
-Psiphon still requires this application's own network settings via PSIPHON_CONFIG.
-The implementation does not borrow another application's settings.
+## Smart Connect
 
-Aether's MASQUE-over-HTTP/2 runtime is not bundled: its unpinned TLS path disables
-server authentication. MAXIMUS retains usque's existing server authentication and
-its HTTP/3 implementation. No HTTP/2 capability is claimed by this change.
+- A bounded recovery catalog includes available engines and distinct saved bridges.
+  Stable IDs and path-based deduplication preserve separate carrier/bridge settings.
+- Engines are tested serially through the LAB, with real requests and rechecks. No
+  untested engine selection can be overwritten by a later Tor branch.
+- WARP recovery is available in DAILY and survival modes. Sidecar availability is
+  initialized at application startup, including before the first VPN service run.
+- Missing executables/settings are unavailable, not tested failures. UDP/QUIC
+  restrictions gate the corresponding families, retaining HTTP/2 and WebTunnel.
+- Stop interrupts isolated startup waits. Engine processes, registration children,
+  generated credentials and LAB work folders are cleaned up on failure/cancellation.
 
-An isolated SOCKS request verifies the engine and chain, not another app's complete
-TUN path. The running VPN is checked again after startup, with background upload and
-download checks. Device tests remain necessary on ARM64/ARM32, with Wi-Fi/mobile
-handover, blocked UDP and cancellation during startup. No field result is claimed.
+## Clean IP scanning
 
-Public version and signing configuration remain unchanged. This change does not
-publish an APK or replace release assets.
+TCP timing is only a shortlist. Smart Connect probes several edges using the actual
+config, then rechecks passing paths before selecting one. Scanner sockets bypass
+the temporary traffic-blocking interface explicitly. TLS probes validate both CA
+trust and hostname. REALITY endpoints are not rewritten to Cloudflare addresses.
+The chosen copy preserves protocol, port, SNI, Host, path and credentials.
+
+## Configuration and security
+
+The LAB chain page accepts authorized Psiphon network settings JSON, validates the
+required fields and HTTPS list addresses, and stores it using Android Keystore-backed
+encryption. Settings take effect on the next connection. Release-provided settings
+remain a fallback. Imported WebTunnel lines use the existing universal importer.
+
+Matrix Transport requires the source's SPKI allowlist at every MASQUE handshake;
+missing/malformed/mismatched pins fail closed. Unauthenticated account fronting is
+disabled; account requests use the normal authenticated HTTPS client. Upstream
+logos/branding are not used. The complete locked Rust source/dependencies, upstream
+license/trademark notices, patch and revision are included in the corresponding
+source archive beside releases containing the runtime.
+
+## Validation limits
+
+A local SOCKS request proves an engine/chain carries traffic; another app's complete
+TUN path still needs device testing. The running VPN is checked again after startup
+and background upload/download tests run on the same route. Native builds, Android
+TLS-policy execution, JVM tests, emulator launch checks and carrier field tests are
+reported separately. No device or field result is implied by source availability.
+
+Public version and signing identity are unchanged. This branch does not publish
+an APK or replace release assets without a separate release action.
