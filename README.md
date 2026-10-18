@@ -21,7 +21,7 @@ Smart Connect · Network LAB · Clean IP discovery · Private server tools
 
 ## See the app
 
-Actual captures of the published **V1.0.2** APK on Android 15. These show a clean installation, with no imported servers or active tunnel. No connection results or user data have been added to the images.
+Actual captures of the published **V1.0.2** APK on Android 15. These show a clean installation with the app-provided public node list and no active tunnel. No private accounts, user-supplied profiles or invented connection results have been added.
 
 <table>
 <tr>

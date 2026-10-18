@@ -79,7 +79,7 @@ metadata = {'package': PACKAGE, 'version': re.findall(r'versionName=(\S+)', vers
             'versionCode': re.findall(r'versionCode=(\d+)', version)[0],
             'android': adb('shell', 'getprop', 'ro.build.version.release').strip(),
             'device': 'Android emulator, x86_64, 1080x2400',
-            'state': 'Clean install; no user accounts, servers, credentials or active VPN',
+            'state': 'Clean install with app-provided public nodes; no private accounts, user-supplied profiles or active VPN',
             'capture': 'adb exec-out screencap -p; original pixels, no UI retouching', 'screens': shots}
 (OUT / 'capture.json').write_text(json.dumps(metadata, indent=2) + '\n')
 print(json.dumps(metadata, indent=2))

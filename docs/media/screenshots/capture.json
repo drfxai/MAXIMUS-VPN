@@ -4,7 +4,7 @@
   "versionCode": "30",
   "android": "15",
   "device": "Android emulator, x86_64, 1080x2400",
-  "state": "Clean install; no user accounts, servers, credentials or active VPN",
+  "state": "Clean install with app-provided public nodes; no private accounts, user-supplied profiles or active VPN",
   "capture": "adb exec-out screencap -p; original pixels, no UI retouching",
   "screens": [
     {
