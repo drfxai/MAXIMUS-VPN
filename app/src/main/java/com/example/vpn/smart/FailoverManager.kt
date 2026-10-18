@@ -112,7 +112,7 @@ class FailoverManager(
                 if (!isActive) break
                 if (!isHealthy) {
                     val failures = consecutiveFailures.updateAndGet { (it + 1).coerceAtMost(WatchPolicy.FAILURES_TO_SWITCH) }
-                    XrayLogManager.w("FAILOVER", "Node $safeName carried no traffic or exceeded the latency limit ($failures/${WatchPolicy.FAILURES_TO_SWITCH}).")
+                    XrayLogManager.w("FAILOVER", "Node $safeName failed a real traffic check ($failures/${WatchPolicy.FAILURES_TO_SWITCH}).")
 
                     // Several failures in a row, so one lost request does not cause flapping.
                     if (failures >= WatchPolicy.FAILURES_TO_SWITCH) {
@@ -202,7 +202,12 @@ class FailoverManager(
         val probe = tunnelProbe ?: return checkHealth(profile, latencyThreshold)
         return try {
             com.example.vpn.diagnostics.ConnectionMetrics.activeTunnelChecks.incrementAndGet()
-            (probe() < maxOf(latencyThreshold, REAL_REQUEST_LATENCY_FLOOR_MS)).also { if (it) passive?.recordActiveSuccess() }
+            val latency = probe()
+            passive?.recordActiveSuccess()
+            if (latency >= maxOf(latencyThreshold, REAL_REQUEST_LATENCY_FLOOR_MS)) {
+                XrayLogManager.d("FAILOVER", "Tunnel carried traffic in ${latency} ms; keeping the working connection.")
+            }
+            true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -291,7 +296,14 @@ class FailoverManager(
         // A filter that stops one node usually stops its whole kind (QUIC, a TLS fingerprint, a CDN
         // path), so the next node is of a kind that has not failed during this outage.
         failedFamilies.add(protocolFamily(degradedProfile))
-        val otherFamilies = preferUntriedFamilies(nonDegraded, failedFamilies)
+        val fresh = freshestTier(byFreshEvidence(nonDegraded))
+        val hasRecentSuccess = fresh.firstOrNull()?.let {
+            book.eligibility(ref(it)) in setOf(com.example.vpn.connectivity.PathEligibility.FRESH_VERIFIED,
+                com.example.vpn.connectivity.PathEligibility.FRESH_CANDIDATE)
+        } == true
+        // A recently working path outranks diversity: do not discard it just because its family
+        // matches the failed path and then select an untested REALITY endpoint instead.
+        val otherFamilies = if (hasRecentSuccess) fresh else preferUntriedFamilies(nonDegraded, failedFamilies)
         if (otherFamilies.size < nonDegraded.size && otherFamilies.isNotEmpty()) {
             XrayLogManager.i("FAILOVER", "Trying a different kind of connection than ${failedFamilies.joinToString()}.")
         }
@@ -315,7 +327,7 @@ class FailoverManager(
 
             if (bestFallback != null) {
                 _currentTier.value = CascadeTier.TIER_2_SECONDARY_NODES
-                val reason = "Switched to ${bestFallback.profile.name}."
+                val reason = "Trying ${bestFallback.profile.name}; traffic verification is required."
                 _failoverEvents.value = reason
                 XrayLogManager.i("GOD_MODE", reason)
                 policy.recordSwitch(degradedProfile)
@@ -345,7 +357,7 @@ class FailoverManager(
 
         if (fallback != null) {
             consecutiveFailures.set(0)
-            val reason = "Failover: Availability or latency policy triggered on $safeDegraded. Switched to ${fallback.profile.name}."
+            val reason = "Failover: Repeated traffic checks failed on $safeDegraded. Trying ${fallback.profile.name}; traffic verification is required."
             _failoverEvents.value = reason
             XrayLogManager.i("FAILOVER", reason)
             policy.recordSwitch(degradedProfile)

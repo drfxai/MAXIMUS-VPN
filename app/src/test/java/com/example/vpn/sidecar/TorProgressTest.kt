@@ -8,6 +8,16 @@ import java.nio.file.Files
 
 /** Tor's own progress reaches the app log, so a stalled start shows where it stalled. */
 class TorProgressTest {
+
+    @Test fun phoneWebTunnelProgressIsNotCutOffAfterTwentySeconds() {
+        val d = TorStartDeadline(startedAt = 0, baseMs = 120_000)
+        d.saw("Tor 0%: Starting", 0)
+        d.saw("Tor 25%: Asking for networkstatus consensus", 14_000)
+        assertFalse(d.expired(20_000))
+        assertFalse(d.expired(63_089))
+        assertTrue(d.expired(164_000))
+    }
+
     @Test fun reportsBootstrapStepsAndWarningsOnlyOnce() {
         val file = Files.createTempFile("tor", ".log").toFile()
         val progress = TorProgress(file)

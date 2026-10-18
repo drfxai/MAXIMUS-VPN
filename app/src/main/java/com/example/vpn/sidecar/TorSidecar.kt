@@ -43,7 +43,11 @@ class TorSidecar(
     override fun startInApp(launch: SidecarLaunch, context: SidecarContext): RunningEngine? {
         val start = starter ?: error("Tor needs Android to run")
         // The app runs lyrebird itself and hands Tor its SOCKS ports (see PluggableTransports).
-        val bridges = File(context.workDir, BRIDGES_FILE).readLines().filter { it.isNotBlank() }
+        val saved = File(context.workDir, BRIDGES_FILE).readLines().filter { it.isNotBlank() }
+        // A chained transport delegates DNS to its upstream hop. Direct WebTunnel needs the same
+        // poison-resistant resolution as ordinary proxy profiles, while retaining its URL and SNI.
+        val bridges = if (context.upstreamSocks != null) saved else WebTunnelEndpoints.resolve(saved,
+            privateDns = context.mode == com.example.data.model.OperationalMode.GOD_MODE)
         val pt = PluggableTransports.start(context.executable, transportsOf(bridges), File(context.workDir, "pt_state"), context.upstreamSocks)
         val tor = try {
             start(torrcWithPorts(bridges, context.socksPort, pt.methods, context.upstreamSocks), context.socksPort)
@@ -53,7 +57,7 @@ class TorSidecar(
         return object : RunningEngine {
             override val isAlive: Boolean get() = tor.isAlive && pt.isAlive
             override fun awaitReady(timeoutMs: Long): Boolean = tor.awaitReady(timeoutMs) && pt.isAlive
-            override fun stop() { tor.stop(); pt.stop() }
+            override fun stop() { try { tor.stop() } finally { pt.stop() } }
         }
     }
 

@@ -125,7 +125,7 @@ object EngineProbe {
                     val process = EngineReaper.track(engine.startInApp(launch, ctx)
                         ?: SidecarProcess.start("lab-${engine.id}", launch, ctx.workDir, ctx.socksPort))
                     try {
-                        if (!process.awaitReady(minOf(launch.readyTimeoutMs, 45_000L))) error("${engine.id} was not ready")
+                        if (!process.awaitReady(launch.readyTimeoutMs)) error("${engine.id} was not ready")
                         process to launch
                     } catch (t: Throwable) { process.stop(); throw t }
                 })
@@ -139,6 +139,7 @@ object EngineProbe {
             }
             return combine(first, more)
         } catch (e: Exception) {
+            if (e is InterruptedException || e is kotlinx.coroutines.CancellationException) throw e
             return Result("chain", ConnectionStage.NOT_TESTED, null, "chain start or request failed: ${e.javaClass.simpleName}", false)
         } finally {
             try { running?.stop() } finally { cleanup(workDir) }
@@ -154,7 +155,7 @@ object EngineProbe {
             return Result(engine.id, ConnectionStage.NOT_TESTED, null, it.message ?: "the engine did not start", notTested = false)
         }
         try {
-            val ready = running.awaitReady(minOf(launch.readyTimeoutMs, 45_000L))
+            val ready = running.awaitReady(launch.readyTimeoutMs)
             if (!ready) return judge(engine.id, false, null)
             val chained = SidecarChain.xrayProfile(profile, ctx, launch)
             val started = System.currentTimeMillis()

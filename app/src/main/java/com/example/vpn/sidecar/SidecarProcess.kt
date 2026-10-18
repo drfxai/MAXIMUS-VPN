@@ -52,11 +52,8 @@ class SidecarProcess(
     }
 
     override fun stop() {
-        // destroy() sends SIGTERM, which lets the engines close their connections; nothing else is needed.
         stopping = true
-        process.destroy()
-        val deadline = System.currentTimeMillis() + 2_000
-        while (isAlive && System.currentTimeMillis() < deadline) Thread.sleep(50)
+        EngineProcessStop.stop(process)
     }
 
     companion object {

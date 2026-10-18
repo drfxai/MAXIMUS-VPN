@@ -683,7 +683,16 @@ class LabController(
                         onProgress("${pk.family.title}: ${if (d.recheck) "rechecking" else "testing"} ${pk.profile.name}")
                         val engine = Sidecars.forProfile(pk.profile)
                         if (Sidecars.isEngineProfile(pk.profile)) {
-                            val r = engineWindow { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2) }
+                            val remaining = (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1)
+                            // A transport gets time to bootstrap, but cannot consume the entire search.
+                            // Timeout is a measured unsuccessful attempt, not "not run". User cancellation
+                            // still propagates through runInterruptible and stops the child processes.
+                            val windowMs = minOf(remaining, if (engine?.id == "tor") 180_000L else 90_000L)
+                            val r = withTimeoutOrNull(windowMs) {
+                                engineWindow { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2) }
+                            } ?: EngineProbe.Result(engine?.id ?: "chain", ConnectionStage.NOT_TESTED, null,
+                                "engine startup or traffic verification timed out after ${windowMs / 1000}s", false)
+                            XrayLogManager.i("SMART", "Recovery ${r.engineId}: ${r.failure ?: r.stage.title}")
                             if (r.notTested) planner.notTested(pk.profile.id, r.failure ?: "not measured")
                             else {
                                 planner.record(pk.profile.id, r.outcomes, r.latencyMs, System.currentTimeMillis(), r.failure ?: r.stage.title, r.spanMs)

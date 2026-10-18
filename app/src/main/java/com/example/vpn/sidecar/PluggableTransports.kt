@@ -21,9 +21,7 @@ class PluggableTransports private constructor(
     val isAlive: Boolean get() = try { process.exitValue(); false } catch (_: IllegalThreadStateException) { true }
 
     fun stop() {
-        // Closing stdin asks lyrebird to exit (TOR_PT_EXIT_ON_STDIN_CLOSE); destroy() makes sure.
-        runCatching { process.outputStream.close() }
-        process.destroy()
+        EngineProcessStop.stop(process)
     }
 
     companion object {
@@ -45,12 +43,13 @@ class PluggableTransports private constructor(
                 if (upstreamSocks != null) put("TOR_PT_PROXY", "socks5://127.0.0.1:$upstreamSocks")
             }
             val process = builder.start()
-            val lines = LinkedBlockingQueue<String>()
+            val lines = LinkedBlockingQueue<String>(128)
+            val collecting = java.util.concurrent.atomic.AtomicBoolean(true)
             Thread({
                 try {
                     process.inputStream.bufferedReader().useLines { seq ->
                         seq.forEachIndexed { i, line ->
-                            lines.offer(line)
+                            if (collecting.get()) lines.offer(line)
                             if (i < 500) logLine(line)
                         }
                     }
@@ -59,25 +58,33 @@ class PluggableTransports private constructor(
                 lines.offer(EOF)
             }, "lyrebird-out").apply { isDaemon = true; start() }
 
+            try {
             val methods = mutableMapOf<String, Int>()
             val deadline = System.currentTimeMillis() + timeoutMs
             while (true) {
                 val left = deadline - System.currentTimeMillis()
                 val line = if (left > 0) lines.poll(left, TimeUnit.MILLISECONDS) else null
                 if (line == null || line == EOF) {
-                    process.destroy()
+                    EngineProcessStop.stop(process)
                     error(if (line == null) "Tor's bridge program did not report in time" else "Tor's bridge program stopped before it was ready")
                 }
                 when (val r = parse(line)) {
                     is Reply.Method -> methods[r.transport] = r.port
-                    is Reply.Failed -> { process.destroy(); error("Tor's bridge program: ${r.reason.take(200)}") }
+                    is Reply.Failed -> { EngineProcessStop.stop(process); error("Tor's bridge program: ${r.reason.take(200)}") }
                     Reply.Done -> break
                     null -> Unit
                 }
             }
-            if (methods.isEmpty()) { process.destroy(); error("Tor's bridge program offered none of: ${transports.joinToString()}") }
+            if (methods.isEmpty()) { EngineProcessStop.stop(process); error("Tor's bridge program offered none of: ${transports.joinToString()}") }
             XrayLogManager.i(TAG, "Bridge program ready: ${methods.keys.joinToString()}")
             return PluggableTransports(process, methods)
+            } catch (t: Throwable) {
+                EngineProcessStop.stop(process)
+                throw t
+            } finally {
+                collecting.set(false)
+                lines.clear()
+            }
         }
 
         private const val EOF = "\u0000eof"

@@ -76,7 +76,7 @@ class RayVpnService : VpnService() {
         const val EXTRA_EXACT = "com.drfxai.maximusvpn.EXTRA_EXACT"
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
         /** How long a connect may spend in the LAB's fast recovery before it reports no verified path. */
-        internal const val FAST_RECOVERY_MS = 90_000L
+        internal const val FAST_RECOVERY_MS = 300_000L
         // The agent's last resort: revive dead Cloudflare-fronted configs. Bounded so a failed connect
         // does not hang; revival keeps the winning recipe for next time even if this run is cut short.
         internal const val CONFIG_REVIVE_MS = 60_000L
@@ -1015,7 +1015,14 @@ class RayVpnService : VpnService() {
                         com.example.RayApplication.instance.lab.fastRecovery(skipRefs + exclude + requestedProfile.id + userProfile.id, deadline,
                             engineWindow = { test -> engineWindow(test) }) { step -> showForegroundNotification(step) }
                     }
-                }.onFailure { XrayLogManager.w("SMART", "Recovery search stopped: ${it.message}") }.getOrNull()
+                }.onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    XrayLogManager.w("SMART", "Recovery search stopped: ${it.message}")
+                }.getOrElse {
+                    com.example.vpn.lab.LabController.FastRecoveryOutcome(null, 0, false,
+                        "recovery interrupted by ${it.javaClass.simpleName}")
+                } ?: com.example.vpn.lab.LabController.FastRecoveryOutcome(null, 0, false,
+                    "recovery time limit reached; unfinished engines were stopped")
                 val found = outcome?.result
                 outcome?.let { tracker.add(com.example.vpn.smart.SearchStage.RECOVERY, tested = it.tested, verified = if (found != null) 1 else 0) }
                 tracker.finish(com.example.vpn.smart.SearchStage.RECOVERY, verified = found != null, note = outcome?.why)
@@ -1034,7 +1041,7 @@ class RayVpnService : VpnService() {
                         "after ${found.tested} test(s); it carried a real request.")
                 } else {
                     recoveryExhausted = outcome?.exhausted == true
-                    XrayLogManager.w("SMART", "Recovery found no path: ${outcome?.why ?: "not run"}.")
+                    XrayLogManager.w("SMART", "Recovery found no path: ${outcome.why}.")
                 }
             }
 
@@ -1834,7 +1841,7 @@ class RayVpnService : VpnService() {
     private suspend fun routeLatency(): Long {
         val endpoint = engineEndpoint ?: return com.example.vpn.diagnostics.LiveTunnelProbe.latency(this)
         return withContext(Dispatchers.IO) {
-            com.example.vpn.verify.TrafficCheck(com.example.vpn.verify.RouteDialers.engine(endpoint), stepTimeoutMs = 5_000).smallRequest()
+            com.example.vpn.verify.TrafficCheck(com.example.vpn.verify.RouteDialers.engine(endpoint), stepTimeoutMs = 15_000).smallRequest()
         }
     }
 
@@ -1899,6 +1906,11 @@ class RayVpnService : VpnService() {
 
     /** Traffic went through [profile]: its evidence and, for a free config, the last-known-good pool. */
     private fun onTrafficVerified(profile: VlessProfile, rttMs: Long?) {
+        if (rttMs != null) {
+            val network = com.example.vpn.smart.NetworkKey.current(this)
+            networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(profile), rttMs)
+            _environment.value = com.example.vpn.smart.NetworkEnvironment.observe(this, networkMemory, dnsPoisoned)
+        }
         recordFreeOutcome(profile, success = true, rttMs = rttMs, stage = null)
     }
 

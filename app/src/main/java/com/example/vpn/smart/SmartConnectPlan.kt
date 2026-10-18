@@ -76,7 +76,7 @@ data class SmartConnectPlan(
             } else {
                 if (!input.godMode) {
                     listOf(EmergencyTransport.MASQUE, EmergencyTransport.PSIPHON, EmergencyTransport.TOR)
-                        .forEach { off[it] = "Started directly in GOD MODE only; recovery methods may still reach it" }
+                        .forEach { off[it] = "Deferred to recovery engine tests in this mode" }
                 }
                 val states = input.reading?.let { it.restrictions + it.primary }.orEmpty()
                 // A measured block, never a guess: WARP's WireGuard and MASQUE's HTTP/3 both need UDP abroad.
