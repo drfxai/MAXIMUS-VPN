@@ -70,7 +70,7 @@ object MasqueSidecar : SidecarEngine {
             if (isRunning(process)) throw java.io.IOException("MASQUE registration timed out")
             reader.join(500)
             if (process.exitValue() != 0 || !config.isFile || config.length() == 0L) {
-                throw java.io.IOException("MASQUE registration failed: ${SecretRedactor.redact(log.toString().take(200)).trim()}")
+                throw java.io.IOException("MASQUE registration failed: ${SecretRedactor.redact(registrationReason(log.toString()))}")
             }
         } finally {
             // Cancellation interrupts the wait. Do not leave the registration child holding credentials
@@ -78,6 +78,21 @@ object MasqueSidecar : SidecarEngine {
             if (isRunning(process)) process.destroy()
         }
     }
+
+    /**
+     * The part of usque's registration output that says why it failed. usque first warns that its config
+     * file does not exist yet (expected before a first registration), so the opening lines never hold
+     * the reason; the last lines do. Timestamps are dropped to keep the reason readable in the log.
+     */
+    internal fun registrationReason(output: String): String {
+        val lines = output.lineSequence()
+            .map { it.replace(TIMESTAMP, "").trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("Config file not found") }
+            .toList()
+        return lines.takeLast(2).joinToString("; ").take(240).ifEmpty { "usque gave no reason" }
+    }
+
+    private val TIMESTAMP = Regex("""^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\s*""")
 
     private fun isRunning(process: Process): Boolean = try {
         process.exitValue(); false
