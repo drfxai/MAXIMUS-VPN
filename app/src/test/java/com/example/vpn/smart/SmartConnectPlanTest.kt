@@ -21,7 +21,7 @@ class SmartConnectPlanTest {
     @Test fun dailyRunsEveryStageButStartsEnginesOnlyThroughRecovery() {
         val plan = SmartConnectPlan.of(input())
         SearchStage.values().forEach { assertTrue(it.name, plan.allows(it)) }
-        assertEquals(listOf(EmergencyTransport.CLEAN_IP), plan.transports)
+        assertEquals(listOf(EmergencyTransport.CLEAN_IP, EmergencyTransport.WARP), plan.transports)
     }
 
     @Test fun godModeKeepsTheEmergencyOrder() {

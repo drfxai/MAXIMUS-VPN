@@ -75,7 +75,7 @@ data class SmartConnectPlan(
                 EmergencyTransport.values().forEach { off[it] = skipped.getValue(SearchStage.EMERGENCY) }
             } else {
                 if (!input.godMode) {
-                    listOf(EmergencyTransport.WARP, EmergencyTransport.MASQUE, EmergencyTransport.PSIPHON, EmergencyTransport.TOR)
+                    listOf(EmergencyTransport.MASQUE, EmergencyTransport.PSIPHON, EmergencyTransport.TOR)
                         .forEach { off[it] = "Started directly in GOD MODE only; recovery methods may still reach it" }
                 }
                 val states = input.reading?.let { it.restrictions + it.primary }.orEmpty()

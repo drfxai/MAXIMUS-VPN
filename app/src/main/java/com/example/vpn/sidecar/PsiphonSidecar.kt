@@ -155,6 +155,23 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
             return null
         }
 
+        fun validateNetworkSettings(raw: String): String? {
+            if (raw.length > 512 * 1024) return "Psiphon settings exceed 512 KiB."
+            val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return "Psiphon settings must be a JSON object."
+            incompleteReason(obj)?.let { return it }
+            for (key in listOf("RemoteServerListURLs", "ObfuscatedServerListRootURLs")) {
+                val urls = obj.optJSONArray(key) ?: continue
+                for (i in 0 until urls.length()) {
+                    val item = urls.opt(i)
+                    val value = if (item is JSONObject) item.optString("URL") else item?.toString().orEmpty()
+                    val uri = runCatching { java.net.URI(value) }.getOrNull()
+                    if (uri?.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null)
+                        return "Psiphon server lists must use HTTPS without URL credentials."
+                }
+            }
+            return null
+        }
+
         private fun hasUrls(settings: JSONObject, key: String): Boolean =
             (settings.opt(key) as? JSONArray)?.length()?.let { it > 0 } == true
 

@@ -67,10 +67,11 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         val detected = com.example.vpn.connectivity.NetworkFirewalls.detect(NetworkKey.current(getApplication<Application>()))
         val sc = com.example.vpn.sidecar.Sidecars
         val psiphonReady = runCatching { sc.psiphon().let { sc.isBundled(it) && it.problem(com.example.vpn.sidecar.PsiphonSidecar.profile()) == null } }.getOrDefault(true)
+        val matrixReady = runCatching { sc.isBundled(com.example.vpn.sidecar.MatrixTransportSidecar) }.getOrDefault(false)
         val masqueReady = runCatching { sc.isBundled(com.example.vpn.sidecar.MasqueSidecar) }.getOrDefault(false)
         val torReady = runCatching { sc.ENGINES.first { it.id == "tor" }.let { sc.isBundled(it) } }.getOrDefault(true)
         local.update { it.copy(revival = it.revival.copy(eligible = eligible, detected = detected),
-            chain = it.chain.copy(psiphonReady = psiphonReady, torReady = torReady, masqueReady = masqueReady)) }
+            chain = it.chain.copy(psiphonReady = psiphonReady, torReady = torReady, masqueReady = masqueReady, matrixReady = matrixReady)) }
         local.value = local.value.copy(configs = configs.map { p ->
             LabConfigOption(p.id, p.name.ifBlank { "Config" }, listOf(p.protocolType.displayName, p.transport.uppercase().ifBlank { null }, p.security.uppercase().ifBlank { null })
                 .filterNotNull().filter { it != "NONE" }.joinToString(" · "))
@@ -196,6 +197,19 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopShadowLink() { shadowJob?.cancel() }
 
+    fun savePsiphonSettings(raw: String) {
+        viewModelScope.launch {
+            val error = com.example.vpn.sidecar.PsiphonSidecar.validateNetworkSettings(raw)
+            if (error != null) { lab.showMessage(error); return@launch }
+            withContext(Dispatchers.IO) {
+                com.example.data.security.SecureStorage(getApplication<Application>())
+                    .encryptAndSave("psiphon_network_settings_v1", raw.trim())
+            }
+            loadConfigs()
+            lab.showMessage("Psiphon settings saved securely. They apply on the next connection.")
+        }
+    }
+
     fun chainOrder(order: ChainOrder) = local.update { it.copy(chain = it.chain.copy(order = order, savedName = null)) }
     fun chainRegion(code: String) = local.update { it.copy(chain = it.chain.copy(region = code, savedName = null)) }
 
@@ -217,7 +231,7 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     private fun hop(engineId: String, region: String) =
         com.example.vpn.sidecar.EngineChain.Hop(engineId, region = if (engineId == "psiphon") region else "")
 
-    private fun titleOf(engineId: String) = when (engineId) { "psiphon" -> "Psiphon"; "masque" -> "WARP MASQUE"; else -> "Tor" }
+    private fun titleOf(engineId: String) = when (engineId) { "psiphon" -> "Psiphon"; "masque" -> "WARP MASQUE"; "matrix-transport" -> "Matrix Transport"; else -> "Tor" }
     fun chooseFirewall(f: com.example.vpn.connectivity.NetworkFirewalls.Firewall?) = local.update { it.copy(revival = it.revival.copy(chosen = f)) }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }
@@ -304,7 +318,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onUseRecommended = viewModel::useRecommended, onRevive = viewModel::revive, onStopRevive = viewModel::stopRevive,
                 onFirewall = viewModel::chooseFirewall, onCheckServices = viewModel::checkServices, onStopServices = viewModel::stopServices,
                 onRunShadowLink = viewModel::runShadowLink, onStopShadowLink = viewModel::stopShadowLink,
-                onChainOrder = viewModel::chainOrder, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain
+                onChainOrder = viewModel::chainOrder, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings
             )
         },
         relativeTime = ::relative

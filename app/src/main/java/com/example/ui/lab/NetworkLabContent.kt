@@ -148,7 +148,8 @@ class NetworkLabActions(
     val onStopShadowLink: () -> Unit = {},
     val onChainOrder: (ChainOrder) -> Unit = {},
     val onChainRegion: (String) -> Unit = {},
-    val onSaveChain: () -> Unit = {}
+    val onSaveChain: () -> Unit = {},
+    val onPsiphonSettings: (String) -> Unit = {}
 )
 
 @Composable
@@ -171,7 +172,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
                     LabSection.REVIVE -> RevivePage(c, state.revival, state.vpnOn, state.snapshot.running != null || state.snapshot.analysisRunning,
                         actions.onRevive, actions.onStopRevive, relativeTime, actions.onFirewall)
                     LabSection.SERVICES -> ServicesPage(c, state.services, state.vpnOn, actions.onCheckServices, actions.onStopServices, relativeTime)
-                    LabSection.CHAIN -> ChainPage(c, state.chain, actions.onChainOrder, actions.onChainRegion, actions.onSaveChain)
+                    LabSection.CHAIN -> ChainPage(c, state.chain, actions.onChainOrder, actions.onChainRegion, actions.onSaveChain, actions.onPsiphonSettings)
                 }
             }
         }

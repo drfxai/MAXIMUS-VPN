@@ -529,18 +529,23 @@ class RayVpnService : VpnService() {
      */
     private suspend fun cleanIpPath(profile: VlessProfile, timeoutSec: Int): com.example.vpn.smart.ServerRace.Winner? {
         val fronted = profile.transport.lowercase() in setOf("ws", "xhttp", "splithttp", "httpupgrade", "grpc", "h2") &&
-            (profile.security.equals("tls", true) || profile.security.equals("reality", true))
+            profile.security.equals("tls", true) && !profile.allowInsecure
         if (!fronted) return null
-        showForegroundNotification("Looking for a clean address...")
-        val best = withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
-            runCatching { com.example.panels.CleanIpOptimizer.findBestCleanIpSync() }.getOrNull()
-        } ?: return null
-        val candidate = com.example.panels.CleanIpOptimizer.variant(profile, best)
-        if (com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(candidate) != null) return null
-        val outcome = com.example.vpn.Abandonable.run { probe(candidate, timeoutSec) }
-        return (outcome as? com.example.xray.RealDelayProbe.Outcome.Delay)?.let {
-            XrayLogManager.i("SMART", "Reached ${com.example.core.SecretRedactor.redact(profile.name)} through a clean address (${it.latencyMs} ms).")
-            com.example.vpn.smart.ServerRace.Winner(candidate, profile, it.latencyMs)
+        showForegroundNotification("Looking for a verified clean path...")
+        val candidates = withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
+            com.example.panels.CleanIpOptimizer.findCleanIpsSync(port = profile.port, openSocket = {
+                Socket().also { socket ->
+                    if (!safeProtectSocket(socket)) { socket.close(); error("Clean-IP socket protection failed") }
+                }
+            })
+        }.orEmpty()
+        val attempt = coroutineContext[Job]
+        return com.example.vpn.Abandonable.run {
+            com.example.vpn.smart.CleanPathRace.select(profile, candidates.map { it.ip },
+                probe = { paths -> probeAll(paths, timeoutSec) },
+                cancelled = { attempt?.isActive == false })
+        }?.also {
+            XrayLogManager.i("SMART", "A clean path carried two real requests (${it.latencyMs} ms).")
         }
     }
 
@@ -953,9 +958,6 @@ class RayVpnService : VpnService() {
                 if (choice.nothingWorked && !raced && plan.allows(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) {
                     cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
                 }
-                if (choice.nothingWorked && !raced && plan.allows(com.example.vpn.smart.EmergencyTransport.WARP)) {
-                    warpPath(timeouts.alternateSec)?.let { adopt(it) }
-                }
                 // Sidecar engines must carry requests before selection. The shared recovery pool below
                 // tests MASQUE, Psiphon, saved Tor bridges and chains serially in DAILY and GOD MODE;
                 // choosing several untested engines here used to overwrite the earlier choices with Tor.
@@ -991,6 +993,13 @@ class RayVpnService : VpnService() {
             // A Stop pressed during the earlier probes unwinds here, before the long recovery stages begin,
             // so the connection attempt can always be cancelled rather than running on for minutes.
             coroutineContext.ensureActive()
+
+            if (!raced && provenDead && !force && !lockExit && (raceFirst || settings.autoFailoverEnabled) &&
+                plan.allows(com.example.vpn.smart.EmergencyTransport.WARP)) {
+                tracker.start(com.example.vpn.smart.SearchStage.EMERGENCY)
+                warpPath(timeouts.alternateSec)?.let { adopt(it) }
+                tracker.finish(com.example.vpn.smart.SearchStage.EMERGENCY, verified = raced)
+            }
 
             // Escalation before giving up: the LAB's fast recovery (Connect goal) over every other saved family
             // and the built-in recovery engines, stopping at the first path that carries a real request.

@@ -23,7 +23,14 @@ object RecoveryEngineCatalog {
             TorSidecar.profile().copy(id = "recovery-tor-snowflake"),
             ChainRunner.profile(EngineChain.Chain(listOf(EngineChain.Hop("psiphon"), EngineChain.Hop("masque")))) {
                 if (it == "masque") "WARP MASQUE" else "Psiphon"
-            }.copy(id = "recovery-psiphon-masque", name = "Psiphon over WARP MASQUE")
+            }.copy(id = "recovery-psiphon-masque", name = "Psiphon over WARP MASQUE"),
+            com.example.vpn.sidecar.MatrixTransportSidecar.profile("h2").copy(id = "recovery-matrix-h2"),
+            com.example.vpn.sidecar.MatrixTransportSidecar.profile("h3").copy(id = "recovery-matrix-h3"),
+            com.example.vpn.sidecar.MatrixTransportSidecar.profile("wireguard").copy(id = "recovery-matrix-wg"),
+            com.example.vpn.sidecar.MatrixTransportSidecar.profile("gool").copy(id = "recovery-matrix-gool"),
+            ChainRunner.profile(EngineChain.Chain(listOf(EngineChain.Hop("psiphon"), EngineChain.Hop("matrix-transport")))) {
+                if (it == "matrix-transport") "Matrix Transport" else "Psiphon"
+            }.copy(id = "recovery-psiphon-matrix", name = "Psiphon over Matrix Transport (HTTP/2)")
         )
         // Saved choices win a duplicate, including their region and bridge settings. A failed private
         // bridge must not suppress the no-bridge Snowflake fallback merely because both use Tor.

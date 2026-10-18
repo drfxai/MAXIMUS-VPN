@@ -74,6 +74,11 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
     /** AmneziaWG through the bundled Mihomo (amnezia-wg-option). */
     AMNEZIAWG("AmneziaWG", udp = true, engine = true),
     PSIPHON("Psiphon", engine = true),
+    MATRIX_H2("Matrix MASQUE HTTP/2", engine = true),
+    MATRIX_H3("Matrix MASQUE HTTP/3", udp = true, engine = true),
+    MATRIX_WG("Matrix WireGuard", udp = true, engine = true),
+    MATRIX_GOOL("Matrix WARP-in-WARP", udp = true, engine = true),
+    PSIPHON_MATRIX("Psiphon over Matrix HTTP/2", engine = true),
     MASQUE("WARP MASQUE (HTTP/3)", udp = true, engine = true),
     PSIPHON_MASQUE("Psiphon over WARP MASQUE", udp = true, engine = true),
     ENGINE_CHAIN("Engine chain", engine = true),
@@ -97,7 +102,17 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
          */
         fun of(p: VlessProfile, engineId: String? = null, detail: String? = null): PathFamily = when {
             engineId == "masque" -> MASQUE
-            engineId == "chain" -> if (detail == "psiphon,masque") PSIPHON_MASQUE else ENGINE_CHAIN
+            engineId == "matrix-transport" -> when (detail) {
+                "h3" -> MATRIX_H3
+                "wireguard" -> MATRIX_WG
+                "gool" -> MATRIX_GOOL
+                else -> MATRIX_H2
+            }
+            engineId == "chain" -> when (detail) {
+                "psiphon,masque" -> PSIPHON_MASQUE
+                "psiphon,matrix-transport" -> PSIPHON_MATRIX
+                else -> ENGINE_CHAIN
+            }
             engineId == "psiphon" -> PSIPHON
             engineId == "tor" -> when (detail) {
                 "webtunnel" -> TOR_WEBTUNNEL

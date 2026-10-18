@@ -26,7 +26,7 @@ object EngineChain {
     data class Chain(val hops: List<Hop>)
 
     /** Engine ids that can be chained, in a stable order for the picker. */
-    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque")
+    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque", "matrix-transport")
 
     const val MIN_HOPS = 2
     const val MAX_HOPS = 2
@@ -37,8 +37,9 @@ object EngineChain {
         if (hops.size < MIN_HOPS) return "A chain needs at least $MIN_HOPS engines."
         if (hops.size > MAX_HOPS) return "A chain can hold at most $MAX_HOPS engines."
         if (hops.map { it.engineId }.distinct().size != hops.size) return "Each engine can appear once in a chain."
-        if (hops.any { it.engineId == "masque" } && (hops.last().engineId != "masque" || hops.first().engineId != "psiphon")) {
-            return "MASQUE can only be the outer carrier for Psiphon."
+        val carrier = hops.firstOrNull { it.engineId in setOf("masque", "matrix-transport") }
+        if (carrier != null && (hops.last() != carrier || hops.first().engineId != "psiphon")) {
+            return "A WARP carrier can only be the outer carrier for Psiphon."
         }
         for (hop in hops) {
             if (hop.engineId !in CHAINABLE) return "${hop.engineId} cannot be part of a chain."
@@ -51,6 +52,7 @@ object EngineChain {
         "psiphon" -> PsiphonSidecar.profile(hop.region)
         "tor" -> TorSidecar.profile(hop.bridges)
         "masque" -> MasqueSidecar.profile()
+        "matrix-transport" -> MatrixTransportSidecar.profile("h2")
         else -> throw IllegalArgumentException("${hop.engineId} cannot be part of a chain.")
     }
 

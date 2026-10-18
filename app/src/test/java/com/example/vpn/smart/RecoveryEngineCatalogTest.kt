@@ -22,7 +22,7 @@ class RecoveryEngineCatalogTest {
         val candidates = RecoveryEngineCatalog.candidates(listOf(saved)) { true }
         assertTrue(candidates.any { it.id == saved.id })
         assertFalse(candidates.any { it.id == "recovery-tor-snowflake" })
-        assertEquals(4, candidates.size)
+        assertEquals(9, candidates.size)
     }
 
     @Test fun availabilityAndSecurityAreGates() {
@@ -49,7 +49,7 @@ class RecoveryEngineCatalogTest {
     }
 
     @Test fun measuredUdpFailureSkipsBothMasquePathsButKeepsTcpBridges() {
-        val net = NetworkCapabilityProfile(udpAvailable = false, quicAvailable = false)
+        val net = NetworkCapabilityProfile(udpAvailable = false, quicAvailable = false, tcpAvailable = true, tlsAvailable = true)
         val plan = ExperimentPlanner.plan(com.example.vpn.lab.NetworkStateClassifier.classify(net), net, 10)
         // The emergency order must never prefer a UDP carrier when UDP has no answer.
         val order = ExperimentPlanner.emergencyOrder(net)

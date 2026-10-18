@@ -16,7 +16,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
       - name: Read the release version
@@ -110,6 +110,14 @@ jobs:
             echo "OFFICIAL_MIRRORS=$OFFICIAL_MIRRORS" >> "$GITHUB_ENV"
             echo "Official subscription mirrors: $(printf '%s' "$OFFICIAL_MIRRORS" | tr ',' '\n' | grep -c .)"
           fi
+      - name: Native transport build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake ninja-build pkg-config
+          sdkmanager 'ndk;26.3.11579264' 'cmake;3.22.1'
+          libclang=$(find /usr/lib/llvm-* -name libclang.so -print -quit)
+          test -n "$libclang"
+          echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
       - name: Build the engine programs from pinned, checksum-verified sources
         # Every ABI is linked with the NDK's C toolchain (so DNS uses Android's resolver); the runner image has it.
         run: bash scripts/build-engines.sh arm64-v8a armeabi-v7a x86_64
@@ -135,6 +143,8 @@ jobs:
             "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
           done
           sha256sum MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk > SHA256SUMS
+          cp build/transport-offer/MatrixTransport-source.tar.gz MatrixTransport-source.tar.gz
+          sha256sum MatrixTransport-source.tar.gz >> SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Enable KVM
         run: |
@@ -165,6 +175,7 @@ jobs:
             MAXIMUSVPN-${{ env.APP_VERSION }}-arm64-v8a.apk
             MAXIMUSVPN-${{ env.APP_VERSION }}-universal.apk
             SHA256SUMS
+            build/transport-offer/MatrixTransport-source.tar.gz
           retention-days: 30
           if-no-files-found: error
       - name: Publish release
@@ -184,10 +195,10 @@ jobs:
           fi
           # The hidden maximus-build line is what the in-app update check reads.
           notes=$(printf 'Build %s\n\n<!-- maximus-build: %s -->' "$MAXIMUS_RELEASE_BUILD" "$MAXIMUS_RELEASE_BUILD")
-          gh release create "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS --target "$GITHUB_SHA" --title "Android version $RELEASE_TAG" --notes "$notes" --latest
+          gh release create "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS build/transport-offer/MatrixTransport-source.tar.gz --target "$GITHUB_SHA" --title "Android version $RELEASE_TAG" --notes "$notes" --latest
           actual="$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$actual" = "MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,SHA256SUMS" || { echo "Unexpected assets: $actual"; exit 1; }
-          echo 'Published three uploaded assets plus two GitHub-generated source archives.'
+          test "$actual" = "MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,MatrixTransport-source.tar.gz,SHA256SUMS" || { echo "Unexpected assets: $actual"; exit 1; }
+          echo 'Published APKs, checksums and the native transport corresponding-source archive.'
       - name: Publish update information for the in-app update pop-up
         # update.json on the update-info branch is what the app reads through jsDelivr/Statically when
         # api.github.com is blocked. Written only after the release itself is published.

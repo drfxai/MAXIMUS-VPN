@@ -723,6 +723,7 @@ class LabController(
         val engine = if (chain != null) "chain" else Sidecars.forProfile(p)?.id
         val detail = when (engine) {
             "chain" -> chain!!.hops.joinToString(",") { it.engineId }
+            "matrix-transport" -> com.example.vpn.sidecar.MatrixTransportSidecar.mode(p)
             "tor" -> runCatching { TorSidecar.bridges(p).firstOrNull()?.substringBefore(' ') }.getOrNull() ?: "invalid"
             "mihomo" -> MihomoSidecar.proxyOf(p)?.let { o ->
                 val type = o.optString("type").lowercase()

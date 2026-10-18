@@ -25,7 +25,8 @@ import com.example.ui.protocols.LabText
 enum class ChainOrder(val first: String, val second: String, val title: String) {
     PSIPHON_TOR("psiphon", "tor", "Psiphon → Tor"),
     TOR_PSIPHON("tor", "psiphon", "Tor → Psiphon"),
-    PSIPHON_MASQUE("psiphon", "masque", "Psiphon / WARP")
+    PSIPHON_MASQUE("psiphon", "masque", "Psiphon / WARP"),
+    PSIPHON_MATRIX("psiphon", "matrix-transport", "Psiphon / HTTP2")
 }
 
 /** LAB "Engine chain": builds a two-hop Psiphon/Tor chain and saves it as a server to connect to. */
@@ -36,6 +37,7 @@ data class ChainUi(
     val psiphonReady: Boolean = true,
     val torReady: Boolean = true,
     val masqueReady: Boolean = false,
+    val matrixReady: Boolean = false,
     val saving: Boolean = false,
     /** Name of the chain last saved this session, for the confirmation line. */
     val savedName: String? = null
@@ -45,7 +47,7 @@ data class ChainUi(
 internal val CHAIN_REGIONS = listOf("" to "Any", "US" to "US", "DE" to "DE", "NL" to "NL", "GB" to "GB", "FR" to "FR", "CA" to "CA")
 
 @Composable
-internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, onRegion: (String) -> Unit, onSave: () -> Unit) {
+internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, onRegion: (String) -> Unit, onSave: () -> Unit, onPsiphonSettings: (String) -> Unit = {}) {
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Panel(c) {
@@ -57,6 +59,20 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
                 }
             }
         }
+        item {
+            Panel(c) {
+                val settings = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+                LabText("Psiphon network settings", c.text, 14.sp, FontWeight.SemiBold)
+                LabText("Import your authorized JSON settings. They are stored encrypted on this phone.", c.text3, 12.sp)
+                androidx.compose.material3.OutlinedTextField(value = settings.value, onValueChange = { settings.value = it },
+                    modifier = Modifier.fillMaxWidth(), label = { androidx.compose.material3.Text("Settings JSON") },
+                    minLines = 2, maxLines = 5)
+                SecondaryButton(c, "Save Psiphon settings", Icons.Rounded.Save, enabled = settings.value.isNotBlank()) {
+                    onPsiphonSettings(settings.value)
+                    settings.value = ""
+                }
+            }
+        }
         item { GroupLabel(c, "Order") }
         item {
             Column(Modifier.padding(horizontal = Gutter)) {
@@ -65,6 +81,7 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
                     when (s.order) {
                         ChainOrder.PSIPHON_TOR -> "Psiphon is the way in; Tor is the exit the site sees."
                         ChainOrder.TOR_PSIPHON -> "Tor is the way in; Psiphon is the exit the site sees."
+                        ChainOrder.PSIPHON_MATRIX -> "Psiphon reaches its servers through a pinned MASQUE HTTP/2 carrier. The final exit is Psiphon."
                         ChainOrder.PSIPHON_MASQUE -> "Psiphon reaches its servers through WARP MASQUE (HTTP/3). The final exit is Psiphon."
                     },
                     c.text3, 12.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp), maxLines = 2, lineHeight = 16.sp
@@ -81,7 +98,9 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
         }
         val missing = buildList {
             if (!s.psiphonReady) add("Psiphon")
-            if (s.order == ChainOrder.PSIPHON_MASQUE) {
+            if (s.order == ChainOrder.PSIPHON_MATRIX) {
+                if (!s.matrixReady) add("Matrix Transport")
+            } else if (s.order == ChainOrder.PSIPHON_MASQUE) {
                 if (!s.masqueReady) add("WARP MASQUE")
             } else if (!s.torReady) add("Tor")
         }
