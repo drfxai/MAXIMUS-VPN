@@ -49,4 +49,17 @@ class TorSidecarTest {
         assertNotNull(TorSidecar.problemOf(TorSidecar.profile("vanilla 1.2.3.4:443")))
         assertNotNull(TorSidecar.problemOf(TorSidecar.profile("obfs4 1.2.3.4:443 X\rSocksPort 0.0.0.0:9050")))
     }
+
+    @Test fun theRequestTestProfileForAReadyTorIsMeasuredNotSkippedAsAnEngine() {
+        val profile = TorSidecar.profile()
+        val ctx = SidecarContext(tmp.root, File("/system/bin/true"), 18901, "u1", "p1", OperationalMode.GOD_MODE)
+        val launch = com.example.vpn.sidecar.SidecarLaunch(command = emptyList(), socksAuth = false)
+        // The tunnel hop keeps the profile's fields; only the request-test copy drops the engine marker,
+        // which made RealDelayProbe skip every ready Tor as "carried by its own engine".
+        assertTrue(Sidecars.forProfile(com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, ctx, launch)) is TorSidecar)
+        val probe = com.example.vpn.sidecar.SidecarChain.probeProfile(profile, ctx, launch)
+        assertNull(Sidecars.forProfile(probe))
+        assertTrue(probe.rawConfig.contains("\"port\":18901"))
+    }
 }
+

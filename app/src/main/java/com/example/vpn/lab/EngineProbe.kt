@@ -129,7 +129,7 @@ object EngineProbe {
                         process to launch
                     } catch (t: Throwable) { process.stop(); throw t }
                 })
-            val chained = SidecarChain.xrayProfile(profile, running.entryContext, running.entryLaunch)
+            val chained = SidecarChain.probeProfile(profile, running.entryContext, running.entryLaunch)
             val started = System.currentTimeMillis()
             val first = judge("chain", true, RealDelayProbe.measure(chained, timeoutSec))
             if (!first.stage.carriesTraffic || requests <= 1) return first
@@ -157,7 +157,7 @@ object EngineProbe {
         try {
             val ready = running.awaitReady(launch.readyTimeoutMs)
             if (!ready) return judge(engine.id, false, null)
-            val chained = SidecarChain.xrayProfile(profile, ctx, launch)
+            val chained = SidecarChain.probeProfile(profile, ctx, launch)
             val started = System.currentTimeMillis()
             val first = judge(engine.id, true, RealDelayProbe.measure(chained, timeoutSec))
             if (!first.stage.carriesTraffic || requests <= 1) return first

@@ -21,4 +21,12 @@ object SidecarChain {
         val config = JSONObject().put("outbounds", JSONArray().put(outbound))
         return original.copy(profileType = ProfileType.XRAY_JSON, rawConfig = config.toString())
     }
+
+    /**
+     * [xrayProfile] for a request test. The engine's marker in extraSettings is dropped: left in, the
+     * probe still sees an engine profile, skips it as "carried by its own engine", and a ready Tor,
+     * Psiphon or DNS tunnel is recorded as not tested instead of being measured.
+     */
+    fun probeProfile(original: VlessProfile, context: SidecarContext, launch: SidecarLaunch): VlessProfile =
+        xrayProfile(original, context, launch).copy(extraSettings = "")
 }
