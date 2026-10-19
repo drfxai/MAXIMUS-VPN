@@ -132,6 +132,7 @@ class ServerRace(
 
     companion object {
         const val MAX_BATCHES = 2
+        private const val DISGUISED = 2
         /**
          * Smart Connect and a failed connect race every saved server up to [FULL_LIMIT] (plus the
          * disguised forms), not only the best ten: on a filtered network the few that still work are
@@ -141,7 +142,6 @@ class ServerRace(
         const val FULL_BATCHES = (FULL_LIMIT + DISGUISED + RealDelayProbe.MAX_BATCH - 1) / RealDelayProbe.MAX_BATCH
         /** Below this a request through a filtered network times out before it finishes (Test All uses 6 s). */
         const val FULL_MIN_TIMEOUT_SEC = 6
-        private const val DISGUISED = 2
         private val TLS_LOOKING = setOf("REALITY", "CDN", "TLS")
 
         internal fun kindRank(profile: VlessProfile): Int =
