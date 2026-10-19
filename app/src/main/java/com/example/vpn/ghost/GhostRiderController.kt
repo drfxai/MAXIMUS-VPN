@@ -40,6 +40,14 @@ object GhostRiderController {
      * saved-server race so the chosen private path is used.
      */
     fun routeThroughTor(context: Context) {
+        // Already carried by Tor (a saved bridge config that works here): starting Tor again over
+        // Snowflake would only replace a working path with one that may not start on this network.
+        val state = VpnController.connectionState.value
+        val active = state.activeProfile
+        if (state.isTunnelUp && active != null && carriesTor(active)) {
+            com.example.xray.XrayLogManager.i("GHOST", "Already routed through Tor (${com.example.core.SecretRedactor.redact(active.name)}); keeping it.")
+            return
+        }
         val base = when (GhostRiderPath.preference(availableEngines(context)).first()) {
             GhostRiderPath.Step.CHAIN_PSIPHON_TOR -> ChainRunner.profile(GhostRiderPath.chain()) { titleOf(it) }
             else -> TorSidecar.profile(name = "Ghost Rider · Tor")
@@ -52,6 +60,11 @@ object GhostRiderController {
             withContext(Dispatchers.Main) { VpnController.startVpn(context, profile, smart = false, force = true) }
         }
     }
+
+    /** Whether [p] runs through Tor: a Tor config, or a chain with a Tor hop. */
+    internal fun carriesTor(p: com.example.data.model.VlessProfile): Boolean =
+        com.example.vpn.sidecar.Sidecars.forProfile(p)?.id == TorSidecar.ID ||
+            ChainRunner.readChain(p)?.hops?.any { it.engineId == TorSidecar.ID } == true
 
     /**
      * Panic: drop the tunnel and wipe the sensitive on-device state at once. [regenerateAtomicId] clears
