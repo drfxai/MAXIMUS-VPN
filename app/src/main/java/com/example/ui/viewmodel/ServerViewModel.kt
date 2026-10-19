@@ -261,9 +261,13 @@ class ServerViewModel(
     fun selectServer(profile: VlessProfile) {
         XrayLogManager.i("UI", "Selected active server profile: '${profile.name}' (${profile.address}:${profile.port})")
         settingsRepository.setSelectedProfileId(profile.id)
-        if (com.example.vpn.VpnController.connectionState.value.let { it.isTunnelUp && !it.isBusy }) {
-            XrayLogManager.i("VPN", "Active connection detected. Switching tunnel to '${profile.name}' (${profile.address}:${profile.port})...")
-            com.example.vpn.VpnController.startVpn(RayApplication.instance, profile)
+        // Picking a node while the VPN is on (or still connecting) switches to it at once, exactly as the
+        // power button connects: that config as saved, no pre-test, search or switch to another server.
+        val state = com.example.vpn.VpnController.connectionState.value
+        if ((state.isTunnelUp || state.isBusy) && state.status != com.example.data.model.ConnectionStatus.DISCONNECTING &&
+            state.activeProfile?.id != profile.id) {
+            XrayLogManager.i("VPN", "Switching the connection to the node picked in Nodes: '${profile.name}'.")
+            com.example.vpn.VpnController.startVpn(RayApplication.instance, profile, exact = true)
         }
     }
 

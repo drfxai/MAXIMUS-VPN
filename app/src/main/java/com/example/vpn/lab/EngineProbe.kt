@@ -2,7 +2,9 @@ package com.example.vpn.lab
 
 import android.content.Context
 import com.example.data.model.AppSettings
+import com.example.data.model.OperationalMode
 import com.example.data.model.VlessProfile
+import com.example.vpn.sidecar.EngineHandoff
 import com.example.vpn.sidecar.EngineReaper
 import com.example.vpn.sidecar.SidecarChain
 import com.example.vpn.sidecar.SidecarContext
@@ -85,25 +87,35 @@ object EngineProbe {
      * winner is re-verified without a second start-up. The work folder (generated configs, bridge lines,
      * credentials) is deleted after the engine stops; only the sanitized result is kept.
      */
-    fun test(context: Context, engine: SidecarEngine, profile: VlessProfile, timeoutSec: Int, requests: Int = 1, gapMs: Long = FullAnalysis.STABLE_WINDOW_MS): Result {
+    fun test(
+        context: Context, engine: SidecarEngine, profile: VlessProfile, timeoutSec: Int, requests: Int = 1,
+        gapMs: Long = FullAnalysis.STABLE_WINDOW_MS,
+        mode: OperationalMode = AppSettings().operationalMode,
+        /** A passing engine is left running in [EngineHandoff] for the connect that follows. */
+        keep: Boolean = false
+    ): Result {
         val executable = Sidecars.executable(engine)
             ?: return Result(engine.id, ConnectionStage.NOT_TESTED, null, "the ${engine.id} engine is not in this build", notTested = true)
         engine.problem(profile)?.let { return Result(engine.id, ConnectionStage.NOT_TESTED, null, it, notTested = true) }
         val workDir = File(context.noBackupFilesDir, "lab-engines/${engine.id}-${Sidecars.randomToken(6)}").apply { mkdirs() }
         try {
-            return runIsolated(engine, profile, executable, workDir, timeoutSec, requests, gapMs)
+            return runIsolated(engine, profile, executable, workDir, timeoutSec, requests, gapMs, mode, keep)
         } finally {
-            cleanup(workDir)
+            if (!EngineHandoff.holds(workDir)) cleanup(workDir)
         }
     }
 
     /** Tests either a lone sidecar or every hop of a saved chain, with identical request criteria. */
-    fun testProfile(context: Context, profile: VlessProfile, timeoutSec: Int, requests: Int = 1): Result {
+    fun testProfile(
+        context: Context, profile: VlessProfile, timeoutSec: Int, requests: Int = 1,
+        mode: OperationalMode = AppSettings().operationalMode,
+        keep: Boolean = false
+    ): Result {
         val chain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
         if (chain == null) {
             val engine = Sidecars.forProfile(profile)
                 ?: return Result("unknown", ConnectionStage.NOT_TESTED, null, "no engine carries this profile", true)
-            return test(context, engine, profile, timeoutSec, requests)
+            return test(context, engine, profile, timeoutSec, requests, mode = mode, keep = keep)
         }
         com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(profile)?.let {
             return Result("chain", ConnectionStage.NOT_TESTED, null, it, true)
@@ -146,28 +158,36 @@ object EngineProbe {
         }
     }
 
-    private fun runIsolated(engine: SidecarEngine, profile: VlessProfile, executable: File, workDir: File, timeoutSec: Int, requests: Int, gapMs: Long): Result {
-        val ctx = SidecarContext(workDir, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9), Sidecars.randomToken(), AppSettings().operationalMode)
+    private fun runIsolated(
+        engine: SidecarEngine, profile: VlessProfile, executable: File, workDir: File, timeoutSec: Int, requests: Int, gapMs: Long,
+        mode: OperationalMode, keep: Boolean
+    ): Result {
+        val ctx = SidecarContext(workDir, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9), Sidecars.randomToken(), mode)
         val launch = runCatching { engine.prepare(profile, AppSettings(), ctx) }.getOrElse {
             return Result(engine.id, ConnectionStage.NOT_TESTED, null, it.message ?: "could not prepare the engine", notTested = true)
         }
         val running = runCatching { EngineReaper.track(engine.startInApp(launch, ctx) ?: SidecarProcess.start("lab-${engine.id}", launch, workDir, ctx.socksPort)) }.getOrElse {
             return Result(engine.id, ConnectionStage.NOT_TESTED, null, it.message ?: "the engine did not start", notTested = false)
         }
+        var kept = false
         try {
             val ready = running.awaitReady(launch.readyTimeoutMs)
             if (!ready) return judge(engine.id, false, null)
             val chained = SidecarChain.probeProfile(profile, ctx, launch)
             val started = System.currentTimeMillis()
             val first = judge(engine.id, true, RealDelayProbe.measure(chained, timeoutSec))
-            if (!first.stage.carriesTraffic || requests <= 1) return first
-            val more = (2..requests).map {
+            val result = if (!first.stage.carriesTraffic || requests <= 1) first else combine(first, (2..requests).map {
                 Thread.sleep(gapMs)
                 RealDelayProbe.measure(chained, timeoutSec) to (System.currentTimeMillis() - started)
+            })
+            // Its last request passed: the connect takes this engine over instead of bootstrapping it again.
+            if (keep && result.outcomes.lastOrNull() == true && running.isAlive) {
+                EngineHandoff.park(EngineHandoff.Parked(profile.id, engine.id, mode, running, ctx, launch, System.currentTimeMillis()))
+                kept = true
             }
-            return combine(first, more)
+            return result
         } finally {
-            running.stop()
+            if (!kept) running.stop()
         }
     }
 

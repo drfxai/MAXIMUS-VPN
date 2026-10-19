@@ -638,6 +638,8 @@ class LabController(
         exclude: Set<String>,
         deadlineMs: Long,
         engineWindow: suspend (() -> EngineProbe.Result) -> EngineProbe.Result,
+        /** The connect's mode, so a passing engine runs as the connect would start it and can be handed over. */
+        mode: com.example.data.model.OperationalMode = com.example.data.model.AppSettings().operationalMode,
         onProgress: (String) -> Unit = {}
     ): FastRecoveryOutcome {
         if (!testLock.tryLock()) return FastRecoveryOutcome(null, 0, false, "the LAB is running an analysis")
@@ -692,7 +694,7 @@ class LabController(
                             // still propagates through runInterruptible and stops the child processes.
                             val windowMs = minOf(remaining, if (engine?.id == "tor") 180_000L else 90_000L)
                             val r = withTimeoutOrNull(windowMs) {
-                                engineWindow { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2) }
+                                engineWindow { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2, mode = mode, keep = true) }
                             } ?: EngineProbe.Result(engine?.id ?: "chain", ConnectionStage.NOT_TESTED, null,
                                 "engine startup or traffic verification timed out after ${windowMs / 1000}s", false)
                             XrayLogManager.i("SMART", "Recovery ${r.engineId}: ${r.failure ?: r.stage.title}")

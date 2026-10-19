@@ -91,6 +91,22 @@ class SmartConnectRaceTest {
         assertEquals(StealthVariants.FRAGMENT, win.variantKey)
     }
 
+    @Test fun aFullRaceReachesAWorkingServerFarDownTheList() {
+        val pool = (1..30).map { reality("$it", score = 100.0 - it).copy(sni = "s$it.example.com") }
+        val ranked = ServerRace.rank(pool, limit = ServerRace.FULL_LIMIT)
+        assertEquals(30, ranked.size)
+        val last = ranked.last().id
+        var rounds = 0
+        val race = ServerRace(probe = { list, _ ->
+            rounds++
+            list.map { if (it.id == last) RealDelayProbe.Outcome.Delay(900) else RealDelayProbe.Outcome.Failed("reset") }
+        }, log = {})
+        assertNull(race.run(ranked, { it }, timeoutSec = 6))
+        val win = race.run(ranked, { it }, timeoutSec = 6, maxBatches = ServerRace.FULL_BATCHES)
+        assertEquals(last, win!!.owner.id)
+        assertTrue(rounds > ServerRace.MAX_BATCHES)
+    }
+
     @Test fun kindsThatJustFailedOnThisNetworkGoLast() {
         val ranked = ServerRace.rank(listOf(reality("1", score = 99.0), hy2("2", score = 1.0)), failedKinds = setOf("REALITY"))
         assertEquals(listOf("h2", "1"), ranked.map { it.id })

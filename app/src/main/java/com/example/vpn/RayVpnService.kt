@@ -302,7 +302,8 @@ class RayVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        if (action == ACTION_CONNECT && !_vpnState.value.isTunnelUp && !_vpnState.value.isBusy) {
+        if (action == ACTION_CONNECT && !_vpnState.value.isTunnelUp &&
+            (!_vpnState.value.isBusy || _vpnState.value.status == ConnectionStatus.PREPARING)) {
             // Show "connecting" the moment the button is tapped. The protective interface, the stop of
             // the previous engine and the connect lock below can take a while, and until now the button
             // looked unresponsive during them.
@@ -365,6 +366,7 @@ class RayVpnService : VpnService() {
                 connectJob?.cancel()
                 // Engines of the attempt this Connect replaces stop now, so the new attempt does not wait behind them.
                 com.example.vpn.sidecar.EngineReaper.stopAll()
+                com.example.vpn.sidecar.EngineHandoff.clear()
                 connectJob = serviceScope.launch {
                     val profile = if (!profileId.isNullOrBlank()) {
                         serverRepository.getProfileById(profileId)
@@ -406,6 +408,7 @@ class RayVpnService : VpnService() {
                     updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING))
                 }
                 com.example.vpn.sidecar.EngineReaper.stopAll()
+                com.example.vpn.sidecar.EngineHandoff.clear()
                 serviceScope.launch {
                     // A second Disconnect while one runs joins it instead of tearing down twice.
                     lifecycle.singleTeardown { disconnect() }
@@ -485,6 +488,7 @@ class RayVpnService : VpnService() {
         val intel = runCatching { com.example.RayApplication.instance.iranIntel.current() }.getOrNull()
         val ranked = com.example.vpn.smart.ServerRace.rank(
             all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude,
+            limit = com.example.vpn.smart.ServerRace.FULL_LIMIT,
             adjust = { p -> intel?.adjustmentFor(p, network)?.value ?: 0.0 }
         )
         // UDP where UDP is blocked, IPv6 where there is no IPv6: skipped, not hammered (TransportCapabilityEngine).
@@ -504,7 +508,9 @@ class RayVpnService : VpnService() {
         val raceJob = kotlinx.coroutines.currentCoroutineContext()[Job]
         // Abandonable: a Stop returns from here at once; the round already running finishes on its own.
         com.example.vpn.Abandonable.run {
-            com.example.vpn.smart.ServerRace(probe = ::probeAll).run(candidates, resolve, timeoutSec, onFailure = {
+            com.example.vpn.smart.ServerRace(probe = ::probeAll).run(candidates, resolve,
+                timeoutSec.coerceAtLeast(com.example.vpn.smart.ServerRace.FULL_MIN_TIMEOUT_SEC),
+                maxBatches = com.example.vpn.smart.ServerRace.FULL_BATCHES, onFailure = {
                 networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
             }, disguiseOnly = dead, shouldStop = { raceJob?.isActive == false })
         }?.let { return it }
@@ -1020,7 +1026,7 @@ class RayVpnService : VpnService() {
                 val outcome = runCatching {
                     withTimeoutOrNull(FAST_RECOVERY_MS + 10_000L) {
                         com.example.RayApplication.instance.lab.fastRecovery(skipRefs + exclude + requestedProfile.id + userProfile.id, deadline,
-                            engineWindow = { test -> engineWindow(test) }) { step -> showForegroundNotification(step) }
+                            engineWindow = { test -> engineWindow(test) }, mode = settings.operationalMode) { step -> showForegroundNotification(step) }
                     }
                 }.onFailure {
                     if (it is kotlinx.coroutines.CancellationException) throw it
@@ -1557,6 +1563,13 @@ class RayVpnService : VpnService() {
     private fun startSidecar(engine: com.example.vpn.sidecar.SidecarEngine, profile: VlessProfile, settings: AppSettings): VlessProfile {
         sidecar?.stop()
         sidecar = null
+        // The recovery test just ran this engine and it carried real requests: take it over as it is.
+        com.example.vpn.sidecar.EngineHandoff.take(profile.id, engine.id, settings.operationalMode)?.let { kept ->
+            sidecar = kept.engine
+            XrayLogManager.i("VPN", "Engine ${engine.id} kept running from the recovery test; no second start-up")
+            watchSidecar(engine, kept.engine)
+            return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, kept.context, kept.launch)
+        }
         val executable = com.example.vpn.sidecar.Sidecars.executable(engine)
             ?: error("The ${engine.id} engine is not included in this build for this phone")
         val workDir = java.io.File(noBackupFilesDir, "engines/${engine.id}").apply { mkdirs() }
@@ -1579,7 +1592,12 @@ class RayVpnService : VpnService() {
             error("The ${engine.id} engine did not start")
         }
         XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
-        val watched = process
+        watchSidecar(engine, process)
+        return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, context, launch)
+    }
+
+    /** Reports [watched] stopping while it is still the connection's engine. */
+    private fun watchSidecar(engine: com.example.vpn.sidecar.SidecarEngine, watched: com.example.vpn.sidecar.RunningEngine) {
         serviceScope.launch(Dispatchers.IO) {
             while (isActive && sidecar === watched && watched.isAlive) delay(1_000)
             if (sidecar === watched) {
@@ -1587,7 +1605,6 @@ class RayVpnService : VpnService() {
                 failoverManager?.reportTunnelError("engine ${engine.id} stopped")
             }
         }
-        return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, context, launch)
     }
 
     /**

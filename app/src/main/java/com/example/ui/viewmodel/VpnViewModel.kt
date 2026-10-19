@@ -102,6 +102,8 @@ class VpnViewModel(
             pendingExact = exact
             onRequestPermission(prepareIntent)
         } else if (targetProfile != null) {
+            // Shown on the tap, before the service starts and reaches its own first step.
+            RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null) }
             VpnController.startVpn(context, targetProfile, smart = smart, exact = exact)
         } else {
             viewModelScope.launch {
@@ -164,6 +166,10 @@ class VpnViewModel(
         // FAILED keeps the protective block in place, so the button must release it rather than
         // retry the same failing profile forever.
         if (currentState.isTunnelUp || currentState.isBusy || currentState.status == ConnectionStatus.FAILED) {
+            // The button answers on the tap; the service then tears down (it sets the same state itself).
+            if (currentState.status != ConnectionStatus.FAILED) {
+                RayVpnService.mutateState { it.copy(status = ConnectionStatus.DISCONNECTING) }
+            }
             VpnController.stopVpn(context)
         } else {
             // The power button connects the config selected in Nodes and only that one; Smart Connect is
