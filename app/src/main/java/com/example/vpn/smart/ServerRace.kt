@@ -71,7 +71,7 @@ class ServerRace(
     ): Winner? {
         if (candidates.isEmpty() && disguiseOnly.isEmpty()) return null
         val dead = disguiseOnly.filter { ConnectionKind.of(it) in TLS_LOOKING }.take(DISGUISED)
-        val paths = withDisguises(resolveAll(dead + candidates, resolve), dead.map { it.id }.toSet()).take(MAX_CANDIDATES)
+        val paths = withDisguises(resolveAll(dead + candidates, resolve), dead.map { it.id }.toSet()).take(maxBatches * RealDelayProbe.MAX_BATCH)
         val batches = StealthPathFinder.parallelSafeBatches(paths) { it.profile }.take(maxBatches)
         for ((round, batch) in batches.withIndex()) {
             if (shouldStop()) return null
@@ -132,6 +132,15 @@ class ServerRace(
 
     companion object {
         const val MAX_BATCHES = 2
+        /**
+         * Smart Connect and a failed connect race every saved server up to [FULL_LIMIT] (plus the
+         * disguised forms), not only the best ten: on a filtered network the few that still work are
+         * often far down the ranking, and Test All on the same list found them where two rounds did not.
+         */
+        const val FULL_LIMIT = 30
+        const val FULL_BATCHES = (FULL_LIMIT + DISGUISED + RealDelayProbe.MAX_BATCH - 1) / RealDelayProbe.MAX_BATCH
+        /** Below this a request through a filtered network times out before it finishes (Test All uses 6 s). */
+        const val FULL_MIN_TIMEOUT_SEC = 6
         private const val DISGUISED = 2
         private val TLS_LOOKING = setOf("REALITY", "CDN", "TLS")
 
