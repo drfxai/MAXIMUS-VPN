@@ -110,7 +110,8 @@ class ProtocolsViewModel(app: Application) : AndroidViewModel(app) {
                     if (panel != null) {
                         lab.runOnServer(LabFamily.serverFamilies.filter { it in s.families }, priority = s.priority, onProgress = progress)
                     } else {
-                        val saved = serverRepository.getAllProfilesOnce()
+                        // Configs carried by their own engine (Tor, Psiphon, DNS tunnels) cannot be measured here.
+                        val saved = serverRepository.getAllProfilesOnce().filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }
                         require(saved.isNotEmpty()) { "Add a server or some configs first, then run the test." }
                         lab.runOnSaved(saved, priority = s.priority, onProgress = progress)
                     }

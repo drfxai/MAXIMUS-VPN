@@ -123,9 +123,14 @@ class ProtocolLab(
         rounds: Int = DEFAULT_ROUNDS,
         priority: LabPriority = LabPriority.BALANCED,
         perFamily: Int = 3,
+        now: Long = System.currentTimeMillis(),
         onProgress: (Progress) -> Unit = {}
     ): List<LabResult> {
-        val candidates = profiles.groupBy { LabFamily.of(it) }.mapValues { it.value.take(perFamily) }
+        // The configs that answered a test lately (Ping All, Test All, a connect) go first in their family:
+        // taking the first three as saved left out the ones that work on this network.
+        val candidates = profiles.groupBy { LabFamily.of(it) }.mapValues { (_, list) ->
+            list.sortedWith(compareBy<VlessProfile> { recentLatency(it, now) ?: Long.MAX_VALUE }.thenByDescending { it.overallScore }).take(perFamily)
+        }
         val flat = candidates.values.flatten()
         val measured = measureRounds(flat, rounds, priority) { round ->
             onProgress(Progress("Testing your internet, round ${round + 1} of $rounds", round, rounds))
@@ -136,6 +141,10 @@ class ProtocolLab(
             .map { (family, indices) -> measured[indices.maxBy { measured[it].score }].copy(family = family) }
         return rank(best)
     }
+
+    /** The last measured delay when it is under a day old, else null. */
+    private fun recentLatency(p: VlessProfile, now: Long): Long? =
+        p.lastLatencyMs?.takeIf { it > 0 && (p.lastTestedTimestamp ?: 0L) > now - RECENT_MS }
 
     /** Keeps [chosen] on the server and removes every other test config this run created. */
     fun keepOnly(chosen: LabResult?, results: List<LabResult>) {
@@ -168,6 +177,7 @@ class ProtocolLab(
 
     companion object {
         const val DEFAULT_ROUNDS = 3
+        private const val RECENT_MS = 24 * 60 * 60 * 1000L
 
         /** Working families first, best score first; ties go to the lower median latency. */
         fun rank(results: List<LabResult>): List<LabResult> =

@@ -114,6 +114,17 @@ class ProtocolLabTest {
     }
 
     @Test
+    fun aConfigThatAnsweredRecentlyIsTestedEvenWhenSavedLast() {
+        val now = 10_000_000_000L
+        val dead = (1..5).map { profile("dead$it", LabFamily.REALITY) }
+        val alive = profile("alive", LabFamily.REALITY).copy(lastLatencyMs = 300, lastTestedTimestamp = now - 60_000)
+        val lab = ProtocolLab(measure = { profiles -> profiles.map { if (it.uuid == "alive") 300L else null } })
+        val results = lab.runOnSaved(dead + alive, rounds = 1, now = now)
+        assertEquals("alive", results.single().profile?.uuid)
+        assertTrue(results.single().works)
+    }
+
+    @Test
     fun priorityChangesTheWeighting() {
         // Fast but drops a round vs. slower but never fails.
         val fastFlaky = LabResult(LabFamily.HYSTERIA2, null, listOf(60, 70, null), 0)
