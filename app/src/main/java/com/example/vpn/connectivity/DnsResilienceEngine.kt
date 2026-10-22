@@ -17,7 +17,7 @@ enum class DnsOutcome {
 
 /**
  * How server names are looked up on one network, from real queries made on it:
- * which DoH resolvers to ask (best first, ones that never worked here last or left out), and for which
+ * which DoH resolvers to ask (recently reliable first; repeated recent failures rested), and for which
  * names the network's own DNS is known to give block-page answers, so those go straight to DoH without the
  * grace wait. Never a downgrade: names that go privately (GOD MODE) never reach the network's DNS.
  */
@@ -76,7 +76,7 @@ class DnsResilienceEngine(
 
     @Synchronized
     fun stats(network: String?, resolver: String): ResolverStats {
-        val s = fresh(network).filter { it.resolver == resolver }
+        val s = fresh(network).filter { it.resolver == resolver }.takeLast(STATS_WINDOW)
         val lat = s.filter { it.outcome == DnsOutcome.ANSWER }.mapNotNull { it.ms }.sorted()
         return ResolverStats(resolver, s.size, s.count { it.outcome == DnsOutcome.ANSWER }, s.count { it.outcome == DnsOutcome.TIMEOUT },
             lat.getOrNull(lat.size / 2))
@@ -86,7 +86,10 @@ class DnsResilienceEngine(
     @Synchronized
     fun profile(network: String?, available: List<String>): DnsResilienceProfile {
         val stats = available.associateWith { stats(network, it) }
-        fun dead(r: String) = stats.getValue(r).let { it.queries >= DEAD_AFTER && it.answers == 0 }
+        fun dead(r: String): Boolean {
+            val recent = fresh(network).filter { it.resolver == r }.takeLast(DEAD_AFTER)
+            return recent.size == DEAD_AFTER && recent.none { it.outcome == DnsOutcome.ANSWER }
+        }
         val ranked = available.distinct().withIndex().sortedWith(compareBy<IndexedValue<String>>(
             { dead(it.value) },
             // Measured and working first, by success rate then speed; unmeasured keep their given order.
@@ -94,12 +97,13 @@ class DnsResilienceEngine(
             { stats.getValue(it.value).medianMs ?: Long.MAX_VALUE },
             { it.index }
         )).map { it.value }
-        // Ones that never answered here are left out, but [MIN_RESOLVERS] are always asked.
+        // Ones with repeated recent failures are rested, but [MIN_RESOLVERS] are always asked.
         val live = ranked.filter { !dead(it) }
         val base = if (live.size >= MIN_RESOLVERS) live else ranked.take(maxOf(MIN_RESOLVERS, live.size))
         // Periodically retry one excluded resolver: a temporary outage must not quarantine it for 24 h.
-        val retry = ranked.firstOrNull { r -> r !in base && fresh(network).filter { it.resolver == r }.maxOfOrNull { it.at }
-            ?.let { clock() - it >= RETRY_AFTER_MS } == true }
+        val retry = ranked.filter { it !in base }.mapNotNull { r ->
+            fresh(network).filter { it.resolver == r }.maxOfOrNull { it.at }?.let { r to it }
+        }.filter { clock() - it.second >= RETRY_AFTER_MS }.minByOrNull { it.second }?.first
         val order = if (retry == null) base else base + retry
         val system = fresh(network).filter { it.resolver == SYSTEM }
         val tampered = system.groupBy { it.host }.filter { (_, s) ->
@@ -116,6 +120,7 @@ class DnsResilienceEngine(
         const val TTL_MS = 24L * 60 * 60 * 1000
         const val MAX_SAMPLES = 500
         const val RETRY_AFTER_MS = 60_000L
+        const val STATS_WINDOW = 12
         const val DEAD_AFTER = 3
         const val MIN_RESOLVERS = 3
         const val TAMPERED_AFTER = 2

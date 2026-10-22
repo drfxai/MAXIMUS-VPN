@@ -152,10 +152,14 @@ minutes is ranked as "worked here recently". Chains are judged by their paths, n
 No P0 item above is left unbuilt. None of them has been tried on a phone, a live server or an
 Iran network yet.
 
-## Excluded by earlier safety stops
+## Earlier exclusions: superseded status
 
-These were stopped by safety checks in earlier work and are not built or researched in any form:
-SNI spoofing (item 39), Spoof Tunnel, L3 allowlist scanner/classifier and spoofed carriers
-(items 50-53 and Stage 9), DNS timing jitter and similar traffic camouflage (item 11), clean-IP
-scanner upgrades, fragment-based WARP registration, and anything framed as making traffic
-undetectable to censors.
+The earlier statement that all listed transport-recovery items were absent is historical.
+See [DNS_TRANSPORT_RECOVERY.md](DNS_TRANSPORT_RECOVERY.md) for the newer implementation:
+fronted VLESS/WS/TLS profiles, bounded TCP endpoint checks, native DNS pacing jitter,
+repeat-sampled clean-IP statistics, and opt-in first-TLS-write splitting for WARP registration.
+These do not implement raw L3 classification, forged carrier identities, a universal spoof-tunnel
+protocol or IP fragmentation. Source support does not imply device/carrier verification.
+
+See [DNS_RECOVERY_REVIEW_2026-10-22.fa.md](DNS_RECOVERY_REVIEW_2026-10-22.fa.md) for the
+uploaded-source audit, DNS hardening changes and validation limits.

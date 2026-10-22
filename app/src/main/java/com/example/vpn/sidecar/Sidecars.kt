@@ -17,6 +17,7 @@ object Sidecars {
                 }.invoke()
             },
             DnsttSidecar(),
+            CottenDnsSidecar(),
             SlipstreamSidecar(),
             MasqueSidecar,
             MatrixTransportSidecar,

@@ -59,7 +59,20 @@ object EndpointResolver {
         skipSystem: Boolean = false,
         onOutcome: (resolver: String, outcome: DnsOutcome, ms: Long?) -> Unit = { _, _, _ -> }
     ): Result {
-        val pool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "endpoint-resolver").apply { isDaemon = true } }
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(9) { r -> Thread(r, "endpoint-resolver").apply { isDaemon = true } }
+        val active = mutableSetOf<HttpURLConnection>()
+        var closed = false
+        val trackedOpen: (URL) -> HttpURLConnection = { url ->
+            open(url).also { connection ->
+                synchronized(active) {
+                    if (closed) {
+                        connection.disconnect()
+                        throw java.io.InterruptedIOException("DNS lookup completed")
+                    }
+                    active += connection
+                }
+            }
+        }
         try {
             val done = java.util.concurrent.ExecutorCompletionService<Pair<String?, Boolean>>(pool)
             var systemError: Exception? = null
@@ -91,7 +104,7 @@ object EndpointResolver {
                 done.submit {
                     val started = System.nanoTime()
                     try {
-                        queryEndpoint(endpoint, host, open).also {
+                        queryEndpoint(endpoint, host, trackedOpen).also {
                             report(onOutcome, endpoint, if (it != null) DnsOutcome.ANSWER else DnsOutcome.NO_ANSWER,
                                 (System.nanoTime() - started) / 1_000_000)
                         } to true
@@ -118,6 +131,8 @@ object EndpointResolver {
             )
         } finally {
             pool.shutdownNow()
+            val connections = synchronized(active) { closed = true; active.toList() }
+            connections.forEach { runCatching { it.disconnect() } }
         }
     }
 
@@ -151,7 +166,10 @@ object EndpointResolver {
             connection.instanceFollowRedirects = false
             connection.setRequestProperty("Accept", "application/dns-json")
             if (connection.responseCode != 200) return null
-            return parseDohAnswer(connection.inputStream.use { readBounded(it).toString(Charsets.UTF_8) })
+            val host = URL(url).query.orEmpty().split('&').firstOrNull { it.startsWith("name=") }
+                ?.substringAfter('=')?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+                ?: throw java.io.IOException("DNS JSON query has no name")
+            return parseDohAnswer(connection.inputStream.use { readBounded(it).toString(Charsets.UTF_8) }, host)
         } finally {
             connection.disconnect()
         }
@@ -201,43 +219,35 @@ object EndpointResolver {
 
     /** First public IPv4 address among the answers of a wire-format response to [query]. */
     internal fun parseWireAnswer(query: ByteArray, response: ByteArray): String? {
-        if (!com.example.vpn.dns.DnsMessageValidator.isResponseTo(query, response, response.size)) return null
-        if ((response[2].toInt() and 0x02) != 0) return null
-        // This parser walks an uncompressed echoed question. Reject alternate encodings.
-        if (response.size < query.size || !query.copyOfRange(12, query.size).contentEquals(response.copyOfRange(12, query.size))) return null
-        if ((response[2].toInt() and 0x80) == 0 || (response[3].toInt() and 0x0f) != 0) return null
-        fun u16(i: Int) = ((response[i].toInt() and 0xff) shl 8) or (response[i + 1].toInt() and 0xff)
-        val answers = u16(6)
-        var pos = query.size // the question is echoed unchanged
-        repeat(answers) {
-            // Name: a pointer (2 bytes) or labels ending in zero.
-            while (pos < response.size) {
-                val len = response[pos].toInt() and 0xff
-                if (len and 0xc0 == 0xc0) { pos += 2; break }
-                pos += 1 + len
-                if (len == 0) break
-            }
-            if (pos + 10 > response.size) return null
-            val type = u16(pos)
-            val rdLength = u16(pos + 8)
-            pos += 10
-            if (pos + rdLength > response.size) return null
-            if (type == 1 && u16(pos - 8) == 1 && rdLength == 4) {
-                val address = InetAddress.getByAddress(response.copyOfRange(pos, pos + 4))
-                if (!isBlockedAnswer(address)) return address.hostAddress
-            }
-            pos += rdLength
-        }
-        return null
+        return com.example.vpn.dns.DnsMessageValidator.addressAnswers(query, response, response.size)
+            .map { InetAddress.getByAddress(it) }
+            .firstOrNull { !isBlockedAnswer(it) }?.hostAddress
     }
 
     /** First public IPv4 address in a DNS JSON response, following CNAMEs. */
-    internal fun parseDohAnswer(body: String): String? {
+    internal fun parseDohAnswer(body: String, host: String? = null): String? {
         val root = JSONObject(body)
         if (root.optInt("Status", -1) != 0 || root.optBoolean("TC", false)) return null
         val answers = root.optJSONArray("Answer") ?: return null
-        return (0 until answers.length()).mapNotNull { answers.optJSONObject(it) }
-            .filter { it.optInt("type") == 1 }
+        val records = (0 until answers.length()).mapNotNull { answers.optJSONObject(it) }
+        fun canonical(value: String): String = java.net.IDN.toASCII(value.trim().trimEnd('.')).lowercase(java.util.Locale.ROOT)
+        // Real lookups must bind every address to the requested name or its CNAME chain.
+        // The host-less form is retained only for parser-level validation callers.
+        val owner = host?.let { requested ->
+            var current = canonical(requested)
+            val visited = mutableSetOf<String>()
+            var terminal: String? = null
+            for (hops in 0..16) {
+                if (!visited.add(current)) return null
+                val here = records.filter { canonical(it.optString("name")) == current }
+                val aliases = here.filter { it.optInt("type") == 5 }.map { canonical(it.optString("data")) }.distinct()
+                if (aliases.isEmpty()) { terminal = current; break }
+                if (aliases.size != 1 || here.any { it.optInt("type") == 1 }) return null
+                current = aliases.single()
+            }
+            terminal ?: return null
+        }
+        return records.filter { it.optInt("type") == 1 && (owner == null || canonical(it.optString("name")) == owner) }
             .map { it.optString("data").trim() }
             .firstOrNull { ip ->
                 ip.matches(Regex("""\d{1,3}(\.\d{1,3}){3}""")) && ip.split('.').all { it.toInt() in 0..255 } &&

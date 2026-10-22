@@ -89,7 +89,9 @@ fun EditConfigScreen(
     onDelete: () -> Unit,
     onFetchFingerprint: suspend (address: String, port: Int, sni: String) -> Result<String>
 ) {
-    if (DnsttSidecar().handles(profile)) {
+    if (com.example.vpn.sidecar.CottenDnsSidecar().handles(profile)) {
+        CottenDnsEditor(profile, onBack, onSave, onDelete)
+    } else if (DnsttSidecar().handles(profile)) {
         DnsTunnelEditor(profile, onBack, onSave, onDelete)
     } else if (SlipstreamSidecar().handles(profile)) {
         SlipstreamEditor(profile, onBack, onSave, onDelete)
@@ -894,3 +896,52 @@ private val SLIPSTREAM_RESOLVER_PRESETS = listOf(
     "Google" to "8.8.8.8",
     "Quad9" to "9.9.9.9"
 )
+
+/** CottenMax has a separate editor so Xray fields cannot silently corrupt its settings. */
+@Composable
+private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
+                            onSave: suspend (VlessProfile) -> String?, onDelete: () -> Unit) {
+    val initial = remember(profile.id) { runCatching { com.example.vpn.sidecar.CottenDnsSidecar.settings(profile) }.getOrNull() }
+    val scope = rememberCoroutineScope()
+    var name by remember(profile.id) { mutableStateOf(profile.name) }
+    var domain by remember(profile.id) { mutableStateOf(initial?.domain ?: profile.address) }
+    var resolvers by remember(profile.id) { mutableStateOf(initial?.resolvers?.joinToString("\n").orEmpty()) }
+    var transport by remember(profile.id) { mutableStateOf(initial?.transport ?: "auto") }
+    var backups by remember(profile.id) { mutableStateOf(initial?.backups?.joinToString("\n").orEmpty()) }
+    var tlsName by remember(profile.id) { mutableStateOf(initial?.tlsName.orEmpty()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var discard by remember { mutableStateOf(false) }
+    var remove by remember { mutableStateOf(false) }
+    fun lines(value: String) = value.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    fun leave() { if (!saving) discard = true }
+    BackHandler { leave() }
+    Column(Modifier.fillMaxSize().background(AppTheme.colors.background).testTag("edit_cotten_dns_screen")) {
+        EditTopBar("CottenDNS · Max beta", name, saving, { leave() }, { remove = true }) {
+            val next = runCatching {
+                com.example.vpn.sidecar.CottenDnsSidecar.withSettings(profile.copy(name = name.trim().ifBlank { "CottenDNS · Max beta" }),
+                    com.example.vpn.sidecar.CottenDnsSidecar.Settings(domain, profile.uuid, lines(resolvers), transport.trim(), lines(backups), tlsName))
+            }.getOrElse { error = it.message ?: "Check the CottenDNS settings"; return@EditTopBar }
+            saving = true
+            scope.launch {
+                val failure = onSave(next)
+                saving = false
+                if (failure == null) onBack() else error = failure
+            }
+        }
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Hint("Opt-in CottenMax beta. Needs a matching Max-capable server with the same domain and key. No automatic legacy downgrade.")
+            error?.let { Text(it, color = AppTheme.colors.statusError) }
+            EditField("Name", name) { name = it }
+            EditField("Delegated tunnel domain", domain, monospace = true) { domain = it }
+            EditField("Resolvers: one IP[:port] per line, up to six", resolvers, monospace = true, minLines = 3) { resolvers = it }
+            EditField("DNS transport: auto, udp, tcp, dot or doh", transport, monospace = true) { transport = it }
+            EditField("TLS certificate name (optional, for dot/doh)", tlsName, monospace = true) { tlsName = it }
+            EditField("Backup domains on compatible servers (up to three)", backups, monospace = true, minLines = 2) { backups = it }
+            Hint("The server key is preserved. Import a new MAXIMUS CottenDNS link to replace it. Encrypted DNS keeps certificate checks enabled and never silently falls back to plaintext.")
+        }
+    }
+    if (discard) ConfirmDialog("Discard changes?", "Unsaved edits will be lost.", "Discard", { onBack() }, { discard = false })
+    if (remove) ConfirmDialog("Delete node", "Remove this CottenDNS profile?", "Delete", { remove = false; onDelete() }, { remove = false })
+}
