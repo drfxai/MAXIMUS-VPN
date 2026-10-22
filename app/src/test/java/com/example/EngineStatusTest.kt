@@ -4,6 +4,8 @@ import com.example.vpn.engine.registry.EngineLedger
 import com.example.vpn.engine.registry.EngineRegistry
 import com.example.vpn.engine.registry.EngineState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -49,6 +51,22 @@ class EngineStatusTest {
         assertTrue(s.detail.contains("TLS_HANDSHAKE"))
         ledger.verified(tor.id, "wifi-a")
         assertEquals(EngineState.TRAFFIC_VERIFIED, state())
+    }
+
+    @Test fun recoverySkipsOnlyAnEngineThatJustFailedHere() {
+        ledger.failed(tor.id, "wifi-a", "did not start")
+        assertTrue(ledger.recentFailure(tor.id, "wifi-a")!!.contains("did not start"))
+        assertFalse(ledger.verifiedHere(tor.id, "wifi-a"))
+        // Another network, or a failure that aged out, gets a fresh try.
+        assertNull(ledger.recentFailure(tor.id, "cell-irancell"))
+        now += EngineLedger.FRESH_MS + 1
+        assertNull(ledger.recentFailure(tor.id, "wifi-a"))
+        // An engine that worked here is retried after a failure, and goes first while it works.
+        ledger.verified(tor.id, "wifi-a")
+        assertTrue(ledger.verifiedHere(tor.id, "wifi-a"))
+        ledger.failed(tor.id, "wifi-a", "TLS_HANDSHAKE")
+        assertNull(ledger.recentFailure(tor.id, "wifi-a"))
+        assertFalse(ledger.verifiedHere(tor.id, "wifi-a"))
     }
 
     @Test fun everyRegistryEngineGetsAStateWithoutAPhone() {

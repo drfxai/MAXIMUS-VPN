@@ -117,11 +117,23 @@ server. An existing Hiddify is detected and imported without any change on the s
 | "Hiddify found on this server" card: add without changes | yes | yes (import over a fake shell) | no | no | no | no | "Not now" lasts until the app restarts |
 | 3X-UI: Back up, Start, Stop in its ••• menu | yes | no | no | no | no | no | |
 
+## Smart Connect recovery reads the engine ledger
+
+The recovery stage of Smart Connect (LabController.fastRecovery) now asks the engine ledger about
+each recovery engine on the current network: an engine whose last start or request here failed
+within 10 minutes, and that has not carried a request here in that time, is not restarted (same
+rule as ConnectivityBrain's RECENTLY_FAILED for paths); one that carried a request here within 10
+minutes is ranked as "worked here recently". Chains are judged by their paths, not by one hop.
+
+| Feature | Implemented | Unit | Simulator | Emulator | Device | Field | Limitation |
+|---|---|---|---|---|---|---|---|
+| Skip an engine that just failed on this network | yes | yes (ledger) | no | no | no | no | the ledger is in memory: an app restart forgets it |
+| Rank an engine that just worked here first | yes | yes (ledger) | no | no | no | no | a nudge in the planner's order, not a guarantee |
+
 ## Remaining P0 work (not done yet)
 
 - Zero-downtime rotation: a rotation still restarts Xray. Real make-before-break needs Xray's
   API (add/remove inbound and outbound at runtime) instead of a restart.
-- Smart Connect ordering does not read the engine ledger yet (it uses NetworkMemory and ConnectivityBrain).
 
 ## Excluded by earlier safety stops
 
