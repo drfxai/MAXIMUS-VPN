@@ -29,15 +29,15 @@ object FrontedTunnel {
         return address.hostAddress ?: error("Invalid IP address")
     }
 
-    fun build(base: VlessProfile, endpoint: String, tlsName: String, originHost: String): VlessProfile {
-        require(base.profileType == ProfileType.VLESS && base.protocolType == ProtocolType.VLESS &&
+    fun build(base: VlessProfile, endpoint: String, tlsName: String, originHost: String, splitHello: Boolean = false): VlessProfile {
+        require(base.profileType == ProfileType.VLESS && base.protocolType in setOf(ProtocolType.VLESS, ProtocolType.VMESS, ProtocolType.TROJAN) &&
             base.security.equals("tls", true) && base.transport.equals("ws", true) && base.rawConfig.isBlank()) {
-            "Choose a VLESS WebSocket TLS profile"
+            "Choose a VLESS, VMess or Trojan WebSocket TLS profile"
         }
         require(!base.allowInsecure && base.verifyPeerCertByName.isBlank() && base.pinnedPeerCertSha256.isBlank()) {
             "Use a profile with normal CA and host-name verification"
         }
-        val fronted = base.copy(id = UUID.randomUUID().toString(), canonicalFingerprint = "", name = "Fronted · ${base.name}",
+        var fronted = base.copy(id = UUID.randomUUID().toString(), canonicalFingerprint = "", name = "Fronted · ${base.name}",
             address = publicAddress(endpoint), sni = domain(tlsName), host = domain(originHost),
             echConfigList = "", echSockopt = "", allowInsecure = false,
             desyncEnabled = false, desyncMethodName = "NONE", lastLatencyMs = null,
@@ -45,6 +45,11 @@ object FrontedTunnel {
             isFavorite = false, createdAt = System.currentTimeMillis(), downloadMbps = 0.0, uploadMbps = 0.0,
             jitterMs = 0, packetLoss = 0.0, handshakeMs = 0, overallScore = 0.0,
             speedScore = 0.0, latencyScore = 0.0, stabilityScore = 0.0, reliabilityScore = 0.0)
+        if (splitHello) {
+            require(base.finalMask.isBlank()) { "This profile already has a transport mask; edit it before adding fragmentation" }
+            fronted = requireNotNull(com.example.vpn.stealth.StealthVariants.find(fronted,
+                com.example.vpn.stealth.StealthVariants.DOUBLE_FRAGMENT)) { "Native TLS fragmentation is unavailable for this profile" }.profile
+        }
         // The legacy canonical key omits HTTP Host when SNI is present. Fronting needs both identities.
         val key = com.example.data.model.CanonicalFingerprint.computeFromProfile(fronted) + "|front-host=" + fronted.host
         val fingerprint = java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))
