@@ -794,9 +794,9 @@ class LabController(
         return valid
     }
 
-    /** Loss, jitter and rate limiting from a short UDP DNS burst to the best honest resolver; null when none answers. */
+    /** DNS request loss, timing and suspected rate limiting on the best usable resolver. */
     private suspend fun measureBurst(resolvers: List<ResolverIntelligence.Result>): ResolverIntelligence.Burst? {
-        val best = resolvers.firstOrNull { it.usable && it.udp == true } ?: return null
+        val best = resolvers.firstOrNull { it.usable } ?: return null
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
         val network = NetworkCapabilityDetector.physical(cm) ?: return null
         return withContext(Dispatchers.IO) { runCatching { ResolverIntelligence.burst(network, best) }.getOrNull() }
@@ -804,7 +804,7 @@ class LabController(
 
     /** Bounded resolver checks on the phone's own network, saved per network with an expiry. */
     private suspend fun measureResolvers(ctx: NetworkContext): List<ResolverIntelligence.Result> {
-        store.resolversFor(ctx.networkKey).takeIf { it.isNotEmpty() }?.let { return it }
+        store.resolversFor(ctx.networkKey).takeIf { ResolverIntelligence.reusable(it) }?.let { return it }
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return emptyList()
         val network = NetworkCapabilityDetector.physical(cm) ?: return emptyList()
         val own = runCatching { cm.getLinkProperties(network)?.dnsServers.orEmpty() }.getOrDefault(emptyList())
