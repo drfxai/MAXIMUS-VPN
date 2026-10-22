@@ -109,7 +109,7 @@ object WarpRegistration {
             if (splitTlsHello) {
                 val https = connection as? javax.net.ssl.HttpsURLConnection
                     ?: throw IOException("TLS splitting requires HTTPS")
-                https.sslSocketFactory = com.example.vpn.tls.TlsHelloSocketFactory(https.sslSocketFactory, 128, 2)
+                https.sslSocketFactory = com.example.vpn.tls.TlsHelloSocketFactory(https.sslSocketFactory, 64, 0, true)
             }
             connection.requestMethod = "POST"
             connection.connectTimeout = TIMEOUT_MS
@@ -126,10 +126,10 @@ object WarpRegistration {
 
             val code = connection.responseCode
             if (code !in 200..299) {
-                val error = runCatching { connection.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull().orEmpty()
+                val error = runCatching { connection.errorStream?.use { readBounded(it, 4096) } }.getOrNull().orEmpty()
                 throw IOException("WARP registration failed: HTTP $code ${SecretRedactor.redact(error.take(200))}".trim())
             }
-            val text = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val text = connection.inputStream.use { readBounded(it, 256 * 1024) }
             return parse(text, base64(privateKey))
         } finally {
             connection.disconnect()
@@ -229,6 +229,19 @@ object WarpRegistration {
         val account = register()
         save(account.toJson())
         return account
+    }
+
+    internal fun readBounded(input: java.io.InputStream, limit: Int): String {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(4096)
+        while (true) {
+            val n = input.read(buffer, 0, minOf(buffer.size, limit + 1 - out.size()))
+            if (n < 0) break
+            if (n == 0) continue
+            out.write(buffer, 0, n)
+            if (out.size() > limit) throw IOException("WARP registration response exceeds size limit")
+        }
+        return out.toString("UTF-8")
     }
 
     private fun isIpv4(value: String): Boolean {
