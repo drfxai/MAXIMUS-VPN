@@ -95,7 +95,7 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val app = getApplication<Application>()
                 val targets = com.example.vpn.experimental.ReachabilityScanner.targets(raw)
-                val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+                val cm = requireNotNull(app.getSystemService(android.net.ConnectivityManager::class.java)) { "Connectivity service unavailable" }
                 val network = cm.activeNetwork?.takeIf { n -> cm.getNetworkCapabilities(n)?.let { caps ->
                     caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                         !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)

@@ -37,7 +37,7 @@ object FrontedTunnel {
         require(!base.allowInsecure && base.verifyPeerCertByName.isBlank() && base.pinnedPeerCertSha256.isBlank()) {
             "Use a profile with normal CA and host-name verification"
         }
-        return base.copy(id = UUID.randomUUID().toString(), canonicalFingerprint = "", name = "Fronted · ${base.name}",
+        val fronted = base.copy(id = UUID.randomUUID().toString(), canonicalFingerprint = "", name = "Fronted · ${base.name}",
             address = publicAddress(endpoint), sni = domain(tlsName), host = domain(originHost),
             echConfigList = "", echSockopt = "", allowInsecure = false,
             desyncEnabled = false, desyncMethodName = "NONE", lastLatencyMs = null,
@@ -45,5 +45,10 @@ object FrontedTunnel {
             isFavorite = false, createdAt = System.currentTimeMillis(), downloadMbps = 0.0, uploadMbps = 0.0,
             jitterMs = 0, packetLoss = 0.0, handshakeMs = 0, overallScore = 0.0,
             speedScore = 0.0, latencyScore = 0.0, stabilityScore = 0.0, reliabilityScore = 0.0)
+        // The legacy canonical key omits HTTP Host when SNI is present. Fronting needs both identities.
+        val key = com.example.data.model.CanonicalFingerprint.computeFromProfile(fronted) + "|front-host=" + fronted.host
+        val fingerprint = java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return fronted.copy(canonicalFingerprint = fingerprint)
     }
 }

@@ -44,6 +44,7 @@ Local executable checks:
 - `bash tools/dns-validation/check.sh`: 20,051 DNS framing/matching/malformed-packet checks, plus 11 TLS checks including real TLS exchange, hostname rejection and untrusted-certificate rejection.
 - `bash tools/dns-validation/check-pacer.sh`: standard-library Go race tests for positive jitter bounds and the rate ceiling.
 - `bash tools/dns-validation/check-dnstt.sh`: downloads the pinned dnstt module, checks the exact h1 sum, applies all three patches, and runs the actual client tests with the race detector.
+- Local Kotlin/JVM compilation of the changed DNS/fronting/scanner core and 13 JUnit tests passed, using the existing JVM stubs for Android-only type references. This does not compile the Compose UI.
 - `DnsHardeningTest` and `FrontedTunnelTest` run with the existing Android unit-test workflow.
 - `.github/workflows/transport-recovery.yml` runs the standalone DNS/TLS and native pacing/client checks on pushes and PRs.
 

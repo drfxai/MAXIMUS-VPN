@@ -22,6 +22,8 @@ class FrontedTunnelTest {
         assertFalse(p.desyncEnabled)
         assertNull(p.lastTestedTimestamp)
         assertEquals("origin.example", base.address)
+        val otherHost = FrontedTunnel.build(base, "104.16.1.1", "FRONT.example.", "other.example")
+        assertNotEquals(p.effectiveFingerprint, otherHost.effectiveFingerprint)
     }
 
     @Test fun incompatibleProfilesAndInsecureModesAreRefused() {
