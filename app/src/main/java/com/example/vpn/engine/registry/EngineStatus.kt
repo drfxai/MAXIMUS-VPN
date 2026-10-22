@@ -60,6 +60,29 @@ class EngineLedger(private val clock: () -> Long = System::currentTimeMillis) {
         if (list.size > MAX_EVENTS) list.removeAt(0)
     }
 
+    private fun last(engineId: String, network: String): Event? {
+        val now = clock()
+        return events[engineId].orEmpty().lastOrNull { it.network == network && now - it.at <= FRESH_MS }
+    }
+
+    /**
+     * Why [engineId] should not be retried on [network] right now: its last start or request here
+     * failed within [FRESH_MS] and it never carried a request here in that time. Null otherwise
+     * (a DEGRADED engine worked here, so it gets its retry).
+     */
+    @Synchronized
+    fun recentFailure(engineId: String, network: String): String? {
+        val now = clock()
+        val here = events[engineId].orEmpty().filter { it.network == network && now - it.at <= FRESH_MS }
+        val l = here.lastOrNull() ?: return null
+        if (l.kind != Kind.FAILED || here.any { it.kind == Kind.VERIFIED }) return null
+        return "the engine failed here ${(now - l.at) / 60_000} min ago" + (l.reason?.let { ": $it" } ?: "")
+    }
+
+    /** True when [engineId] carried a real request on [network] within [FRESH_MS] and has not failed since. */
+    @Synchronized
+    fun verifiedHere(engineId: String, network: String): Boolean = last(engineId, network)?.kind == Kind.VERIFIED
+
     /**
      * The state of [descriptor] on [network]. [bundled] says whether its program is in this APK
      * (null: the engine needs no program of its own); [problem] is why it cannot run without
