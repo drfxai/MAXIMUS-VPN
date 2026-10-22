@@ -100,6 +100,7 @@ object EngineProbe {
         val workDir = File(context.noBackupFilesDir, "lab-engines/${engine.id}-${Sidecars.randomToken(6)}").apply { mkdirs() }
         try {
             return runIsolated(engine, profile, executable, workDir, timeoutSec, requests, gapMs, mode, keep)
+                .also { record(context, listOf(engine.id), it, failures = true) }
         } finally {
             if (!EngineHandoff.holds(workDir)) cleanup(workDir)
         }
@@ -144,12 +145,12 @@ object EngineProbe {
             val chained = SidecarChain.probeProfile(profile, running.entryContext, running.entryLaunch)
             val started = System.currentTimeMillis()
             val first = judge("chain", true, RealDelayProbe.measure(chained, timeoutSec))
-            if (!first.stage.carriesTraffic || requests <= 1) return first
-            val more = (2..requests).map {
+            val result = if (!first.stage.carriesTraffic || requests <= 1) first else combine(first, (2..requests).map {
                 Thread.sleep(FullAnalysis.STABLE_WINDOW_MS)
                 RealDelayProbe.measure(chained, timeoutSec) to (System.currentTimeMillis() - started)
-            }
-            return combine(first, more)
+            })
+            // A passing chain proves every hop; a failing one does not say which hop failed.
+            return result.also { record(context, chain.hops.map { it.engineId }, it, failures = false) }
         } catch (e: Exception) {
             if (e is InterruptedException || e is kotlinx.coroutines.CancellationException) throw e
             return Result("chain", ConnectionStage.NOT_TESTED, null, "chain start or request failed: ${e.javaClass.simpleName}", false)
@@ -188,6 +189,18 @@ object EngineProbe {
             return result
         } finally {
             if (!kept) running.stop()
+        }
+    }
+
+    /** Writes what a test found into the shared engine ledger, which the LAB and diagnostics read. */
+    private fun record(context: Context, engineIds: List<String>, r: Result, failures: Boolean) {
+        if (r.notTested) return
+        val network = runCatching { com.example.vpn.smart.NetworkIdentity.current(context) }
+            .getOrElse { com.example.vpn.smart.NetworkKey.current(context) }
+        val ledger = com.example.vpn.engine.registry.EngineLedger.shared
+        engineIds.forEach { id ->
+            if (r.outcomes.lastOrNull() == true) ledger.verified(id, network)
+            else if (failures) ledger.failed(id, network, r.failure)
         }
     }
 

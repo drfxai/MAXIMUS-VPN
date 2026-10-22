@@ -1384,6 +1384,14 @@ class RayVpnService : VpnService() {
                 check.first, check.second?.name)
             if (check.first != null) ladder.advance(com.example.vpn.connectivity.RecoveryStage.CONNECTED_VERIFIED)
             else activeMtuKey?.let { com.example.vpn.lab.MtuIntelligence.cache.failed(it); activeMtuKey = null }
+            // Every engine on the path shares the verdict: the request crossed all of them, or none is proven.
+            val pathEngines = listOf(engineId) + (engineChain?.hops?.map { it.engineId } ?: listOfNotNull(sidecarEngine?.id))
+            pathEngines.forEach { id ->
+                val ledger = com.example.vpn.engine.registry.EngineLedger.shared
+                if (check.first != null) ledger.verified(id, routeNetwork)
+                // Only a lone engine owns a failure; in a chain or behind Xray it may be another part's.
+                else if (pathEngines.size == 1) ledger.failed(id, routeNetwork, check.second?.name)
+            }
             mutateState {
                 com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, check.first != null, check.first, System.currentTimeMillis(), check.second)
             }
@@ -1589,12 +1597,18 @@ class RayVpnService : VpnService() {
         if (!process.awaitReady(launch.readyTimeoutMs)) {
             process.stop()
             sidecar = null
+            com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "did not start")
             error("The ${engine.id} engine did not start")
         }
+        com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
         XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
         watchSidecar(engine, process)
         return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, context, launch)
     }
+
+    /** The network key the engine ledger files evidence under (the same one route memory uses). */
+    private fun ledgerNetwork(): String = runCatching { com.example.vpn.smart.NetworkIdentity.current(this) }
+        .getOrElse { com.example.vpn.smart.NetworkKey.current(this) }
 
     /** Reports [watched] stopping while it is still the connection's engine. */
     private fun watchSidecar(engine: com.example.vpn.sidecar.SidecarEngine, watched: com.example.vpn.sidecar.RunningEngine) {

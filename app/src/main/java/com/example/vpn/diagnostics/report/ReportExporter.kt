@@ -46,7 +46,12 @@ object ReportExporter {
             eventLogTruncated = EventLog.truncated,
             tests = Tests.registry.tests.value,
             runtime = RuntimeHealth.summary,
-            profileRef = DiagEvent.profileRef(state.activeProfile?.id ?: state.attemptedProfileId)
+            profileRef = DiagEvent.profileRef(state.activeProfile?.id ?: state.attemptedProfileId),
+            engines = runCatching {
+                val app = com.example.RayApplication.instance
+                val net = runCatching { com.example.vpn.smart.NetworkIdentity.current(app) }.getOrElse { com.example.vpn.smart.NetworkKey.current(app) }
+                com.example.vpn.engine.registry.EngineRegistry.statuses(net)
+            }.getOrDefault(emptyList())
         )
     }
 

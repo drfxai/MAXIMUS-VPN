@@ -19,6 +19,7 @@ import com.example.ai.gateway.AiGatewayHolder
 import com.example.data.model.ConnectionStatus
 import com.example.ui.ai.relative
 import com.example.vpn.RayVpnService
+import com.example.vpn.engine.registry.EngineState
 import com.example.vpn.lab.LabBrief
 import com.example.vpn.lab.research.GitHubReleaseSource
 import com.example.vpn.lab.research.ResearchPipeline
@@ -65,11 +66,16 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         val configs = withContext(Dispatchers.IO) { runCatching { RayApplication.instance.serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList()) }
         val eligible = runCatching { revival.eligibleCount(configs) }.getOrDefault(0)
         val detected = com.example.vpn.connectivity.NetworkFirewalls.detect(NetworkKey.current(getApplication<Application>()))
-        val sc = com.example.vpn.sidecar.Sidecars
-        val psiphonReady = runCatching { sc.psiphon().let { sc.isBundled(it) && it.problem(com.example.vpn.sidecar.PsiphonSidecar.profile()) == null } }.getOrDefault(true)
-        val matrixReady = runCatching { sc.isBundled(com.example.vpn.sidecar.MatrixTransportSidecar) }.getOrDefault(false)
-        val masqueReady = runCatching { sc.isBundled(com.example.vpn.sidecar.MasqueSidecar) }.getOrDefault(false)
-        val torReady = runCatching { sc.ENGINES.first { it.id == "tor" }.let { sc.isBundled(it) } }.getOrDefault(true)
+        // The same engine states diagnostics and the report read: bundled, configured, and what ran here.
+        val network = runCatching { com.example.vpn.smart.NetworkIdentity.current(getApplication<Application>()) }.getOrDefault("other")
+        val engines = runCatching { com.example.vpn.engine.registry.EngineRegistry.statuses(network) }.getOrDefault(emptyList())
+        fun ready(id: String, unknown: Boolean) = engines.firstOrNull { it.engineId == id }?.state?.let {
+            it !in setOf(EngineState.UNSUPPORTED, EngineState.NOT_BUNDLED, EngineState.NOT_CONFIGURED)
+        } ?: unknown
+        val psiphonReady = ready("psiphon", true)
+        val matrixReady = ready("matrix-transport", false)
+        val masqueReady = ready("masque", false)
+        val torReady = ready("tor", true)
         local.update { it.copy(revival = it.revival.copy(eligible = eligible, detected = detected),
             chain = it.chain.copy(psiphonReady = psiphonReady, torReady = torReady, masqueReady = masqueReady, matrixReady = matrixReady)) }
         local.value = local.value.copy(configs = configs.map { p ->

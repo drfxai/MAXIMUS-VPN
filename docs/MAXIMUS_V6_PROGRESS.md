@@ -42,7 +42,7 @@ memory (#86); engine handoff from recovery to the connection (#101/#102).
 5. **The pre-setup reachability check only tested the peer's SSH port** and the setup screen
    called that "direct ways can be used".
 
-## PR A: truthful Maximus Tunnel verification (this branch)
+## PR A: truthful Maximus Tunnel verification (#105, merged)
 
 | Feature | Implemented | Unit | Simulator | Emulator | Device | Field | Limitation |
 |---|---|---|---|---|---|---|---|
@@ -60,11 +60,30 @@ path. Only `ROUTE_VERIFIED` paths count as working, rank in "best" or show a lat
 The reverse test port listens on 127.0.0.1 only and routes only into the reverse link; any
 local user on the Iran server could use it to send traffic out through the server abroad.
 
+## PR B: one engine state for the LAB, diagnostics and the release check
+
+`EngineRegistry` (what an engine is) now has `EngineLedger` (what it did on this phone) and
+`EngineRegistry.statuses(network)`, which combines the build, this install's settings and fresh
+evidence into one `EngineState`: UNSUPPORTED, NOT_BUNDLED, NOT_CONFIGURED, AVAILABLE, STARTED,
+TRAFFIC_VERIFIED, DEGRADED, FAILED, UNKNOWN.
+
+| Feature | Implemented | Unit | Simulator | Emulator | Device | Field | Limitation |
+|---|---|---|---|---|---|---|---|
+| Engine states from build + settings + evidence | yes | yes | no | no | no | no | evidence is in memory only and expires after 10 minutes |
+| Evidence is per network; another network or old evidence never shows TRAFFIC_VERIFIED | yes | yes | no | no | no | no | network key is NetworkIdentity (same as route memory) |
+| LAB engine tests and the connection write the ledger | yes | no | no | no | no | no | a failing chain or engine behind Xray is not blamed on one hop |
+| LAB readiness (Psiphon, Tor, MASQUE, Matrix) reads the registry | yes | no | no | no | no | no | |
+| Diagnostic report lists every engine's state | yes | no | no | no | no | no | |
+| Release gate list equals the registry's declared programs | yes | yes | n/a | n/a | n/a | n/a | test compares scripts/check-apk.py with the registry |
+
+DEVICE_VERIFIED and FIELD_VERIFIED are evidence levels from a person's report, not states the app
+can reach by itself, so they are recorded here per feature rather than computed.
+
 ## Remaining P0 work (not done yet)
 
 - Zero-downtime rotation: a rotation still restarts Xray. Real make-before-break needs Xray's
   API (add/remove inbound and outbound at runtime) instead of a restart.
-- One truthful state model and capability registry for the app side (directive items 2, 3, 43, 85).
+- Smart Connect ordering does not read the engine ledger yet (it uses NetworkMemory and ConnectivityBrain).
 - `ServerPanelProvider` with 3x-ui and Hiddify adapters (items 78, 79); Hiddify's licence and
   official installer provenance must be checked first.
 
