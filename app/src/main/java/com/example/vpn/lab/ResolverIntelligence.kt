@@ -28,7 +28,9 @@ object DnsWire {
         val out = java.io.ByteArrayOutputStream()
         val d = DataOutputStream(out)
         d.writeShort(id); d.writeShort(0x0100); d.writeShort(1); d.writeShort(0); d.writeShort(0); d.writeShort(if (ednsSize > 0) 1 else 0)
-        name.trimEnd('.').split('.').filter { it.isNotEmpty() }.forEach { label ->
+        val labels = java.net.IDN.toASCII(name.trimEnd('.')).split('.')
+        require(labels.joinToString(".").length <= 253) { "bad name" }
+        labels.forEach { label ->
             val bytes = label.toByteArray(Charsets.US_ASCII)
             require(bytes.size in 1..63) { "bad label" }
             d.writeByte(bytes.size); d.write(bytes)
@@ -40,7 +42,7 @@ object DnsWire {
 
     /** Reads the header and the A records of a response; null when it is not a DNS response. */
     fun parse(data: ByteArray, length: Int): Answer? {
-        if (length < 12) return null
+        if (!com.example.vpn.dns.DnsMessageValidator.wellFormed(data, length)) return null
         fun u16(i: Int) = ((data[i].toInt() and 0xff) shl 8) or (data[i + 1].toInt() and 0xff)
         val flags = u16(2)
         if ((flags and 0x8000) == 0) return null
@@ -61,11 +63,11 @@ object DnsWire {
             if (i >= length) return@repeat
             skipName()
             if (i + 10 > length) return@repeat
-            val type = u16(i); val rdLen = u16(i + 8)
+            val type = u16(i); val recordClass = u16(i + 2); val rdLen = u16(i + 8)
             i += 10
-            types += type
-            if (type == TYPE_A && rdLen == 4 && i + 4 <= length) addresses += InetAddress.getByAddress(data.copyOfRange(i, i + 4))
-            if (type == TYPE_AAAA && rdLen == 16 && i + 16 <= length) addresses += InetAddress.getByAddress(data.copyOfRange(i, i + 16))
+            if (recordClass == 1) types += type
+            if (recordClass == 1 && type == TYPE_A && rdLen == 4 && i + 4 <= length) addresses += InetAddress.getByAddress(data.copyOfRange(i, i + 4))
+            if (recordClass == 1 && type == TYPE_AAAA && rdLen == 16 && i + 16 <= length) addresses += InetAddress.getByAddress(data.copyOfRange(i, i + 16))
             i += rdLen
         }
         return Answer(u16(0), flags and 0x000F, (flags and 0x0200) != 0, an, addresses, length, types)
@@ -206,27 +208,41 @@ object ResolverIntelligence {
         val rnd = SecureRandom()
         val started = System.nanoTime()
         val normal = runCatching { udp(network, server, DnsWire.query(rnd.nextInt(0xffff), PROBE_NAME, DnsWire.TYPE_A)) }.getOrNull()
-        val rtt = normal?.let { (System.nanoTime() - started) / 1_000_000 }
+        val tcpStarted = System.nanoTime()
+        val tcpAnswer = runCatching { tcp(network, server, DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A)) }.getOrNull()
+        val rtt = normal?.let { (tcpStarted - started) / 1_000_000 }
+            ?: tcpAnswer?.let { (System.nanoTime() - tcpStarted) / 1_000_000 }
+        val tcpOk = tcpAnswer?.let { it.rcode == 0 && !it.truncated && it.addresses.isNotEmpty() } ?: false
+        // A TCP-only resolver still needs the honesty, AAAA and TXT checks.
+        fun followup(name: String, type: Int, ednsSize: Int = 0): DnsWire.Answer? = runCatching {
+            val q = DnsWire.query(rnd.nextInt(65536), name, type, ednsSize)
+            if (normal != null) udp(network, server, q) else if (tcpOk) tcp(network, server, q) else null
+        }.getOrNull()
         val nonce = "mx" + java.lang.Long.toHexString(rnd.nextLong()).take(12)
-        val random = if (normal != null) runCatching { udp(network, server, DnsWire.query(rnd.nextInt(0xffff), "$nonce.$NX_ZONE", DnsWire.TYPE_A)) }.getOrNull() else null
-        val edns = if (normal != null) runCatching { udp(network, server, DnsWire.query(rnd.nextInt(0xffff), PROBE_NAME, DnsWire.TYPE_A, 1232)) }.getOrNull() else null
-        val aaaa = if (normal != null) runCatching { udp(network, server, DnsWire.query(rnd.nextInt(0xffff), PROBE_NAME, DnsWire.TYPE_AAAA)) }.getOrNull() else null
-        val txt = if (normal != null) runCatching { udp(network, server, DnsWire.query(rnd.nextInt(0xffff), NX_ZONE, DnsWire.TYPE_TXT, 1232)) }.getOrNull() else null
-        val tcp = runCatching { tcp(network, server, DnsWire.query(rnd.nextInt(0xffff), PROBE_NAME, DnsWire.TYPE_A)) != null }.getOrDefault(false)
-        val (blockPage, hijack) = judge(normal, random)
-        return Result(c.label, c.address, c.origin, networkKey, udp = normal != null, tcp = tcp, rttMs = rtt, blockPage = blockPage,
-            nxdomainHijack = hijack, ednsSize = edns?.let { if (!it.truncated) 1232 else null }, measuredAt = now, expiresAt = now + TTL_MS,
-            aaaa = aaaa?.let { it.types.contains(DnsWire.TYPE_AAAA) }, txt = txt?.let { it.types.contains(DnsWire.TYPE_TXT) },
+        val random = followup("$nonce.$NX_ZONE", DnsWire.TYPE_A)
+        val edns = if (normal != null) followup(PROBE_NAME, DnsWire.TYPE_A, 1232) else null
+        val aaaa = followup(PROBE_NAME, DnsWire.TYPE_AAAA)
+        val txt = followup(NX_ZONE, DnsWire.TYPE_TXT, 1232)
+        val (udpBlock, hijack) = judge(normal, random)
+        val tcpBlock = judge(tcpAnswer, null).first
+        val blockPage = if (udpBlock == true || tcpBlock == true) true else udpBlock ?: tcpBlock
+        return Result(c.label, c.address, c.origin, networkKey, udp = normal?.let { it.rcode == 0 && !it.truncated && it.addresses.isNotEmpty() } ?: false, tcp = tcpOk, rttMs = rtt, blockPage = blockPage,
+            nxdomainHijack = hijack, ednsSize = edns?.let { if (!it.truncated && it.rcode == 0 && it.addresses.isNotEmpty()) 1232 else null }, measuredAt = now, expiresAt = now + TTL_MS,
+            aaaa = aaaa?.let { it.rcode == 0 && !it.truncated && it.types.contains(DnsWire.TYPE_AAAA) }, txt = txt?.let { it.rcode == 0 && !it.truncated && it.types.contains(DnsWire.TYPE_TXT) },
             truncated = listOfNotNull(edns, txt).takeIf { it.isNotEmpty() }?.any { it.truncated })
     }
 
     /** [count] small A queries to [r], [gapMs] apart; blocking, bounded by count × timeout. */
     fun burst(network: Network?, r: Result, count: Int = 10, gapMs: Long = 150, now: Long = System.currentTimeMillis()): Burst {
+        require(count in 1..20 && gapMs in 0L..2000L) { "Probe burst exceeds limits" }
         val server = InetAddress.getByName(r.address)
         val rnd = SecureRandom()
         val rtts = (1..count).map {
             val t0 = System.nanoTime()
-            val ok = runCatching { udp(network, server, DnsWire.query(rnd.nextInt(0xffff), PROBE_NAME, DnsWire.TYPE_A), BURST_TIMEOUT_MS) != null }.getOrDefault(false)
+            val ok = runCatching {
+                udp(network, server, DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A), BURST_TIMEOUT_MS)
+                    ?.let { it.rcode == 0 && !it.truncated && it.addresses.any { a -> !com.example.vpn.EndpointResolver.isBlockedAnswer(a) } } == true
+            }.getOrDefault(false)
             val rtt = if (ok) (System.nanoTime() - t0) / 1_000_000 else null
             Thread.sleep(gapMs)
             rtt
@@ -242,10 +258,12 @@ object ResolverIntelligence {
         DatagramSocket().use { s ->
             network?.bindSocket(s)
             s.soTimeout = timeoutMs
-            s.send(DatagramPacket(query, query.size, server, 53))
+            s.connect(server, 53)
+            s.send(DatagramPacket(query, query.size))
             val buf = ByteArray(4096)
             val p = DatagramPacket(buf, buf.size)
             s.receive(p)
+            if (!com.example.vpn.dns.DnsMessageValidator.isResponseTo(query, buf, p.length)) return null
             return DnsWire.parse(buf, p.length)
         }
     }
@@ -261,6 +279,7 @@ object ResolverIntelligence {
             val len = input.readUnsignedShort()
             val buf = ByteArray(len)
             input.readFully(buf)
+            if (!com.example.vpn.dns.DnsMessageValidator.isResponseTo(query, buf, len)) return null
             return DnsWire.parse(buf, len)
         }
     }

@@ -87,7 +87,7 @@ class DnsResilienceEngine(
     fun profile(network: String?, available: List<String>): DnsResilienceProfile {
         val stats = available.associateWith { stats(network, it) }
         fun dead(r: String) = stats.getValue(r).let { it.queries >= DEAD_AFTER && it.answers == 0 }
-        val ranked = available.withIndex().sortedWith(compareBy<IndexedValue<String>>(
+        val ranked = available.distinct().withIndex().sortedWith(compareBy<IndexedValue<String>>(
             { dead(it.value) },
             // Measured and working first, by success rate then speed; unmeasured keep their given order.
             { stats.getValue(it.value).let { s -> if (s.queries == 0) 0.5 else 1.0 - s.rate } },
@@ -96,7 +96,11 @@ class DnsResilienceEngine(
         )).map { it.value }
         // Ones that never answered here are left out, but [MIN_RESOLVERS] are always asked.
         val live = ranked.filter { !dead(it) }
-        val order = if (live.size >= MIN_RESOLVERS) live else ranked.take(maxOf(MIN_RESOLVERS, live.size))
+        val base = if (live.size >= MIN_RESOLVERS) live else ranked.take(maxOf(MIN_RESOLVERS, live.size))
+        // Periodically retry one excluded resolver: a temporary outage must not quarantine it for 24 h.
+        val retry = ranked.firstOrNull { r -> r !in base && fresh(network).filter { it.resolver == r }.maxOfOrNull { it.at }
+            ?.let { clock() - it >= RETRY_AFTER_MS } == true }
+        val order = if (retry == null) base else base + retry
         val system = fresh(network).filter { it.resolver == SYSTEM }
         val tampered = system.groupBy { it.host }.filter { (_, s) ->
             s.count { it.outcome == DnsOutcome.BLOCKED_ANSWER } >= TAMPERED_AFTER && s.none { it.outcome == DnsOutcome.ANSWER }
@@ -104,13 +108,14 @@ class DnsResilienceEngine(
         return DnsResilienceProfile(network, order, tampered, clock())
     }
 
-    private fun fresh(network: String?): List<Sample> = clock().let { now -> list().filter { it.network == network && now - it.at <= TTL_MS } }
+    private fun fresh(network: String?): List<Sample> = clock().let { now -> list().filter { it.network == network && now - it.at in 0..TTL_MS } }
 
     companion object {
         /** The network's own resolver, as named in samples. */
         const val SYSTEM = "system"
         const val TTL_MS = 24L * 60 * 60 * 1000
         const val MAX_SAMPLES = 500
+        const val RETRY_AFTER_MS = 60_000L
         const val DEAD_AFTER = 3
         const val MIN_RESOLVERS = 3
         const val TAMPERED_AFTER = 2

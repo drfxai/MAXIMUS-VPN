@@ -67,7 +67,8 @@ object EndpointResolver {
             val systemFuture = if (private) null else done.submit {
                 val started = System.nanoTime()
                 val answers = try { system(host) } catch (e: Exception) { systemError = e; emptyList() }
-                systemPick = answers.firstOrNull { it is java.net.Inet4Address } ?: answers.firstOrNull()
+                val usable = answers.filterNot { isBlockedAnswer(it) }
+                systemPick = usable.firstOrNull { it is java.net.Inet4Address } ?: usable.firstOrNull() ?: answers.firstOrNull()
                 val ms = (System.nanoTime() - started) / 1_000_000
                 report(onOutcome, DnsResilienceEngine.SYSTEM, when {
                     systemError is java.net.SocketTimeoutException -> DnsOutcome.TIMEOUT
@@ -84,7 +85,7 @@ object EndpointResolver {
             }
 
             var dohError: Exception? = null
-            val resolvers = doh.ifEmpty { DOH_ENDPOINTS }
+            val resolvers = doh.ifEmpty { DOH_ENDPOINTS }.distinct().take(8)
             val pending = resolvers.size + if (first == null && !private) 1 else 0
             resolvers.forEach { endpoint ->
                 done.submit {
@@ -108,9 +109,9 @@ object EndpointResolver {
                 val (ip, viaDoh) = next?.get() ?: return@repeat
                 if (ip != null) return Result(ip, viaDoh)
             }
-            // A blocked answer is still better than nothing: the error then shows in the proxy's log.
+            // Never dial a known block page when every trustworthy lookup failed.
             if (systemFuture != null && !systemFuture.isDone) systemFuture.cancel(true)
-            systemPick?.let { return Result(it.hostAddress.orEmpty(), viaDoh = false) }
+            systemPick?.takeIf { !isBlockedAnswer(it) }?.let { return Result(it.hostAddress.orEmpty(), viaDoh = false) }
             throw IllegalStateException(
                 "cannot resolve the server address '$host'",
                 systemError ?: dohError
@@ -147,11 +148,23 @@ object EndpointResolver {
         try {
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
+            connection.instanceFollowRedirects = false
             connection.setRequestProperty("Accept", "application/dns-json")
             if (connection.responseCode != 200) return null
-            return parseDohAnswer(connection.inputStream.bufferedReader().use { it.readText() })
+            return parseDohAnswer(connection.inputStream.use { readBounded(it).toString(Charsets.UTF_8) })
         } finally {
             connection.disconnect()
+        }
+    }
+
+    private fun readBounded(input: java.io.InputStream): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(4096)
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) return out.toByteArray()
+            if (out.size() + n > 65535) throw java.io.IOException("Oversized DNS response")
+            out.write(buffer, 0, n)
         }
     }
 
@@ -163,9 +176,10 @@ object EndpointResolver {
         try {
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
+            connection.instanceFollowRedirects = false
             connection.setRequestProperty("Accept", "application/dns-message")
             if (connection.responseCode != 200) return null
-            return parseWireAnswer(query, connection.inputStream.use { it.readBytes() })
+            return parseWireAnswer(query, connection.inputStream.use { readBounded(it) })
         } finally {
             connection.disconnect()
         }
@@ -180,13 +194,17 @@ object EndpointResolver {
             out.write(bytes.size)
             out.write(bytes)
         }
+        require(out.size() - 12 <= 254) { "Invalid host name length" }
         out.write(byteArrayOf(0, 0, 1, 0, 1))
         return out.toByteArray()
     }
 
     /** First public IPv4 address among the answers of a wire-format response to [query]. */
     internal fun parseWireAnswer(query: ByteArray, response: ByteArray): String? {
-        if (response.size < query.size || response[0] != query[0] || response[1] != query[1]) return null
+        if (!com.example.vpn.dns.DnsMessageValidator.isResponseTo(query, response, response.size)) return null
+        if ((response[2].toInt() and 0x02) != 0) return null
+        // This parser walks an uncompressed echoed question. Reject alternate encodings.
+        if (response.size < query.size || !query.copyOfRange(12, query.size).contentEquals(response.copyOfRange(12, query.size))) return null
         if ((response[2].toInt() and 0x80) == 0 || (response[3].toInt() and 0x0f) != 0) return null
         fun u16(i: Int) = ((response[i].toInt() and 0xff) shl 8) or (response[i + 1].toInt() and 0xff)
         val answers = u16(6)
@@ -204,7 +222,7 @@ object EndpointResolver {
             val rdLength = u16(pos + 8)
             pos += 10
             if (pos + rdLength > response.size) return null
-            if (type == 1 && rdLength == 4) {
+            if (type == 1 && u16(pos - 8) == 1 && rdLength == 4) {
                 val address = InetAddress.getByAddress(response.copyOfRange(pos, pos + 4))
                 if (!isBlockedAnswer(address)) return address.hostAddress
             }
@@ -215,12 +233,15 @@ object EndpointResolver {
 
     /** First public IPv4 address in a DNS JSON response, following CNAMEs. */
     internal fun parseDohAnswer(body: String): String? {
-        val answers = JSONObject(body).optJSONArray("Answer") ?: return null
+        val root = JSONObject(body)
+        if (root.optInt("Status", -1) != 0 || root.optBoolean("TC", false)) return null
+        val answers = root.optJSONArray("Answer") ?: return null
         return (0 until answers.length()).mapNotNull { answers.optJSONObject(it) }
             .filter { it.optInt("type") == 1 }
             .map { it.optString("data").trim() }
             .firstOrNull { ip ->
-                ip.matches(Regex("""\d{1,3}(\.\d{1,3}){3}""")) && !isBlockedAnswer(InetAddress.getByName(ip))
+                ip.matches(Regex("""\d{1,3}(\.\d{1,3}){3}""")) && ip.split('.').all { it.toInt() in 0..255 } &&
+                    !isBlockedAnswer(InetAddress.getByName(ip))
             }
     }
 }
