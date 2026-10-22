@@ -34,7 +34,10 @@ class ServerPanelTest {
         assertNotNull(hiddify.installBlocker(server, facts(os = "debian")))
         assertNotNull(hiddify.installBlocker(server, facts(tcp = "22,443")))
         assertNotNull(hiddify.installBlocker(server, facts(tcp = "22,80")))
-        assertNotNull(hiddify.installBlocker(server, facts(ramKb = 512_000)))
+        assertNotNull(hiddify.installBlocker(server, facts(ramKb = 400_000)))
+        // From 500 MB up a server may install; under 1 GB it gets a warning, not a refusal.
+        assertNull(hiddify.installBlocker(server, facts(ramKb = 600_000)))
+        assertTrue(HiddifyPanelProvider.checks(server, facts(ramKb = 600_000)).any { it.label == "Memory" && !it.ok && !it.blocking })
         assertNotNull(hiddify.installBlocker(server, facts(diskFreeKb = 2_000_000)))
         // Every server reports an x-ui unit state; only real 3x-ui files count.
         assertNull(hiddify.installBlocker(server, facts(extra = "SVC_x-ui=inactive\n")))

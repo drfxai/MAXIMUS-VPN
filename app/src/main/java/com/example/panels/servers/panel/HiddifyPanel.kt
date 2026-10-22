@@ -256,8 +256,10 @@ class HiddifyPanelProvider(
     }
 
     companion object {
-        /** Minimums from Hiddify's own guidance, rounded up for a working panel. */
-        const val MIN_RAM_MB = 1000L
+        /** Memory below this refuses the install (DrFX, 2026-10-22: servers under 1 GB may install). */
+        const val MIN_RAM_MB = 500L
+        /** Below this the install goes ahead with a warning to add swap first. */
+        const val LOW_RAM_MB = 1000L
         const val MIN_DISK_FREE_MB = 5_000L
 
         /**
@@ -279,8 +281,12 @@ class HiddifyPanelProvider(
             val busy = listOf(80, 443).filter { it in facts.tcpPorts }
             add(CheckItem("Ports 80 and 443", busy.isEmpty(),
                 if (busy.isEmpty()) "free" else "${busy.joinToString(" and ")} in use. Hiddify needs both, on a server of its own."))
-            add(CheckItem("Memory", facts.ramMb !in 1 until MIN_RAM_MB,
-                if (facts.ramMb in 1 until MIN_RAM_MB) "Hiddify needs at least 1 GB; this server has ${facts.ramMb} MB" else "${facts.ramMb} MB"))
+            add(when (facts.ramMb) {
+                in 1 until MIN_RAM_MB -> CheckItem("Memory", false, "Hiddify needs at least $MIN_RAM_MB MB; this server has ${facts.ramMb} MB")
+                in MIN_RAM_MB until LOW_RAM_MB -> CheckItem("Memory", false,
+                    "${facts.ramMb} MB. Under 1 GB the install is slow and the panel may run short; add Swap from the Install tab first.", blocking = false)
+                else -> CheckItem("Memory", true, "${facts.ramMb} MB")
+            })
             add(CheckItem("Free disk for Hiddify", facts.diskFreeMb !in 1 until MIN_DISK_FREE_MB,
                 if (facts.diskFreeMb in 1 until MIN_DISK_FREE_MB) "Hiddify needs about 5 GB free; this server has ${facts.diskFreeMb} MB"
                 else "${facts.diskFreeMb / 1024} GB free"))

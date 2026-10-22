@@ -116,6 +116,8 @@ class ServerRace(
     }
 
     private fun resolveAll(candidates: List<VlessProfile>, resolve: (VlessProfile) -> VlessProfile): List<Pair<VlessProfile, VlessProfile>> {
+        // A thread pool of size 0 throws; every server can be skipped as failed here moments ago.
+        if (candidates.isEmpty()) return emptyList()
         val pool = Executors.newFixedThreadPool(candidates.size.coerceAtMost(6)) { r -> Thread(r, "server-race").apply { isDaemon = true } }
         try {
             val futures = candidates.map { c -> c to pool.submit(Callable { resolve(c) }) }
