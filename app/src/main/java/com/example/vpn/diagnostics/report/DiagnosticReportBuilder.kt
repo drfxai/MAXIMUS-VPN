@@ -5,6 +5,7 @@ import com.example.data.model.ConnectionState
 import com.example.vpn.diagnostics.events.DiagEvent
 import com.example.vpn.diagnostics.events.ErrorAggregator
 import com.example.vpn.diagnostics.events.TestRegistry
+import com.example.vpn.engine.registry.EngineStatus
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -47,7 +48,9 @@ object DiagnosticReportBuilder {
         val tests: List<TestRegistry.Entry>,
         /** RuntimeHealth.summary: earlier exits (crash, ANR, low memory) with redacted traces. */
         val runtime: JSONObject,
-        val profileRef: String?
+        val profileRef: String?,
+        /** EngineRegistry.statuses on the current network: bundled, configured and what each engine did here. */
+        val engines: List<EngineStatus> = emptyList()
     )
 
     private fun time(ms: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
@@ -120,6 +123,12 @@ object DiagnosticReportBuilder {
                     .put("attempted", e.attributes["profile.attempted"] ?: JSONObject.NULL))
             }
         })
+        root.put("engines", JSONArray().apply {
+            i.engines.forEach { e ->
+                put(JSONObject().put("id", e.engineId).put("state", e.state.name).put("detail", e.detail)
+                    .put("at", e.at?.let(::time) ?: JSONObject.NULL))
+            }
+        })
         root.put("runtime", i.runtime)
         root.put("events", JSONArray().apply { events.forEach { put(it.toJson()) } })
         // The second redaction pass runs over every string in the report, so nothing added above escapes it.
@@ -140,6 +149,9 @@ object DiagnosticReportBuilder {
         c.verifiedAt?.let { sb.appendLine("Traffic last verified: ${time(it)}") }
         sb.appendLine("Session ${c.sessionId ?: "-"} · attempt ${c.attemptId ?: "-"} · profile ${i.profileRef ?: "-"}")
         sb.appendLine("Network: ${i.networkProfile ?: "not measured"}")
+        if (i.engines.isNotEmpty()) {
+            sb.appendLine("Engines: " + i.engines.joinToString { "${it.engineId} ${it.state.name.lowercase()}" })
+        }
         val exits = i.runtime.optJSONArray("exits")
         val problems = (0 until (exits?.length() ?: 0)).map { exits!!.getJSONObject(it) }
             .filter { it.optString("reason") in setOf("CRASH", "CRASH_NATIVE", "ANR", "LOW_MEMORY") }

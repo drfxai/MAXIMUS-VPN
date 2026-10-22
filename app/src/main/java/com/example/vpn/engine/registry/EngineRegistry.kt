@@ -90,4 +90,32 @@ object EngineRegistry {
     )
 
     fun verified(): List<String> = CAPABILITIES.filterValues { it == CapabilityState.VERIFIED_WORKING }.keys.toList()
+
+    /**
+     * Native programs the release APK must carry for every engine it declares (lib<name>.so): each
+     * separate engine program plus the Tor library. scripts/check-apk.py fails a release missing
+     * one, and a test keeps its list equal to this one.
+     */
+    fun requiredNativePrograms(): Set<String> =
+        com.example.vpn.sidecar.Sidecars.ENGINES.map { it.binary }.toSet() + TOR_LIBRARY
+
+    /** The Tor library inside the APK (libtor.so); the lyrebird program is TorSidecar's. */
+    const val TOR_LIBRARY = "tor"
+
+    /**
+     * Every engine's state on [network] (a NetworkIdentity key): from this build, this install's
+     * settings and what [ledger] saw. The LAB, diagnostics and the report all read this.
+     */
+    fun statuses(network: String, ledger: EngineLedger = EngineLedger.shared): List<EngineStatus> = ENGINES.map { d ->
+        val engine = com.example.vpn.sidecar.Sidecars.ENGINES.firstOrNull { it.id == d.id }
+        val bundled = engine?.let { com.example.vpn.sidecar.Sidecars.isBundled(it) }
+        // Psiphon is the one engine that needs install-wide settings; the others only need a profile.
+        val problem = (engine as? com.example.vpn.sidecar.PsiphonSidecar)?.let { p ->
+            runCatching { p.problem(com.example.vpn.sidecar.PsiphonSidecar.profile()) }.getOrElse { it.message ?: "settings could not be read" }
+        }
+        ledger.status(d, network, bundled, problem)
+    }
+
+    fun status(engineId: String, network: String, ledger: EngineLedger = EngineLedger.shared): EngineStatus? =
+        statuses(network, ledger).firstOrNull { it.engineId == engineId }
 }
