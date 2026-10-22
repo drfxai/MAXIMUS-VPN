@@ -12,6 +12,9 @@ on:
 
 permissions:
   contents: write
+  # Build provenance for the APKs (gh attestation verify).
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -150,6 +153,26 @@ jobs:
           cp build/transport-offer/MatrixTransport-source.tar.gz MatrixTransport-source.tar.gz
           sha256sum MatrixTransport-source.tar.gz >> SHA256SUMS
           sha256sum --check SHA256SUMS
+      - name: Check the permanent signing certificate
+        # Users compare this fingerprint (SECURITY.md); a release signed with any other key stops here.
+        env:
+          EXPECTED_CERT_SHA256: 83352d116d4bb06fc9e8c5e6347633412da2197410fe45fdb48c1ad8e4a9dcfe
+        run: |
+          for apk in MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk; do
+            got=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+            test "$got" = "$EXPECTED_CERT_SHA256" || { echo "$apk is signed with $got"; exit 1; }
+          done
+      - name: Remove the signing key
+        # Nothing after this point signs; the key must not sit on disk while other actions run.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+      - name: Record build provenance
+        if: ${{ !startsWith(inputs.tag, 'dry-run') }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            MAXIMUSVPN-${{ env.APP_VERSION }}-arm64-v8a.apk
+            MAXIMUSVPN-${{ env.APP_VERSION }}-universal.apk
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

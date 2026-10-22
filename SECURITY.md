@@ -19,3 +19,12 @@ Please do **not** open a public issue for security problems. Use GitHub's **Repo
 ## Verifying downloads
 
 Every release ships `SHA256SUMS`. Run `sha256sum --check SHA256SUMS` before installing, and only install APKs downloaded from this repository's Releases page.
+
+A checksum file published next to the APK only shows that the download was not damaged. To check that an APK really comes from this project:
+
+- **Signing certificate.** Every release is signed with the same key. Its SHA-256 fingerprint is:
+
+  `83352d116d4bb06fc9e8c5e6347633412da2197410fe45fdb48c1ad8e4a9dcfe`
+
+  Check it with `apksigner verify --print-certs MAXIMUSVPN-*.apk` (Android SDK build-tools). Android also refuses to install an update signed with a different key over an installed copy.
+- **Build provenance.** Releases built after this note carry a GitHub attestation that ties each APK to the workflow run that built it: `gh attestation verify MAXIMUSVPN-*.apk --repo drfxai/MAXIMUS-VPN`.
