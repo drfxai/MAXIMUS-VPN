@@ -72,6 +72,14 @@ object DnsWire {
         }
         return Answer(u16(0), flags and 0x000F, (flags and 0x0200) != 0, an, addresses, length, types)
     }
+
+    /** Bind measured A/AAAA addresses to this question, rather than unrelated answer records. */
+    internal fun response(query: ByteArray, data: ByteArray, length: Int): Answer? {
+        if (!com.example.vpn.dns.DnsMessageValidator.isResponseTo(query, data, length)) return null
+        val answer = parse(data, length) ?: return null
+        return answer.copy(addresses = com.example.vpn.dns.DnsMessageValidator.addressAnswers(query, data, length)
+            .map { InetAddress.getByAddress(it) })
+    }
 }
 
 /**
@@ -100,7 +108,7 @@ object ResolverIntelligence {
         DNS_TUNNEL_VERIFIED("DNS tunnel verified")
     }
 
-    /** A burst of small UDP queries to one resolver: loss, jitter and rate limiting. */
+    /** DNS request loss and timing; TCP results never imply IP packet-loss measurements. */
     data class Burst(
         val label: String,
         val sent: Int,
@@ -109,7 +117,8 @@ object ResolverIntelligence {
         val jitterMs: Long?,
         /** Answers stopped part-way through: early queries answered, the last ones not. */
         val rateLimited: Boolean,
-        val measuredAt: Long
+        val measuredAt: Long,
+        val transport: String = "UDP"
     ) {
         val lossPercent: Int get() = if (sent == 0) 0 else (sent - answered) * 100 / sent
     }
@@ -176,6 +185,11 @@ object ResolverIntelligence {
     }
 
     const val TTL_MS = 6L * 60 * 60 * 1000
+    const val RECHECK_MS = 2L * 60 * 1000
+
+    /** History may live for hours; an active LAB measurement must be much fresher. */
+    fun reusable(results: List<Result>, now: Long = System.currentTimeMillis()): Boolean =
+        results.isNotEmpty() && results.all { now - it.measuredAt in 0..RECHECK_MS && it.expiresAt > now }
     private const val TIMEOUT_MS = 2500
     private const val BURST_TIMEOUT_MS = 1200
     private const val PROBE_NAME = "www.google.com"
@@ -203,6 +217,14 @@ object ResolverIntelligence {
         return blockPage to hijack
     }
 
+    /** UDP loss or truncation is not a failed resolver when TCP can carry the same question. */
+    internal fun completeAnswer(udp: () -> DnsWire.Answer?, tcp: () -> DnsWire.Answer?): DnsWire.Answer? {
+        val answer = udp()
+        if (answer != null && !answer.truncated) return answer
+        if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("DNS probe stopped")
+        return tcp()?.takeUnless { it.truncated }
+    }
+
     fun evaluate(network: Network?, c: Candidate, networkKey: String, now: Long = System.currentTimeMillis()): Result {
         val server = InetAddress.getByName(c.address)
         val rnd = SecureRandom()
@@ -216,11 +238,17 @@ object ResolverIntelligence {
         // A TCP-only resolver still needs the honesty, AAAA and TXT checks.
         fun followup(name: String, type: Int, ednsSize: Int = 0): DnsWire.Answer? = runCatching {
             val q = DnsWire.query(rnd.nextInt(65536), name, type, ednsSize)
-            if (normal != null) udp(network, server, q) else if (tcpOk) tcp(network, server, q) else null
+            if (normal != null) completeAnswer(
+                { runCatching { udp(network, server, q) }.getOrNull() },
+                { tcp(network, server, q) }
+            ) else if (tcpOk) tcp(network, server, q) else null
         }.getOrNull()
         val nonce = "mx" + java.lang.Long.toHexString(rnd.nextLong()).take(12)
         val random = followup("$nonce.$NX_ZONE", DnsWire.TYPE_A)
-        val edns = if (normal != null) followup(PROBE_NAME, DnsWire.TYPE_A, 1232) else null
+        // Keep UDP-size evidence separate: a TCP fallback must never count as an EDNS UDP pass.
+        val edns = if (normal != null) runCatching {
+            udp(network, server, DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A, 1232))
+        }.getOrNull() else null
         val aaaa = followup(PROBE_NAME, DnsWire.TYPE_AAAA)
         val txt = followup(NX_ZONE, DnsWire.TYPE_TXT, 1232)
         val (udpBlock, hijack) = judge(normal, random)
@@ -232,22 +260,30 @@ object ResolverIntelligence {
             truncated = listOfNotNull(edns, txt).takeIf { it.isNotEmpty() }?.any { it.truncated })
     }
 
-    /** [count] small A queries to [r], [gapMs] apart; blocking, bounded by count × timeout. */
+    /** [count] small A queries; each socket operation has a bounded timeout. */
     fun burst(network: Network?, r: Result, count: Int = 10, gapMs: Long = 150, now: Long = System.currentTimeMillis()): Burst {
         require(count in 1..20 && gapMs in 0L..2000L) { "Probe burst exceeds limits" }
         val server = InetAddress.getByName(r.address)
         val rnd = SecureRandom()
+        val tcpOnly = r.udp != true && r.tcp == true
+        var usedTcp = tcpOnly
         val rtts = (1..count).map {
             val t0 = System.nanoTime()
             val ok = runCatching {
-                udp(network, server, DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A), BURST_TIMEOUT_MS)
+                val query = DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A)
+                val answer = if (tcpOnly) tcp(network, server, query, BURST_TIMEOUT_MS)
+                    else completeAnswer(
+                        { runCatching { udp(network, server, query, BURST_TIMEOUT_MS) }.getOrNull() },
+                        { if (r.tcp == true) { usedTcp = true; tcp(network, server, query, BURST_TIMEOUT_MS) } else null }
+                    )
+                answer
                     ?.let { it.rcode == 0 && !it.truncated && it.addresses.any { a -> !com.example.vpn.EndpointResolver.isBlockedAnswer(a) } } == true
             }.getOrDefault(false)
             val rtt = if (ok) (System.nanoTime() - t0) / 1_000_000 else null
             Thread.sleep(gapMs)
             rtt
         }
-        return burstOf(r.label, rtts, now)
+        return burstOf(r.label, rtts, now).copy(transport = if (tcpOnly) "TCP" else if (usedTcp) "UDP/TCP" else "UDP")
     }
 
     /** Best first: usable, then reliability, then speed. */
@@ -263,24 +299,22 @@ object ResolverIntelligence {
             val buf = ByteArray(4096)
             val p = DatagramPacket(buf, buf.size)
             s.receive(p)
-            if (!com.example.vpn.dns.DnsMessageValidator.isResponseTo(query, buf, p.length)) return null
-            return DnsWire.parse(buf, p.length)
+            return DnsWire.response(query, buf, p.length)
         }
     }
 
-    private fun tcp(network: Network?, server: InetAddress, query: ByteArray): DnsWire.Answer? {
+    private fun tcp(network: Network?, server: InetAddress, query: ByteArray, timeoutMs: Int = TIMEOUT_MS): DnsWire.Answer? {
         val socket = network?.socketFactory?.createSocket() ?: Socket()
         socket.use { s ->
-            s.connect(InetSocketAddress(server, 53), TIMEOUT_MS)
-            s.soTimeout = TIMEOUT_MS
+            s.connect(InetSocketAddress(server, 53), timeoutMs)
+            s.soTimeout = timeoutMs
             val out = DataOutputStream(s.getOutputStream())
             out.writeShort(query.size); out.write(query); out.flush()
             val input = DataInputStream(s.getInputStream())
             val len = input.readUnsignedShort()
             val buf = ByteArray(len)
             input.readFully(buf)
-            if (!com.example.vpn.dns.DnsMessageValidator.isResponseTo(query, buf, len)) return null
-            return DnsWire.parse(buf, len)
+            return DnsWire.response(query, buf, len)
         }
     }
 }
