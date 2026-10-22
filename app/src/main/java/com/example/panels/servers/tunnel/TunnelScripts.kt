@@ -670,6 +670,9 @@ object TunnelScripts {
           if [ "§st" != active ] && ! systemctl is-enabled --quiet §u 2>/dev/null; then st=off; fi
           result "SVC_§u" "§st"
         done
+        if §SUDO test -f /etc/systemd/system/maximus-spoof.service; then
+          result SVC_maximus-spoof "§(systemctl is-active maximus-spoof 2>/dev/null || true)"
+        fi
         step 2
         # The Iran server's own addresses: an exit equal to one of them proves nothing about abroad.
         own=§(hostname -I 2>/dev/null || true)
@@ -800,7 +803,7 @@ object TunnelScripts {
     )
 
     fun logs(lines: Int = 40): ToolScript = ToolScripts.script(
-        "step 1\n§SUDO journalctl -u maximus-tunnel -u maximus-tunnel-hy -u maximus-tunnel-rotate -n $lines --no-pager -o short-iso 2>&1 | tail -n $lines",
+        "step 1\n§SUDO journalctl -u maximus-tunnel -u maximus-tunnel-hy -u maximus-tunnel-rotate -u maximus-spoof -n $lines --no-pager -o short-iso 2>&1 | tail -n $lines",
         listOf("Read logs")
     )
 }
