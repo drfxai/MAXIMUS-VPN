@@ -48,6 +48,30 @@ def main():
                 call("ip", "-n", ns, "link", "set", "lo", "up")
                 call("ip", "netns", "exec", ns, "sysctl", "-qw", "net.ipv4.conf.all.rp_filter=0")
                 call("ip", "netns", "exec", ns, "sysctl", "-qw", f"net.ipv4.conf.{iface}.rp_filter=0")
+            # Exercise the source scanner as well as the data carrier, with fixture addresses only.
+            sources = pathlib.Path(td) / "sources.txt"
+            sources.write_text("198.51.100.1\n198.51.100.2\n")
+            for protocol in ("tcp", "icmp"):
+                logfile = pathlib.Path(td) / f"scan-{protocol}.log"
+                with logfile.open("w+") as log:
+                    command = [str(binary), "tester", "--src-list", str(sources), "--protocol", protocol,
+                               "--dst-port", "19444", "--timeout", "8", "--packet-count", "4", "--max-loss", "25", "--concurrency", "1"]
+                    receiver = subprocess.Popen(["ip", "netns", "exec", right, *command, "--mode", "receiver"], stdout=log, stderr=log,
+                                                env={**os.environ, "TMPDIR": td})
+                    try:
+                        deadline = time.monotonic() + 5
+                        while "[tester-receiver] protocol=" not in logfile.read_text():
+                            assert receiver.poll() is None and time.monotonic() < deadline, "Scanner not ready"
+                            time.sleep(0.05)
+                        call("ip", "netns", "exec", left, *command, "--mode", "sender", "--dst-ip", "10.203.0.2")
+                        assert receiver.wait(timeout=15) == 0
+                        output = logfile.read_text()
+                        for ip in ("198.51.100.1", "198.51.100.2"):
+                            assert f"{ip} 4/4 0.0%" in output, output
+                        print(f"PASS: {protocol} source scanner, exact four-packet receipt for two fixture IPs", flush=True)
+                    finally:
+                        if receiver.poll() is None:
+                            receiver.terminate(); receiver.wait(timeout=3)
             echo = "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(('127.0.0.1',19520))\nwhile True:\n d,a=s.recvfrom(4096);s.sendto(d[::-1],a)"
             processes.append(subprocess.Popen(["ip", "netns", "exec", right, "python3", "-u", "-c", echo]))
             for up, down in (("tcp", "tcp"), ("udp", "udp"), ("icmp", "icmp"), ("icmpv6", "icmpv6"), ("tcp", "icmp")):
