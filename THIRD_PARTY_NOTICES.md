@@ -555,3 +555,18 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 - Bootstrap bridge lines from the user-supplied UAC-SNI-Spoofer-Android source archive, revision b784ebd149336f4463906509738d354dd9850e23, app/src/main/assets/tor/bridges-webtunnel.txt.
 - Public network configuration data only. No uptime, operator affiliation or endorsement is claimed. The app tests traffic before using a path.
+
+## CottenDNS / CottenMax beta CLI integration (2026-10-22)
+
+The original MAXIMUS adapter invokes a separately built CottenDNS program from
+https://github.com/WhiteDNS/CottenDNS at commit
+`e50a43ef75ad10ae2ffbfa106d13c50de3e77624`.
+CottenDNS preserves the MIT notices of Amin Mahmoudi (MasterDnsVPN),
+NullRoute1970 (StormDNS) and tajirax (CottenDNS). CottenMax includes Soar-derived
+components under Apache-2.0; bundled QUIC/qpack notices retain their own terms.
+Copies of the upstream notices are in `app/src/main/assets/licenses/cottendns-*`.
+The adapter, configuration generator and editor are original MAXIMUS code.
+No WhiteDNS-Android proprietary app code, credentials, APK, branding or artwork
+has been copied. The CLI and Android UI have different licenses and are separate
+projects. A source adapter and build recipe do not establish native/runtime or
+carrier verification; see docs/UPSTREAM_INTEGRATION_2026-10-22.fa.md.
