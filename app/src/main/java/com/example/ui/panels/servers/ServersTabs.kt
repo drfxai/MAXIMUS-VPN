@@ -233,6 +233,11 @@ internal fun InstallCenterTab(
             if (inGroup.isEmpty()) continue
             SectionLabel(group.title)
             GroupCard { Rows(inGroup, dividerStart = 62.dp) { tool -> ToolRow(tool, installedOn[tool.id] ?: 0) { onOpen(tool.id) } } }
+            if (group == ToolGroup.PANELS && inGroup.any { it.id == ServerToolCatalog.HIDDIFY }) {
+                Text("Hiddify uses ports 80 and 443 and its own web server, so it goes on a server with nothing else on it. " +
+                    "A Hiddify you already have can be added as it is from its server page.",
+                    color = Sv.Dim, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 2.dp))
+            }
         }
     }
 }
@@ -265,7 +270,7 @@ private fun ToolRow(tool: ServerTool, installedOn: Int, onClick: () -> Unit) {
         tool.fits.size == 2 -> "Iran and abroad"
         ServerLocation.ABROAD in tool.fits -> "Abroad"
         else -> "Iran"
-    } + if (tool.needsDomain) " · needs a domain" else ""
+    } + (if (tool.needsDomain) " · needs a domain" else "") + (if (tool.ownServer) " · needs a server of its own" else "")
     ListRow(
         title = tool.title,
         subtitle = tool.tagline,

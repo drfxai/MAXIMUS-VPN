@@ -1,5 +1,7 @@
 package com.example.ui.panels.servers
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.AlertDialog
@@ -16,8 +18,10 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import com.example.panels.servers.ServerToolCatalog
+import com.example.panels.servers.panel.HiddifyScripts
 
 /** Toasts, haptics and panel reloads from [ServersViewModel] events. Call once while the Panels screen is shown. */
 @Composable
@@ -74,6 +78,7 @@ internal fun InstallTabHost(vm: ServersViewModel, @Suppress("UNUSED_PARAMETER") 
 
 private sealed interface Confirm {
     data class Uninstall(val serverId: String, val toolId: String) : Confirm
+    data class UpdateHiddify(val serverId: String) : Confirm
     data class Remove(val serverId: String) : Confirm
     data class PasswordOff(val serverId: String) : Confirm
     data class RemoveTunnel(val iranId: String) : Confirm
@@ -150,7 +155,17 @@ internal fun ServersOverlay(
                     onLogs = { vm.logs(id, it) },
                     onRotatePort = { vm.rotatePort(id, it) },
                     onRotateKey = { vm.rotateKey(id, it) },
-                    onOpenPanel = { vm.panelIdFor(id)?.let { pid -> vm.close(); onOpenPanel(pid) } },
+                    onOpenPanel = { toolId ->
+                        if (toolId == ServerToolCatalog.HIDDIFY) vm.hiddifyAdminUrl(id)?.let { url ->
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                        } else vm.panelIdFor(id)?.let { pid -> vm.close(); onOpenPanel(pid) }
+                    },
+                    onBackup = { vm.backup(id, it) },
+                    onUpdate = { confirm = Confirm.UpdateHiddify(id) },
+                    onStart = { vm.setRunning(id, it, true) },
+                    onStop = { vm.setRunning(id, it, false) },
+                    onImportHiddify = { vm.importHiddify(id) },
+                    onDismissFound = { vm.dismissFound(id) },
                     onCopy = copy,
                     onUninstall = { confirm = Confirm.Uninstall(id, it) },
                     onInstall = { vm.openWizard(it, id) },
@@ -198,8 +213,15 @@ private fun ConfirmHost(vm: ServersViewModel, confirm: Confirm?, dismiss: () -> 
         null -> Unit
         is Confirm.Uninstall -> ConfirmDialog(
             "Remove ${toolTitle(c.toolId)}?",
-            "It is stopped and deleted from the server, and its config is removed from this phone.",
+            if (c.toolId == ServerToolCatalog.HIDDIFY) "Hiddify's own uninstaller stops and disables it. Its files and database stay on the server."
+            else "It is stopped and deleted from the server, and its config is removed from this phone.",
             "Remove", { vm.uninstall(c.serverId, c.toolId) }, dismiss
+        )
+        is Confirm.UpdateHiddify -> ConfirmDialog(
+            "Update Hiddify to ${HiddifyScripts.VERSION}?",
+            "The app makes a backup on the server first, then runs Hiddify's official installer. The panel and its " +
+                "configs are down while it runs, which can take 30 minutes.",
+            "Update", { vm.updateHiddify(c.serverId) }, dismiss, Sv.Blue
         )
         is Confirm.Remove -> ConfirmDialog(
             "Forget this server?",
@@ -225,13 +247,13 @@ private fun ConfirmHost(vm: ServersViewModel, confirm: Confirm?, dismiss: () -> 
 }
 
 @Composable
-private fun ConfirmDialog(title: String, text: String, action: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun ConfirmDialog(title: String, text: String, action: String, onConfirm: () -> Unit, onDismiss: () -> Unit, actionColor: Color = Sv.Red) {
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Sv.Card,
         title = { Text(title, color = Sv.Text) },
         text = { Text(text, color = Sv.Muted) },
-        confirmButton = { TextButton(onClick = { onConfirm(); onDismiss() }) { Text(action, color = Sv.Red) } },
+        confirmButton = { TextButton(onClick = { onConfirm(); onDismiss() }) { Text(action, color = actionColor) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Sv.Muted) } }
     )
 }

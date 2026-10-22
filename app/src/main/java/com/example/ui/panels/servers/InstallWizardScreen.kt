@@ -193,10 +193,12 @@ private fun PickServer(ui: WizardUi, actions: WizardActions) {
     }
     GroupCard {
         Rows(ui.servers, dividerStart = 50.dp) { row ->
-            val fits = ui.tool.fitsOn(row.location)
+            val clash = ui.tool.conflicts.firstOrNull { it in row.tools }
+            val fits = ui.tool.fitsOn(row.location) && clash == null
             ListRow(
                 row.name,
                 subtitle = when {
+                    clash != null -> "Runs ${toolTitle(clash)}. ${ui.tool.title} needs a server of its own."
                     !fits -> "${ui.tool.title} only helps on a server abroad"
                     row.health == Health.SIGN_IN -> "Sign in to this server first"
                     ui.tool.id in row.tools -> "Installed · tap to update"

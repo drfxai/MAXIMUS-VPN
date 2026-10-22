@@ -40,6 +40,7 @@ import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
@@ -173,6 +174,7 @@ internal fun locationName(location: ServerLocation) = if (location == ServerLoca
 
 internal fun toolIcon(id: String): ImageVector = when (id) {
     ServerToolCatalog.XUI -> Icons.Rounded.Dashboard
+    ServerToolCatalog.HIDDIFY -> Icons.Rounded.Layers
     ServerToolCatalog.DNSTT -> Icons.Rounded.Dns
     ServerToolCatalog.MAXIMUS_TUNNEL -> Icons.Rounded.SyncAlt
     ServerToolCatalog.HYSTERIA2 -> Icons.Rounded.Bolt

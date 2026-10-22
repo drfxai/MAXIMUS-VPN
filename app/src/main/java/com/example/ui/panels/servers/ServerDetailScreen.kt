@@ -18,6 +18,10 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.Subject
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Upgrade
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreHoriz
@@ -62,6 +66,16 @@ data class ToolRowUi(
     val canOpenPanel: Boolean = false,
     val canUninstall: Boolean = true,
     val canOpenTunnel: Boolean = false,
+    val canBackup: Boolean = false,
+    val canUpdate: Boolean = false,
+    val canStart: Boolean = false,
+    val canStop: Boolean = false,
+    /** Some services down while others run: an amber badge instead of red. */
+    val warn: Boolean = false,
+    /** Label -> value pairs under the row ("Services", "9 of 9 active"). */
+    val stats: List<Pair<String, String>> = emptyList(),
+    /** A problem worth reading before acting, shown under the row. */
+    val warning: String? = null,
     val link: String? = null,
     val testResult: String? = null,
     val testOk: Boolean? = null
@@ -86,6 +100,8 @@ data class ServerDetailUi(
     val passwordLoginOff: Boolean = false,
     val needsSignIn: Boolean = false,
     val tools: List<ToolRowUi> = emptyList(),
+    /** What a Hiddify found on the server but not added on this phone looks like ("Version 14.0.5 · 9 of 9 services active"). */
+    val foundHiddify: String? = null,
     val advice: List<AdviceUi> = emptyList(),
     val busy: String = "",
     val error: String = "",
@@ -108,6 +124,12 @@ data class ServerDetailActions(
     val onCopy: (String) -> Unit,
     val onUninstall: (String) -> Unit,
     val onOpenTunnel: () -> Unit = {},
+    val onBackup: (String) -> Unit = {},
+    val onUpdate: (String) -> Unit = {},
+    val onStart: (String) -> Unit = {},
+    val onStop: (String) -> Unit = {},
+    val onImportHiddify: () -> Unit = {},
+    val onDismissFound: () -> Unit = {},
     val onInstall: (String) -> Unit,
     val onInstallCenter: () -> Unit,
     val onRemove: () -> Unit
@@ -142,6 +164,7 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
             PrimaryButton("Sign in", actions.onSignIn, Modifier.fillMaxWidth())
         }
         OverviewCard(ui)
+        if (ui.foundHiddify != null) FoundHiddifyCard(ui.foundHiddify, actions, idle)
 
         SectionLabel("Sign-in security")
         GroupCard {
@@ -260,7 +283,8 @@ private fun Metric(label: String, value: String, sub: String, percent: Int?, loa
     }
 }
 
-private data class ToolAction(val label: String, val icon: ImageVector, val color: Color = Sv.TextSoft, val run: () -> Unit)
+/** [menu] keeps an action in the ••• menu even when there is room in the bar. */
+private data class ToolAction(val label: String, val icon: ImageVector, val color: Color = Sv.TextSoft, val menu: Boolean = false, val run: () -> Unit)
 
 /** An installed tool: one row, an optional test result, and a compact action bar with an overflow menu. */
 @Composable
@@ -271,8 +295,21 @@ private fun ToolBlock(t: ToolRowUi, actions: ServerDetailActions, idle: Boolean)
             subtitle = t.detail,
             subtitleMono = t.detail.any(Char::isDigit),
             leading = { ToolBadge(t.id) },
-            trailing = { Badge(t.status, if (t.healthy) Tone.GOOD else Tone.BAD, dot = true) }
+            trailing = { Badge(t.status, if (t.healthy) Tone.GOOD else if (t.warn) Tone.WARN else Tone.BAD, dot = true) }
         )
+        if (t.stats.isNotEmpty()) {
+            Row(Modifier.padding(start = 62.dp, end = 14.dp, bottom = 6.dp)) {
+                t.stats.forEach { (k, v) ->
+                    Column(Modifier.weight(1f)) {
+                        Text(k, color = Sv.Muted, fontSize = 12.sp)
+                        Text(v, color = Sv.Text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    }
+                }
+            }
+        }
+        if (t.warning != null) {
+            Box(Modifier.padding(start = 62.dp, end = 14.dp, bottom = 8.dp)) { Notice(t.warning, NoticeKind.WARN) }
+        }
         if (t.testResult != null) {
             Box(Modifier.padding(start = 62.dp, end = 14.dp, bottom = 8.dp)) {
                 Notice(t.testResult, if (t.testOk == true) NoticeKind.OK else NoticeKind.WARN)
@@ -283,14 +320,22 @@ private fun ToolBlock(t: ToolRowUi, actions: ServerDetailActions, idle: Boolean)
             if (t.canOpenPanel) add(ToolAction("Open panel", Icons.AutoMirrored.Rounded.OpenInNew) { actions.onOpenPanel(t.id) })
             if (t.canOpenTunnel) add(ToolAction("Open tunnel", Icons.AutoMirrored.Rounded.OpenInNew) { actions.onOpenTunnel() })
             if (t.link != null) add(ToolAction("Copy link", Icons.Rounded.ContentCopy) { actions.onCopy(t.link) })
+            // With services down, fixing comes before backing up or updating.
+            // 3X-UI keeps its bar; its backup sits in the menu.
+            if (t.canBackup && t.warning == null) add(ToolAction("Back up", Icons.Rounded.Download, menu = t.id == ServerToolCatalog.XUI) { actions.onBackup(t.id) })
             if (t.canRestart) add(ToolAction("Restart", Icons.Rounded.RestartAlt) { actions.onRestart(t.id) })
-            if (t.canLogs) add(ToolAction("Logs", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })
+            if (t.canLogs && t.warning != null) add(ToolAction("Logs", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })
+            if (t.canUpdate) add(ToolAction("Update", Icons.Rounded.Upgrade) { actions.onUpdate(t.id) })
+            if (t.canBackup && t.warning != null) add(ToolAction("Back up", Icons.Rounded.Download) { actions.onBackup(t.id) })
+            if (t.canLogs && t.warning == null) add(ToolAction("Logs", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })
+            if (t.canStart) add(ToolAction("Start", Icons.Rounded.PlayArrow) { actions.onStart(t.id) })
+            if (t.canStop) add(ToolAction("Stop", Icons.Rounded.Stop) { actions.onStop(t.id) })
             if (t.canRotatePort) add(ToolAction("New port", Icons.Rounded.SwapHoriz) { actions.onRotatePort(t.id) })
             if (t.canRotateKey) add(ToolAction("New keys", Icons.Rounded.VpnKey) { actions.onRotateKey(t.id) })
             if (t.canUninstall) add(ToolAction("Uninstall", Icons.Rounded.Delete, Sv.Red) { actions.onUninstall(t.id) })
         }
         if (all.isEmpty()) return@Column
-        val shown = all.filter { it.color != Sv.Red }.take(3)
+        val shown = all.filter { it.color != Sv.Red && !it.menu }.take(3)
         val more = all - shown.toSet()
         Row(Modifier.fillMaxWidth().padding(start = 54.dp, end = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             shown.forEach { a -> TextAction(a.label, a.run, Sv.Blue, enabled = idle, icon = a.icon) }
@@ -312,6 +357,27 @@ private fun ToolBlock(t: ToolRowUi, actions: ServerDetailActions, idle: Boolean)
                     }
                 }
             }
+        }
+    }
+}
+
+/** A Hiddify that is on the server but not added on this phone. Adding it changes nothing there. */
+@Composable
+private fun FoundHiddifyCard(summary: String, actions: ServerDetailActions, idle: Boolean) {
+    GroupCard {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ToolBadge(ServerToolCatalog.HIDDIFY, 34.dp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Hiddify found on this server", color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(summary, color = Sv.Muted, fontSize = 13.sp)
+                }
+            }
+            Notice("Add it to manage it from this phone: status, backups, restart and logs. Nothing on the server " +
+                "changes, and the app never installs over it.", NoticeKind.OK)
+            PrimaryButton("Add Hiddify", actions.onImportHiddify, Modifier.fillMaxWidth(), enabled = idle)
+            GhostButton("Not now", actions.onDismissFound, Modifier.fillMaxWidth())
         }
     }
 }
