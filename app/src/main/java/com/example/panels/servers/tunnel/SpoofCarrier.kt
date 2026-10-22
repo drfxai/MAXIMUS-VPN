@@ -61,7 +61,7 @@ object SpoofCarrierScripts {
         SpoofCarrierSpec.ipv4(peer); ToolScripts.port(port, "probe")
         return ToolScripts.script("""
             tmp=§(mktemp -d)
-            trap 'rm -rf "§tmp"' EXIT HUP INT TERM
+            trap '§SUDO rm -rf "§tmp"' EXIT HUP INT TERM
             cat > "§tmp/sources" <<'MX_SOURCES'
             @@SOURCES@@
             MX_SOURCES
@@ -192,7 +192,10 @@ class SpoofCarrierManager(private val connect: (ManagedServer) -> RemoteShell = 
         fun test(from: ManagedServer, to: ManagedServer, ips: List<String>, protocol: String): List<String> {
             if (protocol !in setOf("tcp", "icmp")) return ips
             log("Testing $protocol carrier ${from.displayName} → ${to.displayName}")
-            return scan(from, to, ips, s.port, protocol).also { check(it.isNotEmpty()) { "No entered source reached ${to.displayName}; the provider may block source spoofing" } }
+            return scan(from, to, ips, s.port, protocol).also {
+                log("Observed ${it.size}/${ips.size} source candidates on ${to.displayName}; authenticated tunnel test follows")
+                check(it.isNotEmpty()) { "No entered source reached ${to.displayName}; the provider may block source spoofing" }
+            }
         }
         val selected = s.copy(iranSources = test(iran, abroad, s.iranSources, s.upload),
             abroadSources = test(abroad, iran, s.abroadSources, s.download))
