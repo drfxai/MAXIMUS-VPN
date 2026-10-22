@@ -129,6 +129,11 @@ data class TunnelSetupUi(
     val abroadSites: List<String> = emptyList(),
     val update: Boolean = false,
     val renewKeys: Boolean = false,
+    val spoofEnabled: Boolean = false,
+    val spoofIran: String = "",
+    val spoofAbroad: String = "",
+    val spoofUpload: String = "tcp",
+    val spoofDownload: String = "tcp",
     val steps: List<String> = emptyList(),
     val currentStep: Int = 0,
     val log: List<String> = emptyList(),
@@ -485,6 +490,7 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
                 subtitle = if (unusable) "Not reachable in the check" else t.detail,
                 trailing = {
                     Switch(on, { v ->
+                        if (ui.spoofEnabled) return@Switch
                         val next = if (v) ui.transports + t else ui.transports - t
                         if (next.isNotEmpty()) actions.onChange(ui.copy(transports = next))
                     }, colors = SwitchDefaults.colors(checkedTrackColor = Sv.Accent, uncheckedTrackColor = Sv.Raised, uncheckedBorderColor = Sv.CardBorder))
@@ -511,6 +517,25 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
                         "The old ports keep working for one more period, so nothing drops.",
                     color = Sv.Muted, fontSize = 12.sp, lineHeight = 17.sp
                 )
+            }
+        }
+    }
+
+    SectionLabel("Spoof carrier · server pair")
+    GroupCard {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ListRow("Use source-IP carrier", subtitle = "Requires two Linux servers whose providers permit raw source packets. Hysteria2 authenticates and encrypts the inner tunnel.", trailing = {
+                Switch(ui.spoofEnabled, { enabled -> actions.onChange(ui.copy(spoofEnabled = enabled,
+                    transports = if (enabled) setOf(TunnelTransport.HYSTERIA2) else ui.transports)) })
+            })
+            if (ui.spoofEnabled) {
+                androidx.compose.material3.OutlinedTextField(ui.spoofIran, { actions.onChange(ui.copy(spoofIran = it)) }, label = { Text("Iran source IPv4 list · 1–16") }, modifier = Modifier.fillMaxWidth())
+                androidx.compose.material3.OutlinedTextField(ui.spoofAbroad, { actions.onChange(ui.copy(spoofAbroad = it)) }, label = { Text("Abroad source IPv4 list · 1–16") }, modifier = Modifier.fillMaxWidth())
+                Text("Iran → abroad", color = Sv.TextSoft)
+                Segmented(com.example.panels.servers.tunnel.SpoofCarrierSpec.TRANSPORTS, ui.spoofUpload, { it.uppercase() }) { actions.onChange(ui.copy(spoofUpload = it)) }
+                Text("Abroad → Iran", color = Sv.TextSoft)
+                Segmented(com.example.panels.servers.tunnel.SpoofCarrierSpec.TRANSPORTS, ui.spoofDownload, { it.uppercase() }) { actions.onChange(ui.copy(spoofDownload = it)) }
+                Text("TCP/ICMP candidates are measured in both directions (4 packets/IP). Every carrier must then pass the authenticated tunnel traffic test. Failed setup restores the previous carrier. Raw transport runs on the servers; the phone needs no root.", color = Sv.Muted, fontSize = 12.sp)
             }
         }
     }
