@@ -139,7 +139,8 @@ data class TunnelStatus(
                 evidence = r.filterKeys { it.startsWith("PATH_") }.map { (k, v) -> k.removePrefix("PATH_") to PathEvidence.parse(v, own) }.toMap(),
                 ports = r["PORTS"].orEmpty().split(' ').mapNotNull { it.toIntOrNull() },
                 // Both units must run; Hysteria2's reports "off" when the tunnel does not use it.
-                running = r["SVC_maximus-tunnel"] == "active" && r["SVC_maximus-tunnel-hy"].let { it == null || it == "active" || it == "off" },
+                running = r["SVC_maximus-tunnel"] == "active" && r["SVC_maximus-tunnel-hy"].let { it == null || it == "active" || it == "off" } &&
+                    r["SVC_maximus-spoof"].let { it == null || it == "active" },
                 serverTime = r["TIME"]?.toLongOrNull() ?: 0L
             )
         }
@@ -467,7 +468,13 @@ class TunnelManager(
             abroad.withTool(abroad.tool(ServerToolCatalog.MAXIMUS_TUNNEL)!!.copy(settings = next.toSettings(TunnelSpec.ROLE_ABROAD)))
     }
 
-    fun restart(server: ManagedServer) { connect(server).use { run(it, TunnelScripts.restart(), null, 2 * 60_000L) } }
+    fun restart(server: ManagedServer) {
+        connect(server).use {
+            if (TunnelSpec.fromSettings(server.tool(ServerToolCatalog.MAXIMUS_TUNNEL)?.settings.orEmpty())?.spoof != null)
+                run(it, ToolScripts.script("§SUDO systemctl restart maximus-spoof\nwait_active maximus-spoof", emptyList()), null, 60_000)
+            run(it, TunnelScripts.restart(), null, 2 * 60_000L)
+        }
+    }
 
     fun logs(server: ManagedServer): List<String> = connect(server).use { shell ->
         val lines = mutableListOf<String>()
