@@ -1,1 +1,2 @@
-V1.0.2 Android versionCode 31
+V1.0.2 Android versionCode 32
+DNS resolver recovery, bounded dnstt jitter and experimental transport tools from PR #113.
