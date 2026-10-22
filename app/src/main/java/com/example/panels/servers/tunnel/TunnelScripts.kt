@@ -44,6 +44,7 @@ object TunnelScripts {
         require(spec.entryPublicKey.isEmpty() || KEY.matches(spec.entryPublicKey)) { "Invalid key from the Iran server" }
         listOf(spec.entryPort, spec.hyPort, spec.hyLocalPort).forEach { ToolScripts.port(it, "tunnel") }
         if (spec.rvProbePort != 0) ToolScripts.port(spec.rvProbePort, "reverse test")
+        if (spec.apiPort != 0) ToolScripts.port(spec.apiPort, "Xray API")
         spec.fixedPorts.values.forEach { ToolScripts.port(it, "tunnel") }
         spec.avoidPorts.forEach { ToolScripts.port(it, "avoided") }
         if (TunnelTransport.REVERSE in spec.transports) require(UUID.matches(spec.reverseUuid) && spec.reverseUuid != spec.entryUuid) { "Invalid reverse id" }
@@ -94,8 +95,10 @@ object TunnelScripts {
     // ---------------------------------------------------------------- shared parts
 
     /**
-     * Writes the rotating Xray files for this period and the previous one from the templates and
-     * restarts Xray when they changed. Abroad it also opens the new ports and closes the old ones.
+     * Writes the rotating Xray files for this period and the previous one from the templates and,
+     * when they changed, applies them to the running Xray through its loopback API (new ports
+     * first, then the expired ones) or, failing that, restarts it. Abroad it also opens the new
+     * ports and closes the old ones.
      * Ports come from the shared seed and the clock (see [TunnelPorts]).
      */
     private val ROTATE_SCRIPT = """
@@ -150,19 +153,24 @@ object TunnelScripts {
           else
             eval "pn=\§FIXED_§t"; pp="§pn"
           fi
-          sed -e "s/@PORT@/§pn/" -e "s/@TAG@/t-§t-now/" "§D/tpl/§t.json" > "§new/20-t-§t-now.json"
+          # Files and tags are named by port, so a port that stays open keeps its inbound or
+          # outbound untouched across a rotation (its open connections live on).
+          sed -e "s/@PORT@/§pn/" -e "s/@TAG@/t-§t-§pn/" "§D/tpl/§t.json" > "§new/20-t-§t-§pn.json"
           ports="§ports §pn"
+          [ -z "§{FALLBACK:-}" ] || [ "§t" != "§FALLBACK" ] || fb="t-§t-§pn"
           # The previous period's port stays open too, unless another transport listens on it now.
           if [ "§pp" != "§pn" ] && case " §nowall " in *" §pp "*) false ;; *) true ;; esac; then
-            sed -e "s/@PORT@/§pp/" -e "s/@TAG@/t-§t-prev/" "§D/tpl/§t.json" > "§new/21-t-§t-prev.json"
+            sed -e "s/@PORT@/§pp/" -e "s/@TAG@/t-§t-§pp/" "§D/tpl/§t.json" > "§new/20-t-§t-§pp.json"
             ports="§ports §pp"
           fi
         done
         old=§(cat "§D/ports" 2>/dev/null || true)
-        if [ "§ROLE" = abroad ]; then
-          for p in §ports; do fw allow "§p"; done
-          for p in §old; do case " §ports " in *" §p "*) ;; *) fw delete "§p" ;; esac; done
-        fi
+        if [ "§ROLE" = abroad ]; then for p in §ports; do fw allow "§p"; done; fi
+        # The balancer's first choice before any health probe: this period's port of the fallback way.
+        set_fallback() {
+          [ -n "§{fb:-}" ] || return 0
+          sed -i "s/\"fallbackTag\": *\"t-§FALLBACK-[^\"]*\"/\"fallbackTag\": \"§fb\"/" "§1"
+        }
         changed=0
         for f in "§new"/*.json; do cmp -s "§f" "§D/conf.d/§(basename "§f")" || changed=1; done
         for f in "§D"/conf.d/2*-t-*.json; do [ -e "§f" ] || continue; [ -e "§new/§(basename "§f")" ] || changed=1; done
@@ -171,6 +179,7 @@ object TunnelScripts {
           chk=§(mktemp -d)
           for f in "§D"/conf.d/*.json; do case "§(basename "§f")" in 2*-t-*) ;; *) cp "§f" "§chk/" ;; esac; done
           cp "§new"/*.json "§chk/"
+          set_fallback "§chk/00-base.json" 2>/dev/null || true
           if ! XRAY_LOCATION_ASSET="§D" $BIN/xray run -test -confdir "§chk" >/dev/null 2>&1; then
             rm -rf "§chk"; echo "Xray rejected the new port files; keeping the current ones" >&2; exit 32
           fi
@@ -179,16 +188,52 @@ object TunnelScripts {
           prev=§(mktemp -d)
           for f in "§D"/conf.d/2*-t-*.json; do if [ -e "§f" ]; then cp -p "§f" "§prev/"; fi; done
           cp -p "§D/ports" "§prev/.ports" 2>/dev/null || true
+          cp -p "§D/conf.d/00-base.json" "§prev/.base" 2>/dev/null || true
+          # Without a restart when the running Xray takes the change through its API: new ports are
+          # added first, then the expired ones removed (make before break). A kept port's file must be
+          # unchanged; older setups (files named now/prev) and any API failure take the restart path.
+          live=0
+          if [ -n "§{API:-}" ] && [ "§{1:-}" != --no-restart ] && systemctl is-active --quiet maximus-tunnel; then
+            live=1
+            for f in "§D"/conf.d/2*-t-*.json; do
+              [ -e "§f" ] || continue
+              b=§(basename "§f")
+              case "§b" in *-now.json|*-prev.json) live=0 ;; esac
+              if [ -e "§new/§b" ] && ! cmp -s "§f" "§new/§b"; then live=0; fi
+            done
+          fi
+          if [ "§live" = 1 ]; then
+            if [ "§ROLE" = abroad ]; then add=adi; del=rmi; else add=ado; del=rmo; fi
+            for f in "§new"/*.json; do
+              [ -e "§D/conf.d/§(basename "§f")" ] && continue
+              $BIN/xray api "§add" --server="127.0.0.1:§API" "§f" >/dev/null 2>&1 || { live=0; break; }
+            done
+            if [ "§live" = 1 ]; then
+              for f in "§D"/conf.d/2*-t-*.json; do
+                [ -e "§f" ] || continue
+                [ -e "§new/§(basename "§f")" ] && continue
+                $BIN/xray api "§del" --server="127.0.0.1:§API" "§(basename "§f" .json | sed 's/^[0-9]*-//')" >/dev/null 2>&1 || { live=0; break; }
+              done
+            fi
+            if [ "§live" = 0 ]; then echo "The live update did not apply; restarting Xray with the new ports" >&2; fi
+          fi
           rm -f "§D"/conf.d/2*-t-*.json
           for f in "§new"/*.json; do install -m 0640 -g maximus "§f" "§D/conf.d/§(basename "§f")"; done
+          set_fallback "§D/conf.d/00-base.json" || true
           echo "§ports" > "§D/ports"
-          if [ "§{1:-}" != --no-restart ]; then
+          if [ "§ROLE" = abroad ]; then
+            for p in §old; do case " §ports " in *" §p "*) ;; *) fw delete "§p" ;; esac; done
+          fi
+          if [ "§live" = 1 ]; then
+            echo "Applied without restarting Xray" >&2
+          elif [ "§{1:-}" != --no-restart ]; then
             systemctl restart maximus-tunnel || true
             n=0
             while [ §n -lt 20 ] && ! systemctl is-active --quiet maximus-tunnel; do sleep 0.5; n=§((n + 1)); done
             if ! systemctl is-active --quiet maximus-tunnel; then
               rm -f "§D"/conf.d/2*-t-*.json
               for f in "§prev"/*.json; do if [ -e "§f" ]; then cp -p "§f" "§D/conf.d/"; fi; done
+              if [ -e "§prev/.base" ]; then cp -p "§prev/.base" "§D/conf.d/00-base.json"; fi
               if [ -e "§prev/.ports" ]; then
                 cp -p "§prev/.ports" "§D/ports"
                 if [ "§ROLE" = abroad ]; then for p in §(cat "§prev/.ports"); do fw allow "§p"; done; fi
@@ -199,6 +244,11 @@ object TunnelScripts {
             fi
           fi
           rm -rf "§prev"
+        else
+          set_fallback "§D/conf.d/00-base.json" || true
+          if [ "§ROLE" = abroad ]; then
+            for p in §old; do case " §ports " in *" §p "*) ;; *) fw delete "§p" ;; esac; done
+          fi
         fi
         echo "PORTS=§ports"
     """.trimIndent()
@@ -208,7 +258,10 @@ object TunnelScripts {
         return (listOf(
             "ROLE=$role", "SEED=${spec.seed}", "HOURS=${spec.rotationHours}",
             "NAMES=\"${names.joinToString(" ") { it.id }}\"",
-            "AVOID=\"${spec.avoidPorts.sorted().joinToString(" ")}\""
+            "AVOID=\"${spec.avoidPorts.sorted().joinToString(" ")}\"",
+            // Loopback port of the running Xray's API, for rotations without a restart (empty: restart).
+            "API=${spec.apiPort.takeIf { it > 0 } ?: ""}",
+            "FALLBACK=${spec.fallbackTransport.takeIf { role == TunnelSpec.ROLE_IRAN && it in TunnelTransport.ROTATING }?.id ?: ""}"
         ) + names.mapNotNull { t -> spec.fixedPorts[t]?.let { "FIXED_${t.id}=$it" } }).joinToString("\n")
     }
 
@@ -412,6 +465,7 @@ object TunnelScripts {
         val files = linkedMapOf("WRITE_TPL" to writeTemplates(rotating))
         rotating.forEach { files["TPL_${it.id}"] = TunnelConfigs.abroadTemplate(spec, it) }
         files["BASE"] = TunnelConfigs.abroadBase()
+        files["API"] = TunnelConfigs.api(spec)
         files["HY_SERVER"] = TunnelConfigs.abroadHysteria(spec, "$DIR/hy").trimEnd()
         return assemble(
             """
@@ -425,6 +479,14 @@ object TunnelScripts {
             @@BASE@@
             EOF_BASE
             §SUDO chgrp maximus $DIR/conf.d/00-base.json
+            if [ ${if (spec.apiPort > 0) 1 else 0} = 1 ]; then
+              write_file $DIR/conf.d/${TunnelConfigs.API_FILE} 0640 <<'EOF_API'
+            @@API@@
+            EOF_API
+              §SUDO chgrp maximus $DIR/conf.d/${TunnelConfigs.API_FILE}
+            else
+              §SUDO rm -f $DIR/conf.d/${TunnelConfigs.API_FILE}
+            fi
             if [ ${if (TunnelTransport.REVERSE in spec.transports) 1 else 0} = 0 ]; then §SUDO rm -f $DIR/conf.d/${TunnelConfigs.REVERSE_FILE}; fi
             @@WRITE_TPL@@
             OLD_HY=§(§SUDO awk '/^listen:/{sub(/.*:/, ""); print}' $DIR/hy/server.yaml 2>/dev/null || true)
@@ -481,6 +543,7 @@ object TunnelScripts {
         val files = linkedMapOf("WRITE_TPL" to writeTemplates(rotating))
         rotating.forEach { files["TPL_${it.id}"] = TunnelConfigs.iranTemplate(spec, abroadHost, it) }
         files["BASE"] = TunnelConfigs.iranBase(spec)
+        files["API"] = TunnelConfigs.api(spec)
         files["BLOCK"] = TunnelConfigs.iranDefaultBlock()
         files["HY_OUT"] = TunnelConfigs.iranHysteriaOutbound(spec)
         files["HY_CLIENT"] = TunnelConfigs.iranHysteriaClient(spec, abroadHost, "$DIR/hy")
@@ -498,6 +561,14 @@ object TunnelScripts {
             @@BASE@@
             EOF_BASE
             §SUDO chgrp maximus $DIR/conf.d/00-base.json
+            if [ ${if (spec.apiPort > 0) 1 else 0} = 1 ]; then
+              write_file $DIR/conf.d/${TunnelConfigs.API_FILE} 0640 <<'EOF_API'
+            @@API@@
+            EOF_API
+              §SUDO chgrp maximus $DIR/conf.d/${TunnelConfigs.API_FILE}
+            else
+              §SUDO rm -f $DIR/conf.d/${TunnelConfigs.API_FILE}
+            fi
             write_file $DIR/conf.d/${TunnelConfigs.IRAN_BLOCK_FILE} 0640 <<'EOF_BLOCK'
             @@BLOCK@@
             EOF_BLOCK

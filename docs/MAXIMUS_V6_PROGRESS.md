@@ -50,7 +50,7 @@ memory (#86); engine handoff from recovery to the connection (#101/#102).
 | Path verified only with two targets + foreign exit IP (`PathState`) | yes | yes | no | no | no | no | probe shell function run once against a fake curl; exit compared with the Iran server's own addresses, not with the abroad server's IP |
 | Reverse way: real request through a loopback test port | yes | yes (config + script syntax) | no | no | no | no | tunnels set up before this need one "Update tunnel" to get the test port; until then they show "Linked, no traffic" |
 | Check repeated once after setup when nothing verified | yes | no | no | no | no | no | fixed 8 s wait |
-| Rotation rolls back to the previous ports when Xray does not start | yes | script syntax only | no | no | no | no | a rotation still restarts Xray, so open sessions on the Iran side drop (see below) |
+| Rotation rolls back to the previous ports when Xray does not start | yes | script syntax only | no | no | no | no | see "Rotation without a restart" below |
 | Pre-check wording says "SSH port answers" | yes | n/a | no | no | no | no | ports of the tunnel itself cannot be tested before they exist |
 
 States now used by the tunnel: `ROUTE_VERIFIED`, `DEGRADED`, `NO_EXTERNAL_ROUTE_OBSERVED`,
@@ -117,6 +117,23 @@ server. An existing Hiddify is detected and imported without any change on the s
 | "Hiddify found on this server" card: add without changes | yes | yes (import over a fake shell) | no | no | no | no | "Not now" lasts until the app restarts |
 | 3X-UI: Back up, Start, Stop in its ••• menu | yes | no | no | no | no | no | |
 
+## Rotation without a restart
+
+A rotation used to restart Xray on both servers, which dropped every open session. Now each
+port file and its tag are named by the port (`20-t-reality-31001.json`, tag `t-reality-31001`),
+so a port that stays open across a rotation keeps its file and its connections. When the
+running Xray has its loopback API (`05-api.json`, HandlerService on a random 127.0.0.1 port),
+the rotate script adds the new ports first (`xray api adi` abroad, `ado` in Iran), then removes
+the expired ones (`rmi`/`rmo`). Any API failure, a kept file whose content changed, or a tunnel
+still on the old `-now`/`-prev` files takes the old path: restart, and roll back if Xray does not
+start. The Iran balancer's fallback tag follows this period's port of the fallback way.
+
+| Item | Implemented | Unit-tested | Emulator | Phone | Live server | Iran network | Notes |
+|---|---|---|---|---|---|---|---|
+| Port-named files and tags, API inbound on loopback | yes | yes | no | no | no | no | tunnels set up before this restart once per rotation until "Update tunnel" |
+| Add new ports, then remove expired ones, without a restart | yes | yes (script run against a fake xray/systemctl) | no | no | no | no | `xray api` command syntax and dynamic balancer pick-up not tried on a real server |
+| Fall back to restart and rollback on any API failure | yes | yes (fake xray) | no | no | no | no | |
+
 ## Smart Connect recovery reads the engine ledger
 
 The recovery stage of Smart Connect (LabController.fastRecovery) now asks the engine ledger about
@@ -132,8 +149,8 @@ minutes is ranked as "worked here recently". Chains are judged by their paths, n
 
 ## Remaining P0 work (not done yet)
 
-- Zero-downtime rotation: a rotation still restarts Xray. Real make-before-break needs Xray's
-  API (add/remove inbound and outbound at runtime) instead of a restart.
+No P0 item above is left unbuilt. None of them has been tried on a phone, a live server or an
+Iran network yet.
 
 ## Excluded by earlier safety stops
 
