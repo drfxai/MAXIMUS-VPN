@@ -13,7 +13,7 @@
 | [Hiddify Manager](https://github.com/hiddify/Hiddify-Manager) | مدیریت چرخهٔ نصب/پشتیبان/ارتقا؛ GPL-3.0 | adapter و UI موجود حفظ شده، نصب روی سرور اختصاصی و نسخهٔ pinشدهٔ 14.0.5 ادامه دارد. ادعای تست سرور زنده یا پشتیبانی restore اضافه نشده است. |
 | [Byp](https://github.com/devlsam/Byp/blob/main/README_FA.md) | کلاینت ویندوز با Wintun و تفکیک برنامه‌ها، رابط ساده و پایش شبکه | برای UX و سیاست تفکیک مسیر مرجع است؛ کد ویندوز به Android قابل انتقال مستقیم نیست. LICENSE دارای شرایط BUSL-1.1 است؛ کدی از آن کپی نشده است. |
 | [WhiteDNS-Android](https://github.com/WhiteDNS/WhiteDNS-Android) | جداسازی پروفایل/ریزالور و سنجش readiness بعد از انتقال احرازشده | مرجع رفتار و معیار پذیرش؛ LICENSE.MD استفاده در یک برنامهٔ مستقل را مجاز نمی‌کند. کد، APK، کلید، تصویر یا برند آن کپی نشده است. |
-| [CottenDNS](https://github.com/WhiteDNS/CottenDNS) | موتور DNS با UDP/TCP/DoT/DoH؛ CottenMax اختیاری، کنترل نرخ و دامنهٔ پشتیبان؛ MIT با اجزای Soar/QUIC و مجوزهای خودشان | adapter اصلی ماکسیموس، import/export، editor، ثبت موتور، نگاشت مرحلهٔ DNS و دستور build بومی اضافه شد. هستهٔ انتخاب‌شده e50a43ef75ad10ae2ffbfa106d13c50de3e77624 است. باینری جدید هنوز ساخته و آزمایش نشده است. |
+| [CottenDNS](https://github.com/WhiteDNS/CottenDNS) | موتور DNS با UDP/TCP/DoT/DoH؛ CottenMax اختیاری، کنترل نرخ و دامنهٔ پشتیبان؛ MIT با اجزای Soar/QUIC و مجوزهای خودشان | adapter اصلی ماکسیموس، import/export، editor، ثبت موتور، نگاشت مرحلهٔ DNS و دستور build بومی اضافه شد. هستهٔ انتخاب‌شده e50a43ef75ad10ae2ffbfa106d13c50de3e77624 است. باینری هر سه ABI در GitHub Actions ساخته شد و آزمون‌های هسته موفق شدند؛ اجرای واقعی روی گوشی و اپراتور هنوز تأیید نشده است. |
 | [Soar-Server](https://github.com/WhiteDNS/Soar-Server) | پنل سمت سرور با بررسی delegation، آزمون واقعی HTTPS و rollback؛ Apache-2.0 | README، LICENSE و قرارداد معماری پنل بررسی شد. CottenMax از اجزای Soar استفاده می‌کند؛ این به معنی پشتیبانی مستقیم از همهٔ soar://ها یا نصب پنل Soar نیست. |
 | [WhiteAestherMobile](https://github.com/WhiteDNS/WhiteAestherMobile) | MASQUE H2، اعتبارسنجی مسیر، برگشت محدود، API registration و هویت مستقل؛ AGPL-3.0 | مرجع رفتار/معیار آزمون برای Matrix Transport موجود؛ هسته یا کلیدهای برنامهٔ دیگر جایگزین نشد و جدیدترین Aether در این تحویل ادغام نشده است. |
 
@@ -61,7 +61,7 @@ maximus-cotten://t.example.com?mode=cottenmax&key=URL_ENCODED_SERVER_KEY&transpo
 
 ## موارد همچنان تکمیل‌نشده
 
-- ساخت بومی Android و اجرای end-to-end CottenDNS/CottenMax، تست سرور سازگار، گوشی و شبکه‌های واقعی.
+- بسته‌بندی APK نهایی و اجرای end-to-end CottenDNS/CottenMax با سرور سازگار، گوشی و شبکه‌های واقعی.
 - پنل Hashem و carrierهای GRE/FRP/Backhaul، cluster و watchdog مستقل سمت سرور.
 - اتصال مستقیم پنل Soar، پشتیبانی عمومی soar:// و کنترل حساب‌های آن.
 - ساخت پروتکل مستقل Spoof Tunnel، raw-L3 allowlist backend و spoofed carriers.
@@ -69,3 +69,14 @@ maximus-cotten://t.example.com?mode=cottenmax&key=URL_ENCODED_SERVER_KEY&transpo
 - ترجمه و آزمون UI جدید، تغییر شبکه، screen-off و Android service lifecycle.
 
 افزودن اسم یک پروژه به فهرست موتورهای فعال بدون adapter، باینری، تنظیمات معتبر و آزمون انتقال انجام نشده است.
+
+## تأیید ادغام در گیت‌هاب
+
+PR [#114](https://github.com/drfxai/MAXIMUS-VPN/pull/114) با commit `6e65afee7e9aa90f0682e718ff78176783915a3c` ادغام شد.
+
+- [تمام تست‌های Android و lint](https://github.com/drfxai/MAXIMUS-VPN/actions/runs/39841452195): موفق.
+- [ساخت CottenDNS برای سه ABI و آزمون‌های upstream](https://github.com/drfxai/MAXIMUS-VPN/actions/runs/39841452276): موفق.
+- [آزمون‌های DNS/TLS و pacing](https://github.com/drfxai/MAXIMUS-VPN/actions/runs/39841452676): موفق.
+- آزمون‌های Slipstream، ابزارهای سرور، aggregator، ربات و repository hygiene نیز در Checks موفق شدند.
+
+انتشار امضاشدهٔ بیلد داخلی 33 از workflow موجود درخواست می‌شود؛ این مرحله با تأیید اپراتور/گوشی واقعی تفاوت دارد.
