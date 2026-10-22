@@ -92,8 +92,8 @@ against SHA-256 values recorded from that tag before they run; what they downloa
 (Python packages, the panel) is pinned by tag only, as Hiddify's own installer does it.
 
 DrFX's decision (2026-10-22): Hiddify is installed only on a server of its own. The app refuses a
-server with 3x-ui, Maximus Tunnel or anything on ports 80/443, a non-Ubuntu system, under 1 GB of
-memory or under 5 GB free disk; the script repeats the 80/443 and existing-install checks on the
+server with 3x-ui, Maximus Tunnel or anything on ports 80/443, a non-Ubuntu system, under 500 MB of
+memory (under 1 GB it warns to add swap first) or under 5 GB free disk; the script repeats the 80/443 and existing-install checks on the
 server. An existing Hiddify is detected and imported without any change on the server.
 
 | Feature | Implemented | Unit | Simulator | Emulator | Device | Field | Limitation |
