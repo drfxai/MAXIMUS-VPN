@@ -120,18 +120,34 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         local.update { it.copy(transportTools = it.transportTools.copy(warpSplit = enabled)) }
     }
 
-    fun saveFronted(id: String, endpoint: String, sni: String, host: String, splitHello: Boolean) { viewModelScope.launch {
-        try {
-            val clone = withContext(Dispatchers.IO) {
-                val repository = RayApplication.instance.serverRepository
-                val base = repository.getAllProfilesOnce().firstOrNull { it.id == id } ?: error("Choose a base profile")
-                com.example.vpn.experimental.FrontedTunnel.build(base, endpoint, sni, host, splitHello).also { repository.insert(it) }
-            }
-            loadConfigs()
-            local.update { it.copy(transportTools = it.transportTools.copy(message = "Saved ${clone.name}. Select it on Servers and test before use.")) }
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (e: Exception) { local.update { it.copy(transportTools = it.transportTools.copy(message = e.message ?: "Could not save profile")) } }
-    } }
+    fun saveFronted(id: String, endpoint: String, sni: String, host: String, splitHello: Boolean) {
+        if (local.value.transportTools.running || _state.value.vpnOn) return
+        local.update { it.copy(transportTools = it.transportTools.copy(running = true, message = "Testing the fronted profile through native Xray")) }
+        viewModelScope.launch {
+            try {
+                val (clone, evidence) = withContext(Dispatchers.IO) {
+                    val repository = RayApplication.instance.serverRepository
+                    val base = repository.getAllProfilesOnce().firstOrNull { it.id == id } ?: error("Choose a base profile")
+                    val p = com.example.vpn.experimental.FrontedTunnel.build(base, endpoint, sni, host, splitHello)
+                    val result = com.example.xray.RealDelayProbe.measure(p, 8)
+                    // Only an actual proxied request can populate the tested timestamp.
+                    val saved = if (result is com.example.xray.RealDelayProbe.Outcome.Delay)
+                        p.copy(lastLatencyMs = result.latencyMs, lastTestedTimestamp = System.currentTimeMillis()) else p
+                    repository.insert(saved)
+                    saved to result
+                }
+                loadConfigs()
+                val message = when (evidence) {
+                    is com.example.xray.RealDelayProbe.Outcome.Delay -> "Saved ${clone.name}: proxy traffic verified (${evidence.latencyMs} ms)"
+                    is com.example.xray.RealDelayProbe.Outcome.Failed -> "Saved unverified: ${evidence.reason}"
+                    is com.example.xray.RealDelayProbe.Outcome.NotRun -> "Saved unverified: ${evidence.reason}"
+                }
+                local.update { it.copy(transportTools = it.transportTools.copy(message = message)) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { local.update { it.copy(transportTools = it.transportTools.copy(message = e.message ?: "Could not save profile")) } }
+            finally { local.update { it.copy(transportTools = it.transportTools.copy(running = false)) } }
+        }
+    }
 
     private fun loadResearch() {
         local.value = local.value.copy(research = research.all().map { r ->
