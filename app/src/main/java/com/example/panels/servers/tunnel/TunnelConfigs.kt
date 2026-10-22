@@ -19,6 +19,10 @@ object TunnelConfigs {
     const val PORT = "@PORT@"
     const val TAG = "@TAG@"
     const val PROBE_URL = "https://www.gstatic.com/generate_204"
+    /** A second, independent target that also names the address the request arrived from (its `ip=` line). */
+    const val TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
+    /** Inbound tag of the Iran server's loopback test port into the reverse link (see [TunnelSpec.rvProbePort]). */
+    const val REVERSE_PROBE_IN = "probe-rv"
 
     /** Addresses an exit must never open for a client (the server itself and private networks). */
     val PRIVATE_NETS = listOf(
@@ -121,9 +125,19 @@ object TunnelConfigs {
             .put("streamSettings", JSONObject().put("network", "raw").put("security", "reality")
                 .put("realitySettings", reality(spec.entrySni, spec.entryShortId)))
             .put("sniffing", JSONObject().put("enabled", true).put("destOverride", JSONArray().put("http").put("tls").put("quic")).put("routeOnly", true))
+        val inbounds = JSONArray().put(inbound)
+        val rules = JSONArray().put(blockPrivate())
+        // A loopback-only test port that can use nothing but the reverse link, so the status check
+        // proves a request really crosses it (an open connection alone does not).
+        if (TunnelTransport.REVERSE in spec.transports && spec.rvProbePort > 0) {
+            inbounds.put(JSONObject().put("tag", REVERSE_PROBE_IN).put("listen", "127.0.0.1").put("port", spec.rvProbePort)
+                .put("protocol", "socks").put("settings", JSONObject().put("auth", "noauth").put("udp", false)))
+            rules.put(JSONObject().put("inboundTag", JSONArray().put(REVERSE_PROBE_IN)).put("outboundTag", TunnelTransport.REVERSE.tagPrefix))
+        }
+        rules.put(JSONObject().put("inboundTag", JSONArray().put("entry")).put("balancerTag", "abroad"))
         return JSONObject()
             .put("log", JSONObject().put("loglevel", "warning"))
-            .put("inbounds", JSONArray().put(inbound))
+            .put("inbounds", inbounds)
             .put("observatory", JSONObject().put("subjectSelector", JSONArray().put("t-"))
                 .put("probeUrl", PROBE_URL).put("probeInterval", "30s").put("enableConcurrency", true))
             .put("routing", JSONObject().put("domainStrategy", "AsIs")
@@ -131,9 +145,7 @@ object TunnelConfigs {
                     .put("selector", JSONArray().put("t-"))
                     .put("strategy", JSONObject().put("type", "leastPing"))
                     .put("fallbackTag", fallbackTag(spec))))
-                .put("rules", JSONArray()
-                    .put(blockPrivate())
-                    .put(JSONObject().put("inboundTag", JSONArray().put("entry")).put("balancerTag", "abroad"))))
+                .put("rules", rules))
             .text()
     }
 

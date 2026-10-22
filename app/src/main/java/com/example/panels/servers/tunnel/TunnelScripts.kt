@@ -43,6 +43,7 @@ object TunnelScripts {
         require(spec.exitPublicKey.isEmpty() || KEY.matches(spec.exitPublicKey)) { "Invalid key from the server abroad" }
         require(spec.entryPublicKey.isEmpty() || KEY.matches(spec.entryPublicKey)) { "Invalid key from the Iran server" }
         listOf(spec.entryPort, spec.hyPort, spec.hyLocalPort).forEach { ToolScripts.port(it, "tunnel") }
+        if (spec.rvProbePort != 0) ToolScripts.port(spec.rvProbePort, "reverse test")
         spec.fixedPorts.values.forEach { ToolScripts.port(it, "tunnel") }
         spec.avoidPorts.forEach { ToolScripts.port(it, "avoided") }
         if (TunnelTransport.REVERSE in spec.transports) require(UUID.matches(spec.reverseUuid) && spec.reverseUuid != spec.entryUuid) { "Invalid reverse id" }
@@ -174,10 +175,30 @@ object TunnelScripts {
             rm -rf "§chk"; echo "Xray rejected the new port files; keeping the current ones" >&2; exit 32
           fi
           rm -rf "§chk"
+          # Keep the running set until the new one is up, so a failed start puts it back.
+          prev=§(mktemp -d)
+          for f in "§D"/conf.d/2*-t-*.json; do if [ -e "§f" ]; then cp -p "§f" "§prev/"; fi; done
+          cp -p "§D/ports" "§prev/.ports" 2>/dev/null || true
           rm -f "§D"/conf.d/2*-t-*.json
           for f in "§new"/*.json; do install -m 0640 -g maximus "§f" "§D/conf.d/§(basename "§f")"; done
           echo "§ports" > "§D/ports"
-          if [ "§{1:-}" != --no-restart ]; then systemctl restart maximus-tunnel; fi
+          if [ "§{1:-}" != --no-restart ]; then
+            systemctl restart maximus-tunnel || true
+            n=0
+            while [ §n -lt 20 ] && ! systemctl is-active --quiet maximus-tunnel; do sleep 0.5; n=§((n + 1)); done
+            if ! systemctl is-active --quiet maximus-tunnel; then
+              rm -f "§D"/conf.d/2*-t-*.json
+              for f in "§prev"/*.json; do if [ -e "§f" ]; then cp -p "§f" "§D/conf.d/"; fi; done
+              if [ -e "§prev/.ports" ]; then
+                cp -p "§prev/.ports" "§D/ports"
+                if [ "§ROLE" = abroad ]; then for p in §(cat "§prev/.ports"); do fw allow "§p"; done; fi
+              fi
+              systemctl restart maximus-tunnel || true
+              rm -rf "§prev"
+              echo "Xray did not start with the new ports; the previous ports are back" >&2; exit 34
+            fi
+          fi
+          rm -rf "§prev"
         fi
         echo "PORTS=§ports"
     """.trimIndent()
@@ -500,6 +521,7 @@ object TunnelScripts {
               write_file $DIR/reverse.env 0600 <<'EOF_RV'
             RV_FROM=$abroadHost
             RV_PORT=${spec.entryPort}
+            RV_PROBE=${spec.rvProbePort.takeIf { it > 0 } ?: ""}
             EOF_RV
             else
               §SUDO rm -f $DIR/reverse.env
@@ -557,8 +579,9 @@ object TunnelScripts {
 
     /**
      * On the Iran server: the current ports and a real request over each path to the server abroad,
-     * each through a short-lived Xray that uses only that path. Results: PATH_<tag>=ok:<ms> or
-     * fail, PORTS, SVC_<unit>, TIME.
+     * each through a short-lived Xray that uses only that path. Results: PATH_<tag>=ok:<ms>:<exit ip>,
+     * link:<rtt ms> (reverse connection open, no request carried) or fail; LOCAL_IPS and DIRECT_IP
+     * (the Iran server's own addresses); PORTS, SVC_<unit>, TIME. See [TunnelStatus.fromResults].
      */
     fun iranStatus(): ToolScript = ToolScripts.script(
         """
@@ -572,6 +595,19 @@ object TunnelScripts {
           result "SVC_§u" "§st"
         done
         step 2
+        # The Iran server's own addresses: an exit equal to one of them proves nothing about abroad.
+        own=§(hostname -I 2>/dev/null || true)
+        if [ -z "§own" ] && have ip; then own=§(ip -o addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", §4); print §4}' | tr '\n' ' '); fi
+        result LOCAL_IPS "§(echo §own)"
+        result DIRECT_IP "§(curl -s --max-time 8 ${TunnelConfigs.TRACE_URL} 2>/dev/null | sed -n 's/^ip=//p' | head -n1)"
+        # One path through a local SOCKS port: a 204 from one target, then the exit address from a
+        # second, independent one. Prints ok:<ms>:<exit ip> or fail.
+        probe() {
+          r=§(curl -s -o /dev/null -w '%{http_code} %{time_total}' --max-time 12 -x "socks5h://127.0.0.1:§1" ${TunnelConfigs.PROBE_URL} 2>/dev/null || true)
+          if [ "§(echo "§r" | awk '{print §1}')" != 204 ]; then echo fail; return 0; fi
+          ip=§(curl -s --max-time 10 -x "socks5h://127.0.0.1:§1" ${TunnelConfigs.TRACE_URL} 2>/dev/null | sed -n 's/^ip=//p' | head -n1)
+          echo "ok:§(echo "§r" | awk '{printf "%d", §2 * 1000}'):§ip"
+        }
         work=§(mktemp -d)
         pid=""
         trap 'if [ -n "§pid" ]; then kill "§pid" 2>/dev/null || true; fi; rm -rf "§work"' EXIT
@@ -589,28 +625,33 @@ object TunnelScripts {
           if have ss; then
             while [ §n -lt 25 ] && ! ss -Hlnt "sport = :§port" 2>/dev/null | grep -q .; do sleep 0.2; n=§((n + 1)); done
           else sleep 1; fi
-          r=§(curl -s -o /dev/null -w '%{http_code} %{time_total}' --max-time 12 -x "socks5h://127.0.0.1:§port" ${TunnelConfigs.PROBE_URL} 2>/dev/null || true)
+          v=§(probe "§port")
           kill "§pid" 2>/dev/null || true; wait "§pid" 2>/dev/null || true; pid=""
-          code=§(echo "§r" | awk '{print §1}')
-          if [ "§code" = 204 ]; then result "PATH_§tag" "ok:§(echo "§r" | awk '{printf "%d", §2 * 1000}')"
-          else result "PATH_§tag" "fail"; fi
+          result "PATH_§tag" "§v"
         done
         rm -rf "§work"
-        # Reverse: the server abroad holds connections open to the phone port; report the round trip
-        # of the best one (from the kernel), or fail when none is open.
+        # Reverse: a real request through the running Xray's loopback test port, which can only use
+        # the reverse link. Without one (older setups), or when the request fails, an open connection
+        # from the server abroad is reported as "link" (kernel round trip), which is not proof of traffic.
         if §SUDO test -f $DIR/reverse.env; then
           RV_FROM=§(§SUDO sed -n 's/^RV_FROM=//p' $DIR/reverse.env)
           RV_PORT=§(§SUDO sed -n 's/^RV_PORT=//p' $DIR/reverse.env)
-          ips=§(getent ahosts "§RV_FROM" 2>/dev/null | awk '{print §1}' | sort -u | tr '\n' ' ')
-          [ -n "§ips" ] || ips="§RV_FROM"
-          rtt=""
-          if have ss; then
-            rtt=§(ss -Htni state established "( sport = :§RV_PORT )" 2>/dev/null | awk -v ips=" §ips " '
-              /^[ \t]/ { if (m && match(§0, /rtt:[0-9.]+/)) { v = substr(§0, RSTART + 4, RLENGTH - 4) + 0; if (best == "" || v < best) best = v }; next }
-              { p = §4; sub(/:[0-9]+§/, "", p); gsub(/[][]/, "", p); sub(/^::ffff:/, "", p); m = index(ips, " " p " ") > 0 }
-              END { if (best != "") printf "%d", (best < 1 ? 1 : best) }')
+          RV_PROBE=§(§SUDO sed -n 's/^RV_PROBE=//p' $DIR/reverse.env)
+          v=fail
+          if [ -n "§RV_PROBE" ]; then v=§(probe "§RV_PROBE"); fi
+          if [ "§v" = fail ]; then
+            ips=§(getent ahosts "§RV_FROM" 2>/dev/null | awk '{print §1}' | sort -u | tr '\n' ' ')
+            [ -n "§ips" ] || ips="§RV_FROM"
+            rtt=""
+            if have ss; then
+              rtt=§(ss -Htni state established "( sport = :§RV_PORT )" 2>/dev/null | awk -v ips=" §ips " '
+                /^[ \t]/ { if (m && match(§0, /rtt:[0-9.]+/)) { v = substr(§0, RSTART + 4, RLENGTH - 4) + 0; if (best == "" || v < best) best = v }; next }
+                { p = §4; sub(/:[0-9]+§/, "", p); gsub(/[][]/, "", p); sub(/^::ffff:/, "", p); m = index(ips, " " p " ") > 0 }
+                END { if (best != "") printf "%d", (best < 1 ? 1 : best) }')
+            fi
+            if [ -n "§rtt" ]; then v="link:§rtt"; fi
           fi
-          if [ -n "§rtt" ]; then result "PATH_${TunnelTransport.REVERSE.tagPrefix}" "ok:§rtt"; else result "PATH_${TunnelTransport.REVERSE.tagPrefix}" "fail"; fi
+          result "PATH_${TunnelTransport.REVERSE.tagPrefix}" "§v"
         fi
         """,
         STATUS_STEPS

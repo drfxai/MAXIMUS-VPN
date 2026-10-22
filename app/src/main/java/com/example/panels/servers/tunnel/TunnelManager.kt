@@ -38,27 +38,112 @@ data class TunnelChecks(
     val blocked: Boolean get() = items.any { !it.ok && it.blocking }
 }
 
-/** A finished setup. */
+/**
+ * What happened to one path when a real request was sent over it from the Iran server. A path
+ * counts as working only in [ROUTE_VERIFIED]: an HTTPS request answered through it and the
+ * address the internet saw was not one of the Iran server's own.
+ */
+enum class PathState {
+    /** Two HTTPS targets answered through the path and the exit address is abroad. */
+    ROUTE_VERIFIED,
+    /** The request went through, but the exit address could not be read or was the Iran server's own. */
+    NO_EXIT_PROOF,
+    /** Reverse only: the server abroad holds a connection open, but no request was carried over it. */
+    LINK_ONLY,
+    FAILED
+}
+
+/** Evidence for one path: [latencyMs] is the request time, [exitIp] the address the internet saw. */
+data class PathEvidence(val state: PathState, val latencyMs: Long? = null, val exitIp: String? = null) {
+    val verified: Boolean get() = state == PathState.ROUTE_VERIFIED
+
+    companion object {
+        private val IP = Regex("^[0-9A-Fa-f:.]{2,45}$")
+
+        /**
+         * Reads one PATH_ value of the status script: `ok:<ms>[:<exit ip>]`, `link:<rtt ms>` or
+         * `fail`. An exit that is one of [ownIps] (the Iran server's addresses) is not proof that
+         * the request left abroad.
+         */
+        fun parse(value: String, ownIps: Set<String>): PathEvidence {
+            val parts = value.split(':', limit = 3)
+            val ms = parts.getOrNull(1)?.toLongOrNull()
+            return when (parts[0]) {
+                "ok" -> {
+                    val ip = parts.getOrNull(2)?.trim()?.takeIf { IP.matches(it) }
+                    val abroad = ip != null && ip !in ownIps
+                    PathEvidence(if (abroad && ms != null) PathState.ROUTE_VERIFIED else PathState.NO_EXIT_PROOF, ms, ip)
+                }
+                "link" -> PathEvidence(PathState.LINK_ONLY, ms)
+                else -> PathEvidence(PathState.FAILED)
+            }
+        }
+    }
+}
+
+/**
+ * The tunnel's state as a whole, from the last status check. Only [ROUTE_VERIFIED] and
+ * [DEGRADED] mean real traffic crossed it; a running service or an open connection alone never does.
+ */
+enum class TunnelHealth {
+    /** Every tested path carried a request to the internet abroad. */
+    ROUTE_VERIFIED,
+    /** At least one path carried traffic abroad, others failed. */
+    DEGRADED,
+    /** The services run, but no path carried a request with a foreign exit. */
+    NO_EXTERNAL_ROUTE_OBSERVED,
+    /** The tunnel service on the Iran server is not running. */
+    FAILED,
+    /** The check itself could not run (SSH failed, timed out). */
+    UNKNOWN
+}
+
+/** A finished setup. [status] is null when the check after the setup could not run. */
 data class TunnelOutcome(
     val iran: ManagedServer,
     val abroad: ManagedServer,
     val spec: TunnelSpec,
     val profile: VlessProfile,
     val link: String,
-    val paths: Map<String, Long?>
-)
+    val status: TunnelStatus?
+) {
+    val health: TunnelHealth get() = status?.health ?: TunnelHealth.UNKNOWN
+}
 
 /** The live state of a tunnel, read on the Iran server. */
 data class TunnelStatus(
-    /** Outbound tag ("t-reality-now", "t-hy2"...) -> latency in ms, or null when that path failed. */
-    val paths: Map<String, Long?>,
+    /** Outbound tag ("t-reality-now", "t-hy2"...) -> what a real request over that path found. */
+    val evidence: Map<String, PathEvidence>,
     val ports: List<Int>,
     val running: Boolean,
     val serverTime: Long,
     val checkedAt: Long = System.currentTimeMillis()
 ) {
-    val working: Int get() = paths.values.count { it != null }
-    val best: String? get() = paths.filterValues { it != null }.minByOrNull { it.value!! }?.key
+    /** Tag -> latency in ms for paths whose route abroad was verified; null for every other path. */
+    val paths: Map<String, Long?> get() = evidence.mapValues { (_, e) -> e.latencyMs.takeIf { e.verified } }
+    val working: Int get() = evidence.values.count { it.verified }
+    val best: String? get() = evidence.filterValues { it.verified && it.latencyMs != null }.minByOrNull { it.value.latencyMs!! }?.key
+    val health: TunnelHealth get() = when {
+        !running -> TunnelHealth.FAILED
+        working == 0 -> TunnelHealth.NO_EXTERNAL_ROUTE_OBSERVED
+        working < evidence.size -> TunnelHealth.DEGRADED
+        else -> TunnelHealth.ROUTE_VERIFIED
+    }
+
+    companion object {
+        /** Builds the status from the results of [TunnelScripts.iranStatus]; [host] is the Iran server's address in the app. */
+        fun fromResults(r: Map<String, String>, host: String): TunnelStatus {
+            val own = (r["LOCAL_IPS"].orEmpty().split(' ') + r["DIRECT_IP"].orEmpty() + host)
+                .map { it.trim().removePrefix("[").removeSuffix("]") }.filter { it.isNotEmpty() }.toSet()
+            return TunnelStatus(
+                evidence = r.filterKeys { it.startsWith("PATH_") }.map { (k, v) -> k.removePrefix("PATH_") to PathEvidence.parse(v, own) }.toMap(),
+                ports = r["PORTS"].orEmpty().split(' ').mapNotNull { it.toIntOrNull() },
+                // Both units must run; Hysteria2's reports "off" when the tunnel does not use it.
+                running = r["SVC_maximus-tunnel"] == "active" && r["SVC_maximus-tunnel-hy"].let { it == null || it == "active" || it == "off" },
+                serverTime = r["TIME"]?.toLongOrNull() ?: 0L
+            )
+        }
+    }
 }
 
 /**
@@ -121,12 +206,13 @@ class TunnelManager(
             add(CheckItem("Iran server reaches GitHub", github,
                 if (github) "downloads programs itself" else "blocked; this phone will send the verified programs", blocking = false))
             add(CheckItem("Iran server reaches the server abroad", forward != false, when (forward) {
-                true -> "direct ways can be used"
+                // Only the SSH port is known to listen before setup; each way is tested with real traffic after it.
+                true -> "SSH port answers; each way gets a real traffic test after setup"
                 false -> "no connection; the reverse way will carry the tunnel"
                 null -> "could not be tested; trying every way"
             }, blocking = false))
             add(CheckItem("Server abroad reaches the Iran server", backward != false, when (backward) {
-                true -> "the reverse way can be used"
+                true -> "SSH port answers; the reverse way gets a real traffic test after setup"
                 false -> "no connection; the reverse way stays off"
                 null -> "could not be tested; trying every way"
             }, blocking = forward == false && backward == false))
@@ -155,6 +241,7 @@ class TunnelManager(
         TunnelTransport.ROTATING.forEach { t ->
             fixed[t] = previous?.fixedPorts?.get(t) ?: ServerRandom.port(abroadUsed, exclude = avoid + hyPort + fixed.values)
         }
+        val hyLocal = previous?.hyLocalPort ?: ServerRandom.port(iranUsed, range = 10_000..19_999)
         return TunnelSpec(
             iranId = checks.iran.id, abroadId = checks.abroad.id,
             transports = transports, rotationHours = rotationHours,
@@ -174,8 +261,9 @@ class TunnelManager(
             hyAuth = previous?.hyAuth ?: ServerRandom.secret(24),
             hyObfs = previous?.hyObfs ?: ServerRandom.secret(24),
             hyCertPem = previous?.hyCertPem.orEmpty(),
-            hyLocalPort = previous?.hyLocalPort ?: ServerRandom.port(iranUsed, range = 10_000..19_999),
+            hyLocalPort = hyLocal,
             reverseUuid = previous?.reverseUuid?.takeIf { it.isNotBlank() } ?: TunnelRandom.uuid(),
+            rvProbePort = previous?.rvProbePort?.takeIf { it > 0 } ?: ServerRandom.port(iranUsed, range = 10_000..19_999, exclude = setOf(hyLocal)),
             createdAt = previous?.createdAt ?: System.currentTimeMillis()
         ).also { TunnelScripts.validate(it) }
     }
@@ -256,8 +344,7 @@ class TunnelManager(
             // The server abroad opens its first connections within a few seconds.
             Thread.sleep(REVERSE_SETTLE_MS)
         }
-        val status = runCatching { status(iranServer, progress) }.getOrNull()
-        status?.paths?.forEach { (tag, ms) -> progress.log("$tag: ${ms?.let { "$it ms" } ?: "no answer"}") }
+        val status = verify(iranServer, progress)
 
         progress.step(6)
         val iranTool = InstalledTool(ServerToolCatalog.MAXIMUS_TUNNEL, port = spec.entryPort,
@@ -267,7 +354,33 @@ class TunnelManager(
         val iran = iranServer.withTool(iranTool).copy(facts = iranFacts, checkedAt = now)
         val abroad = abroadServer.withTool(abroadTool).copy(facts = abroadFacts, checkedAt = now)
         return TunnelOutcome(iran, abroad, spec, TunnelConfigs.entryProfile(spec, iran, abroad), TunnelConfigs.entryLink(spec, iran, abroad),
-            status?.paths.orEmpty())
+            status)
+    }
+
+    /**
+     * Sends a real request over every path from the Iran server. A fresh Xray probes its paths
+     * in the first seconds and the reverse link needs a moment to open, so a check that finds
+     * no verified path is repeated once. A check that cannot run is logged and returns null:
+     * the setup is then reported as not verified, never as working.
+     */
+    private fun verify(iranServer: ManagedServer, progress: ActionProgress): TunnelStatus? {
+        var status: TunnelStatus? = null
+        for (attempt in 1..VERIFY_ATTEMPTS) {
+            status = try { status(iranServer, progress) } catch (e: Exception) {
+                progress.log("Could not test the paths: ${e.message.orEmpty().take(160)}"); null
+            }
+            if (status != null && status.working > 0) break
+            if (attempt < VERIFY_ATTEMPTS) { progress.log("No path verified yet; testing again in a few seconds"); Thread.sleep(VERIFY_RETRY_MS) }
+        }
+        status?.evidence?.forEach { (tag, e) -> progress.log("$tag: " + describe(e)) }
+        progress.log(when (status?.health ?: TunnelHealth.UNKNOWN) {
+            TunnelHealth.ROUTE_VERIFIED -> "Every path carried a real request abroad"
+            TunnelHealth.DEGRADED -> "${status!!.working} of ${status.evidence.size} paths carried a real request abroad"
+            TunnelHealth.NO_EXTERNAL_ROUTE_OBSERVED -> "The servers are set up, but no path carried a request abroad"
+            TunnelHealth.FAILED -> "The tunnel service on the Iran server is not running"
+            TunnelHealth.UNKNOWN -> "The paths could not be tested; the tunnel is not verified"
+        })
+        return status
     }
 
     /**
@@ -294,16 +407,7 @@ class TunnelManager(
     // ------------------------------------------------------------------ manage
 
     fun status(iran: ManagedServer, progress: ActionProgress? = null): TunnelStatus = connect(iran).use { shell ->
-        val r = run(shell, TunnelScripts.iranStatus(), progress, 3 * 60_000L)
-        TunnelStatus(
-            paths = r.filterKeys { it.startsWith("PATH_") }.map { (k, v) ->
-                k.removePrefix("PATH_") to (if (v.startsWith("ok:")) v.removePrefix("ok:").toLongOrNull() else null)
-            }.toMap(),
-            ports = r["PORTS"].orEmpty().split(' ').mapNotNull { it.toIntOrNull() },
-            // Both units must run; Hysteria2's reports "off" when the tunnel does not use it.
-            running = r["SVC_maximus-tunnel"] == "active" && r["SVC_maximus-tunnel-hy"].let { it == null || it == "active" || it == "off" },
-            serverTime = r["TIME"]?.toLongOrNull() ?: 0L
-        )
+        TunnelStatus.fromResults(run(shell, TunnelScripts.iranStatus(), progress, 3 * 60_000L), iran.host)
     }
 
     /**
@@ -349,6 +453,17 @@ class TunnelManager(
 }
 
 private const val REVERSE_SETTLE_MS = 4_000L
+private const val VERIFY_ATTEMPTS = 2
+private const val VERIFY_RETRY_MS = 8_000L
+
+/** One line for the setup log about a path. */
+internal fun describe(e: PathEvidence): String = when (e.state) {
+    PathState.ROUTE_VERIFIED -> "${e.latencyMs} ms, exit ${e.exitIp}"
+    PathState.NO_EXIT_PROOF -> "answered in ${e.latencyMs} ms, but the exit address " +
+        (e.exitIp?.let { "($it) is the Iran server's own" } ?: "could not be read")
+    PathState.LINK_ONLY -> "linked (${e.latencyMs} ms), but no request went through"
+    PathState.FAILED -> "no answer"
+}
 
 class TunnelScriptException(val exitCode: Int, message: String) : IllegalStateException(message)
 /** Ports the status check uses on the Iran server for its test proxies (39000 + up to 999 + a few). */

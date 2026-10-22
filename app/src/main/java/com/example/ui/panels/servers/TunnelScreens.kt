@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.NetworkCheck
+import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Route
@@ -67,6 +68,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.panels.servers.CheckItem
 import com.example.panels.servers.ServerLocation
+import com.example.panels.servers.tunnel.PathState
+import com.example.panels.servers.tunnel.TunnelHealth
 import com.example.panels.servers.tunnel.TunnelSpec
 import com.example.panels.servers.tunnel.TunnelTransport
 
@@ -94,7 +97,9 @@ data class TunnelPathUi(
     val previous: Boolean,
     val latencyMs: Long?,
     val tested: Boolean,
-    val best: Boolean
+    val best: Boolean,
+    /** What the last real request over this path found; null when it was not tested. */
+    val state: PathState? = null
 )
 
 data class TunnelTabUi(
@@ -128,6 +133,8 @@ data class TunnelSetupUi(
     val currentStep: Int = 0,
     val log: List<String> = emptyList(),
     val paths: List<TunnelPathUi> = emptyList(),
+    /** What the test after the setup found; null before the setup finished. */
+    val health: TunnelHealth? = null,
     val profileName: String? = null,
     val link: String? = null,
     val testing: Boolean = false,
@@ -258,7 +265,7 @@ private fun TunnelHealthLine(card: TunnelCardUi) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         HealthLabel(card.health, card.latencyMs)
         if (card.working != null && card.total != null) {
-            Text("  ·  ${card.working} of ${card.total} paths open", color = Sv.Muted, fontSize = 12.sp)
+            Text("  ·  ${card.working} of ${card.total} paths verified", color = Sv.Muted, fontSize = 12.sp)
         }
         Spacer(Modifier.weight(1f))
         Text(card.rotationText, color = Sv.Muted, fontSize = 12.sp)
@@ -663,13 +670,22 @@ private fun TimelineRow(text: String, state: Int, last: Boolean) {
 private fun TunnelDoneStage(ui: TunnelSetupUi, actions: TunnelActions) {
     GroupCard {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).clip(CircleShape).background(Sv.GreenSoft).border(1.dp, Sv.Green.copy(alpha = 0.35f), CircleShape),
+            // Only a request that really left abroad earns the green check; set up is not the same as working.
+            val verified = ui.health == TunnelHealth.ROUTE_VERIFIED || ui.health == TunnelHealth.DEGRADED
+            val tint = if (verified) Sv.Green else Sv.Amber
+            Box(Modifier.size(40.dp).clip(CircleShape).background(if (verified) Sv.GreenSoft else Sv.AmberSoft).border(1.dp, tint.copy(alpha = 0.35f), CircleShape),
                 contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Check, null, tint = Sv.Green, modifier = Modifier.size(22.dp))
+                Icon(if (verified) Icons.Rounded.Check else Icons.Rounded.PriorityHigh, null, tint = tint, modifier = Modifier.size(22.dp))
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text("Tunnel is up", color = Sv.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(when (ui.health) {
+                    TunnelHealth.ROUTE_VERIFIED -> "Tunnel is up"
+                    TunnelHealth.DEGRADED -> "Tunnel is up, some paths failed"
+                    TunnelHealth.NO_EXTERNAL_ROUTE_OBSERVED -> "Set up, but no path reached the internet"
+                    TunnelHealth.FAILED -> "Set up, but the tunnel is not running"
+                    else -> "Set up, not verified yet"
+                }, color = Sv.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
                     FlagIcon(ServerLocation.IRAN, height = 10.dp)
                     Text("  ${ui.iran?.name.orEmpty()}  →  ", color = Sv.Muted, fontSize = 13.sp)
@@ -705,6 +721,8 @@ private fun PathsCard(paths: List<TunnelPathUi>) {
                     when {
                         !p.tested -> Text("—", color = Sv.Dim, fontSize = 12.sp)
                         p.latencyMs != null -> HealthLabel(Health.ONLINE, p.latencyMs)
+                        p.state == PathState.NO_EXIT_PROOF -> Badge("Exit not confirmed", Tone.WARN, dot = true)
+                        p.state == PathState.LINK_ONLY -> Badge("Linked, no traffic", Tone.WARN, dot = true)
                         p.transport == TunnelTransport.REVERSE -> Badge("Not linked", Tone.BAD, dot = true)
                         else -> Badge("Blocked", Tone.BAD, dot = true)
                     }

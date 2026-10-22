@@ -121,12 +121,14 @@ class TunnelController(
         return TunnelTransport.entries.filter { it in spec.transports }.flatMap { t ->
             if (t !in TunnelTransport.ROTATING) {
                 val port = if (t == TunnelTransport.HYSTERIA2) spec.hyPort else spec.entryPort
-                listOf(TunnelPathUi(t, port, false, status?.paths?.get(t.tagPrefix), status != null && t.tagPrefix in status.paths, best == t.tagPrefix))
+                listOf(TunnelPathUi(t, port, false, status?.paths?.get(t.tagPrefix), status != null && t.tagPrefix in status.paths, best == t.tagPrefix,
+                    status?.evidence?.get(t.tagPrefix)?.state))
             } else {
                 val ports = TunnelPorts.current(spec, t, now)
                 ports.mapIndexed { i, port ->
                     val tag = "${t.tagPrefix}-${if (i == 0) "now" else "prev"}"
-                    TunnelPathUi(t, port, i > 0, status?.paths?.get(tag), status != null && tag in status.paths, best == tag)
+                    TunnelPathUi(t, port, i > 0, status?.paths?.get(tag), status != null && tag in status.paths, best == tag,
+                        status?.evidence?.get(tag)?.state)
                 }
             }
         }
@@ -337,13 +339,14 @@ class TunnelController(
                 val profileId = storeProfile(oldProfile, out.profile)
                 val savedIran = out.iran.withTool(out.iran.tool(ServerToolCatalog.MAXIMUS_TUNNEL)!!.copy(profileId = profileId))
                 save(savedIran); save(out.abroad)
-                val status = TunnelStatus(out.paths, emptyList(), running = true, serverTime = 0L)
+                val status = out.status
                 _state.update { st ->
                     st.copy(
-                        status = if (out.paths.isEmpty()) st.status else st.status + (savedIran.id to status),
+                        status = if (status == null) st.status else st.status + (savedIran.id to status),
                         setup = st.setup?.copy(
                             stage = TunnelStage.DONE, currentStep = manager.steps.size + 1,
-                            paths = paths(out.spec, status.takeIf { out.paths.isNotEmpty() }),
+                            health = out.health,
+                            paths = paths(out.spec, status),
                             profileName = out.profile.name, link = out.link
                         )
                     )

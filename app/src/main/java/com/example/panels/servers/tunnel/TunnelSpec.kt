@@ -79,6 +79,12 @@ data class TunnelSpec(
     val hyLocalPort: Int,
     /** Id the server abroad signs in with for [TunnelTransport.REVERSE]; Xray lets it only carry reverse traffic. */
     val reverseUuid: String = "",
+    /**
+     * Loopback SOCKS port on the Iran server that sends only into the reverse link, so the status
+     * check can push a real request over it. 0 on tunnels set up before it existed: their reverse
+     * way can only be reported as linked until the next update.
+     */
+    val rvProbePort: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 ) {
     val fallbackTransport: TunnelTransport get() = TunnelTransport.entries.first { it in transports }
@@ -96,7 +102,8 @@ data class TunnelSpec(
         put("exitPublicKey", exitPublicKey); put("exitShortId", exitShortId)
         put("xhttpPath", xhttpPath)
         put("hyPort", hyPort.toString()); put("hyAuth", hyAuth); put("hyObfs", hyObfs); put("hyCertPem", hyCertPem)
-        put("hyLocalPort", hyLocalPort.toString()); put("reverseUuid", reverseUuid); put("createdAt", createdAt.toString())
+        put("hyLocalPort", hyLocalPort.toString()); put("reverseUuid", reverseUuid)
+        put("rvProbePort", rvProbePort.toString()); put("createdAt", createdAt.toString())
     }
 
     companion object {
@@ -125,6 +132,7 @@ data class TunnelSpec(
                 hyPort = i("hyPort"), hyAuth = s.getValue("hyAuth"), hyObfs = s.getValue("hyObfs"),
                 hyCertPem = s["hyCertPem"].orEmpty(), hyLocalPort = i("hyLocalPort"),
                 reverseUuid = s["reverseUuid"].orEmpty(),
+                rvProbePort = s["rvProbePort"]?.toIntOrNull() ?: 0,
                 createdAt = s["createdAt"]?.toLongOrNull() ?: 0L
             ).takeIf { it.transports.isNotEmpty() }
         }.getOrNull()
