@@ -25,7 +25,11 @@ data class ServerTool(
     /** Shown in the catalog but not installable yet. */
     val comingLater: Boolean = false,
     /** Only for servers that use apt (Debian, Ubuntu). */
-    val aptOnly: Boolean = false
+    val aptOnly: Boolean = false,
+    /** Tools that cannot share a server with this one. */
+    val conflicts: Set<String> = emptySet(),
+    /** Needs a server with nothing else on it. */
+    val ownServer: Boolean = false
 ) {
     fun fitsOn(location: ServerLocation) = location in fits
 }
@@ -41,7 +45,6 @@ object ServerToolCatalog {
     const val BBR = "bbr"
     const val SWAP = "swap"
     const val MAXIMUS_TUNNEL = "maximus-tunnel"
-    /** Managed through ServerPanelProvider only; not in [all], so no tool card shows it yet. */
     const val HIDDIFY = "hiddify"
 
     private val both = setOf(ServerLocation.IRAN, ServerLocation.ABROAD)
@@ -54,7 +57,20 @@ object ServerToolCatalog {
                 "in Iran it can relay to a server abroad.",
             ToolGroup.PANELS, both,
             listOf("Installs 3X-UI (signed release, pinned installer)", "Creates a random panel login and path",
-                "Serves the panel over HTTPS with a pinned certificate", "Opens the panel port in the firewall")
+                "Serves the panel over HTTPS with a pinned certificate", "Opens the panel port in the firewall"),
+            conflicts = setOf(HIDDIFY)
+        ),
+        ServerTool(
+            HIDDIFY, "Hiddify", "Full panel with users, plans and many protocols",
+            "Hiddify Manager: users, usage limits and many protocols in one panel. It uses ports 80 and 443 " +
+                "and its own web server, so it goes on a server with nothing else on it. Installed with " +
+                "Hiddify's official installer (GPL-3.0, by the Hiddify team), pinned to version 14.0.5.",
+            ToolGroup.PANELS, abroad,
+            listOf("Downloads Hiddify's official installer for 14.0.5 and checks it against pinned SHA-256 values",
+                "Runs it as root: it installs its own web server, proxy cores and database as hiddify-* services",
+                "Takes ports 80 and 443", "Keeps the admin link only in this phone's encrypted store",
+                "If the installer stops halfway, Remove cleans up what it added"),
+            conflicts = setOf(XUI, MAXIMUS_TUNNEL), ownServer = true
         ),
         ServerTool(
             DNSTT, "DNS tunnel (dnstt)", "Works when only DNS gets through",
@@ -72,7 +88,8 @@ object ServerToolCatalog {
                 "the fastest open path and moves its ports on a schedule. Set up from the Tunnel tab.",
             ToolGroup.TUNNELS, both,
             listOf("Abroad: Xray and Hysteria2 under a locked user, keys made on the server, rotating ports",
-                "Iran: Xray with one port for your phone that only forwards abroad")
+                "Iran: Xray with one port for your phone that only forwards abroad"),
+            conflicts = setOf(HIDDIFY)
         ),
         ServerTool(
             HYSTERIA2, "Hysteria2", "Very fast on bad networks (UDP)",

@@ -45,6 +45,9 @@ object InstallChecks {
         val freeMb = facts.diskFreeMb
         add(CheckItem("Free disk", freeMb >= 300, String.format(java.util.Locale.US, "%.1f GB free", freeMb / 1024.0), blocking = freeMb < 100))
         when (tool.id) {
+            ServerToolCatalog.HIDDIFY -> addAll(com.example.panels.servers.panel.HiddifyPanelProvider.checks(server, facts))
+            ServerToolCatalog.XUI -> if (facts.hiddifyInstalled || server.tool(ServerToolCatalog.HIDDIFY) != null)
+                add(CheckItem("No Hiddify", false, "This server runs Hiddify, which needs the server to itself"))
             ServerToolCatalog.DNSTT -> {
                 val dnsBusy = 53 in facts.udpPorts
                 add(CheckItem("UDP 53", !dnsBusy,
