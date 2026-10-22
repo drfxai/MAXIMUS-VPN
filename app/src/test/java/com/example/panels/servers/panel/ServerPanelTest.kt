@@ -35,7 +35,11 @@ class ServerPanelTest {
         assertNotNull(hiddify.installBlocker(server, facts(tcp = "22,80")))
         assertNotNull(hiddify.installBlocker(server, facts(ramKb = 512_000)))
         assertNotNull(hiddify.installBlocker(server, facts(diskFreeKb = 2_000_000)))
-        assertNotNull(hiddify.installBlocker(server, facts(extra = "SVC_x-ui=inactive\n")))
+        // Every server reports an x-ui unit state; only real 3x-ui files count.
+        assertNull(hiddify.installBlocker(server, facts(extra = "SVC_x-ui=inactive\n")))
+        assertNotNull(hiddify.installBlocker(server, facts(extra = "XUI=1\n")))
+        assertNotNull(hiddify.installBlocker(server, facts(extra = "MXTUNNEL=1\n")))
+        assertNotNull(hiddify.installBlocker(server, facts(extra = "HIDDIFY=1\nHIDDIFY_VERSION=14.0.5\n")))
         assertNotNull(hiddify.installBlocker(server.withTool(InstalledTool(ServerToolCatalog.XUI)), facts()))
         assertNotNull(hiddify.installBlocker(server.withTool(InstalledTool(ServerToolCatalog.MAXIMUS_TUNNEL)), facts()))
     }
@@ -44,8 +48,18 @@ class ServerPanelTest {
         val xui = XuiPanelProvider(connect = { error("no SSH in this test") })
         assertNull(xui.installBlocker(server, facts()))
         assertNotNull(xui.installBlocker(server.withTool(InstalledTool(ServerToolCatalog.HIDDIFY)), facts()))
+        assertNotNull(xui.installBlocker(server, facts(extra = "HIDDIFY=1\n")))
         assertFalse(PanelOperation.UPDATE in xui.operations)
         assertEquals("v3.8.5", xui.pinnedVersion)
+    }
+
+    @Test fun factsFindPanelsInstalledFromElsewhere() {
+        val f = facts(extra = "HIDDIFY=1\nHIDDIFY_VERSION=14.0.5\nSVC_hiddify-panel=active\nSVC_hiddify-xray=failed\n")
+        assertTrue(f.hiddifyInstalled)
+        assertEquals("14.0.5", f.hiddifyVersion)
+        assertEquals("failed", f.services["hiddify-xray"])
+        assertFalse(facts().hiddifyInstalled || facts().xuiInstalled || facts().tunnelInstalled)
+        assertTrue(HiddifyPanelProvider.checks(server, facts()).none { it.blocking })
     }
 
     @Test fun versionsCompareNumerically() {

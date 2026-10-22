@@ -71,7 +71,7 @@ class XuiPanelProvider(
 
     override fun installBlocker(server: ManagedServer, facts: ServerFacts): String? = when {
         facts.blocker() != null -> facts.blocker()
-        server.tool(ServerToolCatalog.HIDDIFY) != null -> "This server runs Hiddify, which needs the server to itself."
+        server.tool(ServerToolCatalog.HIDDIFY) != null || facts.hiddifyInstalled -> "This server runs Hiddify, which needs the server to itself."
         else -> null
     }
 

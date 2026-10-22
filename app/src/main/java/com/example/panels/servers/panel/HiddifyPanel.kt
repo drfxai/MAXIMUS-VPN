@@ -1,6 +1,7 @@
 package com.example.panels.servers.panel
 
 import com.example.panels.servers.ActionProgress
+import com.example.panels.servers.CheckItem
 import com.example.panels.servers.InstallOutcome
 import com.example.panels.servers.InstalledTool
 import com.example.panels.servers.ManagedServer
@@ -175,21 +176,8 @@ class HiddifyPanelProvider(
     override val operations = PanelOperation.entries.toSet()
     override val pinnedVersion = HiddifyScripts.VERSION
 
-    /** Minimums from Hiddify's own guidance, rounded up for a working panel. */
-    private val minRamMb = 1000L
-    private val minDiskFreeMb = 5_000L
-
-    override fun installBlocker(server: ManagedServer, facts: ServerFacts): String? = when {
-        facts.blocker() != null -> facts.blocker()
-        facts.osId != "ubuntu" -> "Hiddify needs Ubuntu (22.04 is the tested release); this server runs ${facts.osName.ifBlank { "another system" }}."
-        server.tool(ServerToolCatalog.XUI) != null || facts.services.containsKey("x-ui") ->
-            "This server runs 3x-ui. Hiddify is only installed on a server of its own."
-        server.tool(ServerToolCatalog.MAXIMUS_TUNNEL) != null -> "This server runs Maximus Tunnel. Hiddify is only installed on a server of its own."
-        80 in facts.tcpPorts || 443 in facts.tcpPorts -> "Ports 80 or 443 are in use. Hiddify needs both, on a server of its own."
-        facts.ramMb in 1 until minRamMb -> "Hiddify needs at least 1 GB of memory; this server has ${facts.ramMb} MB."
-        facts.diskFreeMb in 1 until minDiskFreeMb -> "Hiddify needs about 5 GB of free disk; this server has ${facts.diskFreeMb} MB."
-        else -> null
-    }
+    override fun installBlocker(server: ManagedServer, facts: ServerFacts): String? =
+        facts.blocker() ?: checks(server, facts).firstOrNull { it.blocking }?.detail
 
     private fun read(server: ManagedServer): Map<String, String> = connect(server).use { it.runTool(HiddifyScripts.status(), LineCollector(), 60_000L) }
 
@@ -268,6 +256,36 @@ class HiddifyPanelProvider(
     }
 
     companion object {
+        /** Minimums from Hiddify's own guidance, rounded up for a working panel. */
+        const val MIN_RAM_MB = 1000L
+        const val MIN_DISK_FREE_MB = 5_000L
+
+        /**
+         * The read-only checks before an install, shown in the wizard; any blocking item refuses
+         * the install. Hiddify goes only on a server of its own (DrFX, 2026-10-22).
+         */
+        fun checks(server: ManagedServer, facts: ServerFacts): List<CheckItem> = buildList {
+            add(CheckItem("Ubuntu", facts.osId == "ubuntu",
+                if (facts.osId == "ubuntu") "${facts.osName.ifBlank { "Ubuntu" }} (22.04 is the tested release)"
+                else "Hiddify needs Ubuntu; this server runs ${facts.osName.ifBlank { "another system" }}"))
+            val other = when {
+                facts.hiddifyInstalled || server.tool(ServerToolCatalog.HIDDIFY) != null ->
+                    "Hiddify is already here; add it from the server page instead"
+                facts.xuiInstalled || server.tool(ServerToolCatalog.XUI) != null -> "This server runs 3X-UI"
+                facts.tunnelInstalled || server.tool(ServerToolCatalog.MAXIMUS_TUNNEL) != null -> "This server runs Maximus Tunnel"
+                else -> null
+            }
+            add(CheckItem("A server of its own", other == null, other?.let { "$it. Hiddify needs a server of its own." } ?: "no other panel or tunnel"))
+            val busy = listOf(80, 443).filter { it in facts.tcpPorts }
+            add(CheckItem("Ports 80 and 443", busy.isEmpty(),
+                if (busy.isEmpty()) "free" else "${busy.joinToString(" and ")} in use. Hiddify needs both, on a server of its own."))
+            add(CheckItem("Memory", facts.ramMb !in 1 until MIN_RAM_MB,
+                if (facts.ramMb in 1 until MIN_RAM_MB) "Hiddify needs at least 1 GB; this server has ${facts.ramMb} MB" else "${facts.ramMb} MB"))
+            add(CheckItem("Free disk for Hiddify", facts.diskFreeMb !in 1 until MIN_DISK_FREE_MB,
+                if (facts.diskFreeMb in 1 until MIN_DISK_FREE_MB) "Hiddify needs about 5 GB free; this server has ${facts.diskFreeMb} MB"
+                else "${facts.diskFreeMb / 1024} GB free"))
+        }
+
         const val K_VERSION = "version"
         /** The panel's admin address with its secret path; kept only in the encrypted server store. */
         const val K_ADMIN_URL = "adminUrl"
