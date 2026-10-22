@@ -1,5 +1,6 @@
 package com.example.panels.servers.panel
 
+import com.example.panels.servers.InstallChecks
 import com.example.panels.servers.InstalledTool
 import com.example.panels.servers.ManagedServer
 import com.example.panels.servers.RemoteShell
@@ -142,7 +143,17 @@ class ServerPanelTest {
 
     @Test fun providersAreListedById() {
         assertEquals(listOf(ServerToolCatalog.XUI, ServerToolCatalog.HIDDIFY), ServerPanels.all().map { it.id })
-        // Hiddify has no tool card yet; it shows only once its screens are approved.
-        assertNull(ServerToolCatalog.byId(ServerToolCatalog.HIDDIFY))
+        val tool = ServerToolCatalog.byId(ServerToolCatalog.HIDDIFY)!!
+        assertTrue(tool.ownServer)
+        assertEquals(setOf(ServerToolCatalog.XUI, ServerToolCatalog.MAXIMUS_TUNNEL), tool.conflicts)
+        assertTrue(ServerToolCatalog.HIDDIFY in ServerToolCatalog.byId(ServerToolCatalog.XUI)!!.conflicts)
+    }
+
+    @Test fun theWizardCheckRefusesASharedServer() {
+        val tool = ServerToolCatalog.byId(ServerToolCatalog.HIDDIFY)!!
+        assertTrue(InstallChecks.forTool(tool, server, facts()).none { it.blocking })
+        assertTrue(InstallChecks.forTool(tool, server, facts(extra = "XUI=1\n")).any { it.blocking })
+        val xui = ServerToolCatalog.byId(ServerToolCatalog.XUI)!!
+        assertTrue(InstallChecks.forTool(xui, server, facts(extra = "HIDDIFY=1\n")).any { it.blocking })
     }
 }

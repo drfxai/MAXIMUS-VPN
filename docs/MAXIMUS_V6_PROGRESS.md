@@ -104,13 +104,24 @@ server. An existing Hiddify is detected and imported without any change on the s
 | Hiddify detect/import, status per hiddify-* unit | yes | yes (fake shell) | no | no | no | no | |
 | Hiddify update (no downgrade), backup, restart/start/stop, logs, uninstall (keeps data) | yes | script syntax | no | no | no | no | admin URL is masked in logs and stored only in the encrypted server store |
 | 3x-ui adapter (install/uninstall/restart via existing flows; new status, start/stop, backup) | yes | yes | no | no | no | no | update not offered: the installer leaves a working panel alone |
+| Server check finds 3x-ui, Maximus Tunnel and Hiddify from their files (not from unit states) | yes | yes | no | no | no | no | |
+
+### Hiddify screens (previews approved by DrFX 2026-10-22, /mnt/project-files/previews/hiddify-panel)
+
+| Feature | Implemented | Unit | Simulator | Emulator | Device | Field | Limitation |
+|---|---|---|---|---|---|---|---|
+| Install tab: Hiddify under Panels, "needs a server of its own" | yes | catalog test | no | no | no | no | |
+| Wizard: servers with 3X-UI or Maximus Tunnel greyed out with the reason; check list blocks a shared server | yes | yes | no | no | no | no | |
+| Server card: version, services n of m, last backup, amber when some services are down | yes | no | no | no | no | no | status comes from the server check (refresh), not live |
+| Actions: Open panel (admin link from the install), Back up, Restart, Update (backs up first), Logs, Start, Stop, Remove | yes | no | no | no | no | no | an imported Hiddify has no admin link in the app |
+| "Hiddify found on this server" card: add without changes | yes | yes (import over a fake shell) | no | no | no | no | "Not now" lasts until the app restarts |
+| 3X-UI: Back up, Start, Stop in its ••• menu | yes | no | no | no | no | no | |
 
 ## Remaining P0 work (not done yet)
 
 - Zero-downtime rotation: a rotation still restarts Xray. Real make-before-break needs Xray's
   API (add/remove inbound and outbound at runtime) instead of a restart.
 - Smart Connect ordering does not read the engine ledger yet (it uses NetworkMemory and ConnectivityBrain).
-- Panel screens for the providers (Hiddify card, import, backup) after the previews are approved.
 
 ## Excluded by earlier safety stops
 

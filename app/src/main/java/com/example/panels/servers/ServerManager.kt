@@ -4,6 +4,11 @@ import com.example.data.model.VlessProfile
 import com.example.panels.ManagedPanel
 import com.example.panels.PanelProvisioner
 import com.example.panels.XuiInstallRequest
+import com.example.panels.servers.panel.HiddifyPanelProvider
+import com.example.panels.servers.panel.HiddifyScripts
+import com.example.panels.servers.panel.ServerPanelProvider
+import com.example.panels.servers.panel.XuiPanelProvider
+import com.example.panels.servers.panel.mapOfNotNull
 
 /** Options the install wizard's settings step collects. */
 data class InstallOptions(
@@ -56,6 +61,10 @@ class ServerManager(
     private val provisioner: PanelProvisioner = PanelProvisioner(),
     private val connect: (ManagedServer) -> RemoteShell = { SshShell.open(it) }
 ) {
+    /** Hiddify goes through its panel provider; its scripts live there. */
+    val hiddify by lazy { HiddifyPanelProvider(connect) }
+    private val xui by lazy { XuiPanelProvider(this, connect) }
+
     fun discoverHostKey(host: String, port: Int): String = provisioner.discoverSshHostKey(host, port)
 
     /** Signs in once (proving the password or key and the pinned host key) and reads the server. */
@@ -74,7 +83,11 @@ class ServerManager(
         val tool = requireNotNull(ServerToolCatalog.byId(toolId)) { "Unknown tool $toolId" }
         require(!tool.comingLater) { "${tool.title} is not available yet" }
         return when (toolId) {
-            ServerToolCatalog.XUI -> installXui(server, progress)
+            ServerToolCatalog.XUI -> {
+                check(server.tool(ServerToolCatalog.HIDDIFY) == null) { "This server runs Hiddify, which needs the server to itself." }
+                installXui(server, progress)
+            }
+            ServerToolCatalog.HIDDIFY -> if (server.tool(toolId) == null) hiddify.install(server, progress) else updateHiddify(server, progress)
             ServerToolCatalog.KEY_LOGIN -> addKeyLogin(server, progress)
             else -> connect(server).use { shell ->
                 val facts = ServerFacts.parse(shell.run(ServerFacts.SCRIPT, 60_000L).output)
@@ -200,6 +213,9 @@ class ServerManager(
 
     fun uninstall(server: ManagedServer, toolId: String, progress: ActionProgress): ManagedServer {
         val tool = server.tool(toolId)
+        if (toolId == ServerToolCatalog.HIDDIFY) {
+            return hiddify.uninstall(server, progress).let { s -> runCatching { check(s) }.getOrDefault(s) }
+        }
         if (toolId != ServerToolCatalog.KEY_LOGIN) {
             connect(server).use { runScript(it, ToolScripts.uninstall(toolId, tool?.port?.takeIf { p -> p != 53 }), progress) }
         }
@@ -207,11 +223,45 @@ class ServerManager(
     }
 
     fun restart(server: ManagedServer, toolId: String, progress: ActionProgress): ManagedServer {
+        if (toolId == ServerToolCatalog.HIDDIFY) { hiddify.restart(server, progress); return check(server) }
         connect(server).use { runScript(it, ToolScripts.restart(toolId), progress, 2 * 60_000L) }
         return check(server)
     }
 
-    fun logs(server: ManagedServer, toolId: String): List<String> = connect(server).use { shell ->
+    private fun panel(toolId: String): ServerPanelProvider = when (toolId) {
+        ServerToolCatalog.HIDDIFY -> hiddify
+        ServerToolCatalog.XUI -> xui
+        else -> throw IllegalArgumentException("${ServerToolCatalog.byId(toolId)?.title ?: toolId} is not a panel")
+    }
+
+    /** Starts or stops a panel's services (3x-ui, Hiddify). */
+    fun setPanelRunning(server: ManagedServer, toolId: String, run: Boolean, progress: ActionProgress): ManagedServer {
+        if (run) panel(toolId).start(server, progress) else panel(toolId).stop(server, progress)
+        return check(server)
+    }
+
+    /** A panel backup kept on the server; its time is kept on the tool, its path is returned. */
+    fun backupPanel(server: ManagedServer, toolId: String, progress: ActionProgress): Pair<ManagedServer, String> {
+        val path = panel(toolId).backup(server, progress)
+        check(path.isNotBlank()) { "The server did not report where the backup went" }
+        val tool = requireNotNull(server.tool(toolId)) { "Not added to this server" }
+        return server.withTool(tool.copy(settings = tool.settings + (K_LAST_BACKUP to System.currentTimeMillis().toString()))) to path
+    }
+
+    /** Backs up, then updates Hiddify to the pinned version with its own installer. */
+    fun updateHiddify(server: ManagedServer, progress: ActionProgress): InstallOutcome {
+        val (backedUp, path) = backupPanel(server, ServerToolCatalog.HIDDIFY, progress)
+        progress.log("Backup saved on the server: $path")
+        val st = hiddify.update(backedUp, progress)
+        val tool = backedUp.tool(ServerToolCatalog.HIDDIFY)!!.let { t -> t.copy(settings = t.settings + mapOfNotNull(HiddifyPanelProvider.K_VERSION to st.version)) }
+        val checked = runCatching { check(backedUp.withTool(tool)) }.getOrDefault(backedUp.withTool(tool))
+        return InstallOutcome(checked, tool, summary = "Hiddify updated to ${st.version ?: HiddifyScripts.VERSION}")
+    }
+
+    /** Adds a Hiddify that is already on the server, changing nothing there. */
+    fun importHiddify(server: ManagedServer): ManagedServer = hiddify.import(server).server
+
+    fun logs(server: ManagedServer, toolId: String): List<String> = if (toolId == ServerToolCatalog.HIDDIFY) hiddify.logs(server) else connect(server).use { shell ->
         val lines = mutableListOf<String>()
         runScript(shell, ToolScripts.logs(toolId), object : ActionProgress {
             override fun step(index: Int) = Unit
@@ -239,5 +289,10 @@ class ServerManager(
             else -> error("Nothing to rotate for $toolId")
         }
         return install(server, toolId, options, progress)
+    }
+
+    companion object {
+        /** When the app last made a panel backup, in epoch milliseconds (tool setting). */
+        const val K_LAST_BACKUP = "lastBackup"
     }
 }

@@ -23,6 +23,9 @@ import com.example.panels.servers.ToolAdvisor
 import com.example.panels.servers.ToolProfiles
 import com.example.panels.servers.ToolScripts
 import com.example.panels.servers.ServerBinaries
+import com.example.panels.servers.panel.HiddifyPanelProvider
+import com.example.panels.servers.panel.HiddifyScripts
+import com.example.panels.servers.panel.PanelStatus
 import com.example.panels.servers.tunnel.TunnelManager
 import com.example.panels.servers.tunnel.TunnelSpec
 import com.example.vpn.lab.EngineProbe
@@ -68,7 +71,9 @@ data class ServersState(
     val error: String = "",
     val logs: Pair<String, List<String>>? = null,
     /** "serverId/toolId" -> (passed, text). */
-    val tests: Map<String, Pair<Boolean, String>> = emptyMap()
+    val tests: Map<String, Pair<Boolean, String>> = emptyMap(),
+    /** Servers whose "Hiddify found" card was closed with Not now (this session only). */
+    val foundDismissed: Set<String> = emptySet()
 )
 
 /** One-off events for the screen: a message to show, or a vibration on success. */
@@ -259,6 +264,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             passwordLoginOff = s.passwordLoginOff || f?.sshPasswordLogin == false,
             needsSignIn = !s.canSignIn,
             tools = tools,
+            foundHiddify = f?.takeIf { it.hiddifyInstalled && s.tool(ServerToolCatalog.HIDDIFY) == null && id !in st.foundDismissed }
+                ?.let { hiddifySummary(it) },
             advice = ToolAdvisor.suggest(s, f).map { AdviceUi(it.toolId, s.id, s.displayName, s.location, it.reason) },
             busy = st.busy, error = st.error,
             logsTitle = st.logs?.first.orEmpty(), logs = st.logs?.second
@@ -279,7 +286,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val test = st.tests["${s.id}/$id"]
         return when (id) {
             ServerToolCatalog.XUI -> ToolRowUi(id, title, status, running, t.port?.let { "Panel on port $it" }.orEmpty(),
-                canRestart = true, canLogs = true, canOpenPanel = t.panelId != null)
+                canRestart = true, canLogs = true, canOpenPanel = t.panelId != null,
+                canBackup = true, canStart = f != null && !running, canStop = f != null && running)
             ServerToolCatalog.DNSTT -> ToolRowUi(id, title, status, running, t.settings[ToolProfiles.DNSTT_DOMAIN].orEmpty(),
                 canTest = true, canRestart = true, canLogs = true, canRotateKey = true,
                 link = runCatching { ToolProfiles.dnsttLink(s, t) }.getOrNull(), testResult = test?.second, testOk = test?.first)
@@ -293,6 +301,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                     peer?.let { (if (s.location == com.example.panels.servers.ServerLocation.IRAN) "To " else "From ") + it.displayName }.orEmpty(),
                     canRestart = true, canLogs = true, canUninstall = false, canOpenTunnel = spec != null)
             }
+            ServerToolCatalog.HIDDIFY -> hiddifyRow(t, f)
             ServerToolCatalog.KEY_LOGIN -> null // shown in the security card
             ServerToolCatalog.FIREWALL -> ToolRowUi(id, title, if (f?.firewall == "ufw-active") "On" else if (f == null) "Unknown" else "Off",
                 f == null || f.firewall == "ufw-active", "UFW")
@@ -304,6 +313,53 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 f?.let { "${it.swapMb} MB" }.orEmpty())
             else -> ToolRowUi(id, title, status, running)
         }
+    }
+
+    private fun hiddifyUnits(f: ServerFacts) = f.services.filterKeys { it.startsWith("hiddify-") }
+
+    private fun hiddifySummary(f: ServerFacts): String {
+        val units = hiddifyUnits(f)
+        return listOfNotNull(f.hiddifyVersion.ifBlank { null }?.let { "Version $it" },
+            units.takeIf { it.isNotEmpty() }?.let { u -> "${u.count { it.value == "active" }} of ${u.size} services active" })
+            .joinToString(" · ").ifBlank { "Found in /opt/hiddify-manager" }
+    }
+
+    private fun hiddifyRow(t: com.example.panels.servers.InstalledTool, f: ServerFacts?): ToolRowUi {
+        val units = f?.let { hiddifyUnits(it) }.orEmpty()
+        val active = units.count { it.value == "active" }
+        val down = units.filterValues { it != "active" }.keys
+        val version = f?.hiddifyVersion?.ifBlank { null } ?: t.settings[HiddifyPanelProvider.K_VERSION]
+        val status = when {
+            f == null || units.isEmpty() -> "Unknown"
+            down.isEmpty() -> "Running"
+            active == 0 -> "Stopped"
+            else -> "${down.size} of ${units.size} down"
+        }
+        val backup = t.settings[ServerManager.K_LAST_BACKUP]?.toLongOrNull()
+        return ToolRowUi(
+            ServerToolCatalog.HIDDIFY, "Hiddify", status, healthy = f == null || down.isEmpty() && units.isNotEmpty(),
+            detail = listOfNotNull(version?.let { "v$it" }, "ports 80, 443",
+                if (t.settings[HiddifyPanelProvider.K_IMPORTED] == "1") "added from server" else null).joinToString(" · "),
+            warn = active > 0 && down.isNotEmpty(),
+            stats = if (units.isEmpty()) emptyList() else listOf(
+                "Services" to "$active of ${units.size} active",
+                "Last backup" to (backup?.let { whenText(it) } ?: "None from this phone")),
+            warning = if (active > 0 && down.isNotEmpty())
+                down.take(3).joinToString(" and ") + (if (down.size > 3) " and ${down.size - 3} more" else "") +
+                    (if (down.size == 1) " is" else " are") + " not active. Restart, or open Logs to see why." else null,
+            canOpenPanel = t.settings[HiddifyPanelProvider.K_ADMIN_URL] != null,
+            canBackup = units.isNotEmpty(), canRestart = true, canLogs = true,
+            canUpdate = version != null && PanelStatus.compareVersions(HiddifyScripts.VERSION, version) > 0,
+            canStart = f != null && active < units.size, canStop = active > 0
+        )
+    }
+
+    private fun whenText(t: Long): String {
+        val cal = java.util.Calendar.getInstance()
+        val today = cal.get(java.util.Calendar.DAY_OF_YEAR) to cal.get(java.util.Calendar.YEAR)
+        cal.timeInMillis = t
+        val time = String.format(Locale.US, "%02d:%02d", cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
+        return if ((cal.get(java.util.Calendar.DAY_OF_YEAR) to cal.get(java.util.Calendar.YEAR)) == today) "Today $time" else ago(t)
     }
 
     private fun gb(mb: Long) = String.format(Locale.US, "%.1f", mb / 1024.0)
@@ -382,6 +438,35 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         save(updated)
         emit(ServersEvent.Message("${toolTitle(toolId)} removed"))
     }
+
+    fun backup(id: String, toolId: String) = serverAction(id, "Backing up ${toolTitle(toolId)}…") { s ->
+        val (updated, path) = withContext(Dispatchers.IO) { manager.backupPanel(s, toolId, quiet) }
+        save(updated)
+        emit(ServersEvent.Message("Backup saved on the server: $path"))
+    }
+
+    fun updateHiddify(id: String) = serverAction(id, "Backing up, then updating Hiddify to ${HiddifyScripts.VERSION}. This can take 30 minutes…") { s ->
+        val out = withContext(Dispatchers.IO) { manager.updateHiddify(s, quiet) }
+        save(out.server)
+        emit(ServersEvent.Message(out.summary))
+        emit(ServersEvent.Success)
+    }
+
+    fun setRunning(id: String, toolId: String, run: Boolean) =
+        serverAction(id, (if (run) "Starting " else "Stopping ") + toolTitle(toolId) + "…") { s ->
+            save(withContext(Dispatchers.IO) { manager.setPanelRunning(s, toolId, run, quiet) })
+        }
+
+    fun importHiddify(id: String) = serverAction(id, "Adding Hiddify…") { s ->
+        save(withContext(Dispatchers.IO) { manager.importHiddify(s) })
+        emit(ServersEvent.Message("Hiddify added. Nothing on the server changed."))
+        emit(ServersEvent.Success)
+    }
+
+    fun dismissFound(id: String) = _state.update { it.copy(foundDismissed = it.foundDismissed + id) }
+
+    /** The Hiddify admin address from its install, kept only in the encrypted server store. */
+    fun hiddifyAdminUrl(id: String): String? = server(id)?.tool(ServerToolCatalog.HIDDIFY)?.settings?.get(HiddifyPanelProvider.K_ADMIN_URL)
 
     fun remove(id: String) {
         store.delete(id)
@@ -489,7 +574,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val tool = ServerToolCatalog.byId(toolId) ?: return
         if (tool.comingLater) return
         _state.update { it.copy(route = ServersRoute.Wizard, wizard = WizardUi(tool, rows()), error = "") }
-        val fitting = _state.value.servers.filter { tool.fitsOn(it.location) && it.canSignIn }
+        val fitting = _state.value.servers.filter { s -> tool.fitsOn(s.location) && s.canSignIn && tool.conflicts.none { s.tool(it) != null } }
         val pick = serverId ?: fitting.singleOrNull()?.id
         if (pick != null) pickServer(pick)
     }
@@ -596,6 +681,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             ServerToolCatalog.DNSTT -> ToolScripts.DNSTT_STEPS
             ServerToolCatalog.HYSTERIA2 -> ToolScripts.HYSTERIA_STEPS
             ServerToolCatalog.XUI -> manager.xuiSteps
+            ServerToolCatalog.HIDDIFY -> HiddifyScripts.INSTALL_STEPS
             ServerToolCatalog.KEY_LOGIN -> listOf("Create a key on this phone") + ToolScripts.KEY_STEPS + "Sign in with the key"
             ServerToolCatalog.FIREWALL -> ToolScripts.FIREWALL_STEPS
             ServerToolCatalog.FAIL2BAN -> ToolScripts.FAIL2BAN_STEPS
