@@ -8,5 +8,5 @@ java -cp "$classes" DnsMessageValidatorCheck
 java com.sun.tools.javac.Main -cp "$classes" -d "$classes" "$root/tools/dns-validation/DnsOwnershipCheck.java"
 java -cp "$classes" DnsOwnershipCheck
 
-java com.sun.tools.javac.Main -d "$classes" "$root/app/src/main/java/com/example/vpn/tls/TlsHelloSocketFactory.java" "$root/tools/dns-validation/TlsSplitCheck.java"
+java com.sun.tools.javac.Main -d "$classes" "$root/app/src/main/java/com/example/vpn/tls/ClientHelloRecords.java" "$root/app/src/main/java/com/example/vpn/tls/TlsHelloSocketFactory.java" "$root/tools/dns-validation/TlsSplitCheck.java"
 java -cp "$classes" TlsSplitCheck "$root/app/src/test/resources/doh-test-fixture.p12.base64"
