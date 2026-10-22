@@ -202,7 +202,7 @@ object TunnelConfigs {
     fun iranHysteriaClient(spec: TunnelSpec, abroadHost: String, dir: String): String {
         val authority = if (abroadHost.contains(':')) "[$abroadHost]" else abroadHost
         return """
-            server: $authority:${spec.hyPort}
+            server: ${spec.spoof?.let { "127.0.0.1:${it.localPort}" } ?: "$authority:${spec.hyPort}"}
             auth: ${spec.hyAuth}
             obfs:
               type: salamander
