@@ -46,6 +46,8 @@ object EngineRegistry {
     val NAIVE = EngineDescriptor("naive", "NaiveProxy", null, "BSD-3-Clause", bundled = false, runtime = null)
     val DNS_TUNNEL = EngineDescriptor("dns-tunnel", "DNS tunnel (dnstt, separate program)", "v1.20260501.0", "CC0-1.0",
         bundled = true, runtime = null)
+    val COTTEN_DNS = EngineDescriptor("cotten-dns", "CottenDNS / CottenMax (beta, separate program)",
+        com.example.vpn.sidecar.CottenDnsSidecar.REVISION, "MIT (CottenDNS), Apache-2.0 (Soar)", bundled = true, runtime = null)
     val SLIPSTREAM = EngineDescriptor("slipstream", "Slipstream QUIC DNS tunnel (separate program)",
         "main 397850b1 (2026-04-11)", "Apache-2.0 (slipstream), MIT (picoquic/picotls), Apache-2.0 (OpenSSL)",
         bundled = true, runtime = null)
@@ -55,7 +57,7 @@ object EngineRegistry {
     val MATRIX_TRANSPORT = EngineDescriptor("matrix-transport", "Matrix Transport (Aether-derived, separate program)",
         "1.6.0 / secure-v1", "AGPL-3.0-only", bundled = true, runtime = null)
 
-    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, MIHOMO, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL, SLIPSTREAM, MASQUE, MATRIX_TRANSPORT)
+    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, MIHOMO, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL, COTTEN_DNS, SLIPSTREAM, MASQUE, MATRIX_TRANSPORT)
 
     fun descriptorFor(runtime: EngineSelectionPolicy.Runtime): EngineDescriptor =
         ENGINES.first { it.runtime == runtime }
@@ -86,6 +88,7 @@ object EngineRegistry {
         "Tor (Snowflake, obfs4, WebTunnel bridges)" to CapabilityState.ENGINE_SUPPORTED,
         "NaiveProxy" to CapabilityState.NONE,
         "DNS tunnel (dnstt)" to CapabilityState.ENGINE_SUPPORTED,
+        "CottenDNS / CottenMax beta (needs matching server)" to CapabilityState.PARSE_SUPPORTED,
         "Slipstream (QUIC DNS tunnel)" to CapabilityState.ENGINE_SUPPORTED
     )
 
