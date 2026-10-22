@@ -10,7 +10,12 @@ import javax.net.ssl.SSLSocketFactory;
 public final class TlsHelloSocketFactory extends SSLSocketFactory {
     private final SSLSocketFactory tls;
     private final int chunk, delayMs;
+    private final boolean records;
     public TlsHelloSocketFactory(SSLSocketFactory tls, int chunk, int delayMs) {
+        this(tls,chunk,delayMs,false);
+    }
+    public TlsHelloSocketFactory(SSLSocketFactory tls, int chunk, int delayMs, boolean records) {
+        this.records=records;
         if (chunk < 16 || chunk > 1024 || delayMs < 0 || delayMs > 20)
             throw new IllegalArgumentException("Invalid TLS split limits");
         this.tls = tls; this.chunk = chunk; this.delayMs = delayMs;
@@ -38,7 +43,7 @@ public final class TlsHelloSocketFactory extends SSLSocketFactory {
             @Override public void write(int b) throws IOException { write(new byte[]{(byte)b},0,1); }
         };
     }
-    private Socket wrap(Socket socket) throws IOException { return new StreamSocket(socket,chunk,delayMs); }
+    private Socket wrap(Socket socket) throws IOException { return new StreamSocket(socket,chunk,delayMs,records); }
     @Override public Socket createSocket(Socket socket,String host,int port,boolean close) throws IOException {
         try { return tls.createSocket(wrap(socket),host,port,close); }
         catch (IOException | RuntimeException e) { if (close) socket.close(); throw e; }
@@ -54,10 +59,10 @@ public final class TlsHelloSocketFactory extends SSLSocketFactory {
     private static final class StreamSocket extends Socket {
         private final Socket raw;
         private final OutputStream out;
-        StreamSocket(Socket raw,int chunk,int delay) throws IOException {
+        StreamSocket(Socket raw,int chunk,int delay,boolean records) throws IOException {
             // No independent SocketImpl/FD: stream-based TLS providers must use the wrapped streams.
             super((SocketImpl)null);
-            this.raw=raw; this.out=splitFirstHandshake(raw.getOutputStream(),chunk,delay);
+            this.raw=raw; this.out=records ? new ClientHelloRecords(raw.getOutputStream(),chunk) : splitFirstHandshake(raw.getOutputStream(),chunk,delay);
         }
         @Override public InputStream getInputStream() throws IOException { return raw.getInputStream(); }
         @Override public OutputStream getOutputStream() { return out; }
