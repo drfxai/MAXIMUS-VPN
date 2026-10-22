@@ -32,6 +32,11 @@ object TunnelScripts {
 
     /** Checks every value of [spec] that ends up in a script or a config file. */
     fun validate(spec: TunnelSpec) {
+        spec.spoof?.let { s ->
+            s.validate()
+            require(spec.transports == setOf(TunnelTransport.HYSTERIA2)) { "Spoof carrier requires Hysteria2 as its authenticated inner tunnel" }
+            require(s.localPort !in listOf(spec.entryPort, spec.hyPort, spec.hyLocalPort, spec.rvProbePort, spec.apiPort) && s.port !in spec.avoidPorts && s.port !in listOf(spec.entryPort, spec.hyPort, spec.hyLocalPort, spec.rvProbePort, spec.apiPort)) { "Carrier port conflicts with an existing service" }
+        }
         require(spec.transports.isNotEmpty()) { "Pick at least one way to reach the server abroad" }
         require(spec.rotationHours in TunnelSpec.ROTATION_CHOICES) { "Invalid rotation period" }
         require(HEX.matches(spec.seed) && spec.seed.length >= 32) { "Invalid rotation seed" }
