@@ -31,8 +31,15 @@ data class ServerFacts(
     /** null when the SSH server's setting could not be read. */
     val sshPasswordLogin: Boolean? = null,
     val sshdDropIns: Boolean = false,
-    /** systemd unit -> "active", "inactive", "failed"... for the units Maximus manages. */
-    val services: Map<String, String> = emptyMap()
+    /** systemd unit -> "active", "inactive", "failed"... for the units Maximus manages and every enabled hiddify-* unit. */
+    val services: Map<String, String> = emptyMap(),
+    /** 3x-ui's files or unit are on the server (installed by this phone or not). */
+    val xuiInstalled: Boolean = false,
+    /** A Maximus Tunnel unit is on the server. */
+    val tunnelInstalled: Boolean = false,
+    /** Hiddify Manager's folder is on the server. */
+    val hiddifyInstalled: Boolean = false,
+    val hiddifyVersion: String = ""
 ) {
     /** The Go architecture name of the programs this server needs, or null when none is built for it. */
     val goArch: String? get() = when (arch.lowercase()) {
@@ -92,6 +99,15 @@ data class ServerFacts(
             for u in x-ui maximus-dnstt maximus-socks maximus-hysteria maximus-tunnel maximus-tunnel-hy fail2ban; do
               echo "SVC_§u=§(systemctl is-active §u 2>/dev/null || true)"
             done
+            if [ -x /usr/local/x-ui/x-ui ] || [ -f /etc/systemd/system/x-ui.service ]; then echo XUI=1; else echo XUI=0; fi
+            if [ -f /etc/systemd/system/maximus-tunnel.service ]; then echo MXTUNNEL=1; else echo MXTUNNEL=0; fi
+            if [ -d /opt/hiddify-manager ]; then
+              echo HIDDIFY=1
+              echo "HIDDIFY_VERSION=§(head -n1 /opt/hiddify-manager/VERSION 2>/dev/null | tr -cd '0-9A-Za-z.-')"
+              for u in §(systemctl list-unit-files --type=service --no-legend 'hiddify-*' 2>/dev/null | awk '§2=="enabled"{sub(/[.]service§/, "", §1); print §1}' | grep -E '^[A-Za-z0-9_.@-]+§'); do
+                echo "SVC_§u=§(systemctl is-active "§u" 2>/dev/null || true)"
+              done
+            else echo HIDDIFY=0; fi
         """.trimIndent().replace('§', '$')
 
         fun parse(output: String): ServerFacts {
@@ -130,7 +146,11 @@ data class ServerFacts(
                 sshdDropIns = v["SSHD_DROPINS"] == "1",
                 services = v.filterKeys { it.startsWith("SVC_") }
                     .mapKeys { it.key.removePrefix("SVC_") }
-                    .mapValues { it.value.ifBlank { "inactive" } }
+                    .mapValues { it.value.ifBlank { "inactive" } },
+                xuiInstalled = v["XUI"] == "1",
+                tunnelInstalled = v["MXTUNNEL"] == "1",
+                hiddifyInstalled = v["HIDDIFY"] == "1",
+                hiddifyVersion = v["HIDDIFY_VERSION"].orEmpty()
             )
         }
     }

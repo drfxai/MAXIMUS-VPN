@@ -34,6 +34,21 @@ interface ActionProgress {
 }
 
 /**
+ * Runs a [ToolScript], streaming its steps and log lines to [progress], and returns its results.
+ * A non-zero exit becomes an error with the script's last two log lines.
+ */
+internal fun RemoteShell.runTool(script: ToolScript, progress: ActionProgress, timeoutMs: Long = 15 * 60_000L): Map<String, String> {
+    val reader = ScriptProgress(onStep = { progress.step(it) }, onLog = { progress.log(it) })
+    val result = run(script.text, timeoutMs) { reader.line(it) }
+    if (result.exitCode != 0) {
+        val tail = result.output.lineSequence().map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("##") }.toList().takeLast(2).joinToString(" · ")
+        error(tail.ifBlank { "The server reported an error (exit ${result.exitCode})" }.take(220))
+    }
+    return reader.results
+}
+
+/**
  * Everything the Panels server screens do on a server, over pinned SSH. Blocking: call it off the
  * main thread. It returns updated [ManagedServer] values and never stores them itself.
  */
@@ -50,16 +65,8 @@ class ServerManager(
         server.copy(facts = facts, checkedAt = System.currentTimeMillis())
     }
 
-    private fun runScript(shell: RemoteShell, script: ToolScript, progress: ActionProgress, timeoutMs: Long = 15 * 60_000L): Map<String, String> {
-        val reader = ScriptProgress(onStep = { progress.step(it) }, onLog = { progress.log(it) })
-        val result = shell.run(script.text, timeoutMs) { reader.line(it) }
-        if (result.exitCode != 0) {
-            val tail = result.output.lineSequence().map { it.trim() }
-                .filter { it.isNotEmpty() && !it.startsWith("##") }.toList().takeLast(2).joinToString(" · ")
-            error(tail.ifBlank { "The server reported an error (exit ${result.exitCode})" }.take(220))
-        }
-        return reader.results
-    }
+    private fun runScript(shell: RemoteShell, script: ToolScript, progress: ActionProgress, timeoutMs: Long = 15 * 60_000L): Map<String, String> =
+        shell.runTool(script, progress, timeoutMs)
 
     private fun factsOrCheck(server: ManagedServer): ServerFacts = server.facts ?: check(server).facts!!
 
