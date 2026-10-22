@@ -134,9 +134,23 @@ start. The Iran balancer's fallback tag follows this period's port of the fallba
 | Add new ports, then remove expired ones, without a restart | yes | yes (script run against a fake xray/systemctl) | no | no | no | no | `xray api` command syntax and dynamic balancer pick-up not tried on a real server |
 | Fall back to restart and rollback on any API failure | yes | yes (fake xray) | no | no | no | no | |
 
+## Smart Connect recovery reads the engine ledger
+
+The recovery stage of Smart Connect (LabController.fastRecovery) now asks the engine ledger about
+each recovery engine on the current network: an engine whose last start or request here failed
+within 10 minutes, and that has not carried a request here in that time, is not restarted (same
+rule as ConnectivityBrain's RECENTLY_FAILED for paths); one that carried a request here within 10
+minutes is ranked as "worked here recently". Chains are judged by their paths, not by one hop.
+
+| Feature | Implemented | Unit | Simulator | Emulator | Device | Field | Limitation |
+|---|---|---|---|---|---|---|---|
+| Skip an engine that just failed on this network | yes | yes (ledger) | no | no | no | no | the ledger is in memory: an app restart forgets it |
+| Rank an engine that just worked here first | yes | yes (ledger) | no | no | no | no | a nudge in the planner's order, not a guarantee |
+
 ## Remaining P0 work (not done yet)
 
-- Smart Connect ordering does not read the engine ledger yet (it uses NetworkMemory and ConnectivityBrain).
+No P0 item above is left unbuilt. None of them has been tried on a phone, a live server or an
+Iran network yet.
 
 ## Excluded by earlier safety stops
 

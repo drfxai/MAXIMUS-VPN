@@ -661,9 +661,15 @@ class LabController(
                 .filter { it.id !in exclude && com.example.vpn.connectivity.PathRef.of(it) !in exclude }
             if (all.isEmpty()) return FastRecoveryOutcome(null, 0, true, "no other saved config or recovery engine is available")
             val families = all.map { it to familyOf(it) }
+            // The engine ledger (LAB tests and real connects) adds what each engine did on this network:
+            // one that just failed here is not restarted, one that just carried a request goes first.
+            val ledger = com.example.vpn.engine.registry.EngineLedger.shared
+            val ledgerNetwork = currentIdentity
+            val engineIds = all.associate { it.id to Sidecars.forProfile(it)?.id }
             val recent = all.mapNotNull { p ->
                 val ref = com.example.vpn.connectivity.PathRef.of(p)
-                if (book.eligibility(ref) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED) p.id to "failed a real request on this network moments ago" else null
+                if (book.eligibility(ref) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED) p.id to "failed a real request on this network moments ago"
+                else engineIds[p.id]?.let { ledger.recentFailure(it, ledgerNetwork) }?.let { p.id to it }
             }.toMap()
             val pool = FullAnalysis.select(families, plan.copy(budget = MAX_POOL), emptySet())
             val byId = pool.associateBy { it.profile.id }
@@ -672,7 +678,8 @@ class LabController(
             val lowBattery = device.charging != true && (device.batteryPercent ?: 100) < 20
             val planner = AdaptivePlanner(plan, cap, AdaptivePlanner.Priors(memory = memory, recentlyFailed = recent),
                 AdaptivePlanner.Device(device.metered, lowBattery), AdaptivePlanner.Goal.CONNECT)
-            planner.add(pool.map { pk -> AdaptivePlanner.Candidate(pk.profile.id, pk.profile.name, pk.family, ipv6 = pk.profile.address.contains(':')) })
+            planner.add(pool.map { pk -> AdaptivePlanner.Candidate(pk.profile.id, pk.profile.name, pk.family, ipv6 = pk.profile.address.contains(':'),
+                provenHere = engineIds[pk.profile.id]?.let { ledger.verifiedHere(it, ledgerNetwork) } == true) })
             // Stop the moment the attempt is cancelled (the user pressed Stop, or a newer Connect arrived),
             // not only when the time limit is reached: otherwise recovery runs on for up to its full window
             // and the connect lock it holds blocks the disconnect behind it.
