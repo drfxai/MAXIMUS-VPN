@@ -112,7 +112,7 @@ data class TunnelOutcome(
 
 /** The live state of a tunnel, read on the Iran server. */
 data class TunnelStatus(
-    /** Outbound tag ("t-reality-now", "t-hy2"...) -> what a real request over that path found. */
+    /** Outbound tag ("t-reality-31001", "t-hy2"...) -> what a real request over that path found. */
     val evidence: Map<String, PathEvidence>,
     val ports: List<Int>,
     val running: Boolean,
@@ -242,6 +242,10 @@ class TunnelManager(
             fixed[t] = previous?.fixedPorts?.get(t) ?: ServerRandom.port(abroadUsed, exclude = avoid + hyPort + fixed.values)
         }
         val hyLocal = previous?.hyLocalPort ?: ServerRandom.port(iranUsed, range = 10_000..19_999)
+        val rvProbe = previous?.rvProbePort?.takeIf { it > 0 } ?: ServerRandom.port(iranUsed, range = 10_000..19_999, exclude = setOf(hyLocal))
+        // Loopback on both servers, so it avoids what either one already uses.
+        val api = previous?.apiPort?.takeIf { it > 0 }
+            ?: ServerRandom.port(iranUsed + abroadUsed, range = 10_000..19_999, exclude = setOf(hyLocal, rvProbe))
         return TunnelSpec(
             iranId = checks.iran.id, abroadId = checks.abroad.id,
             transports = transports, rotationHours = rotationHours,
@@ -263,7 +267,8 @@ class TunnelManager(
             hyCertPem = previous?.hyCertPem.orEmpty(),
             hyLocalPort = hyLocal,
             reverseUuid = previous?.reverseUuid?.takeIf { it.isNotBlank() } ?: TunnelRandom.uuid(),
-            rvProbePort = previous?.rvProbePort?.takeIf { it > 0 } ?: ServerRandom.port(iranUsed, range = 10_000..19_999, exclude = setOf(hyLocal)),
+            rvProbePort = rvProbe,
+            apiPort = api,
             createdAt = previous?.createdAt ?: System.currentTimeMillis()
         ).also { TunnelScripts.validate(it) }
     }

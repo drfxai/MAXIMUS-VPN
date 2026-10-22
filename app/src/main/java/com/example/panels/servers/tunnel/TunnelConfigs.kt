@@ -156,11 +156,24 @@ object TunnelConfigs {
     fun iranDefaultBlock(): String = JSONObject()
         .put("outbounds", JSONArray().put(JSONObject().put("tag", "block").put("protocol", "blackhole"))).toString(2)
 
-    /** The tag the balancer uses before the first health probe finishes. */
-    fun fallbackTag(spec: TunnelSpec): String = when (val t = spec.fallbackTransport) {
+    /**
+     * The tag the balancer uses before the first health probe finishes. A rotating way's tag names
+     * its port; the rotate script moves it to each new period's port.
+     */
+    fun fallbackTag(spec: TunnelSpec, nowMs: Long = System.currentTimeMillis()): String = when (val t = spec.fallbackTransport) {
         TunnelTransport.HYSTERIA2, TunnelTransport.REVERSE -> t.tagPrefix
-        else -> "${t.tagPrefix}-now"
+        else -> pathTag(t, TunnelPorts.current(spec, t, nowMs).first())
     }
+
+    /** Tag (and file name stem) of a rotating way on one port, e.g. "t-reality-31234". */
+    fun pathTag(t: TunnelTransport, port: Int) = "${t.tagPrefix}-$port"
+
+    /** File name of [api] on both servers. */
+    const val API_FILE = "05-api.json"
+
+    /** Xray's API on loopback only: rotations add and remove ports through it instead of restarting. */
+    fun api(spec: TunnelSpec): String = JSONObject().put("api", JSONObject().put("tag", "api")
+        .put("listen", "127.0.0.1:${spec.apiPort}").put("services", JSONArray().put("HandlerService"))).toString(2)
 
     /** One Iran-server outbound to the exit over [t]; port and tag are filled in on the server. */
     fun iranTemplate(spec: TunnelSpec, abroadHost: String, t: TunnelTransport): String {

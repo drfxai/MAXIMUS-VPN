@@ -126,7 +126,9 @@ class TunnelController(
             } else {
                 val ports = TunnelPorts.current(spec, t, now)
                 ports.mapIndexed { i, port ->
-                    val tag = "${t.tagPrefix}-${if (i == 0) "now" else "prev"}"
+                    // Tags name the port; tunnels not updated since still report "now" and "prev".
+                    val tag = TunnelConfigs.pathTag(t, port).takeIf { status == null || it in status.paths || it in status.evidence }
+                        ?: "${t.tagPrefix}-${if (i == 0) "now" else "prev"}"
                     TunnelPathUi(t, port, i > 0, status?.paths?.get(tag), status != null && tag in status.paths, best == tag,
                         status?.evidence?.get(tag)?.state)
                 }

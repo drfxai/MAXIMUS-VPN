@@ -112,7 +112,7 @@ class TunnelTest {
         val base = JSONObject(TunnelConfigs.iranBase(s))
         assertFalse(base.has("outbounds"))
         assertEquals("blackhole", JSONObject(TunnelConfigs.iranDefaultBlock()).getJSONArray("outbounds").getJSONObject(0).getString("protocol"))
-        assertTrue(TunnelConfigs.IRAN_BLOCK_FILE > "30-t-hy2.json" && TunnelConfigs.IRAN_BLOCK_FILE > "21-t-xhttp-prev.json")
+        assertTrue(TunnelConfigs.IRAN_BLOCK_FILE > "30-t-hy2.json" && TunnelConfigs.IRAN_BLOCK_FILE > "20-t-xhttp-65535.json")
         val exitRouting = JSONObject(TunnelConfigs.abroadBase()).getJSONObject("routing")
         assertEquals("IPOnDemand", exitRouting.getString("domainStrategy"))
         val exitRules = exitRouting.getJSONArray("rules")
@@ -121,7 +121,11 @@ class TunnelTest {
         assertTrue(exitRules.getJSONObject(0).getJSONArray("domain").toString().contains("localhost"))
         assertTrue(exitRules.getJSONObject(1).has("ip"))
         assertEquals("direct", exitRules.getJSONObject(exitRules.length() - 1).getString("outboundTag"))
-        assertEquals("t-reality-now", base.getJSONObject("routing").getJSONArray("balancers").getJSONObject(0).getString("fallbackTag"))
+        // The fallback names this period's port of the fallback way, as the rotate script sets it.
+        val at = 1_700_000_000_000L
+        assertEquals(TunnelConfigs.pathTag(TunnelTransport.REALITY, TunnelPorts.current(s, TunnelTransport.REALITY, at).first()),
+            TunnelConfigs.fallbackTag(s, at))
+        assertTrue(Regex("t-reality-\\d+").matches(base.getJSONObject("routing").getJSONArray("balancers").getJSONObject(0).getString("fallbackTag")))
         assertEquals("t-hy2", TunnelConfigs.fallbackTag(spec(transports = setOf(TunnelTransport.HYSTERIA2))))
         val client = TunnelConfigs.iranHysteriaClient(s, abroad.host, "/etc/maximus/tunnel/hy")
         assertTrue(client.contains("ca: /etc/maximus/tunnel/hy/abroad-cert.pem"))
@@ -312,5 +316,27 @@ class TunnelTest {
         assertTrue(status.contains("RV_PROBE=") && status.contains("link:"))
         val install = TunnelScripts.abroadInstall(spec(), "amd64", abroad.host, renewKeys = false).text
         assertTrue(install.contains("the previous ports are back"))
+    }
+
+    @Test fun rotationAddsNewPortsBeforeRemovingOldOnes() {
+        val s = spec()
+        val p = s.copy(apiPort = 15000)
+        assertEquals(p, TunnelSpec.fromSettings(p.toSettings(TunnelSpec.ROLE_IRAN)))
+        // Tunnels set up before the API have no port and keep restarting Xray on rotation.
+        assertEquals(0, TunnelSpec.fromSettings(s.toSettings(TunnelSpec.ROLE_IRAN) - "apiPort")!!.apiPort)
+        val api = JSONObject(TunnelConfigs.api(s.copy(apiPort = 15000))).getJSONObject("api")
+        assertEquals("127.0.0.1:15000", api.getString("listen"))
+        assertEquals("HandlerService", api.getJSONArray("services").getString(0))
+        val iranText = TunnelScripts.iranInstall(s.copy(apiPort = 15000), "amd64", abroad.host, false, null).text
+        assertTrue(iranText.contains("API=15000") && iranText.contains("FALLBACK=reality") && iranText.contains(TunnelConfigs.API_FILE))
+        val abroadText = TunnelScripts.abroadInstall(s.copy(apiPort = 15000), "amd64", abroad.host, renewKeys = false).text
+        // Only the Iran side has a balancer to point at this period's port.
+        assertTrue(abroadText.contains("API=15000\nFALLBACK=\n"))
+        assertTrue(TunnelScripts.iranInstall(s, "amd64", abroad.host, false, null).text.contains("API=\nFALLBACK="))
+        // Additions come before removals, and either failing falls back to a restart.
+        val rotate = iranText.substringAfter("<<'EOF_ROTATE'").substringBefore("EOF_ROTATE")
+        assertTrue(rotate.indexOf("\"\$add\"") in 0 until rotate.indexOf("\"\$del\""))
+        assertTrue(rotate.contains("Applied without restarting Xray") && rotate.contains("systemctl restart maximus-tunnel"))
+        assertEquals("t-xhttp-30001", TunnelConfigs.pathTag(TunnelTransport.XHTTP, 30001))
     }
 }

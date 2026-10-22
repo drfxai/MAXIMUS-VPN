@@ -85,6 +85,11 @@ data class TunnelSpec(
      * way can only be reported as linked until the next update.
      */
     val rvProbePort: Int = 0,
+    /**
+     * Loopback port of each server's Xray API, which lets a rotation add and remove ports without
+     * restarting Xray. 0 on tunnels set up before it existed: they restart until the next update.
+     */
+    val apiPort: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 ) {
     val fallbackTransport: TunnelTransport get() = TunnelTransport.entries.first { it in transports }
@@ -103,7 +108,8 @@ data class TunnelSpec(
         put("xhttpPath", xhttpPath)
         put("hyPort", hyPort.toString()); put("hyAuth", hyAuth); put("hyObfs", hyObfs); put("hyCertPem", hyCertPem)
         put("hyLocalPort", hyLocalPort.toString()); put("reverseUuid", reverseUuid)
-        put("rvProbePort", rvProbePort.toString()); put("createdAt", createdAt.toString())
+        put("rvProbePort", rvProbePort.toString()); put("apiPort", apiPort.toString())
+        put("createdAt", createdAt.toString())
     }
 
     companion object {
@@ -133,6 +139,7 @@ data class TunnelSpec(
                 hyCertPem = s["hyCertPem"].orEmpty(), hyLocalPort = i("hyLocalPort"),
                 reverseUuid = s["reverseUuid"].orEmpty(),
                 rvProbePort = s["rvProbePort"]?.toIntOrNull() ?: 0,
+                apiPort = s["apiPort"]?.toIntOrNull() ?: 0,
                 createdAt = s["createdAt"]?.toLongOrNull() ?: 0L
             ).takeIf { it.transports.isNotEmpty() }
         }.getOrNull()
