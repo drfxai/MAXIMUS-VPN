@@ -313,7 +313,7 @@ object FullAnalysis {
         ) + (if (!burstMeasured) listOf("Packet loss and jitter") else emptyList()) +
             if (p?.recursiveDnsEgress == null) listOf("Recursive DNS egress (needs a controlled foreign DNS zone)") else emptyList()
 
-    /** The packet loss / jitter row, from a small UDP DNS burst to the best resolver. */
+    /** DNS request loss / timing; transport is explicit, so TCP is never called a UDP test. */
     fun burstPath(b: ResolverIntelligence.Burst): LivePath {
         val loss = b.lossPercent
         val status = when {
@@ -321,8 +321,8 @@ object FullAnalysis {
             loss >= 30 || b.rateLimited -> PathStatus.DEGRADED
             else -> PathStatus.AVAILABLE
         }
-        return LivePath("udp-burst", "Packet loss / jitter (UDP)", status, checkedAt = b.measuredAt, latencyMs = b.medianMs, attempts = b.sent,
-            reason = "${b.sent} DNS queries to ${b.label}: $loss% lost" + (b.jitterMs?.let { ", jitter $it ms" } ?: "") +
+        return LivePath("udp-burst", "DNS query loss / jitter (${b.transport})", status, checkedAt = b.measuredAt, latencyMs = b.medianMs, attempts = b.sent,
+            reason = "${b.sent} DNS queries to ${b.label}: $loss% unanswered" + (b.jitterMs?.let { ", timing jitter $it ms" } ?: "") +
                 if (b.rateLimited) ", answers stopped part-way (rate limiting suspected)" else "")
     }
 }
