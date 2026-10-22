@@ -58,7 +58,7 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
         item { OutlinedTextField(sni, { sni = it }, label = { Text("TLS SNI / certificate name") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(host, { host = it }, label = { Text("Origin HTTP Host") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { Row { Checkbox(splitHello, { splitHello = it }); Text("Native Xray TLS record + TCP fragmentation") } }
-        item { Button(onClick = { actions.onSaveFronted(selected, endpoint, sni, host, splitHello) }, enabled = selected.isNotBlank()) { Text("Save fronted profile") } }
+        item { Button(onClick = { actions.onSaveFronted(selected, endpoint, sni, host, splitHello) }, enabled = selected.isNotBlank() && !ui.running && !state.vpnOn) { Text("Test and save fronted profile") } }
         item { HorizontalDivider() }
         item {
             Text("WARP registration · TLS splitting", style = MaterialTheme.typography.titleMedium)
