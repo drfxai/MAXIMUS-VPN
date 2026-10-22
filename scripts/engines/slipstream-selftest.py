@@ -134,12 +134,19 @@ def start_udp_forward(listen_port, target_port):
     return state
 
 
+_handed_out = set()
+
+
 def free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    """A free local port not handed out before in this run (a closed probe socket can get the same one again)."""
+    while True:
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        if port not in _handed_out:
+            _handed_out.add(port)
+            return port
 
 
 def socks_fetch(client_port, host, path, method="GET", body=None):
