@@ -1,0 +1,17 @@
+name: Spoof carrier integration
+on:
+  pull_request:
+    paths: ['app/src/main/java/com/example/panels/servers/tunnel/**', 'tools/spoof-validation/**', '.github/workflows/spoof-carrier.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-carriers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install namespace tools
+        run: sudo apt-get update && sudo apt-get install -y iproute2
+      - name: Test bidirectional carriers in isolated namespaces
+        run: sudo python3 tools/spoof-validation/check.py
