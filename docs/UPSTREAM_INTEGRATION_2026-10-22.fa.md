@@ -1,8 +1,7 @@
 # استفاده از پروژه‌های مرجع در MAXIMUS VPN — ۲۲ اکتبر ۲۰۲۶
 
 این تغییر روی نسخهٔ اصلاح‌شدهٔ DNS جلسهٔ قبل ساخته شده است. سورس عمومی برنامه همچنان
-1.0.2 است. آرشیو ورودی کد داخلی 31 داشت؛ main گیت‌هاب به 32 رسیده بود و هدف به‌روزرسانی حاضر 33 است. تنظیمات امضا تغییر نکرده است. هیچ ریلیز، نصب سرور یا اتصال به
-حساب ثالثی انجام نشده است.
+1.0.2 است. آرشیو ورودی کد داخلی 31 داشت؛ main گیت‌هاب به 32 رسیده بود و هدف به‌روزرسانی حاضر 33 است. تنظیمات امضا تغییر نکرده است. در مرحلهٔ بررسی اولیه، ریلیز یا نصب سرور انجام نشده بود؛ انتشار نهایی در انتهای این گزارش ثبت شده است.
 
 ## بررسی هر هشت منبع
 
@@ -61,7 +60,7 @@ maximus-cotten://t.example.com?mode=cottenmax&key=URL_ENCODED_SERVER_KEY&transpo
 
 ## موارد همچنان تکمیل‌نشده
 
-- بسته‌بندی APK نهایی و اجرای end-to-end CottenDNS/CottenMax با سرور سازگار، گوشی و شبکه‌های واقعی.
+- اجرای end-to-end CottenDNS/CottenMax با سرور سازگار، گوشی فیزیکی و شبکه‌های واقعی.
 - پنل Hashem و carrierهای GRE/FRP/Backhaul، cluster و watchdog مستقل سمت سرور.
 - اتصال مستقیم پنل Soar، پشتیبانی عمومی soar:// و کنترل حساب‌های آن.
 - ساخت پروتکل مستقل Spoof Tunnel، raw-L3 allowlist backend و spoofed carriers.
@@ -79,4 +78,13 @@ PR [#114](https://github.com/drfxai/MAXIMUS-VPN/pull/114) با commit `6e65afee7
 - [آزمون‌های DNS/TLS و pacing](https://github.com/drfxai/MAXIMUS-VPN/actions/runs/39841452676): موفق.
 - آزمون‌های Slipstream، ابزارهای سرور، aggregator، ربات و repository hygiene نیز در Checks موفق شدند.
 
-انتشار امضاشدهٔ بیلد داخلی 33 از workflow موجود درخواست می‌شود؛ این مرحله با تأیید اپراتور/گوشی واقعی تفاوت دارد.
+انتشار امضاشدهٔ بیلد داخلی 33 در workflow موجود انجام شد؛ این مرحله با تأیید اپراتور/گوشی واقعی تفاوت دارد.
+
+## نتیجهٔ انتشار نهایی
+
+- [Signed Android release — run 86](https://github.com/drfxai/MAXIMUS-VPN/actions/runs/39843421451): موفق.
+- نسخهٔ عمومی V1.0.2، کد داخلی Android برابر 33؛ commit انتشار `a0269bf22ec93e60729a8b31bd2ecff5c04ac586`.
+- ساخت موتورهای بومی، تست‌ها، lint، ساخت ARM64/Universal، بررسی بسته‌بندی/امضا/checksum و نصب/اجرای Android 15 emulator موفق شدند.
+- SHA-256 گواهی هر دو APK با انتشار قبلی یکسان است: `83352d116d4bb06fc9e8c5e6347633412da2197410fe45fdb48c1ad8e4a9dcfe`.
+- [ریلیز رسمی و فایل‌های APK](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.2) به‌روزرسانی شد؛ update.json نیز Build 86 را اعلام می‌کند.
+- آزمون اپراتورهای ایران و گوشی فیزیکی انجام نشده است؛ CottenMax همچنان beta و نیازمند سرور سازگار است.
