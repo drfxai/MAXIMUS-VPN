@@ -13,6 +13,8 @@ dependencies {
 kotlin { jvmToolchain(21) }
 sourceSets {
     main {
+        java.srcDir("../../../app/src/main/java")
+        java.include("com/example/vpn/dns/DnsMessageValidator.java")
         kotlin.srcDirs("src/main/kotlin", "stubs", "../../../app/src/main/java")
         kotlin.include(
             "SimRunner.kt", "Phase4.kt", "android/**", "com/example/vpn/diagnostics/Stubs.kt", "com/example/vpn/tunnel/ProxyDnsTransportStub.kt",

@@ -36,7 +36,9 @@ object WarpProvider {
             WarpRegistration.loadOrRegister(
                 stored = storage.getAndDecrypt(STORAGE_KEY),
                 save = { storage.encryptAndSave(STORAGE_KEY, it) },
-                register = { WarpRegistration.register(open) }
+                register = { WarpRegistration.register(open,
+                    splitTlsHello = context.getSharedPreferences("network_experiments", Context.MODE_PRIVATE)
+                        .getBoolean("warp_split_tls", false)) }
             )
         }.also { cached = it }
     }

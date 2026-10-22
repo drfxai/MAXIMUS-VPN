@@ -46,7 +46,9 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
         val operatorTag: String = "Cloudflare CDN",
         val downloadSpeedKbps: Long = 0L,
         val verificationStatus: String = "TCP only; traffic not verified",
-        val originVerified: Boolean = false
+        val originVerified: Boolean = false,
+        val tlsHandshakeMs: Long? = null,
+        val httpRequestMs: Long? = null
     ) {
         val lossPercent: Double
             get() = (((totalTries - successes).toDouble() / totalTries.toDouble()) * 100.0).coerceIn(0.0, 100.0)
@@ -504,13 +506,17 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
                         val t1 = tcpPing(ip, targetPort, 1200)
                         if (t1 == null) return@async null
                         latencies.add(t1)
+                        // Comparable samples only: TLS and HTTP durations are separate measurements.
+                        repeat(2) { tcpPing(ip, targetPort, 1200)?.let { latencies.add(it) } }
+                        if (latencies.size < 2) return@async null
+                        var tlsMs: Long? = null
 
                         // Probe 2: TLS Handshake check
                         var tlsOk = true
                         if (isTls) {
                             val t2 = tlsHandshakePing(ip, targetPort, sniTarget, 1500)
                             if (t2 != null) {
-                                latencies.add(t2)
+                                tlsMs = t2
                             } else {
                                 tlsOk = false
                             }
@@ -524,7 +530,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
                         if (httpResult != null) {
                             verificationStatus = httpResult.first
                             originVerified = httpResult.second
-                            latencies.add(httpResult.third)
+                            // HTTP request time is recorded separately below.
                         } else {
                             return@async null
                         }
@@ -557,7 +563,9 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
                             operatorTag = operatorTag,
                             downloadSpeedKbps = downloadSpeed,
                             verificationStatus = verificationStatus,
-                            originVerified = originVerified
+                            originVerified = originVerified,
+                            tlsHandshakeMs = tlsMs,
+                            httpRequestMs = httpResult?.third
                         )
                     }
                 }.awaitAll()

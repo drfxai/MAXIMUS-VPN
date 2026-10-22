@@ -60,6 +60,8 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         }
         loadConfigs()
         loadResearch()
+        val split = app.getSharedPreferences("network_experiments", Application.MODE_PRIVATE).getBoolean("warp_split_tls", false)
+        local.update { it.copy(transportTools = it.transportTools.copy(warpSplit = split)) }
     }
 
     private fun loadConfigs() = viewModelScope.launch {
@@ -83,6 +85,53 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
                 .filterNotNull().filter { it != "NONE" }.joinToString(" · "))
         })
     }
+
+    private var endpointJob: Job? = null
+
+    fun scanEndpoints(raw: String) {
+        if (endpointJob?.isActive == true || _state.value.vpnOn) return
+        endpointJob = viewModelScope.launch {
+            local.update { it.copy(transportTools = it.transportTools.copy(running = true, results = emptyList(), message = "Measuring TCP reachability")) }
+            try {
+                val app = getApplication<Application>()
+                val targets = com.example.vpn.experimental.ReachabilityScanner.targets(raw)
+                val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+                val network = cm.activeNetwork?.takeIf { n -> cm.getNetworkCapabilities(n)?.let { caps ->
+                    caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                        !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+                } == true } ?: error("No physical network")
+                val key = com.example.vpn.smart.NetworkIdentity.current(app)
+                val results = com.example.vpn.experimental.ReachabilityScanner.scan(targets, key) { network.socketFactory.createSocket() }
+                check(key == com.example.vpn.smart.NetworkIdentity.current(app) && cm.activeNetwork == network && !_state.value.vpnOn) {
+                    "Network changed; results discarded. Run again on the new network."
+                }
+                local.update { it.copy(transportTools = it.transportTools.copy(results = results, message = "TCP measurements only; tunnel traffic not tested")) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { local.update { it.copy(transportTools = it.transportTools.copy(message = e.message ?: "Scan failed")) } }
+            finally { local.update { it.copy(transportTools = it.transportTools.copy(running = false)) } }
+        }
+    }
+
+    fun stopEndpoints() { endpointJob?.cancel() }
+
+    fun setWarpSplit(enabled: Boolean) {
+        getApplication<Application>().getSharedPreferences("network_experiments", Application.MODE_PRIVATE)
+            .edit().putBoolean("warp_split_tls", enabled).apply()
+        local.update { it.copy(transportTools = it.transportTools.copy(warpSplit = enabled)) }
+    }
+
+    fun saveFronted(id: String, endpoint: String, sni: String, host: String) { viewModelScope.launch {
+        try {
+            val clone = withContext(Dispatchers.IO) {
+                val repository = RayApplication.instance.serverRepository
+                val base = repository.getAllProfilesOnce().firstOrNull { it.id == id } ?: error("Choose a base profile")
+                com.example.vpn.experimental.FrontedTunnel.build(base, endpoint, sni, host).also { repository.insert(it) }
+            }
+            loadConfigs()
+            local.update { it.copy(transportTools = it.transportTools.copy(message = "Saved ${clone.name}. Select it on Servers and test before use.")) }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { local.update { it.copy(transportTools = it.transportTools.copy(message = e.message ?: "Could not save profile")) } }
+    } }
 
     private fun loadResearch() {
         local.value = local.value.copy(research = research.all().map { r ->
@@ -324,6 +373,8 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onUseRecommended = viewModel::useRecommended, onRevive = viewModel::revive, onStopRevive = viewModel::stopRevive,
                 onFirewall = viewModel::chooseFirewall, onCheckServices = viewModel::checkServices, onStopServices = viewModel::stopServices,
                 onRunShadowLink = viewModel::runShadowLink, onStopShadowLink = viewModel::stopShadowLink,
+                onScanEndpoints = viewModel::scanEndpoints, onStopEndpoints = viewModel::stopEndpoints,
+                onSaveFronted = viewModel::saveFronted, onWarpSplit = viewModel::setWarpSplit,
                 onChainOrder = viewModel::chainOrder, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings
             )
         },

@@ -99,12 +99,18 @@ object WarpRegistration {
     fun register(
         open: (URL) -> HttpURLConnection = directOpener,
         privateKey: ByteArray = Curve25519.newPrivateKey(),
-        now: Date = Date()
+        now: Date = Date(),
+        splitTlsHello: Boolean = false
     ): WarpAccount {
         val publicKey = Curve25519.publicKey(privateKey)
         val body = requestBody(base64(publicKey), timestamp(now)).toString().toByteArray(Charsets.UTF_8)
         val connection = open(URL("$API_URL/$API_VERSION/reg"))
         try {
+            if (splitTlsHello) {
+                val https = connection as? javax.net.ssl.HttpsURLConnection
+                    ?: throw IOException("TLS splitting requires HTTPS")
+                https.sslSocketFactory = com.example.vpn.tls.TlsHelloSocketFactory(https.sslSocketFactory, 128, 2)
+            }
             connection.requestMethod = "POST"
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS

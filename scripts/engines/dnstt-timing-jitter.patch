@@ -1,0 +1,41 @@
+--- a/dnstt-client/querypace.go
++++ b/dnstt-client/querypace.go
+@@ -2,6 +2,8 @@
+ 
+ import (
+ 	"sync"
++	"crypto/rand"
++	"encoding/binary"
+ 	"time"
+ )
+ 
+@@ -35,14 +37,15 @@
+ 		return
+ 	}
+ 	p.lock.Lock()
++	defer p.lock.Unlock()
+ 	now := time.Now()
+ 	at := p.next
+ 	if at.Before(now) {
+ 		at = now
+ 	}
+-	p.next = at.Add(p.interval)
+-	p.lock.Unlock()
+ 	time.Sleep(time.Until(at))
++	// Schedule from actual wake time: a late timer must not cause a catch-up burst.
++	p.next = time.Now().Add(p.interval + jitterDelay(p.interval))
+ }
+ 
+ // ready returns the earliest time the next query may be sent.
+@@ -51,3 +54,11 @@
+ 	defer p.lock.Unlock()
+ 	return p.next
+ }
++
++// Only add delay. Subtractive jitter would violate the configured QPS ceiling.
++func jitterDelay(interval time.Duration) time.Duration {
++    if interval <= 0 { return 0 }
++    var b [8]byte
++    if _, err := rand.Read(b[:]); err != nil { return interval / 8 }
++    return time.Duration(binary.LittleEndian.Uint64(b[:]) % (uint64(interval / 4) + 1))
++}

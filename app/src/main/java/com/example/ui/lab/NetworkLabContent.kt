@@ -82,6 +82,7 @@ import com.example.vpn.lab.VerifiedNetworkProfile
 
 /** The LAB's pages: a minimal home and five detail sections (spec sections 40-46), plus Research. */
 enum class LabSection(val title: String, val icon: ImageVector) {
+    TRANSPORT_TOOLS("Transport tools", Icons.Rounded.Science),
     SHADOWLINK("ShadowLink", Icons.Rounded.Shield),
     REPORT("Analysis report", Icons.Rounded.Insights),
     NETWORKS("Networks", Icons.Rounded.CellTower),
@@ -118,7 +119,8 @@ data class NetworkLabUiState(
     val revival: RevivalUi = RevivalUi(),
     val services: ServicesUi = ServicesUi(),
     val shadowLink: ShadowLinkUi = ShadowLinkUi(),
-    val chain: ChainUi = ChainUi()
+    val chain: ChainUi = ChainUi(),
+    val transportTools: TransportToolsUi = TransportToolsUi()
 )
 
 /** Everything the LAB screens can ask for; the screens hold no state of their own beyond expanded cards. */
@@ -149,6 +151,10 @@ class NetworkLabActions(
     val onChainOrder: (ChainOrder) -> Unit = {},
     val onChainRegion: (String) -> Unit = {},
     val onSaveChain: () -> Unit = {},
+    val onScanEndpoints: (String) -> Unit = {},
+    val onStopEndpoints: () -> Unit = {},
+    val onSaveFronted: (String, String, String, String) -> Unit = { _, _, _, _ -> },
+    val onWarpSplit: (Boolean) -> Unit = {},
     val onPsiphonSettings: (String) -> Unit = {}
 )
 
@@ -161,6 +167,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
             else -> Column(Modifier.fillMaxSize()) {
                 TitleBar(c, s.title, sectionSubtitle(s, state), Icons.AutoMirrored.Rounded.ArrowBack, { actions.onOpen(null) })
                 when (s) {
+                    LabSection.TRANSPORT_TOOLS -> TransportToolsPage(state, actions)
                     LabSection.SHADOWLINK -> ShadowLinkPage(c, state.shadowLink, state.vpnOn, actions.onRunShadowLink, actions.onStopShadowLink, actions.onUseRecommended, relativeTime)
                     LabSection.REPORT -> ReportPage(c, state, actions, relativeTime)
                     LabSection.NETWORKS -> NetworksPage(c, state.snapshot, relativeTime)
@@ -181,6 +188,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
 }
 
 private fun sectionSubtitle(s: LabSection, state: NetworkLabUiState): String = when (s) {
+    LabSection.TRANSPORT_TOOLS -> "Measured routes and explicit TLS front settings"
     LabSection.SHADOWLINK -> state.shadowLink.report?.let { "${it.networkLabel} · ${it.egress.title}" } ?: "One fused read of the network and the path to try"
     LabSection.REPORT -> state.snapshot.analysis?.let { "${it.networkLabel} · ${it.state}" } ?: "No full analysis on this network yet"
     LabSection.NETWORKS -> "Only the current network is measured live"
@@ -421,6 +429,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                             else -> Triple(LabSection.SERVICES, "", null)
                         }
                     },
+                    Triple(LabSection.TRANSPORT_TOOLS, "Experimental", null),
                     Triple(LabSection.CHAIN, state.chain.order.title, null),
                     Triple(LabSection.RESEARCH, "${state.research.size}", null)
                 )

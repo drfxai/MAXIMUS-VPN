@@ -24,4 +24,6 @@ trap 'rm -rf "$SRC"' EXIT
 patch -d "$SRC" -p1 --forward --batch --silent < "$(dirname "$0")/dnstt-query-rate.patch"
 patch -d "$SRC" -p1 --forward --batch --silent < "$(dirname "$0")/dnstt-multipath.patch"
 
+patch -d "$SRC" -p1 --forward --batch --silent < "$(dirname "$0")/dnstt-timing-jitter.patch"
+
 build_main "$SRC" ./dnstt-client dnstt
