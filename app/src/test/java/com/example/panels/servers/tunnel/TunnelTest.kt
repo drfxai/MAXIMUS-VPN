@@ -148,7 +148,8 @@ class TunnelTest {
         TunnelScripts.abroadInstall(spec(transports = setOf(TunnelTransport.REVERSE)), "amd64", abroad.host, renewKeys = false),
         TunnelScripts.iranInstall(spec(transports = setOf(TunnelTransport.REVERSE)), "amd64", abroad.host, renewKeys = false, oldEntryPort = null),
         TunnelScripts.abroadReverse(spec(), iran.host),
-        TunnelScripts.restorePrevious()
+        TunnelScripts.restorePrevious(),
+        TunnelScripts.iranInstall(spec().copy(rvProbePort = 12345), "amd64", abroad.host, renewKeys = false, oldEntryPort = null)
     )
 
     @Test fun scriptsAreValidShellWithPinnedPrograms() {
@@ -236,5 +237,80 @@ class TunnelTest {
         assertEquals(setOf(TunnelTransport.REVERSE), TunnelTransport.recommended(false, true))
         assertEquals(TunnelTransport.FORWARD.toSet(), TunnelTransport.recommended(true, false))
         assertEquals(all, TunnelTransport.recommended(false, false))
+    }
+
+    // ------------------------------------------------------------------ verification
+
+    private val own = setOf("198.51.100.20", "10.0.0.5")
+
+    @Test fun onlyAForeignExitVerifiesAPath() {
+        assertEquals(PathEvidence(PathState.ROUTE_VERIFIED, 120, "203.0.113.7"), PathEvidence.parse("ok:120:203.0.113.7", own))
+        assertEquals(PathState.ROUTE_VERIFIED, PathEvidence.parse("ok:80:2001:db8::7", own).state)
+        // The request went through, but nothing shows it left abroad.
+        assertEquals(PathState.NO_EXIT_PROOF, PathEvidence.parse("ok:120:", own).state)
+        assertEquals(PathState.NO_EXIT_PROOF, PathEvidence.parse("ok:120", own).state)
+        assertEquals(PathState.NO_EXIT_PROOF, PathEvidence.parse("ok:120:198.51.100.20", own).state)
+        assertEquals(PathState.NO_EXIT_PROOF, PathEvidence.parse("ok:120:<html>", own).state)
+        assertEquals(PathState.LINK_ONLY, PathEvidence.parse("link:35", own).state)
+        assertFalse(PathEvidence.parse("link:35", own).verified)
+        assertEquals(PathState.FAILED, PathEvidence.parse("fail", own).state)
+        assertEquals(PathState.FAILED, PathEvidence.parse("", own).state)
+    }
+
+    @Test fun statusCountsOnlyVerifiedPaths() {
+        val r = mapOf(
+            "TIME" to "1700000000", "PORTS" to "31001 31002", "SVC_maximus-tunnel" to "active", "SVC_maximus-tunnel-hy" to "off",
+            "LOCAL_IPS" to "10.0.0.5 fe80::1", "DIRECT_IP" to "198.51.100.99",
+            "PATH_t-reality-now" to "ok:140:203.0.113.7", "PATH_t-xhttp-now" to "ok:90:198.51.100.99",
+            "PATH_t-rv" to "link:40", "PATH_t-hy2" to "fail"
+        )
+        val st = TunnelStatus.fromResults(r, iran.host)
+        assertEquals(1, st.working)
+        assertEquals("t-reality-now", st.best)
+        assertEquals(TunnelHealth.DEGRADED, st.health)
+        // The faster XHTTP answer left from the Iran server's own address, so it has no latency to rank.
+        assertNull(st.paths["t-xhttp-now"])
+        assertEquals(140L, st.paths["t-reality-now"])
+        assertEquals(listOf(31001, 31002), st.ports)
+
+        val none = TunnelStatus.fromResults(r.filterKeys { !it.startsWith("PATH_t-reality") }, iran.host)
+        assertEquals(TunnelHealth.NO_EXTERNAL_ROUTE_OBSERVED, none.health)
+        assertNull(none.best)
+        val stopped = TunnelStatus.fromResults(r + ("SVC_maximus-tunnel" to "failed"), iran.host)
+        assertEquals(TunnelHealth.FAILED, stopped.health)
+        val all = TunnelStatus.fromResults(r.filterKeys { it == "SVC_maximus-tunnel" || it == "PATH_t-reality-now" }, iran.host)
+        assertEquals(TunnelHealth.ROUTE_VERIFIED, all.health)
+        // An empty check is never a working tunnel.
+        assertEquals(TunnelHealth.NO_EXTERNAL_ROUTE_OBSERVED, TunnelStatus.fromResults(mapOf("SVC_maximus-tunnel" to "active"), iran.host).health)
+    }
+
+    @Test fun reverseTestPortOnlyReachesTheReverseLink() {
+        val s = spec().copy(rvProbePort = 12345)
+        val base = JSONObject(TunnelConfigs.iranBase(s))
+        val probe = (0 until base.getJSONArray("inbounds").length()).map { base.getJSONArray("inbounds").getJSONObject(it) }
+            .single { it.getString("tag") == TunnelConfigs.REVERSE_PROBE_IN }
+        assertEquals("127.0.0.1", probe.getString("listen"))
+        assertEquals(12345, probe.getInt("port"))
+        val rules = base.getJSONObject("routing").getJSONArray("rules")
+        val rule = (0 until rules.length()).map { rules.getJSONObject(it) }
+            .single { it.optJSONArray("inboundTag")?.getString(0) == TunnelConfigs.REVERSE_PROBE_IN }
+        assertEquals(TunnelTransport.REVERSE.tagPrefix, rule.getString("outboundTag"))
+        // Private networks stay blocked before any inbound rule.
+        assertEquals("block", rules.getJSONObject(0).getString("outboundTag"))
+        assertTrue(TunnelScripts.iranInstall(s, "amd64", abroad.host, false, null).text.contains("RV_PORT=42001\nRV_PROBE=12345"))
+
+        // Without the port (tunnels set up before it), or without the reverse way, there is no test inbound.
+        assertEquals(1, JSONObject(TunnelConfigs.iranBase(spec())).getJSONArray("inbounds").length())
+        assertEquals(1, JSONObject(TunnelConfigs.iranBase(s.copy(transports = setOf(TunnelTransport.REALITY)))).getJSONArray("inbounds").length())
+        assertEquals(s, TunnelSpec.fromSettings(s.toSettings(TunnelSpec.ROLE_IRAN)))
+        assertEquals(0, TunnelSpec.fromSettings(spec().toSettings(TunnelSpec.ROLE_IRAN) - "rvProbePort")!!.rvProbePort)
+    }
+
+    @Test fun statusTestsTwoTargetsAndRotationRollsBack() {
+        val status = TunnelScripts.iranStatus().text
+        assertTrue(status.contains(TunnelConfigs.PROBE_URL) && status.contains(TunnelConfigs.TRACE_URL))
+        assertTrue(status.contains("RV_PROBE=") && status.contains("link:"))
+        val install = TunnelScripts.abroadInstall(spec(), "amd64", abroad.host, renewKeys = false).text
+        assertTrue(install.contains("the previous ports are back"))
     }
 }
