@@ -1,2 +1,3 @@
-V1.0.2 Android versionCode 32
-DNS resolver recovery, bounded dnstt jitter and experimental transport tools from PR #113.
+V1.0.2 Android versionCode 33
+DNS response ownership, recent resolver recovery and authenticated CottenMax beta from PR #114.
+All Android tests/lint, DNS/TLS/pacing and three-ABI CottenDNS builds passed before release.
