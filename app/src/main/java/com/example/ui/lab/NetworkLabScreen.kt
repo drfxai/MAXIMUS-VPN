@@ -120,12 +120,12 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         local.update { it.copy(transportTools = it.transportTools.copy(warpSplit = enabled)) }
     }
 
-    fun saveFronted(id: String, endpoint: String, sni: String, host: String) { viewModelScope.launch {
+    fun saveFronted(id: String, endpoint: String, sni: String, host: String, splitHello: Boolean) { viewModelScope.launch {
         try {
             val clone = withContext(Dispatchers.IO) {
                 val repository = RayApplication.instance.serverRepository
                 val base = repository.getAllProfilesOnce().firstOrNull { it.id == id } ?: error("Choose a base profile")
-                com.example.vpn.experimental.FrontedTunnel.build(base, endpoint, sni, host).also { repository.insert(it) }
+                com.example.vpn.experimental.FrontedTunnel.build(base, endpoint, sni, host, splitHello).also { repository.insert(it) }
             }
             loadConfigs()
             local.update { it.copy(transportTools = it.transportTools.copy(message = "Saved ${clone.name}. Select it on Servers and test before use.")) }
