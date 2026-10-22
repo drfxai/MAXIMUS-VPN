@@ -79,13 +79,38 @@ TRAFFIC_VERIFIED, DEGRADED, FAILED, UNKNOWN.
 DEVICE_VERIFIED and FIELD_VERIFIED are evidence levels from a person's report, not states the app
 can reach by itself, so they are recorded here per feature rather than computed.
 
+## PR C: one server panel interface, 3x-ui and Hiddify adapters (backend only)
+
+`ServerPanelProvider` (panels/servers/panel) gives every server panel the same operations:
+install blocker, status, install, update, backup, restart, start, stop, logs, uninstall. Status is
+`PanelState`: NOT_INSTALLED, INSTALLING, RUNNING, DEGRADED, STOPPED, UNKNOWN (an unreachable
+server is UNKNOWN, never "not installed").
+
+Hiddify Manager (GPL-3.0) is never bundled: the app runs Hiddify's official installer on the
+user's server, pinned to tag `v14.0.5` (commit `331c1114`). The two installer scripts are checked
+against SHA-256 values recorded from that tag before they run; what they download afterwards
+(Python packages, the panel) is pinned by tag only, as Hiddify's own installer does it.
+
+DrFX's decision (2026-10-22): Hiddify is installed only on a server of its own. The app refuses a
+server with 3x-ui, Maximus Tunnel or anything on ports 80/443, a non-Ubuntu system, under 1 GB of
+memory or under 5 GB free disk; the script repeats the 80/443 and existing-install checks on the
+server. An existing Hiddify is detected and imported without any change on the server.
+
+| Feature | Implemented | Unit | Simulator | Emulator | Device | Field | Limitation |
+|---|---|---|---|---|---|---|---|
+| Provider interface + registry (3x-ui, Hiddify) | yes | yes | no | no | no | no | no screens yet; previews come first |
+| Hiddify install with pinned, hash-checked official installer | yes | script syntax + pins | no | no | no | no | never run against a real server; packages it downloads are tag-pinned only |
+| Hiddify dedicated-server blocker | yes | yes | no | no | no | no | reads ServerFacts; the script re-checks 80/443 |
+| Hiddify detect/import, status per hiddify-* unit | yes | yes (fake shell) | no | no | no | no | |
+| Hiddify update (no downgrade), backup, restart/start/stop, logs, uninstall (keeps data) | yes | script syntax | no | no | no | no | admin URL is masked in logs and stored only in the encrypted server store |
+| 3x-ui adapter (install/uninstall/restart via existing flows; new status, start/stop, backup) | yes | yes | no | no | no | no | update not offered: the installer leaves a working panel alone |
+
 ## Remaining P0 work (not done yet)
 
 - Zero-downtime rotation: a rotation still restarts Xray. Real make-before-break needs Xray's
   API (add/remove inbound and outbound at runtime) instead of a restart.
 - Smart Connect ordering does not read the engine ledger yet (it uses NetworkMemory and ConnectivityBrain).
-- `ServerPanelProvider` with 3x-ui and Hiddify adapters (items 78, 79); Hiddify's licence and
-  official installer provenance must be checked first.
+- Panel screens for the providers (Hiddify card, import, backup) after the previews are approved.
 
 ## Excluded by earlier safety stops
 

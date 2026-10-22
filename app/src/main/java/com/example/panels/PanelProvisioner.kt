@@ -919,7 +919,7 @@ class PanelProvisioner(
 
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()
-        private const val XUI_VERSION = "v3.8.5"
+        internal const val XUI_VERSION = "v3.8.5"
         private const val XUI_INSTALLER_URL =
             "https://raw.githubusercontent.com/MHSanaei/3x-ui/7ef22f94c950ff09f0870e2295fa65ad5968742c/install.sh"
         private const val RESULT_MARKER = "---MAXIMUS-RESULT---"

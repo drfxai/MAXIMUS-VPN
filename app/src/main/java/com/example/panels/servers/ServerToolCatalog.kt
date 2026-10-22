@@ -41,6 +41,8 @@ object ServerToolCatalog {
     const val BBR = "bbr"
     const val SWAP = "swap"
     const val MAXIMUS_TUNNEL = "maximus-tunnel"
+    /** Managed through ServerPanelProvider only; not in [all], so no tool card shows it yet. */
+    const val HIDDIFY = "hiddify"
 
     private val both = setOf(ServerLocation.IRAN, ServerLocation.ABROAD)
     private val abroad = setOf(ServerLocation.ABROAD)
