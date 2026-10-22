@@ -292,7 +292,7 @@ class WarPlanEnginesAndStealthTest {
     }
 
     @Test fun droppedSystemDnsFallsBackToDohWithinTheGracePeriod() {
-        val answer = """{"Status":0,"Answer":[{"name":"x","type":1,"data":"104.21.30.40"}]}"""
+        val answer = """{"Status":0,"Answer":[{"name":"blocked.example","type":1,"data":"104.21.30.40"}]}"""
         val open: (URL) -> HttpURLConnection = { url ->
             object : HttpURLConnection(url) {
                 override fun connect() {}
@@ -314,8 +314,8 @@ class WarPlanEnginesAndStealthTest {
         val query = EndpointResolver.wireQuery("a.example", id = 0x1234)
         // Header (response, 1 question, 2 answers), the echoed question, a CNAME and an A record.
         val answer = query.copyOf().also { it[2] = 0x81.toByte(); it[3] = 0x80.toByte(); it[7] = 2 } +
-            byteArrayOf(0xc0.toByte(), 12, 0, 5, 0, 1, 0, 0, 0, 60, 0, 2, 0xc0.toByte(), 12) +
-            byteArrayOf(0xc0.toByte(), 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 104, 16, 1, 2)
+            byteArrayOf(0xc0.toByte(), 12, 0, 5, 0, 1, 0, 0, 0, 60, 0, 4, 1, 'b'.code.toByte(), 0xc0.toByte(), 14) +
+            byteArrayOf(1, 'b'.code.toByte(), 0xc0.toByte(), 14, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 104, 16, 1, 2)
         assertEquals("104.16.1.2", EndpointResolver.parseWireAnswer(query, answer))
         val blockPage = answer.copyOf().also { it[it.size - 4] = 10; it[it.size - 3] = 10; it[it.size - 2] = 34; it[it.size - 1] = 36 }
         assertNull(EndpointResolver.parseWireAnswer(query, blockPage))
