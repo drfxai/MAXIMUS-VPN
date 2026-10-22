@@ -570,3 +570,11 @@ No WhiteDNS-Android proprietary app code, credentials, APK, branding or artwork
 has been copied. The CLI and Android UI have different licenses and are separate
 projects. A source adapter and build recipe do not establish native/runtime or
 carrier verification; see docs/UPSTREAM_INTEGRATION_2026-10-22.fa.md.
+
+## Optional Linux server spoof carrier
+
+MAXIMUS can install ParsaKSH/spoof-tunnel v3.1.0-beta.0 on explicitly selected managed servers.
+Upstream: https://github.com/ParsaKSH/spoof-tunnel — Apache-2.0.
+The original upstream binary is SHA-256 pinned separately for amd64 and arm64; it is not linked into the Android APK.
+The license is included at app/src/main/assets/licenses/spoof-tunnel-Apache-2.0.txt.
+The MAXIMUS integration is original code; no Hashem Pro panel code or licensing logic is copied.
