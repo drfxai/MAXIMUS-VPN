@@ -19,17 +19,9 @@ object LiveTunnelProbe {
      * falling back to the ISP after disconnect.
      */
     suspend fun latency(context: Context): Long = withContext(Dispatchers.IO) {
-        val vpn = vpnNetwork(context)
-        val started = System.nanoTime()
-        val connection = vpn.openConnection(URL(com.example.xray.RealDelayProbe.PROBE_URL)) as HttpURLConnection
-        try {
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.instanceFollowRedirects = false
-            connection.useCaches = false
-            check(connection.responseCode in 200..399) { "Probe returned HTTP ${connection.responseCode}" }
-            ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)
-        } finally { connection.disconnect() }
+        com.example.vpn.verify.TrafficCheck(
+            com.example.vpn.verify.RouteDialers.vpn(context), stepTimeoutMs = 4_000
+        ).smallRequest()
     }
 
     /** Latency through the tunnel, plus the exit country and address when Cloudflare's trace page is reachable. */
