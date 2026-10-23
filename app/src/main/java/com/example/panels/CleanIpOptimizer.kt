@@ -235,11 +235,11 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
                 security = effectiveSecurity,
                 sni = effectiveSni,
                 host = effectiveHost,
-                lastLatencyMs = cleanIp.medianMs,
+                lastLatencyMs = null,
                 jitterMs = cleanIp.jitterMs,
                 packetLoss = cleanIp.lossPercent,
                 countryCode = cleanIp.country,
-                lastTestedTimestamp = System.currentTimeMillis()
+                lastTestedTimestamp = null
             )
         }
 
@@ -372,6 +372,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
         }
 
         val targetHost = profile.host.ifBlank { profile.sni.ifBlank { profile.address } }
+        val tlsName = profile.sni.ifBlank { targetHost }
         if (targetHost.isBlank() || (targetHost.matches(Regex("^[0-9.]+$")) && profile.sni.isBlank())) {
             return@withContext OriginHealth.Incompatible(
                 "Missing domain SNI or Host header. Cloudflare Anycast CDN requires a registered domain hostname to route requests to the backend."
@@ -404,11 +405,11 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
                 rawSocket.connect(InetSocketAddress(ipToProbe, port), 4000)
 
                 val probeSocket: Socket = if (isTls) {
-                    val ssl = probeSslSocketFactory.createSocket(rawSocket, targetHost, port, true) as SSLSocket
+                    val ssl = probeSslSocketFactory.createSocket(rawSocket, tlsName, port, true) as SSLSocket
                     ssl.soTimeout = 4000
                     val sslParams = ssl.sslParameters ?: SSLParameters()
                     sslParams.endpointIdentificationAlgorithm = "HTTPS"
-                    runCatching { sslParams.serverNames = listOf(SNIHostName(targetHost)) }
+                    runCatching { sslParams.serverNames = listOf(SNIHostName(tlsName)) }
                     ssl.sslParameters = sslParams
                     ssl.startHandshake()
                     ssl
