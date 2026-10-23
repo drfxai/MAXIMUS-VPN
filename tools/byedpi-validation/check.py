@@ -41,7 +41,7 @@ s=http.server.HTTPServer(('10.221.1.2',18443),http.server.SimpleHTTPRequestHandl
 c=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);c.load_cert_chain(sys.argv[1],sys.argv[2]);s.socket=c.wrap_socket(s.socket,server_side=True);s.serve_forever()
 '''
             processes.append(subprocess.Popen(['ip','netns','exec',server,'python3','-u','-c',source,str(root/'cert.pem'),str(root/'key.pem')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-            capture = subprocess.Popen(['ip','netns','exec',router,'tcpdump','-U','-i','mfr0','-w',str(root/'capture.pcap'),'tcp','port','18443'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            capture = subprocess.Popen(['ip','netns','exec',router,'tcpdump','--immediate-mode','-U','-i','mfr0','-w',str(root/'capture.pcap'),'tcp','port','18443'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             processes.append(capture)
             env = {**os.environ, 'MAXIMUS_PEER_IP':'10.221.1.2', 'MAXIMUS_PEER_PORT':'18443'}
             native = subprocess.Popen(['ip','netns','exec',client,binary,'--ip','127.0.0.1','--port','19080','--conn-ip','0.0.0.0',
@@ -55,7 +55,9 @@ c=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);c.load_cert_chain(sys.argv[1],sys.argv
             assert 'Directory listing' in response.stdout
             # A valid TLS exchange and application response must coexist with the decoy on the wire.
             capture.terminate(); capture.wait(timeout=5)
-            assert b'decoy.test' in (root/'capture.pcap').read_bytes(), 'No fake SNI observed on wire'
+            capture_bytes = (root/'capture.pcap').read_bytes()
+            print('Captured bytes:', len(capture_bytes), flush=True)
+            assert b'decoy.test' in capture_bytes, 'No fake SNI observed on wire'
             assert b'actual.test' in (root/'capture.pcap').read_bytes(), 'Original TLS handshake missing'
             print('PASS: native fake SNI on wire; real certificate-verified TLS and HTTP intact', flush=True)
             wrong = subprocess.run(command[:-1] + ['https://wrong.test:18443/','--resolve','wrong.test:18443:10.221.1.2'], capture_output=True, timeout=30)
