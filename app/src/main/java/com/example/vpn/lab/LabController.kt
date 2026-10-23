@@ -735,6 +735,10 @@ class LabController(
                     }
                 }
             }
+            if (com.example.vpn.smart.NetworkIdentity.current(context) != currentIdentity) {
+                com.example.vpn.sidecar.EngineHandoff.clear()
+                return FastRecoveryOutcome(null, 0, false, "network changed during recovery; results discarded")
+            }
             val tested = planner.tracks().count { it.outcomes.isNotEmpty() }
             val best = planner.verifiedFamilies().firstOrNull() ?: planner.best()
             if (best != null) {
