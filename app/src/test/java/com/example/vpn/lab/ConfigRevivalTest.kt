@@ -193,6 +193,21 @@ class ConfigRevivalTest {
         assertFalse(alive.scannedForIps)
     }
 
+    @Test fun deadFirstOriginDoesNotPreventValidatedDiscoveryThroughSecondOrigin() {
+        val visited = mutableListOf<String>()
+        var validated = emptyList<String>()
+        val r = ConfigRevival(engine, endpoints = { validated },
+            probe = { ps -> ps.map { DerivedRecoveryCandidate.TestResult.Failed("timeout") } },
+            findCleanIps = { p, _ ->
+                visited += p.id
+                if (p.id == "second") validated = listOf("188.114.97.3")
+                validated
+            })
+        val report = r.run(listOf(cf("first", "first.example.workers.dev"), cf("second", "second.example.workers.dev")), net)
+        assertEquals(listOf("first", "second"), visited)
+        assertEquals(validated, report.cleanIps)
+    }
+
     @Test fun anAddressThatRefusesTheCertificateIsSkippedForADay() {
         val dead = cf("q", "q.example.workers.dev")
         val bad = "188.114.97.3"
