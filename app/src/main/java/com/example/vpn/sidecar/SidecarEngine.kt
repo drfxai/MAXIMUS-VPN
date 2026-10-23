@@ -38,6 +38,7 @@ interface SidecarEngine {
 /** A started engine, program or in-app. */
 interface RunningEngine {
     val isAlive: Boolean
+    val startupFailure: String? get() = null
     /** Waits until the engine can carry traffic on its SOCKS port, it stops, or [timeoutMs] passes. */
     fun awaitReady(timeoutMs: Long): Boolean
     fun stop()
