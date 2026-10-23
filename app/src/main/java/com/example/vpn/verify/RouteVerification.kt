@@ -104,11 +104,12 @@ data class TrafficEvidence(
         attemptId != null && attemptId == state.attemptId && networkGeneration == state.networkGeneration
 
     /** One line for the log and the diagnostics report. */
-    fun describe(): String = "download ${leg(download)}, upload ${leg(upload)} (${path.title})"
+    fun describe(): String = "download ${leg(download)}, upload ${leg(upload, upload = true)} (${path.title})"
 
-    private fun leg(r: LegResult): String = when (r) {
+    private fun leg(r: LegResult, upload: Boolean = false): String = when (r) {
         is LegResult.Passed -> "verified (${r.bytes / 1024} KB, ${r.elapsedMs} ms, ${r.bytesPerSecond / 1024} KB/s)"
-        is LegResult.Failed -> if (r.stalled) "stalled after ${r.bytes} bytes (${r.stage.name})" else "failed (${r.stage.name}: ${r.reason})"
+        is LegResult.Failed -> if (r.stalled && upload) "unconfirmed after ${r.bytes} bytes written locally (${r.stage.name}); remote receipt unknown"
+            else if (r.stalled) "stalled after ${r.bytes} bytes (${r.stage.name})" else "failed (${r.stage.name}: ${r.reason})"
         is LegResult.NotTested -> "not tested (${r.reason})"
     }
 }
