@@ -28,14 +28,16 @@ python3 - "$work/proxy.c" <<'PY'
 import pathlib, sys
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
 needle = '    union sockaddr_u addr = *dst;'
-assert s.count(needle) == 1
-s = s.replace(needle, '''    const char *allowed = getenv("MAXIMUS_PEER_IP");
+start = s.index('int create_conn(')
+index = s.index(needle, start)
+prefix, body = s[:index], s[index:]
+s = prefix + body.replace(needle, '''    const char *allowed = getenv("MAXIMUS_PEER_IP");
     const char *port = getenv("MAXIMUS_PEER_PORT");
     struct in_addr wanted;
     if (!allowed || !port || inet_pton(AF_INET, allowed, &wanted) != 1 ||
         dst->sa.sa_family != AF_INET || dst->in.sin_addr.s_addr != wanted.s_addr ||
         ntohs(dst->in.sin_port) != atoi(port)) return -1;
-''' + needle)
+''' + needle, 1)
 p.write_text(s)
 PY
 make -C "$work" -j2 CC="$compiler" CFLAGS='-I. -std=c99 -O2 -fPIE' LDFLAGS='-pie -Wl,-z,max-page-size=16384'
