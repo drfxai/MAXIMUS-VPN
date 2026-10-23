@@ -109,9 +109,14 @@ class ConfigRevival(
             ech = runCatching { echCheck() }.getOrDefault(emptyMap())
             if (ips.isEmpty()) {
                 onProgress(Progress(0, pool.size, "Looking for clean Cloudflare IPs"))
-                runCatching { findCleanIps(dead.first(), network) }
-                scanned = true
-                ips = endpoints(network)
+                // One dead origin must not prevent discovering a path for another origin.
+                for (parent in dead.distinctBy { it.sni.ifBlank { it.host } }.take(3)) {
+                    if (cancelled()) break
+                    val found = runCatching { findCleanIps(parent, network) }.getOrDefault(emptyList())
+                    scanned = true
+                    ips = (endpoints(network) + found).distinct().take(12)
+                    if (ips.isNotEmpty()) break
+                }
             }
         }
         val bias = biasFor(wall, ech)
