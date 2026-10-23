@@ -1,3 +1,3 @@
-V1.0.2 Android versionCode 34
-Verified native fake-SNI, four-carrier source scanner and transactional clean-IP recovery.
-Source: db0f8fe672ef2a52856180a042e31c538e721c42
+V1.0.2 Android versionCode 35
+Verified Irancell recovery fixes: bounded Tor bootstrap, registration dependency gating, multi-reference route health and automatic Fake SNI trials.
+Source: 2e3ffd886a1919cff95c52bdf2b9a7dddb7b98e1
