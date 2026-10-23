@@ -184,37 +184,19 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
             cleanIp: Result,
             asClone: Boolean = false
         ): VlessProfile {
-            if (original.security.equals("reality", ignoreCase = true)) {
-                throw IllegalArgumentException("Reality configurations cannot use Cloudflare Clean IPs. Reality endpoints require direct VPS connection. Use DPI Desync or God Mode instead.")
+            require(isCloudflareCompatible(original) && original.security.equals("tls", true) && !original.allowInsecure && original.rawConfig.isBlank()) {
+                "Clean-IP recovery requires a structured CDN-compatible TLS profile"
             }
-
+            com.example.vpn.experimental.FrontedTunnel.publicAddress(cleanIp.ip)
             val origAddress = original.address
             val effectiveSni = original.sni.ifBlank {
-                if (!origAddress.matches(Regex("^[0-9.]+$")) && !origAddress.contains(":")) origAddress else "cloudflare.com"
+                require(!origAddress.matches(Regex("[0-9.]+")) && !origAddress.contains(':')) { "Missing TLS domain" }
+                origAddress
             }
-            val effectiveHost = original.host.ifBlank {
-                if (!origAddress.matches(Regex("^[0-9.]+$")) && !origAddress.contains(":")) origAddress else effectiveSni
-            }
-
-            val effectivePort = if (original.port in CLOUDFLARE_ALL_PORTS) {
-                original.port
-            } else if (original.security.equals("tls", ignoreCase = true) || effectiveSni.isNotBlank() || original.transport.equals("ws", ignoreCase = true)) {
-                443
-            } else {
-                80
-            }
-
-            val effectiveTransport = if (original.transport.isBlank() || original.transport.equals("tcp", ignoreCase = true)) {
-                "ws"
-            } else {
-                original.transport
-            }
-
-            val effectiveSecurity = if (original.security.isBlank() || original.security.equals("none", ignoreCase = true)) {
-                if (effectivePort in CLOUDFLARE_PORTS_TLS || effectivePort == 443) "tls" else "none"
-            } else {
-                original.security
-            }
+            val effectiveHost = original.host.ifBlank { effectiveSni }
+            val effectivePort = original.port
+            val effectiveTransport = original.transport
+            val effectiveSecurity = original.security
 
             val baseName = original.name
                 .removePrefix("⚡ [Revived] ")
