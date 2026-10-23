@@ -46,6 +46,22 @@ class TrafficCheckTest {
         }
     }
 
+    @Test fun aFailedSmallReferenceDoesNotRejectAWorkingRoute() {
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.start()
+        val probe = TrafficCheck(direct, tls = false, small = target("/first"),
+            smallFallbacks = listOf(target("/second")), stepTimeoutMs = 1_000)
+        assertTrue(probe.smallRequest() >= 1)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test fun redirectsDoNotCountAsVerifiedConnectivity() {
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "https://login.example"))
+        server.start()
+        assertTrue(runCatching { check().smallRequest() }.isFailure)
+    }
+
     @Test fun aWorkingRouteIsVerifiedBothWays() {
         server.dispatcher = echo()
         server.start()
