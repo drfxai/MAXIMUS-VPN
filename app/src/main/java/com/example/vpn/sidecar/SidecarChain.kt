@@ -8,6 +8,7 @@ import org.json.JSONObject
 /** The profile Xray runs while a sidecar carries the traffic: one SOCKS5 outbound to its port. */
 object SidecarChain {
     fun xrayProfile(original: VlessProfile, context: SidecarContext, launch: SidecarLaunch): VlessProfile {
+        if (ByedpiSidecar.handles(original)) return ByedpiSidecar.wrap(original, context)
         val server = JSONObject()
             .put("address", "127.0.0.1")
             .put("port", context.socksPort)
