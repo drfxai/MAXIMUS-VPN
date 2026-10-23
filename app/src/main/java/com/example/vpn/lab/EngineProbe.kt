@@ -173,7 +173,8 @@ object EngineProbe {
         var kept = false
         try {
             val ready = running.awaitReady(launch.readyTimeoutMs)
-            if (!ready) return judge(engine.id, false, null)
+            if (!ready) return judge(engine.id, false, null).copy(failure = running.startupFailure
+                ?: "engine startup or traffic readiness failed")
             val chained = SidecarChain.probeProfile(profile, ctx, launch)
             val started = System.currentTimeMillis()
             val first = judge(engine.id, true, RealDelayProbe.measure(chained, timeoutSec))
