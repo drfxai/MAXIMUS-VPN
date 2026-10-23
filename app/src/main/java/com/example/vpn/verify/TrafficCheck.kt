@@ -44,7 +44,8 @@ class TrafficCheck(
     private val random: java.util.Random = SecureRandom(),
     private val sslFactory: () -> SSLSocketFactory = { SSLSocketFactory.getDefault() as SSLSocketFactory },
     private val hostnameVerifier: HostnameVerifier = HttpsURLConnection.getDefaultHostnameVerifier(),
-    private val clock: () -> Long = System::currentTimeMillis
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val smallFallbacks: List<Target> = if (small == SMALL) SMALL_FALLBACKS else emptyList()
 ) {
     data class Target(val host: String, val port: Int, val path: String, val expectBytes: Int = 0) {
         override fun toString(): String = host
@@ -53,9 +54,18 @@ class TrafficCheck(
     /** One small request (HTTP 204 expected); returns its round-trip time. Throws on any failure. */
     fun smallRequest(): Long {
         val started = clock()
-        val r = exchange(small, "GET", null, keepBody = false)
-        if (r.status != 204 && r.status !in 200..399) throw IOException("Probe returned HTTP ${r.status}")
-        return (clock() - started).coerceAtLeast(1)
+        var failure: IOException? = null
+        for (target in listOf(small) + smallFallbacks) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException()
+            try {
+                val r = exchange(target, "GET", null, keepBody = false)
+                if (r.status !in 200..299) throw IOException("Probe returned HTTP ${r.status}")
+                return (clock() - started).coerceAtLeast(1)
+            } catch (e: IOException) {
+                if (failure == null) failure = e else failure.addSuppressed(e)
+            }
+        }
+        throw failure ?: IOException("No probe reference")
     }
 
     fun download(): LegResult = firstPassing(downloads) { t -> downloadFrom(t) }
@@ -223,6 +233,7 @@ class TrafficCheck(
         private const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
         val SMALL = Target("www.gstatic.com", 443, "/generate_204")
+        val SMALL_FALLBACKS = listOf(Target("www.msftconnecttest.com", 443, "/connecttest.txt"))
         val DOWNLOADS = listOf(
             Target("httpbin.org", 443, "/bytes/$DOWNLOAD_BYTES", DOWNLOAD_BYTES),
             Target("speed.cloudflare.com", 443, "/__down?bytes=$DOWNLOAD_BYTES", DOWNLOAD_BYTES)
