@@ -19,6 +19,16 @@ import java.util.concurrent.TimeUnit
 /** Stop ends a connect attempt at once: blocking tests are left behind and starting engines are ended. */
 class StopIsInstantTest {
 
+    @Test fun trackedEnginePreservesRegistrationFailure() {
+        val tracked = EngineReaper.track(object : RunningEngine {
+            override val isAlive = false
+            override val startupFailure = "registration failed"
+            override fun awaitReady(timeoutMs: Long) = false
+            override fun stop() = Unit
+        })
+        try { assertEquals("registration failed", tracked.startupFailure) } finally { tracked.stop() }
+    }
+
     @Test fun cancellingReturnsAtOnceWhileTheBlockingCallFinishesOnItsOwn() = runBlocking {
         val finished = CountDownLatch(1)
         val job = async { Abandonable.run { Thread.sleep(1_500); finished.countDown(); 42 } }

@@ -640,6 +640,7 @@ class LabController(
         engineWindow: suspend (() -> EngineProbe.Result) -> EngineProbe.Result,
         /** The connect's mode, so a passing engine runs as the connect would start it and can be handed over. */
         mode: com.example.data.model.OperationalMode = com.example.data.model.AppSettings().operationalMode,
+        resolveForRecovery: (VlessProfile) -> VlessProfile = { it },
         onProgress: (String) -> Unit = {}
     ): FastRecoveryOutcome {
         if (!testLock.tryLock()) return FastRecoveryOutcome(null, 0, false, "the LAB is running an analysis")
@@ -656,7 +657,12 @@ class LabController(
             val plan = ExperimentPlanner.plan(reading, cap, ExperimentPlanner.budget(
                 ExperimentPlanner.Budget(true, device.batteryPercent, device.charging, device.metered)))
             val saved = loadAllProfiles().filter { !it.allowInsecure && com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
-            val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(saved)
+            val fakeSni = withTimeoutOrNull(12_000L) {
+                kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.vpn.smart.FakeSniRecovery.candidates(saved, resolveForRecovery)
+                }
+            }.orEmpty()
+            val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(saved) + fakeSni
             val all = (saved + builtIn).distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
                 .filter { it.id !in exclude && com.example.vpn.connectivity.PathRef.of(it) !in exclude }
             if (all.isEmpty()) return FastRecoveryOutcome(null, 0, true, "no other saved config or recovery engine is available")
@@ -669,7 +675,7 @@ class LabController(
             val recent = all.mapNotNull { p ->
                 val ref = com.example.vpn.connectivity.PathRef.of(p)
                 if (book.eligibility(ref) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED) p.id to "failed a real request on this network moments ago"
-                else engineIds[p.id]?.let { ledger.recentFailure(it, ledgerNetwork) }?.let { p.id to it }
+                else engineIds[p.id]?.takeUnless { it == "byedpi" || it == "tor" }?.let { ledger.recentFailure(it, ledgerNetwork) }?.let { p.id to it }
             }.toMap()
             val pool = FullAnalysis.select(families, plan.copy(budget = MAX_POOL), emptySet())
             val byId = pool.associateBy { it.profile.id }
@@ -683,6 +689,7 @@ class LabController(
             // Stop the moment the attempt is cancelled (the user pressed Stop, or a newer Connect arrived),
             // not only when the time limit is reached: otherwise recovery runs on for up to its full window
             // and the connect lock it holds blocks the disconnect behind it.
+            val attemptPolicy = com.example.vpn.smart.RecoveryAttemptPolicy()
             loop@ while (currentCoroutineContext().isActive && System.currentTimeMillis() < deadlineMs) {
                 when (val d = planner.decide(System.currentTimeMillis())) {
                     is AdaptivePlanner.Decision.Stop -> break@loop
@@ -691,19 +698,27 @@ class LabController(
                         val pk = byId[d.candidate.id] ?: continue@loop
                         onProgress("${pk.family.title}: ${if (d.recheck) "rechecking" else "testing"} ${pk.profile.name}")
                         val engine = Sidecars.forProfile(pk.profile)
+                        val dependencies = com.example.vpn.sidecar.ChainRunner.readChain(pk.profile)?.hops?.map { it.engineId }
+                            ?: listOfNotNull(engine?.id)
+                        if (attemptPolicy.skip(dependencies)) {
+                            planner.notTested(pk.profile.id, "registration already failed for this engine in this search")
+                            continue@loop
+                        }
                         if (Sidecars.isEngineProfile(pk.profile)) {
                             val remaining = (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1)
                             // No engine can start and carry a request in a few seconds; starting one now
                             // only logs a "timed out after 0s" test at the very end of the search.
                             if (remaining < MIN_ENGINE_WINDOW_MS) break@loop
-                            // A transport gets time to bootstrap, but cannot consume the entire search.
+                            // A Tor attempt admitted before the search deadline may finish its bounded,
+                            // progress-aware bootstrap. The service outer deadline includes this grace.
                             // Timeout is a measured unsuccessful attempt, not "not run". User cancellation
                             // still propagates through runInterruptible and stops the child processes.
-                            val windowMs = minOf(remaining, if (engine?.id == "tor") 180_000L else 90_000L)
+                            val windowMs = com.example.vpn.smart.RecoveryAttemptPolicy.window(engine?.id, remaining)
                             val r = withTimeoutOrNull(windowMs) {
                                 engineWindow { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2, mode = mode, keep = true) }
                             } ?: EngineProbe.Result(engine?.id ?: "chain", ConnectionStage.NOT_TESTED, null,
                                 "engine startup or traffic verification timed out after ${windowMs / 1000}s", false)
+                            attemptPolicy.record(r.engineId, r.failure)
                             XrayLogManager.i("SMART", "Recovery ${r.engineId}: ${r.failure ?: r.stage.title}")
                             if (r.notTested) planner.notTested(pk.profile.id, r.failure ?: "not measured")
                             else {
@@ -719,6 +734,10 @@ class LabController(
                         }
                     }
                 }
+            }
+            if (com.example.vpn.smart.NetworkIdentity.current(context) != currentIdentity) {
+                com.example.vpn.sidecar.EngineHandoff.clear()
+                return FastRecoveryOutcome(null, 0, false, "network changed during recovery; results discarded")
             }
             val tested = planner.tracks().count { it.outcomes.isNotEmpty() }
             val best = planner.verifiedFamilies().firstOrNull() ?: planner.best()

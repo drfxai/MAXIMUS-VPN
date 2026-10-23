@@ -1028,9 +1028,10 @@ class RayVpnService : VpnService() {
                 val skipRefs = setOf(com.example.vpn.connectivity.PathRef.of(requestedProfile), com.example.vpn.connectivity.PathRef.of(userProfile))
                 val deadline = System.currentTimeMillis() + FAST_RECOVERY_MS
                 val outcome = runCatching {
-                    withTimeoutOrNull(FAST_RECOVERY_MS + 10_000L) {
+                    withTimeoutOrNull(FAST_RECOVERY_MS + com.example.vpn.smart.RecoveryAttemptPolicy.TOR_WINDOW_MS + 10_000L) {
                         com.example.RayApplication.instance.lab.fastRecovery(skipRefs + exclude + requestedProfile.id + userProfile.id, deadline,
-                            engineWindow = { test -> engineWindow(test) }, mode = settings.operationalMode) { step -> showForegroundNotification(step) }
+                            engineWindow = { test -> engineWindow(test) }, mode = settings.operationalMode,
+                            resolveForRecovery = { p -> if (isLiteralIp(p.address)) p else resolveEndpoint(p) }) { step -> showForegroundNotification(step) }
                     }
                 }.onFailure {
                     if (it is kotlinx.coroutines.CancellationException) throw it
@@ -1885,7 +1886,7 @@ class RayVpnService : VpnService() {
     private suspend fun routeLatency(): Long {
         val endpoint = engineEndpoint ?: return com.example.vpn.diagnostics.LiveTunnelProbe.latency(this)
         return withContext(Dispatchers.IO) {
-            com.example.vpn.verify.TrafficCheck(com.example.vpn.verify.RouteDialers.engine(endpoint), stepTimeoutMs = 15_000).smallRequest()
+            com.example.vpn.verify.TrafficCheck(com.example.vpn.verify.RouteDialers.engine(endpoint), stepTimeoutMs = 4_000).smallRequest()
         }
     }
 
@@ -1923,7 +1924,7 @@ class RayVpnService : VpnService() {
                     XrayLogManager.i("VPN", when (st) {
                         com.example.vpn.smart.TunMtuTrial.State.TRYING_LOW -> "The next connect on this network tests MTU ${com.example.vpn.smart.TunMtuTrial.LOW_MTU}."
                         com.example.vpn.smart.TunMtuTrial.State.LOW_HELPED -> "MTU $used fixed the bulk stall on this network; it is kept here."
-                        com.example.vpn.smart.TunMtuTrial.State.LOW_DID_NOT_HELP -> "The bulk transfer stalled at MTU $used too: MTU is not the cause; back to $configured."
+                        com.example.vpn.smart.TunMtuTrial.State.LOW_DID_NOT_HELP -> "The bulk transfer stalled at MTU $used too: lowering MTU did not resolve this test; the cause remains unconfirmed. Returning to $configured."
                     })
                     com.example.vpn.diagnostics.events.EventLog.event("tunnel.mtu.trial", attributes = mapOf("state" to st.name, "mtu" to used.toString()))
                 }

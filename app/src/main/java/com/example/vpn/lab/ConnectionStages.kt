@@ -101,6 +101,7 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
          * "wireguard+awg", "hysteria2"...).
          */
         fun of(p: VlessProfile, engineId: String? = null, detail: String? = null): PathFamily = when {
+            engineId == "byedpi" -> ENGINE_CHAIN
             engineId == "masque" -> MASQUE
             engineId == "matrix-transport" -> when (detail) {
                 "h3" -> MATRIX_H3
