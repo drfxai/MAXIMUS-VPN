@@ -36,4 +36,22 @@ class CleanPathRaceTest {
         assertNull(CleanPathRace.select(parent, listOf("192.0.2.1"), probe = { listOf(RealDelayProbe.Outcome.NotRun("busy")) }))
         assertNull(CleanPathRace.select(parent.copy(security = "reality"), listOf("192.0.2.1"), probe = { error("not CDN") }))
     }
+    @Test fun staleCachedBatchCannotHideFreshFifthCandidate() {
+        var calls = 0
+        val win = CleanPathRace.select(parent, (1..5).map { "192.0.2.$it" }, probe = { profiles ->
+            calls++
+            assertTrue(profiles.size <= 4)
+            profiles.map { if (it.address.endsWith(".5")) RealDelayProbe.Outcome.Delay(30) else RealDelayProbe.Outcome.Failed("stale") }
+        })
+        assertEquals("192.0.2.5", win?.profile?.address)
+        assertEquals(3, calls)
+    }
+
+    @Test fun networkChangeAfterProbeDiscardsEvenSuccessfulResults() {
+        var changed = false
+        assertNull(CleanPathRace.select(parent, listOf("192.0.2.1"), probe = {
+            changed = true
+            listOf(RealDelayProbe.Outcome.Delay(1))
+        }, cancelled = { changed }))
+    }
 }
