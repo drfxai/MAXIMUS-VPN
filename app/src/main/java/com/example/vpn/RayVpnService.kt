@@ -545,6 +545,8 @@ class RayVpnService : VpnService() {
             profile.security.equals("tls", true) && !profile.allowInsecure
         if (!fronted) return null
         showForegroundNotification("Looking for a verified clean path...")
+        val scanNetwork = com.example.vpn.smart.NetworkKey.current(this)
+        val cached = RayApplication.instance.endpointScores.validated(scanNetwork)
         val candidates = withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
             com.example.panels.CleanIpOptimizer.findCleanIpsSync(port = profile.port, openSocket = {
                 Socket().also { socket ->
@@ -554,10 +556,12 @@ class RayVpnService : VpnService() {
         }.orEmpty()
         val attempt = kotlinx.coroutines.currentCoroutineContext()[Job]
         return com.example.vpn.Abandonable.run {
-            com.example.vpn.smart.CleanPathRace.select(profile, candidates.map { it.ip },
+            com.example.vpn.smart.CleanPathRace.select(profile, (cached + candidates.map { it.ip }).distinct(),
                 probe = { paths -> probeAll(paths, timeoutSec) },
-                cancelled = { attempt?.isActive == false })
+                cancelled = { attempt?.isActive == false || com.example.vpn.smart.NetworkKey.current(this) != scanNetwork })
         }?.also {
+            RayApplication.instance.endpointScores.record(listOf(com.example.vpn.connectivity.EndpointScoringEngine.Measurement(
+                it.profile.address, scanNetwork, System.currentTimeMillis(), true, it.latencyMs)))
             XrayLogManager.i("SMART", "A clean path carried two real requests (${it.latencyMs} ms).")
         }
     }
@@ -1272,7 +1276,9 @@ class RayVpnService : VpnService() {
             }
             if (engineChain != null) profile = startChain(engineChain, settings)
             else if (sidecarEngine != null) profile = startSidecar(sidecarEngine, profile, settings)
-            engineEndpoint = if (engineChain != null || sidecarEngine != null) com.example.vpn.verify.Socks5.endpointOf(profile) else null
+            engineEndpoint = if (sidecarEngine?.id == com.example.vpn.sidecar.ByedpiSidecar.ID)
+                com.example.vpn.sidecar.ByedpiSidecar.healthEndpoint(profile)
+                else if (engineChain != null || sidecarEngine != null) com.example.vpn.verify.Socks5.endpointOf(profile) else null
             val runtime = EngineSelectionPolicy.select(profile)
             val engineId = com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
             if (!engineBreaker.allows(engineId)) {
