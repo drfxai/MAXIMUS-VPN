@@ -14,6 +14,7 @@ object EngineReaper {
     fun track(engine: RunningEngine): RunningEngine {
         val tracked = object : RunningEngine {
             override val isAlive: Boolean get() = engine.isAlive
+            override val startupFailure: String? get() = engine.startupFailure
             override fun awaitReady(timeoutMs: Long): Boolean = engine.awaitReady(timeoutMs)
             override fun stop() {
                 live.remove(this)
