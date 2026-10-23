@@ -112,9 +112,9 @@ class ConfigRevival(
                 // One dead origin must not prevent discovering a path for another origin.
                 for (parent in dead.distinctBy { it.sni.ifBlank { it.host } }.take(3)) {
                     if (cancelled()) break
-                    val found = runCatching { findCleanIps(parent, network) }.getOrDefault(emptyList())
+                    runCatching { findCleanIps(parent, network) }
                     scanned = true
-                    ips = (endpoints(network) + found).distinct().take(12)
+                    ips = endpoints(network).distinct().take(12)
                     if (ips.isNotEmpty()) break
                 }
             }
