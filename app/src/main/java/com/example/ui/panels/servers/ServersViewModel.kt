@@ -531,7 +531,10 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     /** A pinned server program downloaded on this phone, for a server that cannot reach GitHub. Checked by the caller. */
     private fun downloadProgram(name: String): ByteArray? {
         val client = http.newBuilder().readTimeout(60, TimeUnit.SECONDS).followRedirects(true).build()
-        return client.newCall(Request.Builder().url("${ServerBinaries.BASE_URL}/$name").build()).execute().use { r ->
+        val base = if (name in com.example.panels.servers.tunnel.SpoofCarrierScripts.hashes.keys.map { "spoof-linux-$it" })
+            com.example.panels.servers.tunnel.SpoofCarrierScripts.BASE_URL else ServerBinaries.BASE_URL
+        require(name in ServerBinaries.SHA256 || name in com.example.panels.servers.tunnel.SpoofCarrierScripts.hashes.keys.map { "spoof-linux-$it" })
+        return client.newCall(Request.Builder().url("$base/$name").build()).execute().use { r ->
             if (!r.isSuccessful) return null
             val body = r.body ?: return null
             val limit = com.example.panels.servers.RemoteShell.MAX_TRANSFER
