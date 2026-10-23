@@ -24,6 +24,7 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
     var endpoint by rememberSaveable { mutableStateOf("") }
     var sni by rememberSaveable { mutableStateOf("") }
     var host by rememberSaveable { mutableStateOf("") }
+    var splitHello by rememberSaveable { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
     val ui = state.transportTools
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -56,18 +57,19 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
         item { OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Front IP") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(sni, { sni = it }, label = { Text("TLS SNI / certificate name") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(host, { host = it }, label = { Text("Origin HTTP Host") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
-        item { Button(onClick = { actions.onSaveFronted(selected, endpoint, sni, host) }, enabled = selected.isNotBlank()) { Text("Save fronted profile") } }
+        item { Row { Checkbox(splitHello, { splitHello = it }); Text("Native Xray TLS record + TCP fragmentation") } }
+        item { Button(onClick = { actions.onSaveFronted(selected, endpoint, sni, host, splitHello) }, enabled = selected.isNotBlank() && !ui.running && !state.vpnOn) { Text("Test and save fronted profile") } }
         item { HorizontalDivider() }
         item {
             Text("WARP registration · TLS splitting", style = MaterialTheme.typography.titleMedium)
             Row {
                 Checkbox(ui.warpSplit, actions.onWarpSplit)
-                Text("Split the first TLS handshake write on new registration (experimental).")
+                Text("Fragment ClientHello into small TLS records on new registration (experimental).")
             }
             Text("Existing WARP accounts are reused. TLS trust and certificate checks stay enabled. Physical packet boundaries depend on Android and the network.")
         }
-        item { Text("DNS timing jitter is included in the dnstt build, with positive random delay and the existing query-rate cap. A rebuilt native engine is required.") }
-        item { Text("Raw source-IP / carrier spoofing requires a compatible privileged packet backend and server. It is not provided by this TCP scanner or fronted profile.") }
+        item { Text("DNS timing jitter is included in the dnstt build, with positive random delay and the existing query-rate cap. The native engine is bundled in official releases.") }
+        item { Text("Server-side L3 candidate tests and TCP/UDP/ICMP/ICMPv6 spoof carriers are available in Servers → Maximus Tunnel → Spoof carrier. Configure both managed servers and explicit source IPs there.") }
         item { if (ui.message.isNotBlank()) Text(ui.message) }
     }
 }

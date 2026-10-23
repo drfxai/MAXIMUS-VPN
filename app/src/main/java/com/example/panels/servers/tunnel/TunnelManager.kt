@@ -139,7 +139,8 @@ data class TunnelStatus(
                 evidence = r.filterKeys { it.startsWith("PATH_") }.map { (k, v) -> k.removePrefix("PATH_") to PathEvidence.parse(v, own) }.toMap(),
                 ports = r["PORTS"].orEmpty().split(' ').mapNotNull { it.toIntOrNull() },
                 // Both units must run; Hysteria2's reports "off" when the tunnel does not use it.
-                running = r["SVC_maximus-tunnel"] == "active" && r["SVC_maximus-tunnel-hy"].let { it == null || it == "active" || it == "off" },
+                running = r["SVC_maximus-tunnel"] == "active" && r["SVC_maximus-tunnel-hy"].let { it == null || it == "active" || it == "off" } &&
+                    r["SVC_maximus-spoof"].let { it == null || it == "active" },
                 serverTime = r["TIME"]?.toLongOrNull() ?: 0L
             )
         }
@@ -215,7 +216,7 @@ class TunnelManager(
                 true -> "SSH port answers; the reverse way gets a real traffic test after setup"
                 false -> "no connection; the reverse way stays off"
                 null -> "could not be tested; trying every way"
-            }, blocking = forward == false && backward == false))
+            }, blocking = false))
         }
         return TunnelChecks(iran, abroad, items, iranSites, abroadSites, github, skew, forward, backward)
     }
@@ -286,7 +287,9 @@ class TunnelManager(
      */
     fun install(iranServer: ManagedServer, abroadServer: ManagedServer, planned: TunnelSpec, renewKeys: Boolean, progress: ActionProgress): TunnelOutcome {
         progress.step(1)
+        TunnelScripts.validate(planned)
         var spec = planned
+        val carrier = SpoofCarrierManager(connect)
         val (iranFacts, abroadFacts) = connect(iranServer).use { facts(it) } to connect(abroadServer).use { facts(it) }
         iranFacts.blocker()?.let { error("Iran server: $it") }
         abroadFacts.blocker()?.let { error("Server abroad: $it") }
@@ -304,6 +307,19 @@ class TunnelManager(
                 val pem = runCatching { String(Base64.getDecoder().decode(r["CERT"].orEmpty())) }.getOrDefault("")
                 require(pem.contains("BEGIN CERTIFICATE")) { "The server abroad did not return its Hysteria2 certificate" }
                 spec = spec.copy(hyCertPem = pem.trim())
+            }
+        }
+
+        if (spec.spoof != null) {
+            try {
+                val selected = carrier.setup(iranServer.copy(facts = iranFacts), abroadServer.copy(facts = abroadFacts),
+                    spec.spoof!!, spec.hyPort, progress::log)
+                spec = spec.copy(spoof = selected)
+            } catch (e: Exception) {
+                val undo = if (planned.exitPublicKey.isNotEmpty()) TunnelScripts.restorePrevious()
+                    else TunnelScripts.uninstall(TunnelSpec.ROLE_ABROAD, null, spec.hyPort)
+                runCatching { connect(abroadServer).use { run(it, undo, progress) } }.exceptionOrNull()?.let { e.addSuppressed(it) }
+                throw e
             }
         }
 
@@ -330,6 +346,7 @@ class TunnelManager(
                 run(shell, iranScript(spec), progress)
             }
         } } catch (e: Exception) {
+            if (spec.spoof != null) runCatching { carrier.rollback(iranServer, abroadServer) }.exceptionOrNull()?.let { e.addSuppressed(it) }
             if (isUpdate) {
                 progress.log("The Iran server failed; putting the server abroad back to its previous setup")
                 val undone = runCatching { connect(abroadServer).use { run(it, TunnelScripts.restorePrevious(), progress) } }.isSuccess
@@ -350,7 +367,22 @@ class TunnelManager(
             Thread.sleep(REVERSE_SETTLE_MS)
         }
         val status = verify(iranServer, progress)
+        if (spec.spoof != null) {
+            if (status == null || status.working == 0) {
+                carrier.rollback(iranServer, abroadServer)
+                for (server in listOf(iranServer, abroadServer)) {
+                    connect(server).use { run(it, if (isUpdate) TunnelScripts.restorePrevious()
+                        else TunnelScripts.uninstall(if (server.id == iranServer.id) TunnelSpec.ROLE_IRAN else TunnelSpec.ROLE_ABROAD, spec.entryPort, spec.hyPort), progress) }
+                }
+                error("Spoof carrier did not carry authenticated traffic abroad; previous setup restored")
+            }
+            carrier.commit(iranServer, abroadServer)
+        }
 
+        if (spec.spoof == null && planned.exitPublicKey.isNotEmpty() && status?.working?.let { it > 0 } == true &&
+            TunnelSpec.fromSettings(iranServer.tool(ServerToolCatalog.MAXIMUS_TUNNEL)?.settings.orEmpty())?.spoof != null) {
+            carrier.remove(iranServer); carrier.remove(abroadServer)
+        }
         progress.step(6)
         val iranTool = InstalledTool(ServerToolCatalog.MAXIMUS_TUNNEL, port = spec.entryPort,
             profileId = iranServer.tool(ServerToolCatalog.MAXIMUS_TUNNEL)?.profileId, settings = spec.toSettings(TunnelSpec.ROLE_IRAN))
@@ -436,7 +468,13 @@ class TunnelManager(
             abroad.withTool(abroad.tool(ServerToolCatalog.MAXIMUS_TUNNEL)!!.copy(settings = next.toSettings(TunnelSpec.ROLE_ABROAD)))
     }
 
-    fun restart(server: ManagedServer) { connect(server).use { run(it, TunnelScripts.restart(), null, 2 * 60_000L) } }
+    fun restart(server: ManagedServer) {
+        connect(server).use {
+            if (TunnelSpec.fromSettings(server.tool(ServerToolCatalog.MAXIMUS_TUNNEL)?.settings.orEmpty())?.spoof != null)
+                run(it, ToolScripts.script("§SUDO systemctl restart maximus-spoof\nwait_active maximus-spoof", emptyList()), null, 60_000)
+            run(it, TunnelScripts.restart(), null, 2 * 60_000L)
+        }
+    }
 
     fun logs(server: ManagedServer): List<String> = connect(server).use { shell ->
         val lines = mutableListOf<String>()
@@ -453,6 +491,7 @@ class TunnelManager(
         connect(server).use {
             run(it, TunnelScripts.uninstall(role, spec?.entryPort, spec?.takeIf { TunnelTransport.HYSTERIA2 in it.transports }?.hyPort), null)
         }
+        if (spec?.spoof != null) SpoofCarrierManager(connect).remove(server)
         return server.withoutTool(ServerToolCatalog.MAXIMUS_TUNNEL)
     }
 }

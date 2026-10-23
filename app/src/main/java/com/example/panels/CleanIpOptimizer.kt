@@ -393,7 +393,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
                 throw e
             } catch (_: Exception) {
                 return@withContext OriginHealth.Down(
-                    "Domain '$targetHost' cannot be resolved (DNS NXDOMAIN). Domain expired or DNS records were removed."
+                    "DNS lookup failed for '$targetHost'. This can be filtering, a timeout or missing DNS records."
                 )
             }
 
@@ -435,7 +435,9 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
                 val latency = (System.currentTimeMillis() - start).coerceAtLeast(1L)
 
                 when (code) {
-                    101 -> OriginHealth.Online("Origin server is Online and healthy (WebSocket Upgrade 101 OK).", httpCode = 101, latencyMs = latency, isWebSocket = true)
+                    101 -> if (com.example.vpn.experimental.WebSocketUpgrade.valid(probeSocket.getInputStream(), key))
+                        OriginHealth.Online("WebSocket origin challenge verified", httpCode = 101, latencyMs = latency, isWebSocket = true)
+                    else OriginHealth.Down("Invalid WebSocket challenge response", httpCode = 101)
                     404 -> OriginHealth.Online("Origin server responded (HTTP 404). Backend service is online, verify WebSocket path '$path'.", httpCode = 404, latencyMs = latency, isWebSocket = false)
                     in 200..399 -> OriginHealth.Online("Origin server is reachable (HTTP $code).", httpCode = code ?: 200, latencyMs = latency, isWebSocket = false)
                     521 -> OriginHealth.Down("Cloudflare Error 521: Web server is down. The origin VPS or backend is offline. Clean IPs cannot resurrect an offline server.", httpCode = 521)
@@ -493,6 +495,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
         val chunks = candidatePool.chunked(16)
         for (chunk in chunks) {
             ensureActive()
+            assertNetwork()
             checkpoint()
 
             val batchResults = coroutineScope {
@@ -586,6 +589,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
             )
         }
 
+        assertNetwork()
         ranked(accepted)
     }
 
@@ -667,8 +671,8 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
                     rawSocket
                 }
 
+                val key = Base64.getEncoder().encodeToString(ByteArray(16).apply { SecureRandom().nextBytes(this) })
                 val request = if (isWebSocket) {
-                    val key = Base64.getEncoder().encodeToString(ByteArray(16).apply { SecureRandom().nextBytes(this) })
                     "GET $path HTTP/1.1\r\n" +
                         "Host: $hostHeader\r\n" +
                         "Upgrade: websocket\r\n" +
@@ -693,7 +697,8 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
                 val code = Regex("^HTTP/1\\.[01] ([0-9]{3})(?: .*)?$").matchEntire(statusLine)?.groupValues?.get(1)?.toIntOrNull()
 
                 when (code) {
-                    101 -> Triple("WS 101 OK", true, latency)
+                    101 -> if (isWebSocket && com.example.vpn.experimental.WebSocketUpgrade.valid(socket.getInputStream(), key))
+                        Triple("WS challenge verified", true, latency) else null
                     200 -> Triple("CDN 200 OK", !isWebSocket, latency)
                     204 -> Triple("HTTP 204 OK", false, latency)
                     521 -> Triple("HTTP 521 (Origin Down)", false, latency)

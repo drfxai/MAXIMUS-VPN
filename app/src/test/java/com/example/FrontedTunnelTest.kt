@@ -26,6 +26,16 @@ class FrontedTunnelTest {
         assertNotEquals(p.effectiveFingerprint, otherHost.effectiveFingerprint)
     }
 
+    @Test fun nativeFragmentationIsStoredAndTransportCredentialsSurvive() {
+        for (protocol in listOf(com.example.data.model.ProtocolType.VLESS, com.example.data.model.ProtocolType.VMESS, com.example.data.model.ProtocolType.TROJAN)) {
+            val p = FrontedTunnel.build(base.copy(protocolType = protocol), "104.16.1.1", "front.example", "origin.example", true)
+            assertEquals(protocol, p.protocolType)
+            assertEquals(base.uuid, p.uuid)
+            assertTrue(p.finalMask.contains("fragment"))
+            assertFalse(p.allowInsecure)
+        }
+    }
+
     @Test fun incompatibleProfilesAndInsecureModesAreRefused() {
         for (p in listOf(base.copy(transport = "tcp"), base.copy(security = "reality"),
             base.copy(allowInsecure = true), base.copy(verifyPeerCertByName = "other.example"))) {

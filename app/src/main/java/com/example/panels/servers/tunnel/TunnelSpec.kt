@@ -90,6 +90,7 @@ data class TunnelSpec(
      * restarting Xray. 0 on tunnels set up before it existed: they restart until the next update.
      */
     val apiPort: Int = 0,
+    val spoof: SpoofCarrierSpec? = null,
     val createdAt: Long = System.currentTimeMillis()
 ) {
     val fallbackTransport: TunnelTransport get() = TunnelTransport.entries.first { it in transports }
@@ -110,6 +111,7 @@ data class TunnelSpec(
         put("hyLocalPort", hyLocalPort.toString()); put("reverseUuid", reverseUuid)
         put("rvProbePort", rvProbePort.toString()); put("apiPort", apiPort.toString())
         put("createdAt", createdAt.toString())
+        spoof?.let { putAll(it.settings()) }
     }
 
     companion object {
@@ -140,6 +142,7 @@ data class TunnelSpec(
                 reverseUuid = s["reverseUuid"].orEmpty(),
                 rvProbePort = s["rvProbePort"]?.toIntOrNull() ?: 0,
                 apiPort = s["apiPort"]?.toIntOrNull() ?: 0,
+                spoof = SpoofCarrierSpec.fromSettings(s),
                 createdAt = s["createdAt"]?.toLongOrNull() ?: 0L
             ).takeIf { it.transports.isNotEmpty() }
         }.getOrNull()

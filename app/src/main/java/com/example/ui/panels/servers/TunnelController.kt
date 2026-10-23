@@ -258,6 +258,11 @@ class TunnelController(
             iranId = editSpec?.iranId ?: iranRows.singleOrNull { it.health != Health.SIGN_IN && specOf(server(it.id)) == null }?.id,
             abroadId = editSpec?.abroadId ?: abroadRows.singleOrNull { it.health != Health.SIGN_IN && specOf(server(it.id)) == null }?.id,
             update = editSpec != null,
+            spoofEnabled = editSpec?.spoof != null,
+            spoofIran = editSpec?.spoof?.iranSources?.joinToString(",").orEmpty(),
+            spoofAbroad = editSpec?.spoof?.abroadSources?.joinToString(",").orEmpty(),
+            spoofUpload = editSpec?.spoof?.upload ?: "tcp",
+            spoofDownload = editSpec?.spoof?.download ?: "tcp",
             transports = editSpec?.transports ?: TunnelTransport.entries.toSet(),
             rotationHours = editSpec?.rotationHours ?: 24,
             entrySni = editSpec?.entrySni.orEmpty(), exitSni = editSpec?.exitSni.orEmpty(),
@@ -333,8 +338,20 @@ class TunnelController(
         }
         job = scope.launch {
             try {
-                val planned = manager.plan(c, ui.transports, ui.rotationHours, previous).let { p ->
-                    p.copy(entrySni = ui.entrySni.ifBlank { p.entrySni }, exitSni = ui.exitSni.ifBlank { p.exitSni })
+                val selected = if (ui.spoofEnabled) setOf(TunnelTransport.HYSTERIA2) else ui.transports
+                val planned = manager.plan(c, selected, ui.rotationHours, previous).let { p ->
+                    val carrier = if (ui.spoofEnabled) {
+                        val old = previous?.spoof
+                        val ports = c.iran.facts!!.tcpPorts + c.iran.facts!!.udpPorts + c.abroad.facts!!.tcpPorts + c.abroad.facts!!.udpPorts +
+                            setOf(p.entryPort, p.hyPort, p.hyLocalPort, p.rvProbePort, p.apiPort)
+                        val port = old?.port ?: com.example.panels.servers.ServerRandom.port(ports)
+                        val localPort = old?.localPort ?: com.example.panels.servers.ServerRandom.port(ports + port)
+                        com.example.panels.servers.tunnel.SpoofCarrierSpec(
+                            com.example.panels.servers.tunnel.SpoofCarrierSpec.sources(ui.spoofIran),
+                            com.example.panels.servers.tunnel.SpoofCarrierSpec.sources(ui.spoofAbroad),
+                            ui.spoofUpload, ui.spoofDownload, port, localPort).validate()
+                    } else null
+                    p.copy(entrySni = ui.entrySni.ifBlank { p.entrySni }, exitSni = ui.exitSni.ifBlank { p.exitSni }, spoof = carrier)
                 }
                 val out = withContext(Dispatchers.IO) { manager.install(iran, abroad, planned, ui.renewKeys, progress) }
                 val oldProfile = iran.tool(ServerToolCatalog.MAXIMUS_TUNNEL)?.profileId

@@ -32,6 +32,11 @@ object TunnelScripts {
 
     /** Checks every value of [spec] that ends up in a script or a config file. */
     fun validate(spec: TunnelSpec) {
+        spec.spoof?.let { s ->
+            s.validate()
+            require(spec.transports == setOf(TunnelTransport.HYSTERIA2)) { "Spoof carrier requires Hysteria2 as its authenticated inner tunnel" }
+            require(s.localPort !in listOf(spec.entryPort, spec.hyPort, spec.hyLocalPort, spec.rvProbePort, spec.apiPort) && s.port !in spec.avoidPorts && s.port !in listOf(spec.entryPort, spec.hyPort, spec.hyLocalPort, spec.rvProbePort, spec.apiPort)) { "Carrier port conflicts with an existing service" }
+        }
         require(spec.transports.isNotEmpty()) { "Pick at least one way to reach the server abroad" }
         require(spec.rotationHours in TunnelSpec.ROTATION_CHOICES) { "Invalid rotation period" }
         require(HEX.matches(spec.seed) && spec.seed.length >= 32) { "Invalid rotation seed" }
@@ -665,6 +670,9 @@ object TunnelScripts {
           if [ "§st" != active ] && ! systemctl is-enabled --quiet §u 2>/dev/null; then st=off; fi
           result "SVC_§u" "§st"
         done
+        if §SUDO test -f /etc/systemd/system/maximus-spoof.service; then
+          result SVC_maximus-spoof "§(systemctl is-active maximus-spoof 2>/dev/null || true)"
+        fi
         step 2
         # The Iran server's own addresses: an exit equal to one of them proves nothing about abroad.
         own=§(hostname -I 2>/dev/null || true)
@@ -795,7 +803,7 @@ object TunnelScripts {
     )
 
     fun logs(lines: Int = 40): ToolScript = ToolScripts.script(
-        "step 1\n§SUDO journalctl -u maximus-tunnel -u maximus-tunnel-hy -u maximus-tunnel-rotate -n $lines --no-pager -o short-iso 2>&1 | tail -n $lines",
+        "step 1\n§SUDO journalctl -u maximus-tunnel -u maximus-tunnel-hy -u maximus-tunnel-rotate -u maximus-spoof -n $lines --no-pager -o short-iso 2>&1 | tail -n $lines",
         listOf("Read logs")
     )
 }
