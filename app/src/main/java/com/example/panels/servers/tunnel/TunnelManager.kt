@@ -288,8 +288,12 @@ class TunnelManager(
     fun install(iranServer: ManagedServer, abroadServer: ManagedServer, planned: TunnelSpec, renewKeys: Boolean, progress: ActionProgress): TunnelOutcome {
         progress.step(1)
         TunnelScripts.validate(planned)
+        if (planned.spoof != null) {
+            SpoofCarrierSpec.ipv4(iranServer.host); SpoofCarrierSpec.ipv4(abroadServer.host)
+            require(iranServer.host != abroadServer.host) { "Choose two distinct servers" }
+        }
         var spec = planned
-        val carrier = SpoofCarrierManager(connect)
+        val carrier = SpoofCarrierManager(connect, fetchProgram)
         val (iranFacts, abroadFacts) = connect(iranServer).use { facts(it) } to connect(abroadServer).use { facts(it) }
         iranFacts.blocker()?.let { error("Iran server: $it") }
         abroadFacts.blocker()?.let { error("Server abroad: $it") }
@@ -352,6 +356,12 @@ class TunnelManager(
                 val undone = runCatching { connect(abroadServer).use { run(it, TunnelScripts.restorePrevious(), progress) } }.isSuccess
                 progress.log(if (undone) "The server abroad is back on its previous setup" else "Could not put the server abroad back; run the update again")
             }
+            if (!isUpdate && spec.spoof != null) {
+                rollbackAll(e, listOf(
+                    { connect(iranServer).use { run(it, TunnelScripts.uninstall(TunnelSpec.ROLE_IRAN, spec.entryPort, spec.hyPort), progress) }; Unit },
+                    { connect(abroadServer).use { run(it, TunnelScripts.uninstall(TunnelSpec.ROLE_ABROAD, null, spec.hyPort), progress) }; Unit }
+                ))
+            }
             throw e
         }
         val r = installed!!
@@ -369,12 +379,16 @@ class TunnelManager(
         val status = verify(iranServer, progress)
         if (spec.spoof != null) {
             if (status == null || status.working == 0) {
-                carrier.rollback(iranServer, abroadServer)
-                for (server in listOf(iranServer, abroadServer)) {
-                    connect(server).use { run(it, if (isUpdate) TunnelScripts.restorePrevious()
-                        else TunnelScripts.uninstall(if (server.id == iranServer.id) TunnelSpec.ROLE_IRAN else TunnelSpec.ROLE_ABROAD, spec.entryPort, spec.hyPort), progress) }
-                }
-                error("Spoof carrier did not carry authenticated traffic abroad; previous setup restored")
+                val failure = IllegalStateException("Spoof carrier did not carry authenticated traffic abroad")
+                rollbackAll(failure, listOf(
+                    { carrier.rollback(iranServer, abroadServer) },
+                    { connect(iranServer).use { run(it, if (isUpdate) TunnelScripts.restorePrevious()
+                        else TunnelScripts.uninstall(TunnelSpec.ROLE_IRAN, spec.entryPort, spec.hyPort), progress) }; Unit },
+                    { connect(abroadServer).use { run(it, if (isUpdate) TunnelScripts.restorePrevious()
+                        else TunnelScripts.uninstall(TunnelSpec.ROLE_ABROAD, null, spec.hyPort), progress) }; Unit }
+                ))
+                progress.log(if (failure.suppressed.isEmpty()) "Previous setup restored" else "Rollback incomplete: ${failure.suppressed.size} actions failed; check both servers")
+                throw failure
             }
             carrier.commit(iranServer, abroadServer)
         }
@@ -512,3 +526,8 @@ internal fun describe(e: PathEvidence): String = when (e.state) {
 class TunnelScriptException(val exitCode: Int, message: String) : IllegalStateException(message)
 /** Ports the status check uses on the Iran server for its test proxies (39000 + up to 999 + a few). */
 private val STATUS_PROBE_PORTS: Set<Int> = (39_000..40_999).toSet()
+
+/** Never let one unavailable host prevent cleanup of another; preserve the original failure. */
+internal fun rollbackAll(failure: Exception, actions: List<() -> Unit>) {
+    actions.forEach { action -> runCatching(action).exceptionOrNull()?.let(failure::addSuppressed) }
+}
