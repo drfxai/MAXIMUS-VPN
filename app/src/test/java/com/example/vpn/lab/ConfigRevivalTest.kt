@@ -197,7 +197,7 @@ class ConfigRevivalTest {
         val visited = mutableListOf<String>()
         var validated = emptyList<String>()
         val r = ConfigRevival(engine, endpoints = { validated },
-            probe = { ps -> ps.map { DerivedRecoveryCandidate.TestResult.Failed("timeout") } },
+            probe = { ps -> ps.map { TestResult.Failed("timeout") } },
             findCleanIps = { p, _ ->
                 visited += p.id
                 if (p.id == "second") validated = listOf("188.114.97.3")
