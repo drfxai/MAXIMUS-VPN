@@ -50,7 +50,10 @@ class SidecarProcess(
     override fun awaitReady(timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            if (!isAlive) return false
+            if (!isAlive) {
+                logThread.join(200) // Let the bounded diagnostic reader publish the exit reason.
+                return false
+            }
             if (sawReadyLine && portOpen(socksPort)) return true
             Thread.sleep(100)
         }
