@@ -83,7 +83,8 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
         protectFd: (Int) -> Boolean
     ): AppResult<Unit> {
         activeProfile = profile
-        val configJson = XrayConfigBuilder.buildJson(profile, settings)
+        val configJson = com.example.vpn.sidecar.ByedpiSidecar.addHealthInbound(
+            JSONObject(XrayConfigBuilder.buildJson(profile, settings)), profile).toString()
         return start(configJson, tunFd, settings.dnsServer, settings.mtu, protectFd)
     }
 

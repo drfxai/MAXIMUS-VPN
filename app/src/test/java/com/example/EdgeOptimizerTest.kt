@@ -25,6 +25,8 @@ class EdgeOptimizerTest {
         assertNotEquals(profile.id, changed.id)
         assertEquals("104.16.1.1", changed.address)
         assertEquals("example.workers.dev", profile.address)
+        assertNull(changed.lastLatencyMs)
+        assertNull(changed.lastTestedTimestamp)
     }
     @Test fun rankingRejectsFailuresPenalizesInstabilityAndCapsAt15() {
         val candidates = (1..30).map { CleanIpOptimizer.Result("104.16.1.$it", it * 10L, 0, 3) }

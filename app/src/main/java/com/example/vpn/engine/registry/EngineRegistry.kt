@@ -32,6 +32,7 @@ object EngineRegistry {
      * decision and a pinned, hash-checked download before it can appear as a runtime.
      */
     /** Separate engine programs (vpn/sidecar): bundled, but carried behind Xray rather than being a runtime. */
+    val BYEDPI = EngineDescriptor("byedpi", "Native fake-SNI TCP carrier", "ba532298de7b", "MIT", bundled = true, runtime = null)
     val MIHOMO = EngineDescriptor("mihomo", "Mihomo (separate program)", com.example.vpn.sidecar.MihomoSidecar.VERSION, "GPL-3.0",
         bundled = true, runtime = null)
     val AMNEZIAWG = EngineDescriptor("amneziawg", "amneziawg-go", null, "MIT", bundled = false, runtime = null)
@@ -57,7 +58,7 @@ object EngineRegistry {
     val MATRIX_TRANSPORT = EngineDescriptor("matrix-transport", "Matrix Transport (Aether-derived, separate program)",
         "1.6.0 / secure-v1", "AGPL-3.0-only", bundled = true, runtime = null)
 
-    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, MIHOMO, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL, COTTEN_DNS, SLIPSTREAM, MASQUE, MATRIX_TRANSPORT)
+    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, BYEDPI, MIHOMO, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL, COTTEN_DNS, SLIPSTREAM, MASQUE, MATRIX_TRANSPORT)
 
     fun descriptorFor(runtime: EngineSelectionPolicy.Runtime): EngineDescriptor =
         ENGINES.first { it.runtime == runtime }

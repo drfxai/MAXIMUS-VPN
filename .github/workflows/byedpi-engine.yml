@@ -1,0 +1,52 @@
+name: Native fake-SNI checks
+on:
+  pull_request:
+    paths:
+      - 'scripts/engines/byedpi.sh'
+      - 'tools/byedpi-validation/**'
+      - 'app/src/main/java/com/example/vpn/sidecar/ByedpiSidecar.kt'
+      - '.github/workflows/byedpi-engine.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: byedpi-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  wire-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned native core
+        run: HOST=1 OUT=build/byedpi bash scripts/engines/byedpi.sh
+      - name: Verify fake packets and intact TLS through routed namespaces
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y iproute2 tcpdump openssl curl
+          sudo python3 tools/byedpi-validation/check.py build/byedpi/libbyedpi.so
+  android-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Android native core
+        env:
+          ABI: ${{ matrix.abi }}
+          OUT: build/byedpi
+        run: |
+          export ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/26.3.11579264
+          if [ ! -d "$ANDROID_NDK_HOME" ]; then
+            /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager 'ndk;26.3.11579264'
+          fi
+          bash scripts/engines/byedpi.sh
+          readelf -h build/byedpi/libbyedpi.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: byedpi-${{ matrix.abi }}
+          path: build/byedpi/libbyedpi.so
+          retention-days: 7

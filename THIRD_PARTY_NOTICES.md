@@ -578,3 +578,7 @@ Upstream: https://github.com/ParsaKSH/spoof-tunnel — Apache-2.0.
 The original upstream binary is SHA-256 pinned separately for amd64 and arm64; it is not linked into the Android APK.
 The license is included at app/src/main/assets/licenses/spoof-tunnel-Apache-2.0.txt.
 The MAXIMUS integration is original code; no Hashem Pro panel code or licensing logic is copied.
+
+## ByeDPI
+
+The separate native fake-SNI helper is built from hufrea/byedpi at ba532298de7b28cfe854aea83d061369d13ca290 (MIT). MAXIMUS restricts its outgoing TCP destination to the selected endpoint. The complete license is included in assets/licenses/byedpi-MIT.txt.

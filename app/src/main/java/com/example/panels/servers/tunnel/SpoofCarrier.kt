@@ -41,6 +41,7 @@ data class SpoofCarrierSpec(
 /** Pinned upstream executable; no scripts from the network are executed. */
 object SpoofCarrierScripts {
     const val VERSION = "v3.1.0-beta.0"
+    const val BASE_URL = "https://github.com/ParsaKSH/spoof-tunnel/releases/download/$VERSION"
     const val BIN = "/usr/local/lib/maximus/spoof"
     const val DIR = "/etc/maximus/spoof"
     const val UNIT = "maximus-spoof"
@@ -48,26 +49,79 @@ object SpoofCarrierScripts {
         "arm64" to "ab7e0a58aa37c63a36127feb99ef73cd498523c99d22146feb1a93dd97c9d97b")
 
     fun prepare(arch: String) = ToolScripts.script("""
-        MX_BASE=https://github.com/ParsaKSH/spoof-tunnel/releases/download/$VERSION
+        MX_BASE=$BASE_URL
         fetch_bin spoof-linux-${ToolScripts.arch(arch)} ${hashes.getValue(arch)} $BIN
         have timeout || { echo 'Install coreutils (timeout)' >&2; exit 20; }
         §SUDO test -d $DIR || §SUDO install -d -m 0700 $DIR
     """, emptyList())
 
-    fun probe(sources: List<String>, peer: String, port: Int, receiver: Boolean, protocol: String): ToolScript {
-        require(protocol in setOf("tcp", "icmp"))
-        require(sources.size in 1..16)
+    /** Exercises the actual data carrier, including UDP and ICMPv6, with an SSH-delivered nonce. */
+    fun probe(sources: List<String>, peer: String, port: Int, receiver: Boolean, protocol: String, nonce: String): ToolScript {
+        require(protocol in SpoofCarrierSpec.TRANSPORTS)
+        require(sources.size == 1) { "Probe one source at a time for attributable evidence" }
         sources.forEach { SpoofCarrierSpec.ipv4(it) }
         SpoofCarrierSpec.ipv4(peer); ToolScripts.port(port, "probe")
+        require(nonce.matches(Regex("[a-f0-9]{64}")))
         return ToolScripts.script("""
-            tmp=§(mktemp -d)
-            trap '§SUDO rm -rf "§tmp"' EXIT HUP INT TERM
-            cat > "§tmp/sources" <<'MX_SOURCES'
-            @@SOURCES@@
-            MX_SOURCES
-            §SUDO env TMPDIR="§tmp" timeout 25 $BIN tester --mode ${if (receiver) "receiver" else "sender"} --protocol $protocol --src-list "§tmp/sources" --dst-ip $peer --dst-port $port --timeout 15 --packet-count 4 --max-loss 25 --concurrency 1
-        """, emptyList(), mapOf("SOURCES" to sources.joinToString("\n")))
+            have python3 || { echo 'Install python3 for carrier verification' >&2; exit 20; }
+            §SUDO timeout 20 python3 -u - $BIN ${if (receiver) "receiver" else "sender"} $peer $port $protocol ${sources.single()} $nonce <<'MX_PROBE'
+            @@PROBE@@
+            MX_PROBE
+        """, emptyList(), mapOf("PROBE" to PROBE_PYTHON))
     }
+
+    // Also executed verbatim by tools/spoof-validation/check.py inside isolated namespaces.
+    val PROBE_PYTHON = """
+import signal, socket, subprocess, sys, time
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
+binary, role, peer, port, protocol, source, nonce = sys.argv[1:]
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind(('127.0.0.1', 0))
+local = sock.getsockname()[1]
+if role == 'receiver':
+    args = ['remote', '--forward', '127.0.0.1:' + str(local), '--client-ip', peer,
+            '--client-port', port, '--listen-port', port]
+else:
+    sock.close()
+    args = ['local', '--listen', '127.0.0.1:' + str(local), '--remote', peer,
+            '--remote-port', port, '--recv-port', port]
+process = subprocess.Popen([binary] + args + ['--spoof-ip', source, '--spoof-port', port,
+    '--send-transport', protocol, '--recv-transport', protocol], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+try:
+    time.sleep(0.5)
+    if process.poll() is not None:
+        raise RuntimeError('Carrier failed to start')
+    if role == 'receiver':
+        print('[carrier-receiver] ready', flush=True)
+        seen = set()
+        deadline = time.monotonic() + 12
+        sock.settimeout(0.25)
+        while len(seen) < 4 and time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError('Carrier exited')
+            try:
+                payload, _ = sock.recvfrom(2048)
+            except socket.timeout:
+                continue
+            for i in range(4):
+                if payload == (nonce + ':' + str(i)).encode('ascii'):
+                    seen.add(i)
+        print(source + ' ' + str(len(seen)) + '/4 ' + str((4-len(seen))*25.0) + '%', flush=True)
+    else:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as tx:
+            for i in range(4):
+                tx.sendto((nonce + ':' + str(i)).encode('ascii'), ('127.0.0.1', local))
+                time.sleep(0.2)
+finally:
+    sock.close()
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+""".trimIndent()
 
     fun install(s: SpoofCarrierSpec, iran: Boolean, peer: String, hyPort: Int): ToolScript {
         s.validate(); SpoofCarrierSpec.ipv4(peer); ToolScripts.port(hyPort, "Hysteria2")
@@ -153,7 +207,32 @@ object SpoofCarrierScripts {
     }.distinct().toList()
 }
 
-class SpoofCarrierManager(private val connect: (ManagedServer) -> RemoteShell = { SshShell.open(it) }) {
+class SpoofCarrierManager(
+    private val connect: (ManagedServer) -> RemoteShell = { SshShell.open(it) },
+    private val fetchProgram: (String) -> ByteArray? = { null }
+) {
+    fun prepare(server: ManagedServer, donor: ManagedServer?, log: (String) -> Unit) {
+        val arch = requireNotNull(server.facts?.goArch) { "Check both servers first" }
+        val script = SpoofCarrierScripts.prepare(arch)
+        connect(server).use { shell ->
+            val initial = shell.run(script.text, 120_000)
+            if (initial.exitCode == 0) return
+            check(initial.exitCode == ToolScripts.EXIT_DOWNLOAD) { "Carrier preparation failed on ${server.displayName} (exit ${initial.exitCode})" }
+            val name = "spoof-linux-$arch"
+            val expected = SpoofCarrierScripts.hashes.getValue(arch)
+            fun verified(bytes: ByteArray?) = bytes != null && bytes.isNotEmpty() && bytes.size <= RemoteShell.MAX_TRANSFER &&
+                java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) } == expected
+            var bytes = runCatching { fetchProgram(name) }.getOrNull()
+            if (!verified(bytes) && donor?.facts?.goArch == arch) {
+                bytes = runCatching { connect(donor).use { it.download(SpoofCarrierScripts.BIN) } }.getOrNull()
+            }
+            check(verified(bytes)) { "Cannot obtain a verified carrier for ${server.displayName}; enable a working connection on this phone and retry" }
+            log("Sending checksum-verified carrier to ${server.displayName}")
+            shell.upload(bytes!!, "${ToolScripts.STAGE_DIR}/$name")
+            check(shell.run(script.text, 120_000).exitCode == 0) { "Relayed carrier installation failed on ${server.displayName}" }
+        }
+    }
+
     private fun run(server: ManagedServer, script: ToolScript): String = connect(server).use { shell ->
         val r = shell.run(script.text, 120_000)
         check(r.exitCode == 0) { "Carrier action failed on ${server.displayName}: ${r.output.takeLast(300)}" }
@@ -161,38 +240,42 @@ class SpoofCarrierManager(private val connect: (ManagedServer) -> RemoteShell = 
     }
 
     /** Probe only explicitly entered sources against the other managed server, four packets per source. */
-    fun scan(sender: ManagedServer, receiver: ManagedServer, sources: List<String>, port: Int, protocol: String): List<String> {
+    fun scan(sender: ManagedServer, receiver: ManagedServer, sources: List<String>, port: Int, protocol: String): List<String> =
+        sources.filter { source -> scanOne(sender, receiver, source, port, protocol) }
+
+    private fun scanOne(sender: ManagedServer, receiver: ManagedServer, source: String, port: Int, protocol: String): Boolean {
+        val nonce = java.util.UUID.randomUUID().toString().replace("-", "") + java.util.UUID.randomUUID().toString().replace("-", "")
+        val sources = listOf(source)
         val ready = CountDownLatch(1)
         val pool = Executors.newSingleThreadExecutor()
         val receive = pool.submit<String> {
             connect(receiver).use { shell ->
-                val r = shell.run(SpoofCarrierScripts.probe(sources, sender.host, port, true, protocol).text, 30_000) {
-                    if (it.contains("[tester-receiver] protocol=")) ready.countDown()
+                val r = shell.run(SpoofCarrierScripts.probe(sources, sender.host, port, true, protocol, nonce).text, 25_000) {
+                    if (it.contains("[carrier-receiver] ready")) ready.countDown()
                 }
                 check(r.exitCode == 0) { "Carrier receiver failed on ${receiver.displayName}" }
                 r.output
             }
         }
         try {
-            check(ready.await(10, TimeUnit.SECONDS)) { "Carrier receiver did not become ready" }
-            run(sender, SpoofCarrierScripts.probe(sources, receiver.host, port, false, protocol))
-            return SpoofCarrierScripts.received(receive.get(25, TimeUnit.SECONDS), sources)
+            check(ready.await(8, TimeUnit.SECONDS)) { "Carrier receiver did not become ready" }
+            run(sender, SpoofCarrierScripts.probe(sources, receiver.host, port, false, protocol, nonce))
+            return source in SpoofCarrierScripts.received(receive.get(18, TimeUnit.SECONDS), sources)
         } finally { receive.cancel(true); pool.shutdownNow() }
     }
 
     fun setup(iran: ManagedServer, abroad: ManagedServer, s: SpoofCarrierSpec, hyPort: Int, log: (String) -> Unit): SpoofCarrierSpec {
         s.validate(); SpoofCarrierSpec.ipv4(iran.host); SpoofCarrierSpec.ipv4(abroad.host)
         require(iran.host != abroad.host) { "Choose two distinct servers" }
-        for (server in listOf(iran, abroad)) {
-            val arch = requireNotNull(server.facts?.goArch) { "Check both servers first" }
-            run(server, SpoofCarrierScripts.prepare(arch))
-            run(server, SpoofCarrierScripts.finish(false))
-        }
-        // The upstream tester supports TCP and ICMP. UDP/ICMPv6 need the subsequent authenticated tunnel test.
+        prepare(abroad, null, log)
+        prepare(iran, abroad, log)
+        for (server in listOf(iran, abroad)) run(server, SpoofCarrierScripts.finish(false))
+        // Separate port avoids mixing probes with an already running carrier during an update.
+        val occupied = iran.facts?.tcpPorts.orEmpty() + iran.facts?.udpPorts.orEmpty() + abroad.facts?.tcpPorts.orEmpty() + abroad.facts?.udpPorts.orEmpty()
+        val probePort = (20000..60000).shuffled().first { it != s.port && it != s.localPort && it != hyPort && it !in occupied }
         fun test(from: ManagedServer, to: ManagedServer, ips: List<String>, protocol: String): List<String> {
-            if (protocol !in setOf("tcp", "icmp")) return ips
             log("Testing $protocol carrier ${from.displayName} → ${to.displayName}")
-            return scan(from, to, ips, s.port, protocol).also {
+            return scan(from, to, ips, probePort, protocol).also {
                 log("Observed ${it.size}/${ips.size} source candidates on ${to.displayName}; authenticated tunnel test follows")
                 check(it.isNotEmpty()) { "No entered source reached ${to.displayName}; the provider may block source spoofing" }
             }
@@ -203,7 +286,7 @@ class SpoofCarrierManager(private val connect: (ManagedServer) -> RemoteShell = 
             run(abroad, SpoofCarrierScripts.install(selected, false, iran.host, hyPort))
             run(iran, SpoofCarrierScripts.install(selected, true, abroad.host, hyPort))
         } catch (e: Exception) {
-            rollback(iran, abroad)
+            runCatching { rollback(iran, abroad) }.exceptionOrNull()?.let(e::addSuppressed)
             throw e
         }
         return selected

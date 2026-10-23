@@ -34,9 +34,32 @@ class SpoofCarrierTest {
         val lines = "1.1.1.1 4/4 0.0%\n8.8.8.8 4/4 0.0%\n1.1.1.2 2/4 50.0%\n1.1.1.3 3/4 25.0%\n1.1.1.4 9/4 0.0%"
         assertEquals(listOf("1.1.1.1", "1.1.1.3"), SpoofCarrierScripts.received(lines, listOf("1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4")))
     }
+    @Test fun failedCleanupDoesNotSkipOtherServer() {
+        val failure = IllegalStateException("connection failed")
+        val visited = mutableListOf<Int>()
+        rollbackAll(failure, listOf(
+            { visited += 1; error("carrier unavailable") },
+            { visited += 2; error("Iran unavailable") },
+            { visited += 3 }
+        ))
+        assertEquals(listOf(1, 2, 3), visited)
+        assertEquals(2, failure.suppressed.size)
+        assertEquals("connection failed", failure.message)
+    }
+
+    @Test fun everyCarrierUsesNonceVerifiedDataProbe() {
+        for (protocol in SpoofCarrierSpec.TRANSPORTS) {
+            val script = SpoofCarrierScripts.probe(s.iranSources, "9.9.9.9", 18443, true, protocol, "b".repeat(64)).text
+            assertTrue(script.contains("18443 $protocol"))
+            assertTrue(script.contains("payload == (nonce"))
+            assertTrue(script.contains("seen.add(i)"))
+            assertTrue(script.contains("process.terminate()"))
+        }
+    }
+
     @Test fun generatedShellPassesSyntaxAndUsesPinnedDownloads() {
         val scripts = listOf(SpoofCarrierScripts.prepare("amd64"), SpoofCarrierScripts.prepare("arm64"),
-            SpoofCarrierScripts.probe(s.iranSources,"9.9.9.9",18443,true,"tcp"),
+            SpoofCarrierScripts.probe(s.iranSources,"9.9.9.9",18443,true,"tcp", "a".repeat(64)),
             SpoofCarrierScripts.install(s,true,"9.9.9.9",45000), SpoofCarrierScripts.install(s,false,"9.9.9.9",45000),
             SpoofCarrierScripts.finish(true), SpoofCarrierScripts.finish(false), SpoofCarrierScripts.remove())
         for (script in scripts) {

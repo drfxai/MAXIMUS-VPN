@@ -153,7 +153,7 @@ class NetworkLabActions(
     val onSaveChain: () -> Unit = {},
     val onScanEndpoints: (String) -> Unit = {},
     val onStopEndpoints: () -> Unit = {},
-    val onSaveFronted: (String, String, String, String, Boolean) -> Unit = { _, _, _, _, _ -> },
+    val onSaveFronted: (String, String, String, String, Boolean, String, Int) -> Unit = { _, _, _, _, _, _, _ -> },
     val onWarpSplit: (Boolean) -> Unit = {},
     val onPsiphonSettings: (String) -> Unit = {}
 )

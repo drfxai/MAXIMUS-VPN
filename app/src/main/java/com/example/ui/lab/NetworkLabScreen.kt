@@ -120,16 +120,25 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         local.update { it.copy(transportTools = it.transportTools.copy(warpSplit = enabled)) }
     }
 
-    fun saveFronted(id: String, endpoint: String, sni: String, host: String, splitHello: Boolean) {
+    fun saveFronted(id: String, endpoint: String, sni: String, host: String, splitHello: Boolean, decoy: String, fakeTtl: Int) {
         if (local.value.transportTools.running || _state.value.vpnOn) return
         local.update { it.copy(transportTools = it.transportTools.copy(running = true, message = "Testing the fronted profile through native Xray")) }
         viewModelScope.launch {
             try {
                 val (clone, evidence) = withContext(Dispatchers.IO) {
+                    val networkBefore = NetworkKey.current(getApplication<Application>())
                     val repository = RayApplication.instance.serverRepository
                     val base = repository.getAllProfilesOnce().firstOrNull { it.id == id } ?: error("Choose a base profile")
-                    val p = com.example.vpn.experimental.FrontedTunnel.build(base, endpoint, sni, host, splitHello)
-                    val result = com.example.xray.RealDelayProbe.measure(p, 8)
+                    val front = com.example.vpn.experimental.FrontedTunnel.build(base, endpoint, sni, host, splitHello)
+                    val p = if (decoy.isBlank()) front else com.example.vpn.sidecar.ByedpiSidecar.enable(front, decoy, fakeTtl)
+                    val result = if (decoy.isBlank()) com.example.xray.RealDelayProbe.measure(p, 8) else {
+                        val probe = com.example.vpn.lab.EngineProbe.testProfile(getApplication<Application>(), p, 8, requests = 2)
+                        if (probe.stage.carriesTraffic && probe.latencyMs != null) com.example.xray.RealDelayProbe.Outcome.Delay(probe.latencyMs)
+                        else com.example.xray.RealDelayProbe.Outcome.NotRun(probe.failure ?: "Native fake-SNI path did not pass")
+                    }
+                    check(networkBefore == NetworkKey.current(getApplication<Application>()) && !_state.value.vpnOn) {
+                        "Network changed during testing; retry on the current network"
+                    }
                     // Only an actual proxied request can populate the tested timestamp.
                     val saved = if (result is com.example.xray.RealDelayProbe.Outcome.Delay)
                         p.copy(lastLatencyMs = result.latencyMs, lastTestedTimestamp = System.currentTimeMillis()) else p

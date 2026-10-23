@@ -25,6 +25,9 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
     var sni by rememberSaveable { mutableStateOf("") }
     var host by rememberSaveable { mutableStateOf("") }
     var splitHello by rememberSaveable { mutableStateOf(false) }
+    var fake by rememberSaveable { mutableStateOf(false) }
+    var decoy by rememberSaveable { mutableStateOf("www.microsoft.com") }
+    var ttl by rememberSaveable { mutableStateOf("8") }
     var expanded by remember { mutableStateOf(false) }
     val ui = state.transportTools
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -57,8 +60,14 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
         item { OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Front IP") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(sni, { sni = it }, label = { Text("TLS SNI / certificate name") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(host, { host = it }, label = { Text("Origin HTTP Host") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
-        item { Row { Checkbox(splitHello, { splitHello = it }); Text("Native Xray TLS record + TCP fragmentation") } }
-        item { Button(onClick = { actions.onSaveFronted(selected, endpoint, sni, host, splitHello) }, enabled = selected.isNotBlank() && !ui.running && !state.vpnOn) { Text("Test and save fronted profile") } }
+        item { Row { Checkbox(splitHello, { splitHello = it; if (it) fake = false }); Text("Native Xray TLS record + TCP fragmentation") } }
+        item { Row { Checkbox(fake, { fake = it; if (it) splitHello = false }); Text("Native fake-SNI packets (experimental)") } }
+        if (fake) {
+            item { OutlinedTextField(decoy, { decoy = it }, label = { Text("Decoy SNI · real TLS identity stays unchanged") }, singleLine = true) }
+            item { OutlinedTextField(ttl, { ttl = it }, label = { Text("Decoy TTL · 1–32") }, singleLine = true) }
+            item { Text("TTL must expire before the real server. A wrong value can break TLS; test each network. Requires the bundled ByeDPI engine.") }
+        }
+        item { Button(onClick = { actions.onSaveFronted(selected, endpoint, sni, host, splitHello, if (fake) decoy else "", ttl.toIntOrNull() ?: 0) }, enabled = selected.isNotBlank() && !ui.running && !state.vpnOn) { Text("Test and save fronted profile") } }
         item { HorizontalDivider() }
         item {
             Text("WARP registration · TLS splitting", style = MaterialTheme.typography.titleMedium)

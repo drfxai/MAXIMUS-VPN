@@ -10,6 +10,7 @@ object Sidecars {
     /** Registered engines, strongest first. Each engine file adds itself here. */
     val ENGINES: List<SidecarEngine> by lazy {
         listOf(
+            ByedpiSidecar,
             MihomoSidecar,
             PsiphonSidecar {
                 psiphonSettings?.invoke() ?: PsiphonSidecar.assetProvider { name ->
