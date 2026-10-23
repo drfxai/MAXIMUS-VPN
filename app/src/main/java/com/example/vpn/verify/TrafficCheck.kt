@@ -233,7 +233,7 @@ class TrafficCheck(
         private const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
         val SMALL = Target("www.gstatic.com", 443, "/generate_204")
-        val SMALL_FALLBACKS = listOf(Target("www.msftconnecttest.com", 443, "/connecttest.txt"))
+        val SMALL_FALLBACKS = listOf(Target("www.apple.com", 443, "/library/test/success.html"))
         val DOWNLOADS = listOf(
             Target("httpbin.org", 443, "/bytes/$DOWNLOAD_BYTES", DOWNLOAD_BYTES),
             Target("speed.cloudflare.com", 443, "/__down?bytes=$DOWNLOAD_BYTES", DOWNLOAD_BYTES)
