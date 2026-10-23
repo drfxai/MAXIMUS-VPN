@@ -15,12 +15,18 @@ class SidecarProcess(
 ) : RunningEngine {
     @Volatile private var sawReadyLine = readyLine == null
     @Volatile private var stopping = false
+    @Volatile override var startupFailure: String? = null
+        private set
 
     private val logThread = Thread({
         try {
             process.inputStream.bufferedReader().useLines { lines ->
                 // Engines can print server addresses and keys; only redacted, bounded lines reach the log.
                 lines.forEachIndexed { index, line ->
+                    if (line.contains("registration", true) &&
+                        (line.contains("error", true) || line.contains("failed", true))) {
+                        startupFailure = "registration failed before the local proxy became ready"
+                    }
                     if (!sawReadyLine && readyLine?.containsMatchIn(line) == true) sawReadyLine = true
                     if (index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line.take(300)))
                 }
