@@ -62,6 +62,15 @@ class TrafficCheckTest {
         assertTrue(runCatching { check().smallRequest() }.isFailure)
     }
 
+    @Test fun fullLocalUploadWithoutReplyDoesNotProveAnMtuBlackHole() {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        server.start()
+        val r = check(timeoutMs = 1_000).upload()
+        assertTrue(r.toString(), r is LegResult.Failed && !r.stalled)
+        assertEquals(TrafficCheck.UPLOAD_BYTES, (r as LegResult.Failed).bytes)
+        assertTrue(r.reason.contains("remote receipt unconfirmed"))
+    }
+
     @Test fun aWorkingRouteIsVerifiedBothWays() {
         server.dispatcher = echo()
         server.start()
