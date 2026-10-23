@@ -105,7 +105,10 @@ class TrafficCheck(
                 else -> LegResult.NotTested("$t did not echo the upload")
             }
         } catch (e: TransferException) {
-            failed(e, t)
+            val result = failed(e, t)
+            // Socket writes count local buffering, not remote receipt or a path-MTU measurement.
+            if (result is LegResult.Failed) result.copy(stalled = false,
+                reason = "${result.reason}; ${e.moved} bytes written locally, remote receipt unconfirmed") else result
         }
     }
 
