@@ -18,7 +18,7 @@ Safety invariant: do not silently bypass Android lockdown, weaken TLS verificati
 Present or documented on `main` (source presence is **not** field validation):
 
 - One Android `RayVpnService`, Always-on-capable; Xray/VLESS, Mihomo, Psiphon, Tor/lyrebird (including obfs4, WebTunnel, Snowflake, meek), WARP WireGuard and MASQUE, Matrix Transport, DNSTT and Slipstream families.
-- LAB measurements and a `NetworkStateTracker`; security-gated derived config experiments; real-request verification; network memory and MTU/fragment experiments; packet guard and explicit Android lockdown guidance.
+- LAB measurements and a documented `NetworkStateTracker`; security-gated derived config experiments; `TrafficCheck` small/download/upload test logic; an existing `RouteRecipe` / `RouteBook` with a bidirectional flag, network-scoped route memory and MTU/fragment experiments; packet guard and explicit Android lockdown guidance. Code presence alone does not establish every wiring path is working on a physical handset.
 - Signed subscription envelopes, anti-rollback sequence, last-known-good local cache and optional independent HTTPS mirrors (`docs/SUBSCRIPTIONS.md`). **Current documentation also describes an unsigned fallback for builds with no configured official public key:** this needs a compatibility-aware migration policy, not a silent breaking change.
 - Existing experiment limits and trade-mode behavior must be preserved. Do not infer an engine is ready merely because a sidecar is packaged.
 
@@ -77,7 +77,7 @@ The bootstrap plane is **not** the data plane. Low-throughput DNS-based bootstra
 
 ### 4.2 Route recipe / switch contract
 
-Extend the proposed immutable route recipe ADR rather than inventing a second representation:
+Extend the existing `RouteRecipe` and the proposed adaptive-route-validation ADR rather than inventing a second representation:
 `network_epoch`, non-identifying `network_class`, engine version/hash, tunnel identity, endpoint IP/port, TLS hostname/Host/ALPN requested + negotiated, ECH requested + negotiated + unknown, fragment mode, TUN MTU versus *measured* path MTU, IPv4/v6 binding, DNS mode, certificate/pin verdict, verification-target IDs, sample time and expiry, upload/download proof, and bounded failure-stage taxonomy. **Never store secrets in telemetry or LAB snapshots.**
 
 Routing rules:
@@ -141,7 +141,7 @@ Field status as of this ADR: **NOT TESTED here**. User-provided Irancell diagnos
 ## 8. Prioritized engineering backlog
 
 - **P0-A:** inventory **actual** non-Cloudflare signed subscription origins, eliminate same-provider mirror dependence and validate secure frozen last-known-good on device. Add origin fault-injection tests and conservative signing-key migration.
-- **P0-B:** implement a consolidated immutable `RouteReceipt` with current network epoch and authenticated upload/download through TUN; expose truthful UI evidence and evidence age.
+- **P0-B:** audit and extend the existing `vpn/smart/RouteRecipe.kt`, `NetworkMemory.routes` and `vpn/verify/TrafficCheck.kt` (already store a bidirectional flag and implement upload/download checks). Add missing negotiated-transport/pin/expiry provenance, bind evidence to the installed TUN and current network epoch, then verify the UI never promotes a stale or incomplete receipt.
 - **P0-C:** verify Android lockdown, protected sockets, no IPv6/DNS leak, process death and rapid handover on a real physical device. Repair failures before broad engine additions.
 - **P0-D:** integrate bounded `ResilienceSupervisor` over existing LAB and Smart Connect (no parallel unbudgeted scanning), with S0–S6 evidence, cool-down and safe cache reuse.
 - **P1-A:** independently hosted signed manifest distribution with atomic publisher and key rotation, and optional signed offline import.
