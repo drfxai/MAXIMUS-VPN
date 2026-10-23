@@ -546,7 +546,7 @@ class RayVpnService : VpnService() {
         if (!fronted) return null
         showForegroundNotification("Looking for a verified clean path...")
         val scanNetwork = com.example.vpn.smart.NetworkKey.current(this)
-        val cached = RayApplication.instance.endpointScores.validated(scanNetwork)
+        val cached = com.example.RayApplication.instance.endpointScores.validated(scanNetwork)
         val candidates = withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
             com.example.panels.CleanIpOptimizer.findCleanIpsSync(port = profile.port, openSocket = {
                 Socket().also { socket ->
@@ -560,7 +560,7 @@ class RayVpnService : VpnService() {
                 probe = { paths -> probeAll(paths, timeoutSec) },
                 cancelled = { attempt?.isActive == false || com.example.vpn.smart.NetworkKey.current(this) != scanNetwork })
         }?.also {
-            RayApplication.instance.endpointScores.record(listOf(com.example.vpn.connectivity.EndpointScoringEngine.Measurement(
+            com.example.RayApplication.instance.endpointScores.record(listOf(com.example.vpn.connectivity.EndpointScoringEngine.Measurement(
                 it.profile.address, scanNetwork, System.currentTimeMillis(), true, it.latencyMs)))
             XrayLogManager.i("SMART", "A clean path carried two real requests (${it.latencyMs} ms).")
         }

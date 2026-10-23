@@ -177,8 +177,8 @@ finally:
         """, emptyList(), mapOf("SOURCES" to sources.joinToString("\n"), "UNIT" to unit))
     }
 
-    fun finish(commit: Boolean) = ToolScripts.script(if (commit) "§SUDO rm -rf $DIR/previous $DIR/pending" else """
-        if §SUDO test -f $DIR/pending; then
+    fun finish(commit: Boolean, force: Boolean = false) = ToolScripts.script(if (commit) "§SUDO rm -f $DIR/pending" else """
+        if §SUDO test -f $DIR/pending ${if (force) "|| §SUDO test -d $DIR/previous" else ""}; then
           §SUDO systemctl stop $UNIT || true
           if §SUDO test -f $DIR/previous/unit; then
             §SUDO cp $DIR/previous/unit /etc/systemd/system/$UNIT.service
@@ -291,8 +291,8 @@ class SpoofCarrierManager(
         }
         return selected
     }
-    fun rollback(iran: ManagedServer, abroad: ManagedServer) {
-        val failed = listOf(iran, abroad).filter { runCatching { run(it, SpoofCarrierScripts.finish(false)) }.isFailure }
+    fun rollback(iran: ManagedServer, abroad: ManagedServer, force: Boolean = false) {
+        val failed = listOf(iran, abroad).filter { runCatching { run(it, SpoofCarrierScripts.finish(false, force)) }.isFailure }
         check(failed.isEmpty()) { "Carrier rollback needs attention on ${failed.joinToString { it.displayName }}" }
     }
     fun commit(iran: ManagedServer, abroad: ManagedServer) { listOf(iran, abroad).forEach { run(it, SpoofCarrierScripts.finish(true)) } }

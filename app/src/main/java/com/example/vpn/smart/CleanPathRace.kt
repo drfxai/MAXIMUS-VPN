@@ -12,20 +12,25 @@ object CleanPathRace {
         cancelled: () -> Boolean = { false }
     ): ServerRace.Winner? {
         if (profile.allowInsecure || !profile.security.equals("tls", true)) return null
-        val paths = addresses.distinct().take(4).map { RouteRecipe.pinEndpoint(profile, it) }
-        if (paths.isEmpty() || cancelled()) return null
-        val first = probe(paths)
-        if (cancelled()) return null
-        val candidates = paths.zip(first).mapNotNull { (path, result) ->
-            (result as? RealDelayProbe.Outcome.Delay)?.let { path to it.latencyMs }
-        }
-        if (candidates.isEmpty()) return null
-        val second = probe(candidates.map { it.first })
-        if (cancelled()) return null
-        return candidates.zip(second).mapNotNull { (candidate, result) ->
-            (result as? RealDelayProbe.Outcome.Delay)?.let {
-                ServerRace.Winner(candidate.first, profile, (candidate.second + it.latencyMs) / 2)
+        val paths = addresses.distinct().take(12).map { RouteRecipe.pinEndpoint(profile, it) }
+        // Bound each native batch, but do not let four stale cached addresses hide fresh candidates.
+        for (batch in paths.chunked(4)) {
+            if (cancelled()) return null
+            val first = probe(batch)
+            if (cancelled()) return null
+            val candidates = batch.zip(first).mapNotNull { (path, result) ->
+                (result as? RealDelayProbe.Outcome.Delay)?.let { path to it.latencyMs }
             }
-        }.minByOrNull { it.latencyMs }
+            if (candidates.isEmpty()) continue
+            val second = probe(candidates.map { it.first })
+            if (cancelled()) return null
+            val winner = candidates.zip(second).mapNotNull { (candidate, result) ->
+                (result as? RealDelayProbe.Outcome.Delay)?.let {
+                    ServerRace.Winner(candidate.first, profile, (candidate.second + it.latencyMs) / 2)
+                }
+            }.minByOrNull { it.latencyMs }
+            if (winner != null) return winner
+        }
+        return null
     }
 }
