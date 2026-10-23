@@ -300,9 +300,16 @@ class TunnelManager(
         val iranArch = iranFacts.goArch!!
         val abroadArch = abroadFacts.goArch!!
 
+        val isUpdate = planned.exitPublicKey.isNotEmpty()
+        var abroadTouched = false
+        var iranTouched = false
+        var carrierStaged = false
+        var accepted = false
+        try {
         progress.step(2)
         progress.log("Server abroad: ${abroadServer.host}")
         connect(abroadServer).use { shell ->
+            abroadTouched = true
             val r = run(shell, TunnelScripts.abroadInstall(spec, abroadArch, abroadServer.host, renewKeys), progress)
             val pub = r["PUBKEY"].orEmpty()
             require(pub.matches(Regex("[A-Za-z0-9_-]{43}"))) { "The server abroad did not return its REALITY key" }
@@ -315,16 +322,10 @@ class TunnelManager(
         }
 
         if (spec.spoof != null) {
-            try {
-                val selected = carrier.setup(iranServer.copy(facts = iranFacts), abroadServer.copy(facts = abroadFacts),
-                    spec.spoof!!, spec.hyPort, progress::log)
-                spec = spec.copy(spoof = selected)
-            } catch (e: Exception) {
-                val undo = if (planned.exitPublicKey.isNotEmpty()) TunnelScripts.restorePrevious()
-                    else TunnelScripts.uninstall(TunnelSpec.ROLE_ABROAD, null, spec.hyPort)
-                runCatching { connect(abroadServer).use { run(it, undo, progress) } }.exceptionOrNull()?.let { e.addSuppressed(it) }
-                throw e
-            }
+            val selected = carrier.setup(iranServer.copy(facts = iranFacts), abroadServer.copy(facts = abroadFacts),
+                spec.spoof!!, spec.hyPort, progress::log)
+            carrierStaged = true
+            spec = spec.copy(spoof = selected)
         }
 
         progress.step(3)
@@ -336,9 +337,9 @@ class TunnelManager(
         var installed: Map<String, String>? = null
         // An update changed the server abroad already (maybe a new key); if the Iran server fails,
         // put the server abroad back so the running pair keeps working.
-        val isUpdate = planned.exitPublicKey.isNotEmpty()
         try { connect(iranServer).use { shell ->
             progress.step(4)
+            iranTouched = true
             installed = try {
                 run(shell, iranScript(spec), progress)
             } catch (e: TunnelScriptException) {
@@ -350,17 +351,9 @@ class TunnelManager(
                 run(shell, iranScript(spec), progress)
             }
         } } catch (e: Exception) {
-            if (spec.spoof != null) runCatching { carrier.rollback(iranServer, abroadServer) }.exceptionOrNull()?.let { e.addSuppressed(it) }
-            if (isUpdate) {
-                progress.log("The Iran server failed; putting the server abroad back to its previous setup")
-                val undone = runCatching { connect(abroadServer).use { run(it, TunnelScripts.restorePrevious(), progress) } }.isSuccess
-                progress.log(if (undone) "The server abroad is back on its previous setup" else "Could not put the server abroad back; run the update again")
-            }
-            if (!isUpdate && spec.spoof != null) {
-                rollbackAll(e, listOf(
-                    { connect(iranServer).use { run(it, TunnelScripts.uninstall(TunnelSpec.ROLE_IRAN, spec.entryPort, spec.hyPort), progress) }; Unit },
-                    { connect(abroadServer).use { run(it, TunnelScripts.uninstall(TunnelSpec.ROLE_ABROAD, null, spec.hyPort), progress) }; Unit }
-                ))
+            if (spec.spoof == null && isUpdate) {
+                runCatching { connect(abroadServer).use { run(it, TunnelScripts.restorePrevious(), progress) } }
+                    .exceptionOrNull()?.let(e::addSuppressed)
             }
             throw e
         }
@@ -379,16 +372,7 @@ class TunnelManager(
         val status = verify(iranServer, progress)
         if (spec.spoof != null) {
             if (status == null || status.working == 0) {
-                val failure = IllegalStateException("Spoof carrier did not carry authenticated traffic abroad")
-                rollbackAll(failure, listOf(
-                    { carrier.rollback(iranServer, abroadServer) },
-                    { connect(iranServer).use { run(it, if (isUpdate) TunnelScripts.restorePrevious()
-                        else TunnelScripts.uninstall(TunnelSpec.ROLE_IRAN, spec.entryPort, spec.hyPort), progress) }; Unit },
-                    { connect(abroadServer).use { run(it, if (isUpdate) TunnelScripts.restorePrevious()
-                        else TunnelScripts.uninstall(TunnelSpec.ROLE_ABROAD, null, spec.hyPort), progress) }; Unit }
-                ))
-                progress.log(if (failure.suppressed.isEmpty()) "Previous setup restored" else "Rollback incomplete: ${failure.suppressed.size} actions failed; check both servers")
-                throw failure
+                error("Spoof carrier did not carry authenticated traffic abroad")
             }
             carrier.commit(iranServer, abroadServer)
         }
@@ -397,6 +381,7 @@ class TunnelManager(
             TunnelSpec.fromSettings(iranServer.tool(ServerToolCatalog.MAXIMUS_TUNNEL)?.settings.orEmpty())?.spoof != null) {
             carrier.remove(iranServer); carrier.remove(abroadServer)
         }
+        accepted = true
         progress.step(6)
         val iranTool = InstalledTool(ServerToolCatalog.MAXIMUS_TUNNEL, port = spec.entryPort,
             profileId = iranServer.tool(ServerToolCatalog.MAXIMUS_TUNNEL)?.profileId, settings = spec.toSettings(TunnelSpec.ROLE_IRAN))
@@ -406,6 +391,20 @@ class TunnelManager(
         val abroad = abroadServer.withTool(abroadTool).copy(facts = abroadFacts, checkedAt = now)
         return TunnelOutcome(iran, abroad, spec, TunnelConfigs.entryProfile(spec, iran, abroad), TunnelConfigs.entryLink(spec, iran, abroad),
             status)
+        } catch (failure: Exception) {
+            if (planned.spoof != null && !accepted) {
+                val actions = mutableListOf<() -> Unit>()
+                if (carrierStaged) actions += { carrier.rollback(iranServer, abroadServer, force = true) }
+                if (iranTouched) actions += { connect(iranServer).use { run(it, if (isUpdate) TunnelScripts.restorePrevious()
+                    else TunnelScripts.uninstall(TunnelSpec.ROLE_IRAN, spec.entryPort, spec.hyPort), progress) }; Unit }
+                if (abroadTouched) actions += { connect(abroadServer).use { run(it, if (isUpdate) TunnelScripts.restorePrevious()
+                    else TunnelScripts.uninstall(TunnelSpec.ROLE_ABROAD, null, spec.hyPort), progress) }; Unit }
+                rollbackAll(failure, actions)
+                progress.log(if (failure.suppressed.isEmpty()) "Previous setup restored" else
+                    "Rollback incomplete: ${failure.suppressed.size} actions failed; check both servers")
+            }
+            throw failure
+        }
     }
 
     /**
