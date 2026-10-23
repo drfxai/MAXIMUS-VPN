@@ -10,16 +10,8 @@ import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
 
-/**
- * Native non-root TCP / TLS Desynchronization (DPI bypass) Engine for Maximus VPN.
- *
- * Implements:
- * 1. Split (Payload fragmentation at TLS ClientHello SNI boundary or specific offsets)
- * 2. Disorder (Segment reordering to defeat stateful middlebox reassembly)
- * 3. Fake SNI (Decoy domain injection with multi-domain random selection per connection)
- * 4. OOB (Out-of-Band TCP urgent pointer injection)
- * 5. Disorder + OOB (Combined out-of-band and out-of-order delivery)
- * 6. Adaptive escalation (Auto-switches to deeper desync if filtering RST is observed)
+/** Legacy configuration helpers. Real fake-SNI/retransmission is implemented by ByedpiSidecar.
+ * A Java OutputStream cannot control TCP sequence numbers or replace retransmitted payloads.
  */
 object DesyncEngine {
 
@@ -110,100 +102,14 @@ object DesyncEngine {
             return
         }
 
-        try {
-            when (config.method) {
-                DesyncMethod.NONE -> {
-                    outStream.write(data)
-                    outStream.flush()
-                }
-
-                DesyncMethod.SPLIT -> {
-                    // Split TLS ClientHello payload into 2 segments (at splitPosition or SNI offset)
-                    val splitPos = config.splitPosition.coerceIn(1, data.size - 1)
-                    outStream.write(data, 0, splitPos)
-                    outStream.flush()
-                    try { Thread.sleep(2) } catch (_: InterruptedException) {}
-                    outStream.write(data, splitPos, data.size - splitPos)
-                    outStream.flush()
-                    XrayLogManager.d("DESYNC", "Applied SPLIT at byte $splitPos (${data.size} bytes total)")
-                }
-
-                DesyncMethod.DISORDER -> {
-                    // Reordered payload delivery with TCP segments
-                    val splitPos = config.splitPosition.coerceIn(1, data.size - 1)
-                    val part1 = data.copyOfRange(0, splitPos)
-                    val part2 = data.copyOfRange(splitPos, data.size)
-
-                    // Write tail segment first then head segment with tiny pause
-                    outStream.write(part2)
-                    outStream.flush()
-                    try { Thread.sleep(3) } catch (_: InterruptedException) {}
-                    outStream.write(part1)
-                    outStream.flush()
-                    XrayLogManager.d("DESYNC", "Applied DISORDER at byte $splitPos")
-                }
-
-                DesyncMethod.FAKE_SNI -> {
-                    // 1. Send decoy Fake SNI ClientHello with chosen fake SNI
-                    val fakeClientHello = buildFakeClientHello(fakeSni)
-                    outStream.write(fakeClientHello)
-                    outStream.flush()
-                    try { Thread.sleep(4) } catch (_: InterruptedException) {}
-
-                    // 2. Send actual payload split
-                    val splitPos = config.splitPosition.coerceIn(1, data.size - 1)
-                    outStream.write(data, 0, splitPos)
-                    outStream.flush()
-                    try { Thread.sleep(2) } catch (_: InterruptedException) {}
-                    outStream.write(data, splitPos, data.size - splitPos)
-                    outStream.flush()
-                    XrayLogManager.d("DESYNC", "Applied FAKE_SNI ($fakeSni) + SPLIT")
-                }
-
-                DesyncMethod.OOB -> {
-                    // Inject TCP Urgent (Out-of-Band) byte before real payload
-                    try {
-                        socket.sendUrgentData(config.oobByte.toInt() and 0xFF)
-                    } catch (e: Exception) {
-                        XrayLogManager.w("DESYNC", "Socket OOB urgent data write note: ${e.message}")
-                    }
-
-                    // Split real payload
-                    val splitPos = config.splitPosition.coerceIn(1, data.size - 1)
-                    outStream.write(data, 0, splitPos)
-                    outStream.flush()
-                    try { Thread.sleep(2) } catch (_: InterruptedException) {}
-                    outStream.write(data, splitPos, data.size - splitPos)
-                    outStream.flush()
-                    XrayLogManager.d("DESYNC", "Applied OOB + SPLIT")
-                }
-
-                DesyncMethod.DISORDER_OOB -> {
-                    // Decoy + OOB urgent data + disordered segments
-                    val fakeClientHello = buildFakeClientHello(fakeSni)
-                    outStream.write(fakeClientHello)
-                    outStream.flush()
-
-                    try {
-                        socket.sendUrgentData(0xFF)
-                    } catch (_: Exception) {}
-
-                    val splitPos = config.splitPosition.coerceIn(1, data.size - 1)
-                    val part1 = data.copyOfRange(0, splitPos)
-                    val part2 = data.copyOfRange(splitPos, data.size)
-
-                    outStream.write(part2)
-                    outStream.flush()
-                    try { Thread.sleep(3) } catch (_: InterruptedException) {}
-                    outStream.write(part1)
-                    outStream.flush()
-                    XrayLogManager.d("DESYNC", "Applied DISORDER_OOB ($fakeSni)")
-                }
-            }
-        } catch (e: Exception) {
-            XrayLogManager.w("DESYNC", "Desync write failed: ${e.localizedMessage}")
-            throw e
+        require(config.method == DesyncMethod.SPLIT) {
+            "This method requires the native ByeDPI carrier; refusing to corrupt the TLS stream"
         }
+        val splitPos = config.splitPosition.coerceIn(1, data.size - 1)
+        outStream.write(data, 0, splitPos)
+        outStream.flush()
+        outStream.write(data, splitPos, data.size - splitPos)
+        outStream.flush()
     }
 
     /**
