@@ -7,6 +7,8 @@ import com.example.data.model.CanonicalFingerprint
 import com.example.data.model.ServerCategory
 import com.example.data.model.Top10Category
 import com.example.data.model.VlessProfile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -14,7 +16,7 @@ class ServerRepository(private val dao: ServerProfileDao) {
 
     val allProfiles: Flow<List<VlessProfile>> = dao.getAllProfiles().map { list ->
         list.map { it.toDomain() }
-    }
+    }.flowOn(Dispatchers.Default)
 
     suspend fun getAllProfilesOnce(): List<VlessProfile> {
         return dao.getAllProfilesOnce().map { it.toDomain() }
@@ -22,7 +24,7 @@ class ServerRepository(private val dao: ServerProfileDao) {
 
     val favoriteProfiles: Flow<List<VlessProfile>> = dao.getFavoriteProfiles().map { list ->
         list.map { it.toDomain() }
-    }
+    }.flowOn(Dispatchers.Default)
 
     suspend fun getProfileById(id: String): VlessProfile? {
         return dao.getProfileById(id)?.toDomain()
@@ -44,16 +46,16 @@ class ServerRepository(private val dao: ServerProfileDao) {
             Top10Category.MOST_STABLE -> dao.getTop10MostStable()
             Top10Category.LOWEST_PACKET_LOSS -> dao.getTop10LowestPacketLoss()
         }
-        return flow.map { list -> list.map { it.toDomain() } }
+        return flow.map { list -> list.map { it.toDomain() } }.flowOn(Dispatchers.Default)
     }
 
     fun getProfilesByCategory(category: ServerCategory): Flow<List<VlessProfile>> {
-        return dao.getProfilesByCategory(category.name).map { list -> list.map { it.toDomain() } }
+        return dao.getProfilesByCategory(category.name).map { list -> list.map { it.toDomain() } }.flowOn(Dispatchers.Default)
     }
 
     fun getProfilesBySubscription(url: String): Flow<List<VlessProfile>> {
         return dao.getProfilesBySubscription(CanonicalFingerprint.computeSubscriptionKey(url), url)
-            .map { list -> list.map { it.toDomain() } }
+            .map { list -> list.map { it.toDomain() } }.flowOn(Dispatchers.Default)
     }
 
     suspend fun insert(profile: VlessProfile) {
