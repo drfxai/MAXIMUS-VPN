@@ -43,3 +43,8 @@ Before enforcing per-bridge cooldown on a running instance, audit the available 
 
 ## Evidence limits
 No new device, emulator, field, DNS leak, protected international traffic or before/after speed measurement has been performed for this PR. User-reported timings are observations, not reproduced benchmarks. No merge, release or deployment is part of this development branch.
+
+## Diagnostic follow-up
+Added BridgeLogAggregator and integrated it into the lyrebird reader. Consecutive identical redacted messages are summarized on the next event, after 30 seconds when another repeat arrives, or when the reader exits. Only one message and a counter are retained. Different messages remain visible after the former 500-line cap. Tests cover 1,000 repeats followed by recovery, periodic summaries, final flush and distinct events.
+
+This does not suppress network retry attempts, identify individual bridges, provide circuit-aware cooldown or globally rate-limit distinct messages. The latter and runtime bridge control remain outstanding. Android CI for this follow-up is pending; no field performance claim.
