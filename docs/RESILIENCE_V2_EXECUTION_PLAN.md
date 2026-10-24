@@ -72,3 +72,6 @@ Prepare reviewable PRs; keep rollback commits. Release is a separate authorized 
 
 ## Current checkpoint
 PR125 contains partial DNS/Tor preparation/logging repairs. Latest functional commit before this plan:86aec807d4e29df50b5e9c96dee1c1a7eeb805f8. No new APK or field measurements. Next: inspect Android CI, validate cancellation/deadline tests, then implement generation-aware evidence and supported bridge-control integration.
+
+### Phase1/2 checkpoint — 4a8b7beccc4a095f1904b0311c6ce76e68ae6a2a
+LabController resolver scan now checks coroutine cancellation and existing tracker session before work and before persistence. Resolver burst requires matching network key, uses runInterruptible, and discards output if physical network or tracker session changed. Analysis rechecks session before proceeding to classification. Status IMPLEMENTED_PENDING_TEST; no full generation/ABA guarantee, no atomic session/persistence claim, and no physical handover evidence yet. CI on previous plan head was running; transport checks passed.
