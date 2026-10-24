@@ -31,5 +31,6 @@
 - [Optional network assistant gateway](MAXIMUS_AI_GATEWAY.md)
 - [Connectivity research](connectivity-research-2026-10-17.md) — dated reference, not a feature or acceptance-test list.
 - [Route validation design record](adr/adaptive-route-validation.md) — distinguish proposals from implemented behavior.
+- [Extreme-filtering resilience architecture](adr/iran-extreme-resilience-architecture.md) — Cloudflare-independent bootstrap, domestic-only states, safety gates and field acceptance plan (proposal; not verified).
 - [Security policy](../SECURITY.md), [license](../LICENSE) and [third-party notices](../THIRD_PARTY_NOTICES.md).
 - [Media gallery](media/README.md) — promotional designs and original app screenshots.
