@@ -46,14 +46,17 @@ class PluggableTransports private constructor(
             val lines = LinkedBlockingQueue<String>(128)
             val collecting = java.util.concurrent.atomic.AtomicBoolean(true)
             Thread({
+                val logs = BridgeLogAggregator({ XrayLogManager.i(TAG, "Bridge program: " + it) })
                 try {
                     process.inputStream.bufferedReader().useLines { seq ->
-                        seq.forEachIndexed { i, line ->
+                        seq.forEach { line ->
                             if (collecting.get()) lines.offer(line)
-                            if (i < 500) logLine(line)
+                            logLine(line, logs)
                         }
                     }
                 } catch (_: Exception) {
+                } finally {
+                    logs.flush()
                 }
                 lines.offer(EOF)
             }, "lyrebird-out").apply { isDaemon = true; start() }
@@ -89,14 +92,14 @@ class PluggableTransports private constructor(
 
         private const val EOF = "\u0000eof"
 
-        private fun logLine(line: String) {
+        private fun logLine(line: String, logs: BridgeLogAggregator) {
             // Only the protocol's status and log lines are worth showing; they can name bridge addresses.
             val text = when {
                 line.startsWith("LOG ") -> line.substringAfter("MESSAGE=", line).trim('"')
                 line.contains("ERROR") -> line
                 else -> return
             }
-            XrayLogManager.i(TAG, "Bridge program: " + SecretRedactor.redact(text.take(240)))
+            logs.accept(SecretRedactor.redact(text.take(240)))
         }
 
         sealed class Reply {
