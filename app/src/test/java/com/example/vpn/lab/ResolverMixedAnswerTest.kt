@@ -18,6 +18,18 @@ class ResolverMixedAnswerTest {
         assertEquals(false, ResolverIntelligence.judge(answer("8.8.8.8"), null).first)
     }
 
+    @Test fun cachedOrderDoesNotOutrankHealthyResolver() {
+        fun result(name: String, blocked: Boolean, rtt: Long) = ResolverIntelligence.Result(
+            name, "8.8.8.8", "test", "network-a", true, true, rtt,
+            blocked, false, null, 1_000, 10_000
+        )
+        val rows = listOf(result("blocked-fast", true, 1), result("healthy", false, 100))
+        val restored = rows.map { ResolverIntelligence.Result.fromJson(it.toJson())!! }
+        assertEquals("healthy", ResolverIntelligence.rank(restored).first().label)
+        assertEquals(false, ResolverIntelligence.reusable(restored, now = 11_000))
+        assertEquals(false, ResolverIntelligence.reusable(restored, now = 500))
+    }
+
     @Test fun missingAnswerRemainsUnknown() {
         assertEquals(null, ResolverIntelligence.judge(null, null).first)
     }
