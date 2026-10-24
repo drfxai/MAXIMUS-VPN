@@ -7,6 +7,7 @@ import java.net.InetAddress
 import java.net.URI
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** The pinned lyrebird client accepts `addr` independently of URL, HTTP Host and TLS identity. */
 object WebTunnelEndpoints {
@@ -16,11 +17,12 @@ object WebTunnelEndpoints {
             open = { it.openConnection() as HttpURLConnection }, private = privateDns).address
     }
 
-    internal fun resolveWith(lines: List<String>, lookup: (String) -> String): List<String> {
+    internal fun resolveWith(lines: List<String>, timeoutMs: Long = 12_000, lookup: (String) -> String): List<String> {
+        require(timeoutMs > 0)
         if (lines.none { it.startsWith("webtunnel ") }) return lines
         val pool = Executors.newFixedThreadPool(minOf(lines.size, 4))
         try {
-            val results = lines.map { line -> pool.submit(Callable {
+            val tasks = lines.map { line -> Callable {
                 try { pin(line, lookup) }
                 catch (e: InterruptedException) { throw e }
                 catch (_: Exception) {
@@ -28,8 +30,10 @@ object WebTunnelEndpoints {
                     XrayLogManager.w("TOR", "Skipped a WebTunnel bridge: no public endpoint could be resolved.")
                     null
                 }
-            }) }
-            val usable = results.mapNotNull { it.get() }
+            } }
+            // One shared deadline: a stuck DNS lookup must not block every healthy bridge.
+            val results = pool.invokeAll(tasks, timeoutMs, TimeUnit.MILLISECONDS)
+            val usable = results.mapNotNull { if (it.isCancelled) null else it.get() }
             check(usable.isNotEmpty()) { "No WebTunnel bridge has a usable public DNS answer; try another bridge or transport" }
             return usable
         } finally { pool.shutdownNow() }
