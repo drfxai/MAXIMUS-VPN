@@ -825,7 +825,7 @@ class LabController(
 
     /** Bounded resolver checks on the phone's own network, saved per network with an expiry. */
     private suspend fun measureResolvers(ctx: NetworkContext): List<ResolverIntelligence.Result> {
-        store.resolversFor(ctx.networkKey).takeIf { ResolverIntelligence.reusable(it) }?.let { return it }
+        store.resolversFor(ctx.networkKey).takeIf { ResolverIntelligence.reusable(it) }?.let { return ResolverIntelligence.rank(it) }
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return emptyList()
         val network = NetworkCapabilityDetector.physical(cm) ?: return emptyList()
         val own = runCatching { cm.getLinkProperties(network)?.dnsServers.orEmpty() }.getOrDefault(emptyList())
@@ -834,6 +834,8 @@ class LabController(
                 async(Dispatchers.IO) { runCatching { ResolverIntelligence.evaluate(network, c, ctx.networkKey) }.getOrNull() }
             }.awaitAll().filterNotNull()
         }
+        // The captured Android Network owns these measurements. Do not publish them after handover.
+        if (NetworkCapabilityDetector.physical(cm) != network) return emptyList()
         store.saveResolvers(ctx.networkKey, results)
         return ResolverIntelligence.rank(results)
     }
