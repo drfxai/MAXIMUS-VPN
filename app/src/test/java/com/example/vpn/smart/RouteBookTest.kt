@@ -53,6 +53,18 @@ class RouteBookTest {
         assertTrue(b.forNetwork(r.network, now = 2_000).isEmpty())
     }
 
+    @Test fun recentlyFailedBidirectionalRouteDoesNotDelayHealthyCandidate() {
+        val b = book()
+        val failed = recipe(profile = "failed-bi", bi = true)
+        b.recordVerified(failed)
+        b.recordVerified(recipe(profile = "healthy", at = 1_500))
+        b.recordFailure(failed.network, failed.id)
+        assertEquals(listOf("healthy", "failed-bi"),
+            book().forNetwork(failed.network, now = 2_000).map { it.profileId })
+        b.recordVerified(failed.copy(verifiedAt = 1_800))
+        assertEquals("failed-bi", b.forNetwork(failed.network, now = 2_000).first().profileId)
+    }
+
     @Test fun storageIsBounded() {
         val b = book()
         repeat(9) { b.recordVerified(recipe(profile = "p$it", at = 1_000L + it)) }
