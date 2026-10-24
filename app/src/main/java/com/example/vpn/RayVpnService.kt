@@ -861,6 +861,27 @@ class RayVpnService : VpnService() {
                 if (ordered.isNotEmpty()) tracker.finish(com.example.vpn.smart.SearchStage.REMEMBERED_ROUTE, verified = raced)
             }
 
+            // Recheck the exact successful engine recipe before scanning unrelated servers or registering WARP.
+            if (!raced && raceFirst && !lockExit && !force) {
+                val early = withTimeoutOrNull(com.example.vpn.smart.RecoveryAttemptPolicy.TOR_WINDOW_MS + 10_000L) {
+                    com.example.RayApplication.instance.lab.fastRecovery(
+                        exclude = exclude, deadlineMs = System.currentTimeMillis() + 90_000L,
+                        engineWindow = { test -> engineWindow(test) }, mode = settings.operationalMode,
+                        rememberedOnly = true
+                    ) { showForegroundNotification("Rechecking the engine route that worked here...") }
+                }?.result
+                if (early != null) {
+                    com.example.vless.VlessValidator.validate(early.profile)
+                    com.example.vpn.engine.RuntimeCapabilities.requireSupported(early.profile)
+                    requestedProfile = early.profile
+                    activeProfile = early.profile
+                    profile = early.profile
+                    raced = true
+                    mutateState { it.copy(activeProfile = early.profile, attemptedProfileId = early.profile.id) }
+                    XrayLogManager.i("SMART", "Previously working engine route passed fresh traffic checks on this network.")
+                }
+            }
+
             var firstFailed = initialResolutionFailed
             if (raceFirst && !raced) {
                 // The chosen server alone first, so a working one costs a single request; only when it
@@ -1410,6 +1431,10 @@ class RayVpnService : VpnService() {
                 XrayLogManager.i("VPN", "Time from connect to verified traffic: $connectMs ms.")
                 onTrafficVerified(requestedProfile, check.first)
                 activeRoute = recordRoute(routeNetwork, requestedProfile, profile, chosenVariant, check.first ?: 0L)
+                if (com.example.vpn.sidecar.Sidecars.isEngineProfile(requestedProfile) &&
+                    com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService) == routeNetwork) {
+                    com.example.vpn.smart.EngineRouteHints.record(this@RayVpnService, routeNetwork, requestedProfile)
+                }
                 launchTrafficCheck()
             } else {
                 val stage = check.second ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN

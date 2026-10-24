@@ -641,6 +641,7 @@ class LabController(
         /** The connect's mode, so a passing engine runs as the connect would start it and can be handed over. */
         mode: com.example.data.model.OperationalMode = com.example.data.model.AppSettings().operationalMode,
         resolveForRecovery: (VlessProfile) -> VlessProfile = { it },
+        rememberedOnly: Boolean = false,
         onProgress: (String) -> Unit = {}
     ): FastRecoveryOutcome {
         if (!testLock.tryLock()) return FastRecoveryOutcome(null, 0, false, "the LAB is running an analysis")
@@ -657,13 +658,14 @@ class LabController(
             val plan = ExperimentPlanner.plan(reading, cap, ExperimentPlanner.budget(
                 ExperimentPlanner.Budget(true, device.batteryPercent, device.charging, device.metered)))
             val saved = loadAllProfiles().filter { !it.allowInsecure && com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
-            val fakeSni = withTimeoutOrNull(12_000L) {
+            val fakeSni = if (rememberedOnly) emptyList() else withTimeoutOrNull(12_000L) {
                 kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
                     com.example.vpn.smart.FakeSniRecovery.candidates(saved, resolveForRecovery)
                 }
             }.orEmpty()
             val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(saved) + fakeSni
-            val all = (saved + builtIn).distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
+            val poolProfiles = if (rememberedOnly) com.example.vpn.smart.EngineRouteHints.preferred(context, currentIdentity, builtIn) else saved + builtIn
+            val all = poolProfiles.distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
                 .filter { it.id !in exclude && com.example.vpn.connectivity.PathRef.of(it) !in exclude }
             if (all.isEmpty()) return FastRecoveryOutcome(null, 0, true, "no other saved config or recovery engine is available")
             val families = all.map { it to familyOf(it) }

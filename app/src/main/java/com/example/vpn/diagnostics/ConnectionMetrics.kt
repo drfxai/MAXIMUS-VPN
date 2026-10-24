@@ -32,7 +32,7 @@ object ConnectionMetrics {
     @Synchronized
     fun summary(): List<String> {
         val times = connectTimes.toList()
-        val median = times.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
+        val median = medianMillis(times)
         return listOf(
             "Connect attempts: ${connectAttempts.get()}, verified: ${connectVerified.get()}",
             "Time to verified traffic (last ${times.size}): ${if (times.isEmpty()) "none yet" else times.joinToString(", ") { "${it}ms" }}" +
@@ -42,6 +42,15 @@ object ConnectionMetrics {
             "Server tests not run while connected: ${notTestedWhileConnected.get()}",
             "LAB network sessions: ${labSessions.get()}"
         )
+    }
+
+    internal fun medianMillis(values: List<Long>): Long? {
+        if (values.isEmpty()) return null
+        val sorted = values.sorted()
+        val mid = sorted.size / 2
+        if (sorted.size % 2 == 1) return sorted[mid]
+        val low = sorted[mid - 1]; val high = sorted[mid]
+        return low + (high - low) / 2
     }
 
     private const val KEEP = 10

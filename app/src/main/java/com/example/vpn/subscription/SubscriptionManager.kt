@@ -260,7 +260,9 @@ class SubscriptionManager(
             .header("Accept", "*/*")
             .build()
         client.newCall(request).execute().use { res ->
-            if (!res.isSuccessful) throw java.io.IOException("HTTP ${res.code}")
+            if (!res.isSuccessful) throw java.io.IOException(
+                if (res.code == 503) "HTTP 503: subscription service unavailable; this does not establish a tunnel failure"
+                else "HTTP ${res.code}")
             val body = res.body ?: throw java.io.IOException("empty response")
             // Protect mobile users with strict 5MB response limit
             val maxBytes = 5 * 1024 * 1024
