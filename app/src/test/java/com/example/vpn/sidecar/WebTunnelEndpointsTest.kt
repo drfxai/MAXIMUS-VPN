@@ -31,6 +31,20 @@ class WebTunnelEndpointsTest {
         assertEquals("snowflake bridge", WebTunnelEndpoints.pin("snowflake bridge") { error("must not resolve Snowflake") })
     }
 
+    @Test(timeout = 5_000) fun stalledLookupDoesNotDiscardCompletedBridge() {
+        val fast = bridge.replace("bridge.example", "fast.example")
+        val interrupted = java.util.concurrent.CountDownLatch(1)
+        val result = WebTunnelEndpoints.resolveWith(listOf(bridge, fast), timeoutMs = 500) { host ->
+            if (host == "bridge.example") {
+                try { java.util.concurrent.CountDownLatch(1).await() }
+                catch (e: InterruptedException) { interrupted.countDown(); throw e }
+            }
+            "93.184.216.34"
+        }
+        assertEquals(listOf("$fast addr=93.184.216.34:8443"), result)
+        assertTrue(interrupted.await(2, java.util.concurrent.TimeUnit.SECONDS))
+    }
+
     @Test fun rejectsAResolverReturningAnotherHostname() {
         assertThrows(IllegalArgumentException::class.java) { WebTunnelEndpoints.pin(bridge) { "block.example" } }
     }
