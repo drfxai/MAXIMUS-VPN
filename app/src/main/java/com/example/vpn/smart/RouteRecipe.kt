@@ -87,11 +87,11 @@ data class RouteRecipe(
 class RouteBook(private val load: () -> String?, private val save: (String) -> Unit) {
     private val routes: MutableList<RouteRecipe> by lazy { parse(load()) }
 
-    /** Routes for [network] that have not expired, best first: both directions verified, then newest. */
+    /** Routes for [network] that have not expired, best first: fewer recent failures, both directions verified, then newest. */
     @Synchronized
     fun forNetwork(network: String, now: Long = System.currentTimeMillis()): List<RouteRecipe> =
         routes.filter { it.network == network && it.expiresAt > now }
-            .sortedWith(compareByDescending<RouteRecipe> { it.bidirectional }.thenBy { it.failures }.thenByDescending { it.verifiedAt })
+            .sortedWith(compareBy<RouteRecipe> { it.failures }.thenByDescending { it.bidirectional }.thenByDescending { it.verifiedAt })
 
     /** How many unexpired routes each network has, for Settings: network keys and counts only. */
     @Synchronized
