@@ -1,4 +1,5 @@
-V1.0.2 Android versionCode 36
-Recheck previously verified engine routes on the same network before broad recovery; correct connection-time median; distinguish subscription HTTP 503 from tunnel failure.
-Functional changes: PR #121; Android unit/lint and transport recovery checks passed at 8101763871b81f72d398b07df45a01585d1ed61b.
-Release source: 3ce9b88ba375a53de856a776820f8b71eb770e2a
+V1.0.2 Android versionCode 37
+Includes PR #122 and #123: server list filtering, sorting and profile stream conversion off the UI thread.
+Includes PR #124: prioritize remembered routes without recent failures.
+Validated functional source: 0ae1cfb5720ca35945da3a60479e28a53987723b; Checks 40108961397 and Transport recovery 40108961318 succeeded.
+Preserve permanent signing identity and public version 1.0.2. Device frame-time improvements are not yet measured.
