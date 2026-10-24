@@ -1,3 +1,4 @@
-V1.0.2 Android versionCode 35
-Verified Irancell recovery fixes: bounded Tor bootstrap, registration dependency gating, multi-reference route health and automatic Fake SNI trials.
-Source: 2e3ffd886a1919cff95c52bdf2b9a7dddb7b98e1
+V1.0.2 Android versionCode 36
+Recheck previously verified engine routes on the same network before broad recovery; correct connection-time median; distinguish subscription HTTP 503 from tunnel failure.
+Functional changes: PR #121; Android unit/lint and transport recovery checks passed at 8101763871b81f72d398b07df45a01585d1ed61b.
+Release source: 3ce9b88ba375a53de856a776820f8b71eb770e2a
