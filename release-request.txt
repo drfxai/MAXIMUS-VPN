@@ -1,5 +1,9 @@
 V1.0.2 Android versionCode 37
-Includes PR #122 and #123: server list filtering, sorting and profile stream conversion off the UI thread.
-Includes PR #124: prioritize remembered routes without recent failures.
-Validated functional source: 0ae1cfb5720ca35945da3a60479e28a53987723b; Checks 40108961397 and Transport recovery 40108961318 succeeded.
-Preserve permanent signing identity and public version 1.0.2. Device frame-time improvements are not yet measured.
+Authorized release refresh on 2026-10-25.
+Validated source: 0fcf8f6c7e5a14b5920dd4f7db7faf58d6c2016a.
+Main Checks 40195760833 and Transport recovery 40195760826 succeeded.
+Includes merged PR #125: DNS resilience repairs, optional WhiteDNS CottenDNS/SOAR links, independent SOAR engine, manual resolver editing, and bounded bridge logging.
+Includes merged PR #127: managed SOAR/CottenDNS Linux installers and Cloudflare DNS reuse.
+SOAR and CottenDNS upstream/helper tests and three-ABI engine builds passed at 919048a4116db9010aca5ee7fa0fc6219b4063cb.
+Preserve versionName 1.0.2, versionCode 37, and permanent signing identity. Release build counter advances through the signed release workflow.
+No field-network connectivity, DNS-leak or device frame-time result is claimed.
