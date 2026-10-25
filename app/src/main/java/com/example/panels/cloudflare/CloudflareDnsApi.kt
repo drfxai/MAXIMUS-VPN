@@ -57,6 +57,45 @@ class CloudflareDnsApi(
         return action
     }
 
+    /**
+     * Provision DNSTT name-server A/AAAA and delegated NS records across the user's active zones.
+     * Preflight ALL records before any mutation, never edit another record, and compensate only
+     * newly created records by their Cloudflare IDs if a later creation fails.
+     * Returns the count of new records (unchanged matching records are not touched).
+     */
+    fun provisionDnstt(token: String, required: List<com.example.panels.servers.DnsDelegation.Record>): Int {
+        val targets = DnsTunnelProvisioning.targets(required, zones(token))
+        val planned = targets.map { target ->
+            val decision = DnsTunnelProvisioning.decide(
+                target.record, records(token, target.zone, target.record.name))
+            require(decision !is Action.Conflict) {
+                (decision as? Action.Conflict)?.why ?: "DNS record conflict"
+            }
+            target to decision
+        }
+        val created = mutableListOf<Pair<Zone, String>>()
+        try {
+            for ((target, action) in planned) {
+                if (action !is Action.Create) continue
+                val result = call(send("POST", "$base/zones/${target.zone.id}/dns_records",
+                    token, body(target.record)))
+                val id = result.optJSONObject("result")?.optString("id").orEmpty()
+                check(id.isNotBlank()) { "Cloudflare did not return the new record ID" }
+                created += target.zone to id
+            }
+        } catch (cause: Exception) {
+            var rollbackFailed = false
+            for ((zone, id) in created.asReversed()) {
+                if (runCatching { call(send("DELETE", "$base/zones/${zone.id}/dns_records/$id", token, null)) }.isFailure) {
+                    rollbackFailed = true
+                }
+            }
+            val suffix = if (rollbackFailed) " Some newly created records could not be rolled back; inspect Cloudflare DNS." else " New records were rolled back."
+            throw IllegalStateException("Cloudflare DNS setup failed." + suffix, cause)
+        }
+        return created.size
+    }
+
     /** Deletes the record [want] describes, only when it still points where Maximus put it. */
     fun remove(token: String, zone: Zone, want: Record): Boolean {
         val match = records(token, zone, want.name).firstOrNull { it.type == want.type && it.content == want.content } ?: return false
