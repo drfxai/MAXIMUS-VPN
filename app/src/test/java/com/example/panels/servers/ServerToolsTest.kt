@@ -60,6 +60,29 @@ class ServerToolsTest {
         assertTrue(busy.any { it.label == "UDP 53" && !it.ok && it.blocking })
     }
 
+    @Test fun standaloneDnsServerScriptsUseVerifiedSourcesAndNeverClaimSilentUpgrades() {
+        val soar = DnsServerScripts.soar("t.example.com").text
+        assertTrue(soar.contains("go install github.com/getlantern/soar/cmd/soar-server@v0.2.4"))
+        assertTrue(soar.contains("GOSUMDB=sum.golang.org"))
+        assertTrue(soar.contains("-allow-ports 80,443"))
+        val cotten = DnsServerScripts.cotten("t.example.com", "amd64").text
+        assertTrue(cotten.contains("276412ca9aeb1d56b7e7306947ca7abaf9c668901245fb2b256163d477ad13cb"))
+        assertTrue(cotten.contains("sha256sum -c -"))
+        assertTrue(cotten.contains("DATA_ENCRYPTION_METHOD = 5"))
+        assertTrue(cotten.contains("already installed").not()) // error is intentionally capitalized
+        assertTrue(cotten.contains("Already installed"))
+        assertTrue(DnsServerScripts.cotten("t.example.com", "arm64").text.contains(
+            "19d7dad466835b1dff6f73ed44c2588b7fba137b7d5d8c731e7e0c05fbb96c80"))
+        val invalid = listOf("t.example.com;id", "t.example.com'bad")
+        for (bad in invalid) {
+            try { DnsServerScripts.soar(bad); fail("accepted $bad") } catch (_: IllegalArgumentException) {}
+            try { DnsServerScripts.cotten(bad, "amd64"); fail("accepted $bad") } catch (_: IllegalArgumentException) {}
+        }
+        assertNotNull(ServerToolCatalog.byId(ServerToolCatalog.SOAR))
+        assertNotNull(ServerToolCatalog.byId(ServerToolCatalog.COTTEN))
+        assertTrue(ServerToolCatalog.byId(ServerToolCatalog.SOAR)!!.conflicts.contains(ServerToolCatalog.DNSTT))
+    }
+
     @Test fun factsAreParsed() {
         assertEquals("Ubuntu 24.04.1 LTS", facts.osName)
         assertEquals("24.04", facts.osVersion)
@@ -87,6 +110,9 @@ class ServerToolsTest {
 
     private fun allScripts(): List<ToolScript> = listOf(
         ToolScripts.dnsttInstall("t.example.com", "amd64", 34567, 45678, newKey = false),
+        DnsServerScripts.soar("t.example.com"),
+        DnsServerScripts.cotten("t.example.com", "amd64"),
+        DnsServerScripts.cotten("t.example.com", "arm64"),
         ToolScripts.dnsttInstall("t.example.com", "arm64", 34567, 45678, newKey = true),
         ToolScripts.hysteriaInstall("amd64", "203.0.113.7", 41234, "A".repeat(24), "b".repeat(24), newCert = false, oldPort = 40000),
         ToolScripts.hysteriaInstall("arm64", "2001:db8::7", 443, "A".repeat(24), "b".repeat(24), newCert = true),
