@@ -95,6 +95,11 @@ class ServerManager(
                 val arch = facts.goArch!!
                 when (toolId) {
                     ServerToolCatalog.DNSTT -> {
+                        // A public UDP/53 listener belongs to another service. DNSTT's redirect
+                        // would otherwise steal its incoming packets; never overwrite that traffic.
+                        check(53 !in facts.udpPorts) {
+                            "UDP 53 is occupied by an existing DNS service. Move or stop it before installing DNSTT."
+                        }
                         DnsDelegation.problem(options.baseDomain, options.tunnelLabel)?.let { error(it) }
                         DnsDelegation.backupProblem(options.baseDomain, options.backupBases)?.let { error(it) }
                         val domain = DnsDelegation.tunnelDomain(options.baseDomain, options.tunnelLabel)

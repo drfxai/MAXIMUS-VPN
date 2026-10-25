@@ -290,6 +290,23 @@ object ResolverIntelligence {
     fun rank(results: List<Result>): List<Result> =
         results.sortedWith(compareByDescending<Result> { it.usable }.thenByDescending { it.reliability }.thenBy { it.rttMs ?: Long.MAX_VALUE })
 
+    /**
+     * Orders resolvers for DNS-tunnel recovery rather than general web browsing.
+     * Only current-network, non-expired measurements can be promoted; DNS compatibility
+     * (TXT and usable TCP fallback) takes priority over a misleadingly low A-query ping.
+     * This is candidate ranking, NOT proof that a Soar/Cotten/DNSTT tunnel works.
+     */
+    fun rankForDnsTunnel(results: List<Result>, networkKey: String, now: Long = System.currentTimeMillis()): List<Result> =
+        results.filter { it.networkKey == networkKey && it.measuredAt <= now &&
+            it.expiresAt > now && it.measuredAt >= now - TTL_MS }
+            .sortedWith(compareByDescending<Result> { it.usable }
+                .thenByDescending { it.status == DnsStatus.DNS_TUNNEL_CANDIDATE }
+                .thenByDescending { it.txt == true }
+                .thenByDescending { it.tcp == true && it.udp == true }
+                .thenByDescending { it.ednsSize ?: 0 }
+                .thenByDescending { it.reliability }
+                .thenBy { it.rttMs ?: Long.MAX_VALUE })
+
     private fun udp(network: Network?, server: InetAddress, query: ByteArray, timeoutMs: Int = TIMEOUT_MS): DnsWire.Answer? {
         DatagramSocket().use { s ->
             network?.bindSocket(s)

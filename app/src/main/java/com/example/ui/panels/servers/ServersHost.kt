@@ -129,6 +129,7 @@ internal fun ServersOverlay(
                     onNext = vm::wizardNext,
                     onRandomPort = vm::randomPort,
                     onCheckDns = vm::checkDns,
+                    onProvisionDns = vm::provisionDns,
                     onInstall = vm::install,
                     onTest = vm::wizardTest,
                     onCopy = copy,

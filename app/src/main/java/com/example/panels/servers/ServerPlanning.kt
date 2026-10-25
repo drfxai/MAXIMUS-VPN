@@ -51,8 +51,8 @@ object InstallChecks {
             ServerToolCatalog.DNSTT -> {
                 val dnsBusy = 53 in facts.udpPorts
                 add(CheckItem("UDP 53", !dnsBusy,
-                    if (dnsBusy) "another DNS server listens on 53; the tunnel will take over incoming DNS" else "free",
-                    blocking = false))
+                    if (dnsBusy) "UDP 53 is already occupied. Stop or move the existing DNS service before installing this tunnel." else "free",
+                    blocking = dnsBusy))
             }
             ServerToolCatalog.SWAP -> add(CheckItem("Swap", facts.swapMb == 0L,
                 if (facts.swapMb > 0) "already ${facts.swapMb} MB" else "none yet", blocking = false))

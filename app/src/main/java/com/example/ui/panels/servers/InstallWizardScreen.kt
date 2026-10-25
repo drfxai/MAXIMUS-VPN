@@ -79,6 +79,8 @@ data class WizardUi(
     val records: List<DnsDelegation.Record> = emptyList(),
     val dnsChecks: List<DnsDelegation.Check>? = null,
     val dnsChecking: Boolean = false,
+    val dnsProvisioning: Boolean = false,
+    val dnsProvisionResult: String = "",
     val steps: List<String> = emptyList(),
     val currentStep: Int = 0,
     val log: List<String> = emptyList(),
@@ -108,6 +110,7 @@ data class WizardActions(
     val onNext: () -> Unit,
     val onRandomPort: () -> Unit,
     val onCheckDns: () -> Unit,
+    val onProvisionDns: () -> Unit,
     val onInstall: () -> Unit,
     val onTest: () -> Unit,
     val onCopy: (String) -> Unit,
@@ -323,9 +326,13 @@ private fun DnsRecordsCard(ui: WizardUi, actions: WizardActions) {
             }
         }
     }
+    GhostButton(if (ui.dnsProvisioning) "Creating records…" else "Create records in Cloudflare", actions.onProvisionDns,
+        Modifier.fillMaxWidth(), Icons.Rounded.NetworkCheck, enabled = !ui.dnsProvisioning && !ui.dnsChecking)
+    if (ui.dnsProvisionResult.isNotBlank()) Notice(ui.dnsProvisionResult,
+        if (ui.dnsProvisionResult.startsWith("Created") || ui.dnsProvisionResult.startsWith("Verified")) NoticeKind.OK else NoticeKind.WARN)
     GhostButton(if (ui.dnsChecking) "Checking…" else "Check DNS", actions.onCheckDns, Modifier.fillMaxWidth(),
-        Icons.Rounded.NetworkCheck, enabled = !ui.dnsChecking)
-    Text("You can install before the records are live. The tunnel starts working once they are.", color = Sv.Dim, fontSize = 12.sp)
+        Icons.Rounded.NetworkCheck, enabled = !ui.dnsChecking && !ui.dnsProvisioning)
+    Text("Cloudflare setup uses the limited DNS token saved under Smart domains. It never overwrites existing DNS records. DNS propagation and a real tunnel test are still required.", color = Sv.Dim, fontSize = 12.sp)
 }
 
 @Composable

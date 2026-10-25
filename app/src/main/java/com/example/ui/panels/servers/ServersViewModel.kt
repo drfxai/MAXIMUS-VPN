@@ -7,6 +7,8 @@ import com.example.RayApplication
 import com.example.data.model.ServerTestStatus
 import com.example.data.model.VlessProfile
 import com.example.panels.PanelStore
+import com.example.panels.cloudflare.CloudflareDnsApi
+import com.example.panels.cloudflare.SmartDomainsStore
 import com.example.panels.servers.ActionProgress
 import com.example.panels.servers.DnsDelegation
 import com.example.panels.servers.InstallChecks
@@ -169,7 +171,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         _state.value.servers.flatMap { s -> s.tools.map { it.id } }.groupingBy { it }.eachCount()
 
     fun close() {
-        if (_state.value.route is ServersRoute.Wizard && _state.value.wizard?.stage == WizardStage.RUNNING) return
+        if (_state.value.route is ServersRoute.Wizard &&
+            (_state.value.wizard?.stage == WizardStage.RUNNING || _state.value.wizard?.dnsProvisioning == true)) return
         _state.update { it.copy(route = ServersRoute.None, wizard = null, logs = null, error = "", busy = "") }
         refreshReach()
     }
@@ -583,6 +586,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun pickServer(id: String) {
+        if (_state.value.wizard?.dnsProvisioning == true) return
         val s = server(id) ?: return
         val w = _state.value.wizard ?: return
         val existing = s.tool(w.tool.id)
@@ -614,10 +618,15 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 backups.takeIf { DnsDelegation.backupProblem(baseDomain, it) == null }.orEmpty()))
         else copy(records = emptyList())
 
-    fun changeWizard(ui: WizardUi) = _state.update { it.copy(wizard = ui.withRecords(server(ui.serverId))) }
+    // A DNS write operates on a frozen preview. Do not let the form change its target mid-write.
+    fun changeWizard(ui: WizardUi) = _state.update { state ->
+        if (state.wizard?.dnsProvisioning == true) state
+        else state.copy(wizard = ui.withRecords(server(ui.serverId)))
+    }
 
     fun wizardBack() {
         val w = _state.value.wizard ?: return close()
+        if (w.dnsProvisioning) return
         val prev = when (w.stage) {
             WizardStage.CHECK -> if (_state.value.servers.count { w.tool.fitsOn(it.location) } > 1) WizardStage.SERVER else null
             WizardStage.SETTINGS -> WizardStage.CHECK
@@ -632,6 +641,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun wizardNext() {
         val w = _state.value.wizard ?: return
+        if (w.dnsProvisioning) return
         val next = when (w.stage) {
             WizardStage.CHECK -> if (hasSettings(w)) WizardStage.SETTINGS else WizardStage.SUMMARY
             WizardStage.SETTINGS -> WizardStage.SUMMARY
@@ -663,6 +673,40 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * User-initiated one-tap DNSTT DNS delegation. Uses the existing Keystore-protected
+     * Smart domains token; never creates/changes a token or switches the user's zone.
+     * DNS records are preflighted across all required zones before writes begin.
+     */
+    fun provisionDns() {
+        val w = _state.value.wizard ?: return
+        if (w.tool.id != ServerToolCatalog.DNSTT || w.records.isEmpty() ||
+            w.dnsProvisioning || w.dnsChecking) return
+        _state.update { it.copy(wizard = w.copy(dnsProvisioning = true, dnsProvisionResult = "")) }
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val token = SmartDomainsStore(getApplication()).token()
+                    require(token.isNotBlank()) {
+                        "First connect your Cloudflare DNS token in Panels > Cloudflare > Smart domains."
+                    }
+                    CloudflareDnsApi().provisionDnstt(token, w.records)
+                }
+            }
+            // Never apply a late result to a different server or a changed domain.
+            val current = _state.value.wizard
+            if (current?.serverId != w.serverId || current?.records != w.records) return@launch
+            val message = outcome.fold(
+                onSuccess = { n -> "Created $n DNS records in Cloudflare (existing matching records kept). Check propagation, then test the tunnel." },
+                onFailure = { e -> e.message ?: "Cloudflare setup failed; check your token and domain permissions." }
+            )
+            _state.update { st ->
+                st.copy(wizard = st.wizard?.copy(dnsProvisioning = false, dnsProvisionResult = message))
+            }
+            if (outcome.isSuccess) checkDns()
+        }
+    }
+
     /** A DoH JSON answer from Cloudflare, else Google; null when neither answered. */
     private fun doh(name: String, type: String): String? {
         val q = "name=${URLEncoder.encode(name, "UTF-8")}&type=$type"
@@ -679,6 +723,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun install() {
         val w = _state.value.wizard ?: return
+        if (w.dnsProvisioning) return
         val s = server(w.serverId) ?: return
         val steps = when (w.tool.id) {
             ServerToolCatalog.DNSTT -> ToolScripts.DNSTT_STEPS

@@ -52,6 +52,14 @@ class ServerToolsTest {
     private val server = ManagedServer(name = "Frankfurt", host = "203.0.113.7", location = ServerLocation.ABROAD,
         hostKeySha256 = "SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG", password = "pw")
 
+    @Test fun occupiedPublicDnsPortBlocksDnsttWizard() {
+        val tool = requireNotNull(ServerToolCatalog.byId(ServerToolCatalog.DNSTT))
+        val allowed = InstallChecks.forTool(tool, server, facts)
+        assertTrue(allowed.any { it.label == "UDP 53" && it.ok && !it.blocking })
+        val busy = InstallChecks.forTool(tool, server, facts.copy(udpPorts = setOf(53, 443)))
+        assertTrue(busy.any { it.label == "UDP 53" && !it.ok && it.blocking })
+    }
+
     @Test fun factsAreParsed() {
         assertEquals("Ubuntu 24.04.1 LTS", facts.osName)
         assertEquals("24.04", facts.osVersion)
