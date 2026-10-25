@@ -9,6 +9,7 @@ Baseline: main fa9a75b3a4e28685cf91dcedc5cd025b93fb8f45, versionName 1.0.2 / ver
 - Tor bridge DNS used GOD_MODE equality and missed GHOST_RIDER. It now uses the common operating-mode policy.
 - Sidecar logging truncated before redaction; redaction now precedes display truncation. Panel error/log output also goes through the common redactor.
 - LAB auto-application now checks the current session and physical network again before staging a verified candidate. This is a boundary guard, not a claim of global atomic network-generation protection.
+- A cancelled/throwing chain-hop readiness wait now stops its process before propagating the exception; the chain runner cannot clean a hop that was never returned to it.
 - A delayed post-connect subscription refresh now checks its originating attempt ID.
 
 ## Review scope and limits

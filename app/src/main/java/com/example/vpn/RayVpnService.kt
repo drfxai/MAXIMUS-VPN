@@ -1705,11 +1705,13 @@ class RayVpnService : VpnService() {
                 val launch = engine.prepare(hopProfile, settings, context)
                 val process = com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
                     ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
-                if (!process.awaitReady(launch.readyTimeoutMs)) {
+                try {
+                    check(process.awaitReady(launch.readyTimeoutMs)) { "The ${engine.id} engine did not start" }
+                    process to launch
+                } catch (t: Throwable) {
                     process.stop()
-                    error("The ${engine.id} engine did not start")
+                    throw t
                 }
-                process to launch
             }
         )
         sidecar = running

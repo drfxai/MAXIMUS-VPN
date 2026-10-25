@@ -33,6 +33,20 @@ class EngineRestartRegressionTest {
         } finally { dir.deleteRecursively() }
     }
 
+    @Test fun existingSymlinkCannotRedirectConfigSecrets() {
+        val dir = Files.createTempDirectory("engine-link").toFile()
+        val outside = Files.createTempFile("engine-outside", ".txt").toFile()
+        try {
+            outside.writeText("unchanged")
+            Files.createSymbolicLink(File(dir, "soar.json").toPath(), outside.toPath())
+            val profile = SoarSidecar.profile("t.example.com", Base64.getEncoder().encodeToString(ByteArray(32) { 1 }),
+                listOf("1.1.1.1"), JSONObject(), "test")
+            val ctx = SidecarContext(dir, File(dir, "unused"), 41001, "test-user", "test-pass", OperationalMode.DAILY)
+            assertThrows(IllegalStateException::class.java) { SoarSidecar().prepare(profile, AppSettings(), ctx) }
+            assertEquals("unchanged", outside.readText())
+        } finally { dir.deleteRecursively(); outside.delete() }
+    }
+
     @Test fun reuseRejectsChangedNetworkDeadEngineAndUnverifiedRoute() {
         listOf("tor", "soar", "cotten-dns").forEach { id ->
             assertTrue(ModeSwitchReuse.allowed(id, true, true, true, true))
