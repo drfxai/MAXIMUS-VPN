@@ -835,7 +835,7 @@ class LabController(
     private suspend fun measureResolvers(ctx: NetworkContext): List<ResolverIntelligence.Result> {
         currentCoroutineContext().ensureActive()
         if (!tracker.isCurrent(ctx.sessionId)) return emptyList()
-        store.resolversFor(ctx.networkKey).takeIf { ResolverIntelligence.reusable(it) }?.let { return ResolverIntelligence.rank(it) }
+        store.resolversFor(ctx.networkKey).takeIf { ResolverIntelligence.reusable(it) }?.let { return ResolverIntelligence.rankForDnsTunnel(it, ctx.networkKey) }
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return emptyList()
         val network = NetworkCapabilityDetector.physical(cm) ?: return emptyList()
         val own = runCatching { cm.getLinkProperties(network)?.dnsServers.orEmpty() }.getOrDefault(emptyList())
@@ -848,7 +848,7 @@ class LabController(
         currentCoroutineContext().ensureActive()
         if (!tracker.isCurrent(ctx.sessionId) || NetworkCapabilityDetector.physical(cm) != network) return emptyList()
         store.saveResolvers(ctx.networkKey, results)
-        return ResolverIntelligence.rank(results)
+        return ResolverIntelligence.rankForDnsTunnel(results, ctx.networkKey)
     }
 
     /** One ranked row from what the planner recorded for a config (and the engine result, for engine configs). */
