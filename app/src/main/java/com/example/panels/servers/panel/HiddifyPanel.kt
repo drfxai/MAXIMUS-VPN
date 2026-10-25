@@ -61,6 +61,25 @@ object HiddifyScripts {
         listOf("Read Hiddify")
     )
 
+    /**
+     * Reads Hiddify's own v14 admin links over the pinned SSH session. The resulting URL is a
+     * credential; only the ##RESULT channel may return it and it must never appear in logs.
+     * A missing URL must not be interpreted as a failed installation.
+     */
+    fun adminUrl(): ToolScript = ToolScripts.script(
+        """
+        step 1
+        if ! §SUDO test -d $DIR; then echo 'Hiddify is not installed' >&2; exit 53; fi
+        url=§(timeout 20s §SUDO hiddify admin 2>/dev/null | grep -Eo 'https://[^[:space:]]+' | head -n1 || true)
+        if [ -z "§url" ]; then
+          echo 'The Hiddify admin link was unavailable; run hiddify admin over SSH and complete setup.' >&2
+          exit 56
+        fi
+        result ADMIN_URL "§url"
+        """,
+        listOf("Retrieve Hiddify admin link")
+    )
+
     val INSTALL_STEPS = listOf("Check the server", "Download the official installer", "Install Hiddify", "Verify the panel")
 
     /**
@@ -104,8 +123,9 @@ object HiddifyScripts {
               i=§((i + 1)); if [ §i -ge 60 ]; then echo 'hiddify-panel did not start' >&2; exit 40; fi; sleep 2
             done
             result VERSION "§(§SUDO cat $DIR/VERSION 2>/dev/null | head -n1 | tr -cd '0-9A-Za-z.-')"
-            $CLI
-            url=§(§SUDO "§cli" all-configs 2>/dev/null | grep -o 'https://[^" ]*/admin/[^" ]*' | head -n1 || true)
+            # Hiddify v14 admin links use secret /<admin-proxy-path>/<admin-id>/ paths,
+            # not the legacy /admin/... form. Do not expose the link to installer logs.
+            url=§(timeout 20s §SUDO hiddify admin 2>/dev/null | grep -Eo 'https://[^[:space:]]+' | head -n1 || true)
             if [ -n "§url" ]; then result ADMIN_URL "§url"; fi
             """,
             INSTALL_STEPS,
@@ -215,6 +235,20 @@ class HiddifyPanelProvider(
         return InstallOutcome(server.withTool(tool), tool, summary = "Hiddify ${st.version.orEmpty()} found and added")
     }
 
+    /**
+     * Recover a missing admin link on an already installed server without reinstalling Hiddify.
+     * The returned ManagedServer must be persisted in the encrypted ServerStore.
+     */
+    fun restoreAdminUrl(server: ManagedServer): ManagedServer {
+        val tool = requireNotNull(server.tool(id)) { "Hiddify is not recorded on this server" }
+        val result = connect(server).use {
+            it.runTool(HiddifyScripts.adminUrl(), LineCollector(), 30_000L)
+        }
+        val url = validatedAdminUrl(result["ADMIN_URL"])
+            ?: error("Hiddify returned no valid HTTPS admin link. Run 'hiddify admin' over SSH and complete the panel setup.")
+        return server.withTool(tool.copy(settings = tool.settings + (K_ADMIN_URL to url)))
+    }
+
     override fun update(server: ManagedServer, progress: ActionProgress): PanelStatus {
         val before = status(server)
         check(before.state != PanelState.NOT_INSTALLED) { "Hiddify is not installed" }
@@ -251,11 +285,23 @@ class HiddifyPanelProvider(
     }
 
     private fun outcome(server: ManagedServer, r: Map<String, String>, facts: ServerFacts, summary: String): InstallOutcome {
-        val tool = InstalledTool(id, port = 443, settings = mapOfNotNull(K_VERSION to r["VERSION"], K_ADMIN_URL to r["ADMIN_URL"]))
+        val tool = InstalledTool(id, port = 443, settings = mapOfNotNull(K_VERSION to r["VERSION"], K_ADMIN_URL to validatedAdminUrl(r["ADMIN_URL"])))
         return InstallOutcome(server.withTool(tool).copy(facts = facts, checkedAt = System.currentTimeMillis()), tool, summary = summary)
     }
 
     companion object {
+        /** Admin links contain a secret path and ID. Reject plain HTTP, credentials in authority,
+         * non-panel links, and invalid URIs before persisting/opening them. */
+        fun validatedAdminUrl(raw: String?): String? {
+            val url = raw?.trim()?.trimEnd(')', ']', '.', ',', ';') ?: return null
+            val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return null
+            if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank() ||
+                uri.userInfo != null || uri.fragment != null || uri.port !in listOf(-1, 443)) return null
+            val parts = uri.path.orEmpty().split('/').filter { it.isNotBlank() }
+            if (parts.size < 2 || parts.any { it.length > 256 }) return null
+            return url
+        }
+
         /** Memory below this refuses the install (DrFX, 2026-10-22: servers under 1 GB may install). */
         const val MIN_RAM_MB = 500L
         /** Below this the install goes ahead with a warning to add swap first. */
