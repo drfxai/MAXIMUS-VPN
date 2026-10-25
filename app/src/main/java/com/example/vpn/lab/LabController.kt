@@ -835,12 +835,32 @@ class LabController(
     private suspend fun measureResolvers(ctx: NetworkContext): List<ResolverIntelligence.Result> {
         currentCoroutineContext().ensureActive()
         if (!tracker.isCurrent(ctx.sessionId)) return emptyList()
-        store.resolversFor(ctx.networkKey).takeIf { ResolverIntelligence.reusable(it) }?.let { return ResolverIntelligence.rankForDnsTunnel(it, ctx.networkKey) }
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return emptyList()
         val network = NetworkCapabilityDetector.physical(cm) ?: return emptyList()
         val own = runCatching { cm.getLinkProperties(network)?.dnsServers.orEmpty() }.getOrDefault(emptyList())
+        // Read only. Probing user-supplied resolvers must not overwrite strict/manual profile policy.
+        val manual = runCatching {
+            loadAllProfiles().take(48).flatMap { profile ->
+                when {
+                    com.example.vpn.sidecar.SoarSidecar().handles(profile) -> {
+                        val o = com.example.vpn.sidecar.SoarSidecar.config(profile).getJSONArray("resolvers")
+                        (0 until o.length()).map { o.getString(it) }
+                    }
+                    com.example.vpn.sidecar.CottenDnsSidecar().handles(profile) ->
+                        com.example.vpn.sidecar.CottenDnsSidecar.settings(profile).resolvers
+                    else -> emptyList()
+                }
+            }.distinct().take(48)
+        }.getOrDefault(emptyList())
+        val candidates = ResolverIntelligence.candidates(own, manual, max = 16)
+        val cache = store.resolversFor(ctx.networkKey)
+        val wanted = candidates.map { it.address to it.port }.toSet()
+        if (ResolverIntelligence.reusable(cache) &&
+            cache.map { it.address to it.port }.toSet() == wanted) {
+            return ResolverIntelligence.rankForDnsTunnel(cache, ctx.networkKey)
+        }
         val results = coroutineScope {
-            ResolverIntelligence.candidates(own).map { c ->
+            candidates.map { c ->
                 async(Dispatchers.IO) { runCatching { ResolverIntelligence.evaluate(network, c, ctx.networkKey) }.getOrNull() }
             }.awaitAll().filterNotNull()
         }
