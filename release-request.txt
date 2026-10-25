@@ -1,9 +1,10 @@
 V1.0.2 Android versionCode 37
-Authorized release refresh on 2026-10-25.
-Validated source: 0fcf8f6c7e5a14b5920dd4f7db7faf58d6c2016a.
-Main Checks 40195760833 and Transport recovery 40195760826 succeeded.
-Includes merged PR #125: DNS resilience repairs, optional WhiteDNS CottenDNS/SOAR links, independent SOAR engine, manual resolver editing, and bounded bridge logging.
-Includes merged PR #127: managed SOAR/CottenDNS Linux installers and Cloudflare DNS reuse.
-SOAR and CottenDNS upstream/helper tests and three-ABI engine builds passed at 919048a4116db9010aca5ee7fa0fc6219b4063cb.
-Preserve versionName 1.0.2, versionCode 37, and permanent signing identity. Release build counter advances through the signed release workflow.
-No field-network connectivity, DNS-leak or device frame-time result is claimed.
+Authorized signed release refresh: master engineering directive 2026-10-25.
+Reviewed combined source: 231218c37552752da90a4908ba67000204d82d9e.
+Merged PR128 head 8e38260937d69dedd8b01010544a39bcc9cfa894: Checks 40222073341, transport 40222073197, SOAR 40222073339 and CottenDNS 40222073423 all SUCCESS.
+Merged PR129 head 1ba19171a6f43142126246ef8aa830381151fabd: Checks 40222806932 and transport 40222806905 SUCCESS.
+Includes reviewed standalone mode-switch sidecar preservation, DNS-engine restart repair, chain carrier/auth fixes, read-only Hiddify link recovery, capability-URL redaction and clearer installation evidence.
+Preserve versionName 1.0.2, versionCode 37 and permanent signing identity.
+Release workflow must pass fresh Android unit/lint/build, packaging, signer and Android15 install/launch checks before publication.
+No physical-device, Iranian-field, full TUN/DNS-leak or performance improvement claim.
+Remaining work and acceptance matrix: docs/MASTER_REMAINING_WORK_20261025.md.
