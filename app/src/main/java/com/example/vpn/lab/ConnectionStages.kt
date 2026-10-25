@@ -121,7 +121,7 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
                 "snowflake", null -> TOR_SNOWFLAKE
                 else -> TOR
             }
-            engineId == "dns-tunnel" || engineId == "slipstream" || engineId == "cotten-dns" -> DNS_TUNNEL
+            engineId == "dns-tunnel" || engineId == "slipstream" || engineId == "cotten-dns" || engineId == "soar" -> DNS_TUNNEL
             engineId != null -> when (detail) {
                 "wireguard+awg" -> AMNEZIAWG
                 "wireguard" -> WIREGUARD
@@ -166,3 +166,4 @@ data class LivePath(
     /** The network session the row belongs to; rows of another session are never shown as current. */
     val sessionId: String? = null
 )
+

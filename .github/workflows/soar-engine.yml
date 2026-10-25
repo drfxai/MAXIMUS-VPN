@@ -1,0 +1,81 @@
+name: SOAR engine checks
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'scripts/engines/soar.sh'
+      - 'tools/soar-client/**'
+      - 'scripts/engines/common.sh'
+      - 'app/src/main/java/com/example/vpn/sidecar/SoarSidecar.kt'
+      - '.github/workflows/soar-engine.yml'
+  pull_request:
+    paths:
+      - 'scripts/engines/soar.sh'
+      - 'tools/soar-client/**'
+      - 'scripts/engines/common.sh'
+      - 'app/src/main/java/com/example/vpn/sidecar/SoarSidecar.kt'
+      - '.github/workflows/soar-engine.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: soar-engine-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  upstream-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.8'
+          cache: false
+      - name: Fetch and verify the exact SOAR revision
+        run: |
+          revision=a8af533d82284f5e6ab13b706552596c108bacf2
+          git init -q "$RUNNER_TEMP/soar-source"
+          git -C "$RUNNER_TEMP/soar-source" fetch --depth=1 https://github.com/getlantern/soar.git "$revision"
+          git -C "$RUNNER_TEMP/soar-source" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/soar-source" rev-parse HEAD)" = "$revision"
+      - name: Configuration, client recovery and authenticated transfer tests
+        working-directory: ${{ runner.temp }}/soar-source
+        run: |
+          go mod download
+          go mod verify
+          mkdir -p cmd/maximus-client
+          cp "$GITHUB_WORKSPACE"/tools/soar-client/*.go cmd/maximus-client/
+          go test -mod=readonly -count=1 -timeout 240s ./...
+          go vet ./cmd/maximus-client
+  android-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.8'
+          cache: false
+      - name: Build the pinned Android executable
+        env:
+          ABI: ${{ matrix.abi }}
+          OUT: ${{ runner.temp }}/soar-native
+        run: |
+          sdk_root=/usr/local/lib/android/sdk
+          sdkmanager_bin=$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager -print -quit)
+          test -n "$sdkmanager_bin"
+          "$sdkmanager_bin" 'ndk;26.3.11579264'
+          export ANDROID_NDK_HOME="$sdk_root/ndk/26.3.11579264"
+          bash scripts/engines/soar.sh
+          test -s "$OUT/libsoar.so"
+          readelf -h "$OUT/libsoar.so"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soar-native-${{ matrix.abi }}
+          path: ${{ runner.temp }}/soar-native/libsoar.so
+          retention-days: 7
+

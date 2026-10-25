@@ -16,7 +16,7 @@ import java.net.URLEncoder
 import java.util.Locale
 
 /** Original MAXIMUS adapter for the pinned, separately built MIT CottenDNS CLI.
- * Only authenticated CottenMax is enabled. The profile must match a Max-capable server.
+ * CottenMax and explicit native Cotten profiles remain distinct; neither auto-downgrades.
  * The upstream app's proprietary UI, credentials, binaries and assets are not used.
  */
 class CottenDnsSidecar : SidecarEngine {
@@ -41,28 +41,28 @@ class CottenDnsSidecar : SidecarEngine {
         return SidecarLaunch(
             command = listOf(context.executable.absolutePath, "-config", config.absolutePath, "-resolvers", resolvers.absolutePath),
             socksAuth = true, readyTimeoutMs = 45_000,
-            // Emitted only after authentication AND the core's transfer probe, not on listening.
+            // Engine startup progress is not application traffic proof: EngineProbe verifies egress.
             readyLine = Regex("WD_PROGRESS phase=connected percent=100(?:\\s|$)")
         )
     }
 
     data class Settings(val domain: String, val key: String, val resolvers: List<String>,
-                        val transport: String = "auto", val backups: List<String> = emptyList(), val tlsName: String = "")
+                        val transport: String = "auto", val backups: List<String> = emptyList(), val tlsName: String = "", val mode: String = "cottenmax")
 
     companion object {
         const val ID = "cotten-dns"
         const val BINARY = "cottendns"
         const val REVISION = "e50a43ef75ad10ae2ffbfa106d13c50de3e77624"
-        // MAXIMUS-specific format; not a claim of stormdns:// or soar:// compatibility.
+        // MAXIMUS-specific round-trip format; WhiteDNS links use WhiteDnsProfileLinks.
         const val SCHEME = "maximus-cotten"
-        private fun domain(raw: String): String {
+        internal fun domain(raw: String): String {
             val d = IDN.toASCII(raw.trim().trimEnd('.')).lowercase(Locale.ROOT)
             require(d.length in 3..253 && d.contains('.') && d.split('.').all {
                 it.matches(Regex("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"))
             }) { "Invalid CottenDNS tunnel domain" }
             return d
         }
-        private fun resolver(raw: String): String {
+        internal fun resolver(raw: String): String {
             val s = raw.trim()
             val uri = runCatching { URI("tcp://" + if (s.count { it == ':' } > 1 && !s.startsWith('[')) "[$s]" else s) }
                 .getOrElse { throw IllegalArgumentException("Invalid resolver address") }
@@ -78,8 +78,9 @@ class CottenDnsSidecar : SidecarEngine {
         }
         fun validate(s: Settings): Settings {
             require(s.key.length in 16..512 && s.key.none { it.isISOControl() }) { "Paste the existing server key (16 to 512 characters)" }
-            require(s.resolvers.size in 1..6) { "Choose one to six explicit DNS resolvers" }
+            require(s.resolvers.size in 1..64) { "Choose one to 64 explicit DNS resolvers" }
             require(s.transport in setOf("auto", "udp", "tcp", "dot", "doh")) { "Unsupported DNS transport" }
+            require(s.mode in setOf("cottenmax", "legacy")) { "Unsupported CottenDNS mode" }
             val d = domain(s.domain)
             val rs = s.resolvers.map(::resolver)
             require(rs.distinct().size == rs.size) { "Duplicate DNS resolver" }
@@ -95,7 +96,7 @@ class CottenDnsSidecar : SidecarEngine {
         }
         fun withSettings(profile: VlessProfile, settings: Settings): VlessProfile {
             val s = validate(settings)
-            val extras = JSONObject().put("engine", ID).put("mode", "cottenmax").put("domain", s.domain)
+            val extras = JSONObject().put("engine", ID).put("mode", s.mode).put("domain", s.domain)
                 .put("resolvers", JSONArray(s.resolvers)).put("transport", s.transport)
                 .put("backups", JSONArray(s.backups)).put("tlsName", s.tlsName).toString()
             val fingerprint = java.security.MessageDigest.getInstance("SHA-256")
@@ -107,9 +108,9 @@ class CottenDnsSidecar : SidecarEngine {
         }
         fun settings(profile: VlessProfile): Settings {
             val o = ProfileExtras.read(profile)
-            require(o.optString("engine") == ID && o.optString("mode") == "cottenmax") { "Not a MAXIMUS CottenMax profile" }
+            require(o.optString("engine") == ID && o.optString("mode") in setOf("cottenmax", "legacy")) { "Not a CottenDNS profile" }
             fun list(key: String): List<String> = o.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
-            return validate(Settings(o.getString("domain"), profile.uuid, list("resolvers"), o.optString("transport", "auto"), list("backups"), o.optString("tlsName")))
+            return validate(Settings(o.getString("domain"), profile.uuid, list("resolvers"), o.optString("transport", "auto"), list("backups"), o.optString("tlsName"), o.getString("mode")))
         }
         fun parse(link: String): VlessProfile {
             require(link.length <= 8192) { "CottenDNS link is too large" }
@@ -120,14 +121,14 @@ class CottenDnsSidecar : SidecarEngine {
             val single = pairs.filter { it.first !in setOf("resolver", "backup") }
             require(single.map { it.first }.distinct().size == single.size && pairs.all { it.first in setOf("key", "mode", "transport", "resolver", "backup", "tls") }) { "Duplicate or unknown CottenDNS option" }
             val p = single.toMap()
-            require(p["mode"] == "cottenmax") { "Explicit mode=cottenmax is required; legacy is not silently enabled" }
+            require(p["mode"] in setOf("cottenmax", "legacy")) { "Explicit CottenDNS mode is required" }
             return profile(Settings(requireNotNull(uri.host) { "Missing tunnel domain" }, p["key"].orEmpty(), pairs.filter { it.first == "resolver" }.map { it.second },
-                p["transport"] ?: "auto", pairs.filter { it.first == "backup" }.map { it.second }, p["tls"].orEmpty()), decode(uri.rawFragment ?: "CottenDNS · Max beta"))
+                p["transport"] ?: "auto", pairs.filter { it.first == "backup" }.map { it.second }, p["tls"].orEmpty(), p.getValue("mode")), decode(uri.rawFragment ?: "CottenDNS · Max beta"))
         }
         fun toLink(profile: VlessProfile): String {
             val s = settings(profile)
             fun enc(v: String) = URLEncoder.encode(v, "UTF-8")
-            val pairs = listOf("mode" to "cottenmax", "key" to s.key, "transport" to s.transport) +
+            val pairs = listOf("mode" to s.mode, "key" to s.key, "transport" to s.transport) +
                 s.resolvers.map { "resolver" to it } + s.backups.map { "backup" to it } + listOf("tls" to s.tlsName)
             return "$SCHEME://${s.domain}?" + pairs.joinToString("&") { (k,v) -> "$k=${enc(v)}" } + "#${enc(profile.name)}"
         }
@@ -137,7 +138,7 @@ class CottenDnsSidecar : SidecarEngine {
             require(context.socksPort in 1..65535 && context.socksUser.none { it.isISOControl() } && context.socksPass.none { it.isISOControl() })
             fun array(v: List<String>) = v.joinToString(",", "[", "]", transform = ::quote)
             return """
-                TUNNEL_MODE = "cottenmax"
+                TUNNEL_MODE = ${quote(s.mode)}
                 CONFIG_PRESET = "survival"
                 DOMAINS = ${array(listOf(s.domain))}
                 STANDBY_DOMAINS = ${array(s.backups)}
@@ -149,8 +150,8 @@ class CottenDnsSidecar : SidecarEngine {
                 RESOLVER_HTTP3_FALLBACK = false
                 RESOLVER_DISCOVERY_ENABLED = false
                 RESOLVER_DISCOVERY_SAMPLE_RANGES = 0
-                QUERY_RATE_LIMIT_PER_SECOND = 4.0
-                QUERY_RATE_LIMIT_BURST = 1
+                QUERY_RATE_LIMIT_PER_SECOND = ${if (s.mode == "legacy") "4.0" else "0.0"}
+                QUERY_RATE_LIMIT_BURST = ${if (s.mode == "legacy") "1" else "0"}
                 PROTOCOL_TYPE = "SOCKS5"
                 LISTEN_IP = "127.0.0.1"
                 LISTEN_PORT = ${context.socksPort}
@@ -172,3 +173,4 @@ class CottenDnsSidecar : SidecarEngine {
         }
     }
 }
+

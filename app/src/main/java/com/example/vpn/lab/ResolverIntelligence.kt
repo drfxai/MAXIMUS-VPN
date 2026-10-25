@@ -212,7 +212,7 @@ object ResolverIntelligence {
 
     /** Classifies a response to a foreign name and to a random never-existing name. Pure; tested. */
     fun judge(normal: DnsWire.Answer?, random: DnsWire.Answer?): Pair<Boolean?, Boolean?> {
-        val blockPage = normal?.let { a -> a.addresses.isNotEmpty() && a.addresses.all { com.example.vpn.EndpointResolver.isBlockedAnswer(it) } }
+        val blockPage = normal?.let { a -> a.addresses.isNotEmpty() && a.addresses.any { com.example.vpn.EndpointResolver.isBlockedAnswer(it) } }
         val hijack = random?.let { it.rcode == DnsWire.RCODE_NOERROR && it.addresses.isNotEmpty() }
         return blockPage to hijack
     }

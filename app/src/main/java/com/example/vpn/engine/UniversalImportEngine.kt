@@ -210,6 +210,12 @@ object UniversalImportEngine {
                     else -> ParsedItem.Invalid(uriString.take(60), problem)
                 }
             }
+            lower.startsWith("cottendns://") || lower.startsWith("soar://") -> try {
+                ParsedItem.Success(com.example.vpn.sidecar.WhiteDnsProfileLinks.parse(uriString)
+                    .copy(sourceFile = fileName, sourceSubscription = subUrl))
+            } catch (_: Exception) {
+                ParsedItem.Invalid("DNS profile [redacted]", "Invalid or unsupported WhiteDNS profile")
+            }
             lower.startsWith("maximus-cotten://") -> try {
                 ParsedItem.Success(com.example.vpn.sidecar.CottenDnsSidecar.parse(uriString)
                     .copy(sourceFile = fileName, sourceSubscription = subUrl))
@@ -728,3 +734,4 @@ object UniversalImportEngine {
         return result
     }
 }
+

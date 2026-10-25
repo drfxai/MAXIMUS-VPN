@@ -37,15 +37,15 @@ class CottenDnsSidecarTest {
         val s = CottenDnsSidecar.validate(settings().copy(resolvers = listOf("2606:4700:4700::1111")))
         assertEquals("[2606:4700:4700::1111]:53", s.resolvers.single())
     }
-    @Test fun legacyAndAmbiguousDuplicateParametersAreRejected() {
+    @Test fun unknownModeAndAmbiguousDuplicateParametersAreRejected() {
         val link = CottenDnsSidecar.toLink(CottenDnsSidecar.profile(settings()))
-        assertThrows(IllegalArgumentException::class.java) { CottenDnsSidecar.parse(link.replace("mode=cottenmax", "mode=legacy")) }
+        assertThrows(IllegalArgumentException::class.java) { CottenDnsSidecar.parse(link.replace("mode=cottenmax", "mode=unknown")) }
         assertThrows(IllegalArgumentException::class.java) { CottenDnsSidecar.parse(link.substringBefore('#') + "&key=other") }
     }
     @Test fun generatedConfigKeepsEncryptionAndLimitsEnabled() {
         val config = CottenDnsSidecar.configuration(settings().copy(transport = "doh", tlsName = "dns.example.com"), context(File(".")))
         for (line in listOf("TUNNEL_MODE = \"cottenmax\"", "RESOLVER_TLS_INSECURE_SKIP_VERIFY = false", "RESOLVER_DISCOVERY_ENABLED = false",
-            "SOCKS5_AUTH = true", "LISTEN_IP = \"127.0.0.1\"", "QUERY_RATE_LIMIT_PER_SECOND = 4.0", "LOG_TO_FILE = false")) assertTrue(line, line in config)
+            "SOCKS5_AUTH = true", "LISTEN_IP = \"127.0.0.1\"", "QUERY_RATE_LIMIT_PER_SECOND = 0.0", "LOG_TO_FILE = false")) assertTrue(line, line in config)
         assertTrue("RESOLVER_TRANSPORT = \"doh\"" in config)
     }
     @Test fun configInjectionThroughCredentialsIsRejectedOrQuoted() {
@@ -74,7 +74,8 @@ class CottenDnsSidecarTest {
         }
     }
     @Test fun excessiveResolversAndRepeatedBackupDomainsAreRejected() {
-        assertThrows(IllegalArgumentException::class.java) { CottenDnsSidecar.validate(settings().copy(resolvers = (1..7).map { "1.1.1.$it" })) }
+        assertThrows(IllegalArgumentException::class.java) { CottenDnsSidecar.validate(settings().copy(resolvers = (1..65).map { "1.1.1.$it" })) }
         assertThrows(IllegalArgumentException::class.java) { CottenDnsSidecar.validate(settings().copy(backups = listOf("t.example.com"))) }
     }
 }
+

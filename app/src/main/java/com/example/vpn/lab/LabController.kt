@@ -40,6 +40,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -208,7 +209,9 @@ class LabController(
         if (!tracker.isCurrent(ctx.sessionId)) return fail(STEP_A_MEASURE, "The network changed during the analysis. Start it again.")
         val cap = NetworkCapabilityDetector.last
         val resolvers = measureResolvers(ctx)
-        val burst = measureBurst(resolvers)
+        val burst = measureBurst(ctx, resolvers)
+        currentCoroutineContext().ensureActive()
+        if (!tracker.isCurrent(ctx.sessionId)) return fail(STEP_A_MEASURE, "The network changed during DNS analysis. Start it again.")
         val intl = cap?.let { c -> c.internationalTried?.let { "international ${c.internationalOk ?: 0}/$it" } } ?: "international not measured"
         step(STEP_A_MEASURE, LabStep.State.DONE, "$intl · ${resolvers.count { it.usable }}/${resolvers.size} resolvers answer honestly")
 
@@ -816,16 +819,23 @@ class LabController(
     }
 
     /** DNS request loss, timing and suspected rate limiting on the best usable resolver. */
-    private suspend fun measureBurst(resolvers: List<ResolverIntelligence.Result>): ResolverIntelligence.Burst? {
-        val best = resolvers.firstOrNull { it.usable } ?: return null
+    private suspend fun measureBurst(ctx: NetworkContext, resolvers: List<ResolverIntelligence.Result>): ResolverIntelligence.Burst? {
+        if (!tracker.isCurrent(ctx.sessionId)) return null
+        val best = resolvers.firstOrNull { it.usable && it.networkKey == ctx.networkKey } ?: return null
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
         val network = NetworkCapabilityDetector.physical(cm) ?: return null
-        return withContext(Dispatchers.IO) { runCatching { ResolverIntelligence.burst(network, best) }.getOrNull() }
+        val result = kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
+            runCatching { ResolverIntelligence.burst(network, best) }.getOrNull()
+        }
+        currentCoroutineContext().ensureActive()
+        return result.takeIf { tracker.isCurrent(ctx.sessionId) && NetworkCapabilityDetector.physical(cm) == network }
     }
 
     /** Bounded resolver checks on the phone's own network, saved per network with an expiry. */
     private suspend fun measureResolvers(ctx: NetworkContext): List<ResolverIntelligence.Result> {
-        store.resolversFor(ctx.networkKey).takeIf { ResolverIntelligence.reusable(it) }?.let { return it }
+        currentCoroutineContext().ensureActive()
+        if (!tracker.isCurrent(ctx.sessionId)) return emptyList()
+        store.resolversFor(ctx.networkKey).takeIf { ResolverIntelligence.reusable(it) }?.let { return ResolverIntelligence.rank(it) }
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return emptyList()
         val network = NetworkCapabilityDetector.physical(cm) ?: return emptyList()
         val own = runCatching { cm.getLinkProperties(network)?.dnsServers.orEmpty() }.getOrDefault(emptyList())
@@ -834,6 +844,9 @@ class LabController(
                 async(Dispatchers.IO) { runCatching { ResolverIntelligence.evaluate(network, c, ctx.networkKey) }.getOrNull() }
             }.awaitAll().filterNotNull()
         }
+        // The captured Android Network owns these measurements. Do not publish them after handover.
+        currentCoroutineContext().ensureActive()
+        if (!tracker.isCurrent(ctx.sessionId) || NetworkCapabilityDetector.physical(cm) != network) return emptyList()
         store.saveResolvers(ctx.networkKey, results)
         return ResolverIntelligence.rank(results)
     }

@@ -140,6 +140,8 @@ object CapabilityMatrix {
             Y, Y, Y, Y, U, U, Y, P, N, U, U),
         row("cotten-dns", "CottenDNS / CottenMax beta", "Original CLI adapter at e50a43ef; native Android build and real traffic not yet verified",
             Y, Y, Y, U, U, U, Y, N, N, U, U),
+        row("soar", "SOAR (manual resolvers)", "Independent pinned Lantern client; local encrypted stream test and Android ABI build in CI; no device or field verification",
+            Y, Y, Y, U, U, U, Y, N, N, U, U),
         row("slipstream", "Slipstream (QUIC DNS tunnel)", "SlipstreamSidecar; scripts/engines/slipstream.sh (source pin); needs the user's own slipstream server",
             Y, Y, Y, Y, U, U, Y, P, N, U, U),
         row("ech", "ECH", "VlessParser (ech), echConfigList/echSockopt, XrayConfigBuilder; no ECH handshake measured by the LAB",
@@ -160,3 +162,4 @@ object CapabilityMatrix {
 
     fun byId(id: String): Row? = ROWS.firstOrNull { it.id == id }
 }
+
