@@ -237,30 +237,6 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val s = server(id) ?: return
         if (!s.canSignIn || id in _state.value.checking) return
         _state.update { it.copy(checking = it.checking + id, error = "") }
-        // Reuse the user's already authorized Cloudflare domain automatically, when reachable.
-        if (w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) &&
-            existing?.settings?.get(ToolProfiles.DNSTT_BASE).isNullOrBlank()) {
-            viewModelScope.launch {
-                val suggested = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val dnsStore = SmartDomainsStore(getApplication())
-                        val token = dnsStore.token().takeIf { it.isNotBlank() } ?: return@runCatching null
-                        val zones = CloudflareDnsApi().zones(token)
-                        com.example.panels.cloudflare.SmartFill.zone(zones.filter { it.status == "active" }, dnsStore.zoneId())?.name
-                    }.getOrNull()
-                }
-                if (!suggested.isNullOrBlank()) {
-                    _state.update { st ->
-                        st.copy(wizard = st.wizard?.let { current ->
-                            if (current.serverId == id && current.tool.id == w.tool.id &&
-                                current.baseDomain.isBlank() && !current.dnsProvisioning)
-                                current.copy(baseDomain = suggested).withRecords(s)
-                            else current
-                        })
-                    }
-                }
-            }
-        }
         viewModelScope.launch {
             val r = runCatching { withContext(Dispatchers.IO) { manager.check(s) } }
             r.onSuccess { save(it) }
@@ -630,6 +606,30 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 backupDomains = existing?.let { ToolProfiles.backupBases(it).joinToString(", ") }.orEmpty(),
                 port = "", renew = false, error = ""
             ).withRecords(s))
+        }
+        // Reuse the user's already authorized Cloudflare domain automatically, when reachable.
+        if (w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) &&
+            existing?.settings?.get(ToolProfiles.DNSTT_BASE).orEmpty().isBlank()) {
+            viewModelScope.launch {
+                val suggested = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val dnsStore = SmartDomainsStore(getApplication())
+                        val token = dnsStore.token().takeIf { it.isNotBlank() } ?: return@runCatching null
+                        val zones = CloudflareDnsApi().zones(token)
+                        com.example.panels.cloudflare.SmartFill.zone(zones.filter { it.status == "active" }, dnsStore.zoneId())?.name
+                    }.getOrNull()
+                }
+                if (!suggested.isNullOrBlank()) {
+                    _state.update { st ->
+                        st.copy(wizard = st.wizard?.let { current ->
+                            if (current.serverId == id && current.tool.id == w.tool.id &&
+                                current.baseDomain.isBlank() && !current.dnsProvisioning)
+                                current.copy(baseDomain = suggested).withRecords(s)
+                            else current
+                        })
+                    }
+                }
+            }
         }
         viewModelScope.launch {
             val r = runCatching { withContext(Dispatchers.IO) { manager.check(s) } }
