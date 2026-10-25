@@ -356,7 +356,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             warning = if (active > 0 && down.isNotEmpty())
                 down.take(3).joinToString(" and ") + (if (down.size > 3) " and ${down.size - 3} more" else "") +
                     (if (down.size == 1) " is" else " are") + " not active. Restart, or open Logs to see why." else null,
-            canOpenPanel = t.settings[HiddifyPanelProvider.K_ADMIN_URL] != null,
+            // The action can recover a missing admin link over SSH; never hide the entry point.
+            canOpenPanel = true,
             canBackup = units.isNotEmpty(), canRestart = true, canLogs = true,
             canUpdate = version != null && PanelStatus.compareVersions(HiddifyScripts.VERSION, version) > 0,
             canStart = f != null && active < units.size, canStop = active > 0
@@ -474,8 +475,20 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissFound(id: String) = _state.update { it.copy(foundDismissed = it.foundDismissed + id) }
 
-    /** The Hiddify admin address from its install, kept only in the encrypted server store. */
-    fun hiddifyAdminUrl(id: String): String? = server(id)?.tool(ServerToolCatalog.HIDDIFY)?.settings?.get(HiddifyPanelProvider.K_ADMIN_URL)
+    /** Hiddify's secret URL is stored only in the encrypted server store and never logged. */
+    fun hiddifyAdminUrl(id: String): String? = HiddifyPanelProvider.validatedAdminUrl(
+        server(id)?.tool(ServerToolCatalog.HIDDIFY)?.settings?.get(HiddifyPanelProvider.K_ADMIN_URL)
+    )
+
+    /** Recover a missing v14 admin URL from the server, without reinstalling Hiddify. */
+    fun openHiddifyAdmin(id: String, onUrl: (String) -> Unit) {
+        hiddifyAdminUrl(id)?.let { onUrl(it); return }
+        serverAction(id, "Retrieving Hiddify admin link…") { server ->
+            val updated = withContext(Dispatchers.IO) { manager.hiddify.restoreAdminUrl(server) }
+            save(updated)
+            onUrl(requireNotNull(hiddifyAdminUrl(id)) { "The recovered Hiddify link is invalid" })
+        }
+    }
 
     fun remove(id: String) {
         store.delete(id)
