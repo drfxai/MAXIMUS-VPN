@@ -26,7 +26,7 @@ class DnsTunnelProvisioningTest {
         assertThrows(IllegalStateException::class.java) {
             DnsTunnelProvisioning.targets(required, zones.take(1))
         }
-        assertThrows(IllegalStateException::class.java) {
+        assertThrows(IllegalArgumentException::class.java) {
             DnsTunnelProvisioning.targets(required, zones.map { it.copy(status = "pending") })
         }
         assertThrows(IllegalStateException::class.java) {
