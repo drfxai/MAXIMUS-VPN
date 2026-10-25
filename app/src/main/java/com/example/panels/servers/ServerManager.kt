@@ -48,7 +48,7 @@ internal fun RemoteShell.runTool(script: ToolScript, progress: ActionProgress, t
     if (result.exitCode != 0) {
         val tail = result.output.lineSequence().map { it.trim() }
             .filter { it.isNotEmpty() && !it.startsWith("##") }.toList().takeLast(2).joinToString(" · ")
-        error(tail.ifBlank { "The server reported an error (exit ${result.exitCode})" }.take(220))
+        error(ServerLogSanitizer.redact(tail.ifBlank { "The server reported an error (exit ${result.exitCode})" }).take(2000))
     }
     return reader.results
 }
@@ -333,3 +333,4 @@ class ServerManager(
         const val K_LAST_BACKUP = "lastBackup"
     }
 }
+

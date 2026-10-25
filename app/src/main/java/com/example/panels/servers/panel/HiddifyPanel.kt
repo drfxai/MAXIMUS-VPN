@@ -61,23 +61,58 @@ object HiddifyScripts {
         listOf("Read Hiddify")
     )
 
-    /**
-     * Reads Hiddify's own v14 admin links over the pinned SSH session. The resulting URL is a
-     * credential; only the ##RESULT channel may return it and it must never appear in logs.
-     * A missing URL must not be interpreted as a failed installation.
-     */
+    /** Read the same durable panel_links array used by pinned Hiddify's print_panel_links.
+     * Unlike `hiddify admin`, this does not reload configs, install packages or restart services. */
+    private val READ_ADMIN = """
+        url=§(timeout 10s §SUDO python3 - <<'READ_LINK'
+        import ipaddress, json, re, sys
+        from urllib.parse import urlsplit
+        try:
+            with open('/opt/hiddify-manager/data/current.json', 'rb') as f:
+                raw = f.read(1048577)
+            if len(raw) > 1048576:
+                raise ValueError()
+            links = json.loads(raw).get('panel_links', [])
+            if not isinstance(links, list):
+                raise ValueError()
+            candidates = []
+            for link in links:
+                if not isinstance(link, str) or len(link) > 2048 or any(ord(c) <= 32 or ord(c) >= 127 for c in link):
+                    continue
+                u = urlsplit(link)
+                parts = [x for x in u.path.split('/') if x]
+                if (u.scheme != 'https' or not u.hostname or u.username is not None or u.password is not None
+                    or u.query or u.fragment or u.port not in (None, 443) or '%' in u.path
+                    or len(parts) < 2 or any(not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', x) for x in parts)):
+                    continue
+                try:
+                    ipaddress.ip_address(u.hostname)
+                    numeric = 1
+                except ValueError:
+                    numeric = 0
+                candidates.append((numeric, link))
+            if not candidates:
+                raise ValueError()
+            print(sorted(candidates)[0][1])
+        except Exception:
+            sys.exit(56)
+        READ_LINK
+        ) || url=''
+    """.trimIndent()
+
     fun adminUrl(): ToolScript = ToolScripts.script(
         """
         step 1
         if ! §SUDO test -d $DIR; then echo 'Hiddify is not installed' >&2; exit 53; fi
-        url=§(timeout 20s §SUDO hiddify admin 2>/dev/null | grep -Eo 'https://[^[:space:]]+' | head -n1 || true)
+        @@READ_ADMIN@@
         if [ -z "§url" ]; then
-          echo 'The Hiddify admin link was unavailable; run hiddify admin over SSH and complete setup.' >&2
+          echo 'No valid HTTPS admin link in Hiddify current.json; complete initial setup or refresh panel links in Hiddify first.' >&2
           exit 56
         fi
         result ADMIN_URL "§url"
         """,
-        listOf("Retrieve Hiddify admin link")
+        listOf("Retrieve Hiddify admin link"),
+        mapOf("READ_ADMIN" to READ_ADMIN)
     )
 
     val INSTALL_STEPS = listOf("Check the server", "Download the official installer", "Install Hiddify", "Verify the panel")
@@ -123,13 +158,11 @@ object HiddifyScripts {
               i=§((i + 1)); if [ §i -ge 60 ]; then echo 'hiddify-panel did not start' >&2; exit 40; fi; sleep 2
             done
             result VERSION "§(§SUDO cat $DIR/VERSION 2>/dev/null | head -n1 | tr -cd '0-9A-Za-z.-')"
-            # Hiddify v14 admin links use secret /<admin-proxy-path>/<admin-id>/ paths,
-            # not the legacy /admin/... form. Do not expose the link to installer logs.
-            url=§(timeout 20s §SUDO hiddify admin 2>/dev/null | grep -Eo 'https://[^[:space:]]+' | head -n1 || true)
+            @@READ_ADMIN@@
             if [ -n "§url" ]; then result ADMIN_URL "§url"; fi
             """,
             INSTALL_STEPS,
-            mapOf("FETCH" to fetch, "GUARD" to guard)
+            mapOf("FETCH" to fetch, "GUARD" to guard, "READ_ADMIN" to READ_ADMIN)
         )
     }
 
@@ -245,7 +278,7 @@ class HiddifyPanelProvider(
             it.runTool(HiddifyScripts.adminUrl(), LineCollector(), 30_000L)
         }
         val url = validatedAdminUrl(result["ADMIN_URL"])
-            ?: error("Hiddify returned no valid HTTPS admin link. Run 'hiddify admin' over SSH and complete the panel setup.")
+            ?: error("Hiddify returned no valid HTTPS admin link. Complete Hiddify setup and refresh its panel links first.")
         return server.withTool(tool.copy(settings = tool.settings + (K_ADMIN_URL to url)))
     }
 
@@ -293,12 +326,13 @@ class HiddifyPanelProvider(
         /** Admin links contain a secret path and ID. Reject plain HTTP, credentials in authority,
          * non-panel links, and invalid URIs before persisting/opening them. */
         fun validatedAdminUrl(raw: String?): String? {
-            val url = raw?.trim()?.trimEnd(')', ']', '.', ',', ';') ?: return null
+            val url = raw?.trim() ?: return null
+            if (url.length > 2048 || url.any { it.code <= 32 || it.code >= 127 }) return null
             val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return null
             if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank() ||
-                uri.userInfo != null || uri.fragment != null || uri.port !in listOf(-1, 443)) return null
-            val parts = uri.path.orEmpty().split('/').filter { it.isNotBlank() }
-            if (parts.size < 2 || parts.any { it.length > 256 }) return null
+                uri.userInfo != null || uri.fragment != null || uri.rawQuery != null || uri.port !in listOf(-1, 443)) return null
+            val parts = uri.rawPath.orEmpty().split('/').filter { it.isNotBlank() }
+            if (parts.size < 2 || parts.any { !it.matches(Regex("[A-Za-z0-9_-]{1,256}")) }) return null
             return url
         }
 
@@ -349,3 +383,4 @@ class HiddifyPanelProvider(
 
 internal fun mapOfNotNull(vararg pairs: Pair<String, String?>): Map<String, String> =
     pairs.mapNotNull { (k, v) -> v?.takeIf { it.isNotBlank() }?.let { k to it } }.toMap()
+

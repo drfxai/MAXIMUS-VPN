@@ -392,7 +392,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 block(s)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _state.update { it.copy(error = e.message ?: "The action failed") }
+                _state.update { it.copy(error = com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "The action failed")) }
             } finally {
                 _state.update { it.copy(busy = "") }
             }
@@ -854,3 +854,4 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         fun locationLabel(l: ServerLocation) = if (l == ServerLocation.IRAN) "Iran" else "Abroad"
     }
 }
+
