@@ -37,6 +37,8 @@ data class ServerTool(
 object ServerToolCatalog {
     const val XUI = "3x-ui"
     const val DNSTT = "dnstt"
+    const val SOAR = "soar-server"
+    const val COTTEN = "cottendns-server"
     const val HYSTERIA2 = "hysteria2"
     const val KEY_LOGIN = "key-login"
     const val FIREWALL = "firewall"
@@ -80,7 +82,25 @@ object ServerToolCatalog {
             listOf("Downloads dnstt-server and a loopback SOCKS helper (checksums pinned in the app)",
                 "Creates a new tunnel key pair on the server", "Adds two systemd services under a locked system user",
                 "Sends UDP 53 to the tunnel and opens it in the firewall"),
-            needsDomain = true
+            needsDomain = true,
+            conflicts = setOf(SOAR, COTTEN)
+        ),
+        ServerTool(
+            SOAR, "Soar Server", "Last-resort authenticated DNS tunnel",
+            "Install GetLantern Soar from a pinned Go module. Needs a delegated domain and exclusive public UDP/53.",
+            ToolGroup.TUNNELS, abroad,
+            listOf("Compiles the pinned Go module with checksum verification",
+                "Creates a unique Ed25519 key on the VPS", "Runs a locked service listening on UDP/53",
+                "Only public destinations on TCP 80/443 are allowed by the server"),
+            needsDomain = true, conflicts = setOf(DNSTT, COTTEN)
+        ),
+        ServerTool(
+            COTTEN, "CottenDNS Server", "Normal and CottenMax beta",
+            "Install a SHA-256 verified WhiteDNS CottenDNS server release. Normal and Max share one domain and key; uses UDP/TCP 53.",
+            ToolGroup.TUNNELS, abroad,
+            listOf("Downloads a fixed, SHA-256 verified Linux release archive", "Installs the isolated systemd server",
+                "Generates a new server encryption key", "Opens UDP/TCP 53; requires authoritative DNS delegation"),
+            needsDomain = true, conflicts = setOf(DNSTT, SOAR)
         ),
         ServerTool(
             MAXIMUS_TUNNEL, "Maximus Tunnel", "Iran ↔ abroad, automatic",
