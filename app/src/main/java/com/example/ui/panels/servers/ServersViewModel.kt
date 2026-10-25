@@ -7,6 +7,8 @@ import com.example.RayApplication
 import com.example.data.model.ServerTestStatus
 import com.example.data.model.VlessProfile
 import com.example.panels.PanelStore
+import com.example.panels.cloudflare.CloudflareDnsApi
+import com.example.panels.cloudflare.SmartDomainsStore
 import com.example.panels.servers.ActionProgress
 import com.example.panels.servers.DnsDelegation
 import com.example.panels.servers.InstallChecks
@@ -660,6 +662,40 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             _state.update { it.copy(wizard = it.wizard?.copy(dnsChecks = checks, dnsChecking = false)) }
+        }
+    }
+
+    /**
+     * User-initiated one-tap DNSTT DNS delegation. Uses the existing Keystore-protected
+     * Smart domains token; never creates/changes a token or switches the user's zone.
+     * DNS records are preflighted across all required zones before writes begin.
+     */
+    fun provisionDns() {
+        val w = _state.value.wizard ?: return
+        if (w.tool.id != ServerToolCatalog.DNSTT || w.records.isEmpty() ||
+            w.dnsProvisioning || w.dnsChecking) return
+        _state.update { it.copy(wizard = w.copy(dnsProvisioning = true, dnsProvisionResult = "")) }
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val token = SmartDomainsStore(getApplication()).token()
+                    require(token.isNotBlank()) {
+                        "First connect your Cloudflare DNS token in Panels > Cloudflare > Smart domains."
+                    }
+                    CloudflareDnsApi().provisionDnstt(token, w.records)
+                }
+            }
+            // Never apply a late result to a different server or a changed domain.
+            val current = _state.value.wizard
+            if (current?.serverId != w.serverId || current.records != w.records) return@launch
+            val message = outcome.fold(
+                onSuccess = { n -> "Created $n DNS records in Cloudflare (existing matching records kept). Check propagation, then test the tunnel." },
+                onFailure = { e -> e.message ?: "Cloudflare setup failed; check your token and domain permissions." }
+            )
+            _state.update { st ->
+                st.copy(wizard = st.wizard?.copy(dnsProvisioning = false, dnsProvisionResult = message))
+            }
+            if (outcome.isSuccess) checkDns()
         }
     }
 
