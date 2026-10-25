@@ -82,6 +82,8 @@ class ServerManager(
     fun install(server: ManagedServer, toolId: String, options: InstallOptions, progress: ActionProgress): InstallOutcome {
         val tool = requireNotNull(ServerToolCatalog.byId(toolId)) { "Unknown tool $toolId" }
         require(!tool.comingLater) { "${tool.title} is not available yet" }
+        val conflict = tool.conflicts.firstOrNull { server.tool(it) != null }
+        check(conflict == null) { "This server already runs ${conflict ?: ""}; DNS tunnel engines cannot share the public DNS listener." }
         return when (toolId) {
             ServerToolCatalog.XUI -> {
                 check(server.tool(ServerToolCatalog.HIDDIFY) == null) { "This server runs Hiddify, which needs the server to itself." }
@@ -94,6 +96,36 @@ class ServerManager(
                 facts.blocker()?.let { error(it) }
                 val arch = facts.goArch!!
                 when (toolId) {
+                    ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> {
+                        DnsDelegation.problem(options.baseDomain, options.tunnelLabel)?.let { error(it) }
+                        check(server.tool(toolId) == null) { "A safe in-place upgrade is not available yet; no changes were made." }
+                        check(53 !in facts.udpPorts && (toolId != ServerToolCatalog.COTTEN || 53 !in facts.tcpPorts)) {
+                            "Port 53 is occupied by another service. Stop or move it before installing a DNS tunnel."
+                        }
+                        val domain = DnsDelegation.tunnelDomain(options.baseDomain, options.tunnelLabel)
+                        val script = if (toolId == ServerToolCatalog.SOAR) DnsServerScripts.soar(domain)
+                            else DnsServerScripts.cotten(domain, arch)
+                        val r = runScript(shell, script, progress, 20 * 60_000L)
+                        val keyName = if (toolId == ServerToolCatalog.SOAR) ToolProfiles.SOAR_PUBKEY else ToolProfiles.COTTEN_KEY
+                        val key = r[if (toolId == ServerToolCatalog.SOAR) "PUBKEY" else "COTTEN_KEY"].orEmpty()
+                        if (toolId == ServerToolCatalog.SOAR)
+                            require(runCatching { java.util.Base64.getDecoder().decode(key).size == 32 }.getOrDefault(false)) {
+                                "Soar did not return its public key"
+                            }
+                        else require(key.matches(Regex("[0-9a-fA-F]{64}"))) { "CottenDNS did not return a valid shared key" }
+                        val installed = InstalledTool(toolId, port = 53, settings = mapOf(
+                            ToolProfiles.DNSTT_DOMAIN to domain,
+                            ToolProfiles.DNSTT_BASE to DnsDelegation.normalizeBase(options.baseDomain),
+                            ToolProfiles.DNSTT_LABEL to options.tunnelLabel,
+                            keyName to key
+                        ))
+                        val updated = server.withTool(installed).copy(facts = facts, checkedAt = System.currentTimeMillis())
+                        val profile = if (toolId == ServerToolCatalog.SOAR) ToolProfiles.soarProfile(updated, installed)
+                            else ToolProfiles.cottenProfile(updated, installed)
+                        val link = if (toolId == ServerToolCatalog.SOAR) ToolProfiles.soarLink(updated, installed)
+                            else ToolProfiles.cottenLink(updated, installed)
+                        InstallOutcome(updated, installed, profile, link, summary = "DNS tunnel server installed on $domain; verify DNS delegation and live egress from the phone")
+                    }
                     ServerToolCatalog.DNSTT -> {
                         // A public UDP/53 listener belongs to another service. DNSTT's redirect
                         // would otherwise steal its incoming packets; never overwrite that traffic.
