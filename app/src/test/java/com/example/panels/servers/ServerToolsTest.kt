@@ -60,6 +60,25 @@ class ServerToolsTest {
         assertTrue(busy.any { it.label == "UDP 53" && !it.ok && it.blocking })
     }
 
+    @Test fun generatedWhiteDnsShareLinksImportIntoNativeClients() {
+        val soarKey = java.util.Base64.getEncoder().encodeToString(ByteArray(32) { (it + 1).toByte() })
+        val soarTool = InstalledTool(ServerToolCatalog.SOAR, port = 53, settings = mapOf(
+            ToolProfiles.DNSTT_DOMAIN to "t.example.com", ToolProfiles.SOAR_PUBKEY to soarKey))
+        val soarLink = ToolProfiles.soarLink(server, soarTool)
+        assertTrue(soarLink.startsWith("soar://"))
+        val soarProfile = com.example.vpn.sidecar.WhiteDnsProfileLinks.parse(soarLink)
+        assertEquals("t.example.com", com.example.vpn.sidecar.SoarSidecar.config(soarProfile).getString("domain"))
+
+        val cottenTool = InstalledTool(ServerToolCatalog.COTTEN, port = 53, settings = mapOf(
+            ToolProfiles.DNSTT_DOMAIN to "t.example.com", ToolProfiles.COTTEN_KEY to "a".repeat(64)))
+        val link = ToolProfiles.cottenLink(server, cottenTool)
+        assertTrue(link.startsWith("cottendns://"))
+        val profile = com.example.vpn.sidecar.WhiteDnsProfileLinks.parse(link)
+        val settings = com.example.vpn.sidecar.CottenDnsSidecar.settings(profile)
+        assertEquals("legacy", settings.mode)
+        assertEquals("a".repeat(64), settings.key)
+    }
+
     @Test fun standaloneDnsServerScriptsUseVerifiedSourcesAndNeverClaimSilentUpgrades() {
         val soar = DnsServerScripts.soar("t.example.com").text
         assertTrue(soar.contains("go install github.com/getlantern/soar/cmd/soar-server@v0.2.4"))
