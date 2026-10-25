@@ -173,6 +173,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     fun close() {
         if (_state.value.route is ServersRoute.Wizard &&
             (_state.value.wizard?.stage == WizardStage.RUNNING || _state.value.wizard?.dnsProvisioning == true)) return
+        wizardTestGeneration++
         _state.update { it.copy(route = ServersRoute.None, wizard = null, logs = null, error = "", busy = "") }
         refreshReach()
     }
@@ -600,6 +601,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     fun openWizard(toolId: String, serverId: String? = null) {
         val tool = ServerToolCatalog.byId(toolId) ?: return
         if (tool.comingLater) return
+        wizardTestGeneration++
         _state.update { it.copy(route = ServersRoute.Wizard, wizard = WizardUi(tool, rows()), error = "") }
         val fitting = _state.value.servers.filter { s -> tool.fitsOn(s.location) && s.canSignIn && tool.conflicts.none { s.tool(it) != null } }
         val pick = serverId ?: fitting.singleOrNull()?.id
@@ -611,6 +613,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val s = server(id) ?: return
         val w = _state.value.wizard ?: return
         val existing = s.tool(w.tool.id)
+        wizardTestGeneration++
         _state.update {
             it.copy(wizard = w.copy(
                 serverId = id, stage = WizardStage.CHECK, checks = null, reinstall = existing != null,
@@ -851,6 +854,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openServerFromWizard() {
         val id = _state.value.wizard?.serverId ?: return
+        wizardTestGeneration++
         _state.update { it.copy(wizard = null) }
         openDetail(id)
     }
