@@ -19,6 +19,7 @@ object Sidecars {
             },
             DnsttSidecar(),
             CottenDnsSidecar(),
+            SoarSidecar(),
             SlipstreamSidecar(),
             MasqueSidecar,
             MatrixTransportSidecar,
@@ -59,3 +60,4 @@ object Sidecars {
         return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(raw)
     }
 }
+

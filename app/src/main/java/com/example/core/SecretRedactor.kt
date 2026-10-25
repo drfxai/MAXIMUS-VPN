@@ -16,7 +16,7 @@ object SecretRedactor {
 
     /** vmess:// and legacy ss:// links carry the whole config, credentials included, as base64. */
     private val BASE64_LINK_PATTERN = Pattern.compile(
-        "\\b(vmess|ss|ssr)://([A-Za-z0-9+/=_-]{12,})"
+        "\\b(vmess|ss|ssr|cottendns|soar)://([A-Za-z0-9+/=_-]{12,})"
     )
 
     private val HTTP_USERINFO_PATTERN = Pattern.compile(
@@ -132,3 +132,4 @@ object SecretRedactor {
         return "${uuid.take(4)}...${uuid.takeLast(4)}"
     }
 }
+

@@ -89,6 +89,10 @@ fun EditConfigScreen(
     onDelete: () -> Unit,
     onFetchFingerprint: suspend (address: String, port: Int, sni: String) -> Result<String>
 ) {
+    if (com.example.vpn.sidecar.SoarSidecar().handles(profile)) {
+        SoarEditor(profile, onBack, onSave, onDelete)
+        return
+    }
     if (com.example.vpn.sidecar.CottenDnsSidecar().handles(profile)) {
         CottenDnsEditor(profile, onBack, onSave, onDelete)
     } else if (DnsttSidecar().handles(profile)) {
@@ -920,7 +924,7 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
         EditTopBar("CottenDNS · Max beta", name, saving, { leave() }, { remove = true }) {
             val next = runCatching {
                 com.example.vpn.sidecar.CottenDnsSidecar.withSettings(profile.copy(name = name.trim().ifBlank { "CottenDNS · Max beta" }),
-                    com.example.vpn.sidecar.CottenDnsSidecar.Settings(domain, profile.uuid, lines(resolvers), transport.trim(), lines(backups), tlsName))
+                    com.example.vpn.sidecar.CottenDnsSidecar.Settings(domain, profile.uuid, lines(resolvers), transport.trim(), lines(backups), tlsName, initial?.mode ?: "cottenmax"))
             }.getOrElse { error = it.message ?: "Check the CottenDNS settings"; return@EditTopBar }
             saving = true
             scope.launch {
@@ -931,11 +935,11 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Hint("Opt-in CottenMax beta. Needs a matching Max-capable server with the same domain and key. No automatic legacy downgrade.")
+            Hint("CottenDNS mode: ${initial?.mode ?: "cottenmax"}. Only the resolvers listed below are used. The imported server mode and key are preserved.")
             error?.let { Text(it, color = AppTheme.colors.statusError) }
             EditField("Name", name) { name = it }
             EditField("Delegated tunnel domain", domain, monospace = true) { domain = it }
-            EditField("Resolvers: one IP[:port] per line, up to six", resolvers, monospace = true, minLines = 3) { resolvers = it }
+            EditField("Resolvers: one IP[:port] per line, up to 64", resolvers, monospace = true, minLines = 3) { resolvers = it }
             EditField("DNS transport: auto, udp, tcp, dot or doh", transport, monospace = true) { transport = it }
             EditField("TLS certificate name (optional, for dot/doh)", tlsName, monospace = true) { tlsName = it }
             EditField("Backup domains on compatible servers (up to three)", backups, monospace = true, minLines = 2) { backups = it }
@@ -944,4 +948,38 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
     }
     if (discard) ConfirmDialog("Discard changes?", "Unsaved edits will be lost.", "Discard", { onBack() }, { discard = false })
     if (remove) ConfirmDialog("Delete node", "Remove this CottenDNS profile?", "Delete", { remove = false; onDelete() }, { remove = false })
+}
+
+
+@Composable
+private fun SoarEditor(profile: VlessProfile, onBack: () -> Unit,
+                       onSave: suspend (VlessProfile) -> String?, onDelete: () -> Unit) {
+    val initial = remember(profile.id) { runCatching { com.example.vpn.sidecar.SoarSidecar.config(profile) }.getOrNull() }
+    val scope = rememberCoroutineScope()
+    var name by remember(profile.id) { mutableStateOf(profile.name) }
+    var resolvers by remember(profile.id) { mutableStateOf(initial?.getJSONArray("resolvers")?.let { a ->
+        (0 until a.length()).joinToString("\n") { a.getString(it) }
+    }.orEmpty()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var discard by remember { mutableStateOf(false) }
+    var remove by remember { mutableStateOf(false) }
+    BackHandler { if (!saving) discard = true }
+    Column(Modifier.fillMaxSize().background(AppTheme.colors.background).testTag("edit_soar_screen")) {
+        EditTopBar("SOAR", name, saving, { if (!saving) discard = true }, { remove = true }) {
+            val next = runCatching { com.example.vpn.sidecar.SoarSidecar.withResolvers(profile.copy(name = name.trim().ifBlank { "SOAR" }), resolvers) }
+                .getOrElse { error = "Check the resolver list: one IP[:port] per line, no duplicates, up to 64."; return@EditTopBar }
+            saving = true
+            scope.launch { val failure = onSave(next); saving = false; if (failure == null) onBack() else error = failure }
+        }
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            error?.let { Text(it, color = AppTheme.colors.statusError) }
+            EditField("Name", name) { name = it }
+            Hint("Server: ${profile.address}. Import a new soar:// link to change its domain or public key.")
+            EditField("Resolvers: one IP[:port] per line, up to 64", resolvers, monospace = true, minLines = 6) { resolvers = it }
+            Hint("Manual resolvers only. No built-in resolver or range discovery is added, even when the imported link enables discovery. Resolver responses alone do not verify the VPN. SOAR carries TCP; UDP applications require another compatible route.")
+        }
+    }
+    if (discard) ConfirmDialog("Discard changes?", "Unsaved edits will be lost.", "Discard", { onBack() }, { discard = false })
+    if (remove) ConfirmDialog("Delete node", "Remove this SOAR profile?", "Delete", { remove = false; onDelete() }, { remove = false })
 }
