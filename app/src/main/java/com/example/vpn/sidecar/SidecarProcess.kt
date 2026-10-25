@@ -28,7 +28,7 @@ class SidecarProcess(
                         startupFailure = "registration failed before the local proxy became ready"
                     }
                     if (!sawReadyLine && readyLine?.containsMatchIn(line) == true) sawReadyLine = true
-                    if (index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line.take(300)))
+                    if (index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line).take(300))
                 }
             }
         } catch (_: Exception) {
@@ -81,3 +81,4 @@ class SidecarProcess(
         }
     }
 }
+

@@ -33,10 +33,7 @@ class CottenDnsSidecar : SidecarEngine {
         val resolvers = File(context.workDir, "cotten-resolvers.txt")
         // Do not put credentials in arguments or environment variables.
         for ((file, text) in listOf(config to configuration(s, context), resolvers to s.resolvers.joinToString("\n", postfix = "\n"))) {
-            check(file.createNewFile()) { "CottenDNS work file already exists" }
-            check(file.setReadable(false, false) && file.setWritable(false, false) &&
-                file.setReadable(true, true) && file.setWritable(true, true)) { "Cannot protect CottenDNS work file" }
-            file.writeText(text)
+            PrivateEngineFile.write(file, text)
         }
         return SidecarLaunch(
             command = listOf(context.executable.absolutePath, "-config", config.absolutePath, "-resolvers", resolvers.absolutePath),
@@ -173,4 +170,5 @@ class CottenDnsSidecar : SidecarEngine {
         }
     }
 }
+
 

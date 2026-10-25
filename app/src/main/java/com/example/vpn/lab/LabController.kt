@@ -1140,6 +1140,7 @@ class LabController(
      * committed or rolled back from what the ledger saw in real use.
      */
     private fun apply(v: VerifiedNetworkProfile, parent: VlessProfile, ctx: NetworkContext) {
+        if (!tracker.isCurrent(ctx.sessionId) || com.example.vpn.smart.NetworkIdentity.current(context) != ctx.vpnKey) return
         val rp = RecoveryProfiles.BUILT_IN.firstOrNull { it.key == v.mutationProfileId } ?: return
         val now = System.currentTimeMillis()
         val copy = rp.derive(parent, v.endpoint)
@@ -1271,3 +1272,4 @@ class LabController(
         val LIVE_STEPS = listOf(STEP_BASELINE, STEP_DNS, STEP_IPV6, STEP_TLS, STEP_TRANSPORT, STEP_CANDIDATES, STEP_SECURITY, STEP_TESTING, STEP_STABILITY, STEP_DONE)
     }
 }
+

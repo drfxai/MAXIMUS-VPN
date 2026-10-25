@@ -879,7 +879,7 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun appendLog(line: String) {
         _state.update { state ->
-            state.copy(logs = (state.logs + line).takeLast(14))
+            state.copy(logs = (state.logs + com.example.core.SecretRedactor.redact(line).take(1000)).takeLast(14))
         }
     }
 
@@ -899,10 +899,11 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
                     scanPaused = false,
                     installingServer = false,
                     status = "",
-                    error = t.message ?: "Operation failed"
+                    error = com.example.core.SecretRedactor.redact(t.message ?: "Operation failed")
                 )
                 appendLog("[ERROR] ${t.message ?: "Operation failed"}")
             }
         }
     }
 }
+
