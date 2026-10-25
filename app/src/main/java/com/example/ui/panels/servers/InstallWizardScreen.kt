@@ -481,7 +481,7 @@ private fun DoneStage(ui: WizardUi, actions: WizardActions) {
     if (ui.profileName != null) {
         SectionLabel("Added to your configs")
         GroupCard {
-            ListRow(ui.profileName, subtitle = "Ready in the server list", leading = { ToolBadge(ui.tool.id, 32.dp) },
+            ListRow(ui.profileName, subtitle = if (ui.testOk == true) "Request verified through this profile; Android TUN not tested" else "Installed; traffic has not been verified", leading = { ToolBadge(ui.tool.id, 32.dp) },
                 trailing = { if (ui.link != null) TextAction("Copy link", { actions.onCopy(ui.link) }, icon = Icons.Rounded.ContentCopy) })
             RowDivider(0.dp)
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -497,7 +497,7 @@ private fun DoneStage(ui: WizardUi, actions: WizardActions) {
             }
         }
     }
-    if (ui.tool.id == ServerToolCatalog.DNSTT && ui.records.isNotEmpty()) {
+    if (ui.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) && ui.records.isNotEmpty()) {
         Notice("The tunnel works once your DNS records are live. The first test can fail while DNS updates.")
     }
     if (ui.log.isNotEmpty()) LogCard(ui.log)
@@ -527,3 +527,4 @@ private fun WizardBottomBar(ui: WizardUi, actions: WizardActions) {
         }
     }
 }
+

@@ -173,6 +173,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     fun close() {
         if (_state.value.route is ServersRoute.Wizard &&
             (_state.value.wizard?.stage == WizardStage.RUNNING || _state.value.wizard?.dnsProvisioning == true)) return
+        wizardTestGeneration++
         _state.update { it.copy(route = ServersRoute.None, wizard = null, logs = null, error = "", busy = "") }
         refreshReach()
     }
@@ -356,7 +357,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             warning = if (active > 0 && down.isNotEmpty())
                 down.take(3).joinToString(" and ") + (if (down.size > 3) " and ${down.size - 3} more" else "") +
                     (if (down.size == 1) " is" else " are") + " not active. Restart, or open Logs to see why." else null,
-            canOpenPanel = t.settings[HiddifyPanelProvider.K_ADMIN_URL] != null,
+            // The action can recover a missing admin link over SSH; never hide the entry point.
+            canOpenPanel = true,
             canBackup = units.isNotEmpty(), canRestart = true, canLogs = true,
             canUpdate = version != null && PanelStatus.compareVersions(HiddifyScripts.VERSION, version) > 0,
             canStart = f != null && active < units.size, canStop = active > 0
@@ -391,7 +393,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 block(s)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _state.update { it.copy(error = e.message ?: "The action failed") }
+                _state.update { it.copy(error = com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "The action failed")) }
             } finally {
                 _state.update { it.copy(busy = "") }
             }
@@ -474,8 +476,20 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissFound(id: String) = _state.update { it.copy(foundDismissed = it.foundDismissed + id) }
 
-    /** The Hiddify admin address from its install, kept only in the encrypted server store. */
-    fun hiddifyAdminUrl(id: String): String? = server(id)?.tool(ServerToolCatalog.HIDDIFY)?.settings?.get(HiddifyPanelProvider.K_ADMIN_URL)
+    /** Hiddify's secret URL is stored only in the encrypted server store and never logged. */
+    fun hiddifyAdminUrl(id: String): String? = HiddifyPanelProvider.validatedAdminUrl(
+        server(id)?.tool(ServerToolCatalog.HIDDIFY)?.settings?.get(HiddifyPanelProvider.K_ADMIN_URL)
+    )
+
+    /** Recover a missing v14 admin URL from the server, without reinstalling Hiddify. */
+    fun openHiddifyAdmin(id: String, onUrl: (String) -> Unit) {
+        hiddifyAdminUrl(id)?.let { onUrl(it); return }
+        serverAction(id, "Retrieving Hiddify admin link…") { server ->
+            val updated = withContext(Dispatchers.IO) { manager.hiddify.restoreAdminUrl(server) }
+            save(updated)
+            onUrl(requireNotNull(hiddifyAdminUrl(id)) { "The recovered Hiddify link is invalid" })
+        }
+    }
 
     fun remove(id: String) {
         store.delete(id)
@@ -510,7 +524,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             when {
                 r.stage.carriesTraffic -> true to "Real request passed in ${r.latencyMs} ms through the tunnel"
                 r.notTested -> false to "Not tested: ${r.failure.orEmpty()}"
-                else -> false to "No answer through the tunnel yet: ${r.failure.orEmpty()}. New DNS records can take a few minutes."
+                else -> false to "No verified traffic through this engine: ${r.failure.orEmpty()}. Check delegation, resolver transport, server authentication and egress; the cause is not established."
             }
         } else {
             when (val st = com.example.vpn.ServerTester.testServer(profile, 8_000).status) {
@@ -587,6 +601,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     fun openWizard(toolId: String, serverId: String? = null) {
         val tool = ServerToolCatalog.byId(toolId) ?: return
         if (tool.comingLater) return
+        wizardTestGeneration++
         _state.update { it.copy(route = ServersRoute.Wizard, wizard = WizardUi(tool, rows()), error = "") }
         val fitting = _state.value.servers.filter { s -> tool.fitsOn(s.location) && s.canSignIn && tool.conflicts.none { s.tool(it) != null } }
         val pick = serverId ?: fitting.singleOrNull()?.id
@@ -598,6 +613,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val s = server(id) ?: return
         val w = _state.value.wizard ?: return
         val existing = s.tool(w.tool.id)
+        wizardTestGeneration++
         _state.update {
             it.copy(wizard = w.copy(
                 serverId = id, stage = WizardStage.CHECK, checks = null, reinstall = existing != null,
@@ -811,15 +827,26 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(wizard = w.copy(stage = WizardStage.SUMMARY, error = "")) }
     }
 
+    private var wizardTestGeneration = 0L
     fun wizardTest() {
         val w = _state.value.wizard ?: return
+        if (w.testing) return
         val s = server(w.serverId) ?: return
-        _state.update { it.copy(wizard = w.copy(testing = true, testResult = null)) }
+        val generation = ++wizardTestGeneration
+        _state.update { it.copy(wizard = w.copy(testing = true, testResult = null, testOk = null)) }
         viewModelScope.launch {
-            val r = runCatching { profileFor(s, w.tool.id)?.let { testProfile(it) } ?: (false to "No config to test") }
-                .getOrElse { false to (it.message ?: "Test failed") }
+            val r = try {
+                profileFor(s, w.tool.id)?.let { testProfile(it) } ?: (false to "No config to test")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false to com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "Test failed")
+            }
             _state.update { st ->
-                st.copy(wizard = st.wizard?.copy(testing = false, testResult = r.second, testOk = r.first),
+                val current = st.wizard
+                if (current == null || generation != wizardTestGeneration || current.serverId != w.serverId ||
+                    current.tool.id != w.tool.id || current.link != w.link) st
+                else st.copy(wizard = current.copy(testing = false, testResult = r.second, testOk = r.first),
                     tests = st.tests + ("${s.id}/${w.tool.id}" to r))
             }
         }
@@ -827,6 +854,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openServerFromWizard() {
         val id = _state.value.wizard?.serverId ?: return
+        wizardTestGeneration++
         _state.update { it.copy(wizard = null) }
         openDetail(id)
     }
@@ -841,3 +869,4 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         fun locationLabel(l: ServerLocation) = if (l == ServerLocation.IRAN) "Iran" else "Abroad"
     }
 }
+

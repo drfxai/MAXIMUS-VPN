@@ -108,7 +108,7 @@ class ScriptProgress(private val onStep: (Int) -> Unit, private val onLog: (Stri
             }
             line.isBlank() -> Unit
             SECRET_LINE.containsMatchIn(line) -> Unit
-            else -> onLog(line.take(160))
+            else -> onLog(ServerLogSanitizer.redact(line).take(2000))
         }
     }
 
@@ -116,3 +116,4 @@ class ScriptProgress(private val onStep: (Int) -> Unit, private val onLog: (Stri
         private val SECRET_LINE = Regex("(pass(word)?|token|secret|private)", RegexOption.IGNORE_CASE)
     }
 }
+

@@ -209,6 +209,39 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
             }
         }
 
+        // Expose Hiddify's setup entry points even when its admin URL was not captured during install.
+        // All actions open the official Hiddify Admin V2 UI; Maximus does not pretend to have
+        // implemented direct Hiddify user/CDN/Telegram APIs yet.
+        if (ui.tools.any { it.id == ServerToolCatalog.HIDDIFY }) {
+            SectionLabel("Hiddify management")
+            GroupCard {
+                ListRow(
+                    "Open admin panel",
+                    subtitle = "Recover your secure admin link over SSH if needed",
+                    leading = { ToolBadge(ServerToolCatalog.HIDDIFY, 32.dp) },
+                    trailing = { TextAction("Open", { actions.onOpenPanel(ServerToolCatalog.HIDDIFY) }, enabled = idle) }
+                )
+                RowDivider(0.dp)
+                ListRow(
+                    "Users & configs",
+                    subtitle = "Open Admin V2, then Manager > Users to add users and obtain subscriptions",
+                    trailing = { TextAction("Manage", { actions.onOpenPanel(ServerToolCatalog.HIDDIFY) }, enabled = idle) }
+                )
+                RowDivider(0.dp)
+                ListRow(
+                    "CDN & domains",
+                    subtitle = "Open Admin V2, then Settings > Domains to configure a CDN domain",
+                    trailing = { TextAction("Manage", { actions.onOpenPanel(ServerToolCatalog.HIDDIFY) }, enabled = idle) }
+                )
+                RowDivider(0.dp)
+                ListRow(
+                    "Telegram proxy",
+                    subtitle = "Open Admin V2 to configure Telegram proxy separately from CDN domains",
+                    trailing = { TextAction("Manage", { actions.onOpenPanel(ServerToolCatalog.HIDDIFY) }, enabled = idle) }
+                )
+            }
+        }
+
         if (ui.logs != null) LogCard(ui.logs.ifEmpty { listOf("No log lines yet.") }, initiallyOpen = true, title = ui.logsTitle)
 
         if (ui.advice.isNotEmpty()) {
