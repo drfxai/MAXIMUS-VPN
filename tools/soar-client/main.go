@@ -109,9 +109,18 @@ func serve(ctx context.Context, c net.Conn, d dialer, cfg config) {
  if err!=nil {reply(c,4);return};defer up.Close()
  reply(c,0);c.SetDeadline(time.Time{})
  done:=make(chan struct{},2)
- go func(){io.Copy(up,c);done<-struct{}{}}()
- go func(){io.Copy(c,up);done<-struct{}{}}()
+ pump := func(dst, src net.Conn) {
+  _, err := io.Copy(dst, src)
+  if err == nil {
+   if half, ok := dst.(interface{ CloseWrite() error }); ok { err = half.CloseWrite() } else { err = dst.Close() }
+  }
+  if err != nil { c.Close(); up.Close() }
+  done <- struct{}{}
+ }
+ go pump(up,c)
+ go pump(c,up)
+ select{case <-ctx.Done():c.Close();up.Close();return;case <-done:}
+ // Preserve a response after the application half-closes its request.
  select{case <-ctx.Done():case <-done:}
- // Closing both directions unblocks copies on cancellation and prevents orphaned pumps.
  c.Close();up.Close()
 }

@@ -921,7 +921,7 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
     fun leave() { if (!saving) discard = true }
     BackHandler { leave() }
     Column(Modifier.fillMaxSize().background(AppTheme.colors.background).testTag("edit_cotten_dns_screen")) {
-        EditTopBar("CottenDNS · Max beta", name, saving, { leave() }, { remove = true }) {
+        EditTopBar("CottenDNS", name, saving, { leave() }, { remove = true }) {
             val next = runCatching {
                 com.example.vpn.sidecar.CottenDnsSidecar.withSettings(profile.copy(name = name.trim().ifBlank { "CottenDNS · Max beta" }),
                     com.example.vpn.sidecar.CottenDnsSidecar.Settings(domain, profile.uuid, lines(resolvers), transport.trim(), lines(backups), tlsName, initial?.mode ?: "cottenmax"))
@@ -943,7 +943,7 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
             EditField("DNS transport: auto, udp, tcp, dot or doh", transport, monospace = true) { transport = it }
             EditField("TLS certificate name (optional, for dot/doh)", tlsName, monospace = true) { tlsName = it }
             EditField("Backup domains on compatible servers (up to three)", backups, monospace = true, minLines = 2) { backups = it }
-            Hint("The server key is preserved. Import a new MAXIMUS CottenDNS link to replace it. Encrypted DNS keeps certificate checks enabled and never silently falls back to plaintext.")
+            Hint("The server key is preserved. Import a new CottenDNS link to replace it. Encrypted DNS keeps certificate checks enabled and never silently falls back to plaintext.")
         }
     }
     if (discard) ConfirmDialog("Discard changes?", "Unsaved edits will be lost.", "Discard", { onBack() }, { discard = false })

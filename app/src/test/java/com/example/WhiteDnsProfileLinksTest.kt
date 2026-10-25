@@ -32,6 +32,7 @@ class WhiteDnsProfileLinksTest {
     @Test fun soarRemainsSeparateAndManualResolverEditsPersist() {
         val p = WhiteDnsProfileLinks.parse(link("soar"))
         assertTrue(SoarSidecar().handles(p)); assertFalse(CottenDnsSidecar().handles(p))
+        assertEquals(com.example.vpn.lab.PathFamily.DNS_TUNNEL, com.example.vpn.lab.PathFamily.of(p, "soar"))
         val edited = SoarSidecar.withResolvers(p, "31.214.172.58\n37.32.2.2\n")
         val config = SoarSidecar.config(edited)
         assertEquals("31.214.172.58:53", config.getJSONArray("resolvers").getString(0))
@@ -53,5 +54,6 @@ class WhiteDnsProfileLinksTest {
         val bad = "cottendns://" + "secret".repeat(10)
         assertFalse(UniversalImportEngine.importText(bad).invalidEntries.toString().contains("secret"))
         assertFalse(SecretRedactor.redact(link("cottendns")).contains("eyJ"))
+        assertFalse(SecretRedactor.redact(link("cottendns").replace("cottendns://", "COTTENDNS://")).contains("eyJ"))
     }
 }

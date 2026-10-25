@@ -44,3 +44,20 @@ func TestNoAuthenticationAndUDPDoNotDial(t *testing.T) {
   b.Close();cancel()
  }
 }
+
+type originDialer struct{ address string }
+func (d originDialer) DialContext(ctx context.Context, network,address string)(net.Conn,error) {
+ return (&net.Dialer{}).DialContext(ctx,"tcp",d.address)
+}
+func TestHalfClosedRequestStillReceivesResponse(t *testing.T) {
+ origin,err:=net.Listen("tcp","127.0.0.1:0");if err!=nil{t.Fatal(err)};defer origin.Close()
+ go func(){c,e:=origin.Accept();if e!=nil{return};defer c.Close();data,_:=io.ReadAll(c);c.Write(append([]byte("reply:"),data...))}()
+ proxy,err:=net.Listen("tcp","127.0.0.1:0");if err!=nil{t.Fatal(err)};defer proxy.Close()
+ ctx,cancel:=context.WithCancel(context.Background());defer cancel()
+ go func(){c,e:=proxy.Accept();if e==nil{serve(ctx,c,originDialer{origin.Addr().String()},config{Username:"u",Password:"p"})}}()
+ c,err:=net.Dial("tcp",proxy.Addr().String());if err!=nil{t.Fatal(err)};defer c.Close()
+ authenticate(t,c);c.Write([]byte{5,1,0,1,1,1,1,1,1,187});r:=make([]byte,10)
+ if _,err=io.ReadFull(c,r);err!=nil||r[1]!=0{t.Fatal(err,r)}
+ c.Write([]byte("request"));c.(*net.TCPConn).CloseWrite()
+ got,err:=io.ReadAll(c);if err!=nil||string(got)!="reply:request"{t.Fatal(err,string(got))}
+}

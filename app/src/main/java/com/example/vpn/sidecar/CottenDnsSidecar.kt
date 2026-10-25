@@ -16,7 +16,7 @@ import java.net.URLEncoder
 import java.util.Locale
 
 /** Original MAXIMUS adapter for the pinned, separately built MIT CottenDNS CLI.
- * Only authenticated CottenMax is enabled. The profile must match a Max-capable server.
+ * CottenMax and explicit native Cotten profiles remain distinct; neither auto-downgrades.
  * The upstream app's proprietary UI, credentials, binaries and assets are not used.
  */
 class CottenDnsSidecar : SidecarEngine {
@@ -41,7 +41,7 @@ class CottenDnsSidecar : SidecarEngine {
         return SidecarLaunch(
             command = listOf(context.executable.absolutePath, "-config", config.absolutePath, "-resolvers", resolvers.absolutePath),
             socksAuth = true, readyTimeoutMs = 45_000,
-            // Emitted only after authentication AND the core's transfer probe, not on listening.
+            // Engine startup progress is not application traffic proof: EngineProbe verifies egress.
             readyLine = Regex("WD_PROGRESS phase=connected percent=100(?:\\s|$)")
         )
     }
@@ -53,7 +53,7 @@ class CottenDnsSidecar : SidecarEngine {
         const val ID = "cotten-dns"
         const val BINARY = "cottendns"
         const val REVISION = "e50a43ef75ad10ae2ffbfa106d13c50de3e77624"
-        // MAXIMUS-specific format; not a claim of stormdns:// or soar:// compatibility.
+        // MAXIMUS-specific round-trip format; WhiteDNS links use WhiteDnsProfileLinks.
         const val SCHEME = "maximus-cotten"
         internal fun domain(raw: String): String {
             val d = IDN.toASCII(raw.trim().trimEnd('.')).lowercase(Locale.ROOT)
@@ -108,7 +108,7 @@ class CottenDnsSidecar : SidecarEngine {
         }
         fun settings(profile: VlessProfile): Settings {
             val o = ProfileExtras.read(profile)
-            require(o.optString("engine") == ID && o.optString("mode") in setOf("cottenmax", "legacy")) { "Not a MAXIMUS CottenMax profile" }
+            require(o.optString("engine") == ID && o.optString("mode") in setOf("cottenmax", "legacy")) { "Not a CottenDNS profile" }
             fun list(key: String): List<String> = o.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
             return validate(Settings(o.getString("domain"), profile.uuid, list("resolvers"), o.optString("transport", "auto"), list("backups"), o.optString("tlsName"), o.getString("mode")))
         }
