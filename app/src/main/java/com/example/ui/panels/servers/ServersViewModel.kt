@@ -523,7 +523,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             when {
                 r.stage.carriesTraffic -> true to "Real request passed in ${r.latencyMs} ms through the tunnel"
                 r.notTested -> false to "Not tested: ${r.failure.orEmpty()}"
-                else -> false to "No answer through the tunnel yet: ${r.failure.orEmpty()}. New DNS records can take a few minutes."
+                else -> false to "No verified traffic through this engine: ${r.failure.orEmpty()}. Check delegation, resolver transport, server authentication and egress; the cause is not established."
             }
         } else {
             when (val st = com.example.vpn.ServerTester.testServer(profile, 8_000).status) {
@@ -824,15 +824,26 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(wizard = w.copy(stage = WizardStage.SUMMARY, error = "")) }
     }
 
+    private var wizardTestGeneration = 0L
     fun wizardTest() {
         val w = _state.value.wizard ?: return
+        if (w.testing) return
         val s = server(w.serverId) ?: return
-        _state.update { it.copy(wizard = w.copy(testing = true, testResult = null)) }
+        val generation = ++wizardTestGeneration
+        _state.update { it.copy(wizard = w.copy(testing = true, testResult = null, testOk = null)) }
         viewModelScope.launch {
-            val r = runCatching { profileFor(s, w.tool.id)?.let { testProfile(it) } ?: (false to "No config to test") }
-                .getOrElse { false to (it.message ?: "Test failed") }
+            val r = try {
+                profileFor(s, w.tool.id)?.let { testProfile(it) } ?: (false to "No config to test")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false to com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "Test failed")
+            }
             _state.update { st ->
-                st.copy(wizard = st.wizard?.copy(testing = false, testResult = r.second, testOk = r.first),
+                val current = st.wizard
+                if (current == null || generation != wizardTestGeneration || current.serverId != w.serverId ||
+                    current.tool.id != w.tool.id || current.link != w.link) st
+                else st.copy(wizard = current.copy(testing = false, testResult = r.second, testOk = r.first),
                     tests = st.tests + ("${s.id}/${w.tool.id}" to r))
             }
         }
