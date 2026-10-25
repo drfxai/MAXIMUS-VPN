@@ -687,7 +687,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             }
             // Never apply a late result to a different server or a changed domain.
             val current = _state.value.wizard
-            if (current?.serverId != w.serverId || current.records != w.records) return@launch
+            if (current?.serverId != w.serverId || current?.records != w.records) return@launch
             val message = outcome.fold(
                 onSuccess = { n -> "Created $n DNS records in Cloudflare (existing matching records kept). Check propagation, then test the tunnel." },
                 onFailure = { e -> e.message ?: "Cloudflare setup failed; check your token and domain permissions." }
