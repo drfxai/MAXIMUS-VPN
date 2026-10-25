@@ -171,7 +171,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         _state.value.servers.flatMap { s -> s.tools.map { it.id } }.groupingBy { it }.eachCount()
 
     fun close() {
-        if (_state.value.route is ServersRoute.Wizard && _state.value.wizard?.stage == WizardStage.RUNNING) return
+        if (_state.value.route is ServersRoute.Wizard &&
+            (_state.value.wizard?.stage == WizardStage.RUNNING || _state.value.wizard?.dnsProvisioning == true)) return
         _state.update { it.copy(route = ServersRoute.None, wizard = null, logs = null, error = "", busy = "") }
         refreshReach()
     }
@@ -585,6 +586,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun pickServer(id: String) {
+        if (_state.value.wizard?.dnsProvisioning == true) return
         val s = server(id) ?: return
         val w = _state.value.wizard ?: return
         val existing = s.tool(w.tool.id)
@@ -616,10 +618,15 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 backups.takeIf { DnsDelegation.backupProblem(baseDomain, it) == null }.orEmpty()))
         else copy(records = emptyList())
 
-    fun changeWizard(ui: WizardUi) = _state.update { it.copy(wizard = ui.withRecords(server(ui.serverId))) }
+    // A DNS write operates on a frozen preview. Do not let the form change its target mid-write.
+    fun changeWizard(ui: WizardUi) = _state.update { state ->
+        if (state.wizard?.dnsProvisioning == true) state
+        else state.copy(wizard = ui.withRecords(server(ui.serverId)))
+    }
 
     fun wizardBack() {
         val w = _state.value.wizard ?: return close()
+        if (w.dnsProvisioning) return
         val prev = when (w.stage) {
             WizardStage.CHECK -> if (_state.value.servers.count { w.tool.fitsOn(it.location) } > 1) WizardStage.SERVER else null
             WizardStage.SETTINGS -> WizardStage.CHECK
@@ -634,6 +641,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun wizardNext() {
         val w = _state.value.wizard ?: return
+        if (w.dnsProvisioning) return
         val next = when (w.stage) {
             WizardStage.CHECK -> if (hasSettings(w)) WizardStage.SETTINGS else WizardStage.SUMMARY
             WizardStage.SETTINGS -> WizardStage.SUMMARY
@@ -715,6 +723,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun install() {
         val w = _state.value.wizard ?: return
+        if (w.dnsProvisioning) return
         val s = server(w.serverId) ?: return
         val steps = when (w.tool.id) {
             ServerToolCatalog.DNSTT -> ToolScripts.DNSTT_STEPS
