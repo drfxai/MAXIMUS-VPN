@@ -95,7 +95,7 @@ object DnsWire {
  */
 object ResolverIntelligence {
 
-    data class Candidate(val label: String, val address: String, val origin: String)
+    data class Candidate(val label: String, val address: String, val origin: String, val port: Int = 53)
 
     enum class DnsStatus(val title: String) {
         DNS_FAILED("No answer"),
@@ -155,7 +155,8 @@ object ResolverIntelligence {
         /** Answered a TXT question with records (DNS tunnels carry data in TXT). */
         val txt: Boolean? = null,
         /** The large answer came back truncated over UDP. */
-        val truncated: Boolean? = null
+        val truncated: Boolean? = null,
+        val port: Int = 53
     ) {
         val status: DnsStatus get() = when {
             udp != true && tcp != true -> DnsStatus.DNS_FAILED
@@ -171,7 +172,7 @@ object ResolverIntelligence {
         fun toJson(): JSONObject = JSONObject().put("l", label).put("a", address).put("o", origin).put("n", networkKey)
             .put("u", udp ?: JSONObject.NULL).put("t", tcp ?: JSONObject.NULL).put("r", rttMs ?: JSONObject.NULL)
             .put("b", blockPage ?: JSONObject.NULL).put("h", nxdomainHijack ?: JSONObject.NULL).put("e", ednsSize ?: JSONObject.NULL)
-            .put("m", measuredAt).put("x", expiresAt)
+            .put("m", measuredAt).put("x", expiresAt).put("po", port)
             .put("q6", aaaa ?: JSONObject.NULL).put("tx", txt ?: JSONObject.NULL).put("tr", truncated ?: JSONObject.NULL)
 
         companion object {
@@ -179,7 +180,7 @@ object ResolverIntelligence {
                 fun b(k: String) = if (o.isNull(k)) null else o.getBoolean(k)
                 Result(o.getString("l"), o.getString("a"), o.optString("o"), o.getString("n"), b("u"), b("t"),
                     if (o.isNull("r")) null else o.getLong("r"), b("b"), b("h"), if (o.isNull("e")) null else o.getInt("e"), o.getLong("m"), o.getLong("x"),
-                    b("q6"), b("tx"), b("tr"))
+                    b("q6"), b("tx"), b("tr"), o.optInt("po", 53))
             }.getOrNull()
         }
     }
@@ -205,10 +206,29 @@ object ResolverIntelligence {
         Candidate("Electro", "78.157.42.100", "public-domestic")
     )
 
-    /** At most [max] resolvers: the network's own first, then public ones. */
+    /** Existing API: network DNS and public fallbacks, with a bounded probe budget. */
     fun candidates(networkDns: List<InetAddress>, max: Int = 7): List<Candidate> =
-        (networkDns.filter { it.address.size == 4 }.map { Candidate("Network DNS", it.hostAddress ?: "", "network") } + PUBLIC)
-            .filter { it.address.isNotBlank() }.distinctBy { it.address }.take(max)
+        candidates(networkDns, emptyList(), max)
+
+    /**
+     * Add user-entered DNS IP:port resolvers from Soar/Cotten profiles. No IP ranges, host name
+     * discovery, OS DNS changes or modification of saved profiles. Reject malformed/private loopback
+     * addresses using the same validator as the native engines.
+     */
+    fun candidates(networkDns: List<InetAddress>, manual: List<String>, max: Int = 16): List<Candidate> {
+        require(max in 1..64)
+        val personal = manual.take(64).mapNotNull { input ->
+            runCatching {
+                val text = com.example.vpn.sidecar.CottenDnsSidecar.resolver(input)
+                val port = text.substringAfterLast(':').toInt()
+                val ip = text.substringBeforeLast(':').removePrefix("[").removeSuffix("]")
+                Candidate("Personal DNS", ip, "manual", port)
+            }.getOrNull()
+        }
+        return (networkDns.map { Candidate("Network DNS", it.hostAddress.orEmpty(), "network") } +
+            personal + PUBLIC).filter { it.address.isNotBlank() }
+            .distinctBy { it.address to it.port }.take(max)
+    }
 
     /** Classifies a response to a foreign name and to a random never-existing name. Pure; tested. */
     fun judge(normal: DnsWire.Answer?, random: DnsWire.Answer?): Pair<Boolean?, Boolean?> {
@@ -229,9 +249,9 @@ object ResolverIntelligence {
         val server = InetAddress.getByName(c.address)
         val rnd = SecureRandom()
         val started = System.nanoTime()
-        val normal = runCatching { udp(network, server, DnsWire.query(rnd.nextInt(0xffff), PROBE_NAME, DnsWire.TYPE_A)) }.getOrNull()
+        val normal = runCatching { udp(network, server, DnsWire.query(rnd.nextInt(0xffff), PROBE_NAME, DnsWire.TYPE_A), port = c.port) }.getOrNull()
         val tcpStarted = System.nanoTime()
-        val tcpAnswer = runCatching { tcp(network, server, DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A)) }.getOrNull()
+        val tcpAnswer = runCatching { tcp(network, server, DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A), port = c.port) }.getOrNull()
         val rtt = normal?.let { (tcpStarted - started) / 1_000_000 }
             ?: tcpAnswer?.let { (System.nanoTime() - tcpStarted) / 1_000_000 }
         val tcpOk = tcpAnswer?.let { it.rcode == 0 && !it.truncated && it.addresses.isNotEmpty() } ?: false
@@ -239,15 +259,15 @@ object ResolverIntelligence {
         fun followup(name: String, type: Int, ednsSize: Int = 0): DnsWire.Answer? = runCatching {
             val q = DnsWire.query(rnd.nextInt(65536), name, type, ednsSize)
             if (normal != null) completeAnswer(
-                { runCatching { udp(network, server, q) }.getOrNull() },
-                { tcp(network, server, q) }
-            ) else if (tcpOk) tcp(network, server, q) else null
+                { runCatching { udp(network, server, q, port = c.port) }.getOrNull() },
+                { tcp(network, server, q, port = c.port) }
+            ) else if (tcpOk) tcp(network, server, q, port = c.port) else null
         }.getOrNull()
         val nonce = "mx" + java.lang.Long.toHexString(rnd.nextLong()).take(12)
         val random = followup("$nonce.$NX_ZONE", DnsWire.TYPE_A)
         // Keep UDP-size evidence separate: a TCP fallback must never count as an EDNS UDP pass.
         val edns = if (normal != null) runCatching {
-            udp(network, server, DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A, 1232))
+            udp(network, server, DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A, 1232), port = c.port)
         }.getOrNull() else null
         val aaaa = followup(PROBE_NAME, DnsWire.TYPE_AAAA)
         val txt = followup(NX_ZONE, DnsWire.TYPE_TXT, 1232)
@@ -257,7 +277,7 @@ object ResolverIntelligence {
         return Result(c.label, c.address, c.origin, networkKey, udp = normal?.let { it.rcode == 0 && !it.truncated && it.addresses.isNotEmpty() } ?: false, tcp = tcpOk, rttMs = rtt, blockPage = blockPage,
             nxdomainHijack = hijack, ednsSize = edns?.let { if (!it.truncated && it.rcode == 0 && it.addresses.isNotEmpty()) 1232 else null }, measuredAt = now, expiresAt = now + TTL_MS,
             aaaa = aaaa?.let { it.rcode == 0 && !it.truncated && it.types.contains(DnsWire.TYPE_AAAA) }, txt = txt?.let { it.rcode == 0 && !it.truncated && it.types.contains(DnsWire.TYPE_TXT) },
-            truncated = listOfNotNull(edns, txt).takeIf { it.isNotEmpty() }?.any { it.truncated })
+            truncated = listOfNotNull(edns, txt).takeIf { it.isNotEmpty() }?.any { it.truncated }, port = c.port)
     }
 
     /** [count] small A queries; each socket operation has a bounded timeout. */
@@ -271,9 +291,9 @@ object ResolverIntelligence {
             val t0 = System.nanoTime()
             val ok = runCatching {
                 val query = DnsWire.query(rnd.nextInt(65536), PROBE_NAME, DnsWire.TYPE_A)
-                val answer = if (tcpOnly) tcp(network, server, query, BURST_TIMEOUT_MS)
+                val answer = if (tcpOnly) tcp(network, server, query, BURST_TIMEOUT_MS, r.port)
                     else completeAnswer(
-                        { runCatching { udp(network, server, query, BURST_TIMEOUT_MS) }.getOrNull() },
+                        { runCatching { udp(network, server, query, BURST_TIMEOUT_MS, r.port) }.getOrNull() },
                         { if (r.tcp == true) { usedTcp = true; tcp(network, server, query, BURST_TIMEOUT_MS) } else null }
                     )
                 answer
@@ -307,11 +327,11 @@ object ResolverIntelligence {
                 .thenByDescending { it.reliability }
                 .thenBy { it.rttMs ?: Long.MAX_VALUE })
 
-    private fun udp(network: Network?, server: InetAddress, query: ByteArray, timeoutMs: Int = TIMEOUT_MS): DnsWire.Answer? {
+    private fun udp(network: Network?, server: InetAddress, query: ByteArray, timeoutMs: Int = TIMEOUT_MS, port: Int = 53): DnsWire.Answer? {
         DatagramSocket().use { s ->
             network?.bindSocket(s)
             s.soTimeout = timeoutMs
-            s.connect(server, 53)
+            s.connect(server, port)
             s.send(DatagramPacket(query, query.size))
             val buf = ByteArray(4096)
             val p = DatagramPacket(buf, buf.size)
@@ -320,10 +340,10 @@ object ResolverIntelligence {
         }
     }
 
-    private fun tcp(network: Network?, server: InetAddress, query: ByteArray, timeoutMs: Int = TIMEOUT_MS): DnsWire.Answer? {
+    private fun tcp(network: Network?, server: InetAddress, query: ByteArray, timeoutMs: Int = TIMEOUT_MS, port: Int = 53): DnsWire.Answer? {
         val socket = network?.socketFactory?.createSocket() ?: Socket()
         socket.use { s ->
-            s.connect(InetSocketAddress(server, 53), timeoutMs)
+            s.connect(InetSocketAddress(server, port), timeoutMs)
             s.soTimeout = timeoutMs
             val out = DataOutputStream(s.getOutputStream())
             out.writeShort(query.size); out.write(query); out.flush()
