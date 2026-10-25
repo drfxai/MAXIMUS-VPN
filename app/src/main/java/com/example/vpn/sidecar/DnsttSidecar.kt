@@ -54,6 +54,7 @@ class DnsttSidecar : SidecarEngine {
     override fun problem(profile: VlessProfile): String? = runCatching { settings(profile) }.exceptionOrNull()?.message
 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
+        require(context.upstreamSocks == null) { "Dnstt cannot skip a requested carrier hop" }
         val s = settings(profile)
         return SidecarLaunch(
             command = command(s, context.executable.absolutePath, context.socksPort),
@@ -348,3 +349,4 @@ class DnsttSidecar : SidecarEngine {
         private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
     }
 }
+

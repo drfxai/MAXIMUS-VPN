@@ -23,9 +23,7 @@ class SoarSidecar : SidecarEngine {
         o.put("listen", "127.0.0.1:${context.socksPort}").put("username", context.socksUser).put("password", context.socksPass)
         context.workDir.mkdirs()
         val file = File(context.workDir, "soar.json")
-        check(file.createNewFile()) { "SOAR work file already exists" }
-        check(file.setReadable(false, false) && file.setWritable(false, false) && file.setReadable(true, true) && file.setWritable(true, true))
-        file.writeText(o.toString())
+        PrivateEngineFile.write(file, o.toString())
         // Local listening is readiness only; EngineProbe and VpnService still verify real traffic.
         return SidecarLaunch(listOf(context.executable.absolutePath, "-config", file.absolutePath), socksAuth = true)
     }
@@ -89,3 +87,4 @@ class SoarSidecar : SidecarEngine {
         }
     }
 }
+

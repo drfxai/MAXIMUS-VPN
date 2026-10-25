@@ -30,6 +30,7 @@ object MasqueSidecar : SidecarEngine {
         profile.protocolType == ProtocolType.MIXED && ProfileExtras.read(profile).optString(KEY_ENGINE) == ID
 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
+        require(context.upstreamSocks == null) { "Masque cannot skip a requested carrier hop" }
         val config = File(context.workDir, CONFIG_FILE)
         if (!config.isFile || config.length() == 0L) register(context.executable, config)
         // usque's SOCKS server checks the login only when both are given, so the per-connection token
@@ -119,3 +120,4 @@ object MasqueSidecar : SidecarEngine {
     private const val READY_TIMEOUT_MS = 30_000L
     private const val REGISTER_TIMEOUT_MS = 30_000L
 }
+

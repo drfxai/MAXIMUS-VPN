@@ -47,7 +47,7 @@ class TorSidecar(
         // A chained transport delegates DNS to its upstream hop. Direct WebTunnel needs the same
         // poison-resistant resolution as ordinary proxy profiles, while retaining its URL and SNI.
         val bridges = if (context.upstreamSocks != null) saved else WebTunnelEndpoints.resolve(saved,
-            privateDns = context.mode == com.example.data.model.OperationalMode.GOD_MODE)
+            privateDns = com.example.vpn.safety.OperatingModePolicy.of(context.mode).privateServerLookup)
         val pt = PluggableTransports.start(context.executable, transportsOf(bridges), File(context.workDir, "pt_state"), context.upstreamSocks)
         val tor = try {
             start(torrcWithPorts(bridges, context.socksPort, pt.methods, context.upstreamSocks), context.socksPort)
@@ -174,3 +174,4 @@ class TorSidecar(
             profile.extraSettings.takeIf { it.isNotBlank() }?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
     }
 }
+

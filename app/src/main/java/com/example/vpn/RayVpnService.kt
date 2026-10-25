@@ -160,6 +160,9 @@ class RayVpnService : VpnService() {
     private var tunnelManager: TunnelManager? = null
     /** The separate engine program carrying traffic for the current profile, if any. */
     @Volatile private var sidecar: com.example.vpn.sidecar.RunningEngine? = null
+    private var sidecarForwardProfile: VlessProfile? = null
+    private var sidecarNetwork: String? = null
+    private var sidecarOwnerFingerprint: String? = null
 
     /**
      * The local port of the engine program this session forwards to, when there is one. The app is left
@@ -275,17 +278,28 @@ class RayVpnService : VpnService() {
         }
     }
 
-    /**
-     * The modes route differently (see OperatingModePolicy), so a switch while connected reconnects
-     * the same server under the new mode. The traffic block holds during the reconnect.
-     */
+    /** Rebuild routing under the new policy without bootstrapping an unchanged reviewed sidecar. */
     private suspend fun handleLiveModeSwitch(
         oldMode: com.example.data.model.OperationalMode,
         newMode: com.example.data.model.OperationalMode
     ) {
-        val safeProfileName = com.example.core.SecretRedactor.redact(activeProfile?.name ?: "")
-        XrayLogManager.i("VPN", "Mode switched from ${oldMode.name} to ${newMode.name}; reconnecting '$safeProfileName' under the new mode.")
-        activeProfile?.let { connect(it) }
+        val ticket = lifecycle.current()
+        connectionMutex.withLock {
+            if (!lifecycle.isCurrent(ticket) || !_vpnState.value.isTunnelUp ||
+                settingsRepository.getSettings().operationalMode != newMode) return@withLock
+            val profile = activeProfile ?: return@withLock
+            val engine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
+            val retain = com.example.vpn.sidecar.ModeSwitchReuse.allowed(
+                engine?.id, _vpnState.value.isConnected, sidecar?.isAlive == true,
+                sidecarForwardProfile != null && sidecarOwnerFingerprint == profile.effectiveFingerprint,
+                sidecarNetwork != null && sidecarNetwork == ledgerNetwork()
+            ) && (newMode != com.example.data.model.OperationalMode.GHOST_RIDER || engine?.id == "tor")
+            XrayLogManager.i("VPN", "Mode switched from ${oldMode.name} to ${newMode.name}; " +
+                if (retain) "applying routing while preserving the running ${engine?.id} engine; traffic will be reverified."
+                else "applying routing with a fresh engine start.")
+            lifecycle.newIntent() // Older queued failover must not undo the user's new mode (especially TRADE).
+            connectLocked(profile, reuseSidecar = if (retain) sidecarForwardProfile else null)
+        }
     }
 
     /** Records whether Android blocks traffic if the app dies, and says what to change when it does not. */
@@ -612,7 +626,8 @@ class RayVpnService : VpnService() {
         smart: Boolean = false,
         exclude: Set<String> = emptySet(),
         startedByUser: Boolean = false,
-        force: Boolean = false
+        force: Boolean = false,
+        reuseSidecar: VlessProfile? = null
     ): Unit = withContext(Dispatchers.IO) {
         // The saved profile the connection belongs to; a same-server switch below can change it.
         var requestedProfile = userProfile
@@ -644,7 +659,7 @@ class RayVpnService : VpnService() {
         try {
             supervisor.requestProtection()
             ensureBlockingInterface()
-            disconnectResources()
+            disconnectResources(preserveSidecar = reuseSidecar != null)
             protectionFailureHandled.set(false)
 
             // 1. Diagnostic step 1: Validate Android VPN permission
@@ -665,7 +680,7 @@ class RayVpnService : VpnService() {
             privateServerLookup = policy.privateServerLookup
             val settings = policy.apply(settingsRepository.getSettings())
             // Trade mode and the power button pin the config: never race, never switch it for anything.
-            val exact = exactSession
+            val exact = exactSession || reuseSidecar != null
             val lockExit = policy.lockExit || exact
             val raceFirst = !lockExit && (smart || policy.alwaysSmartConnect)
 
@@ -1296,11 +1311,19 @@ class RayVpnService : VpnService() {
             if (settings.preferredEngine == EngineType.MIHOMO) {
                 XrayLogManager.w("VPN", "The Mihomo engine has no native core in this build; using Xray instead.")
             }
-            if (engineChain != null) profile = startChain(engineChain, settings)
+            if (reuseSidecar != null) {
+                check(sidecar?.isAlive == true && sidecarNetwork == ledgerNetwork()) {
+                    "Preserved engine stopped or network changed during mode switch"
+                }
+                profile = reuseSidecar
+            } else if (engineChain != null) profile = startChain(engineChain, settings)
             else if (sidecarEngine != null) profile = startSidecar(sidecarEngine, profile, settings)
             engineEndpoint = if (sidecarEngine?.id == com.example.vpn.sidecar.ByedpiSidecar.ID)
                 com.example.vpn.sidecar.ByedpiSidecar.healthEndpoint(profile)
                 else if (engineChain != null || sidecarEngine != null) com.example.vpn.verify.Socks5.endpointOf(profile) else null
+            sidecarForwardProfile = profile.takeIf { sidecar != null }
+            sidecarNetwork = ledgerNetwork().takeIf { sidecar != null }
+            sidecarOwnerFingerprint = requestedProfile.effectiveFingerprint.takeIf { sidecar != null }
             val runtime = EngineSelectionPolicy.select(profile)
             val engineId = com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
             if (!engineBreaker.allows(engineId)) {
@@ -1447,7 +1470,7 @@ class RayVpnService : VpnService() {
             // Refresh due subscriptions through the new tunnel: their addresses may be blocked outside it.
             serviceScope.launch {
                 kotlinx.coroutines.delay(SUBSCRIPTION_REFRESH_DELAY_MS)
-                if (_vpnState.value.status != ConnectionStatus.CONNECTED) return@launch
+                if (_vpnState.value.status != ConnectionStatus.CONNECTED || _vpnState.value.attemptId != attemptId) return@launch
                 runCatching { com.example.RayApplication.instance.subscriptionManager.refreshDue() }
                     .onSuccess { results ->
                         val restored = results.filter { it.isSuccess }.sumOf { it.addedCount }
@@ -1683,11 +1706,13 @@ class RayVpnService : VpnService() {
                 val launch = engine.prepare(hopProfile, settings, context)
                 val process = com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
                     ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
-                if (!process.awaitReady(launch.readyTimeoutMs)) {
+                try {
+                    check(process.awaitReady(launch.readyTimeoutMs)) { "The ${engine.id} engine did not start" }
+                    process to launch
+                } catch (t: Throwable) {
                     process.stop()
-                    error("The ${engine.id} engine did not start")
+                    throw t
                 }
-                process to launch
             }
         )
         sidecar = running
@@ -2043,12 +2068,12 @@ class RayVpnService : VpnService() {
         XrayLogManager.appendLog("VPN successfully disconnected and interface closed.", "VPN")
     }
 
-    private fun disconnectResources() {
+    private fun disconnectResources(preserveSidecar: Boolean = false) {
         // Establish the replacement blackhole before stopping either engine. Native
         // startup failures may close their fd, so retaining only that fd is insufficient.
         val previousInterface = vpnInterface
         if (protectionRequested) {
-            try { vpnInterface = createBlockingInterface() }
+            try { vpnInterface = createBlockingInterface(excludeApp = preserveSidecar) }
             catch (e: Exception) { XrayLogManager.e("VPN", "Unable to replace traffic protection interface", e) }
         }
         durationJob?.cancel()
@@ -2071,8 +2096,13 @@ class RayVpnService : VpnService() {
 
         // Stop Xray before closing the TUN descriptor it owns.
         activeEngine.stop()
-        sidecar?.stop()
-        sidecar = null
+        if (!preserveSidecar) {
+            sidecar?.stop()
+            sidecar = null
+            sidecarForwardProfile = null
+            sidecarNetwork = null
+            sidecarOwnerFingerprint = null
+        }
 
         if (previousInterface !== vpnInterface) {
             try { previousInterface?.close() } catch (_: Exception) {}
@@ -2238,3 +2268,4 @@ class RayVpnService : VpnService() {
         super.onDestroy()
     }
 }
+
