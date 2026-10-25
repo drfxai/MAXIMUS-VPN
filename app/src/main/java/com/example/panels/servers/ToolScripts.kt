@@ -56,6 +56,8 @@ object ToolScripts {
     val UNITS: Map<String, List<String>> = mapOf(
         ServerToolCatalog.XUI to listOf("x-ui"),
         ServerToolCatalog.DNSTT to listOf("maximus-socks", "maximus-dnstt"),
+        ServerToolCatalog.SOAR to listOf("maximus-soar"),
+        ServerToolCatalog.COTTEN to listOf("maximus-cotten"),
         ServerToolCatalog.HYSTERIA2 to listOf("maximus-hysteria"),
         ServerToolCatalog.MAXIMUS_TUNNEL to listOf("maximus-tunnel"),
         ServerToolCatalog.FAIL2BAN to listOf("fail2ban")
@@ -568,6 +570,21 @@ object ToolScripts {
                 §SUDO systemctl daemon-reload
                 fw_close 53 udp
                 ${port?.let { "fw_close $it udp" } ?: ":"}
+            """
+            ServerToolCatalog.SOAR -> """
+                §SUDO systemctl disable --now maximus-soar >/dev/null 2>&1 || true
+                §SUDO rm -f /etc/systemd/system/maximus-soar.service /usr/local/bin/maximus-soar-server
+                §SUDO rm -rf /etc/maximus/soar
+                §SUDO systemctl daemon-reload
+                fw_close 53 udp
+            """
+            ServerToolCatalog.COTTEN -> """
+                §SUDO systemctl disable --now maximus-cotten >/dev/null 2>&1 || true
+                §SUDO rm -f /etc/systemd/system/maximus-cotten.service /usr/local/bin/maximus-cotten-server
+                §SUDO rm -rf /etc/maximus/cotten
+                §SUDO systemctl daemon-reload
+                fw_close 53 udp
+                fw_close 53 tcp
             """
             ServerToolCatalog.HYSTERIA2 -> """
                 §SUDO systemctl disable --now maximus-hysteria >/dev/null 2>&1 || true
