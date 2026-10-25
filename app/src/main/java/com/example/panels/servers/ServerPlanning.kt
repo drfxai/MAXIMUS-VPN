@@ -48,6 +48,12 @@ object InstallChecks {
             ServerToolCatalog.HIDDIFY -> addAll(com.example.panels.servers.panel.HiddifyPanelProvider.checks(server, facts))
             ServerToolCatalog.XUI -> if (facts.hiddifyInstalled || server.tool(ServerToolCatalog.HIDDIFY) != null)
                 add(CheckItem("No Hiddify", false, "This server runs Hiddify, which needs the server to itself"))
+            ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> {
+                val conflict = 53 in facts.udpPorts || (tool.id == ServerToolCatalog.COTTEN && 53 in facts.tcpPorts)
+                add(CheckItem("Public DNS port 53", !conflict,
+                    if (conflict) "Already in use; stop or move the service before installing" else "available",
+                    blocking = conflict))
+            }
             ServerToolCatalog.DNSTT -> {
                 val dnsBusy = 53 in facts.udpPorts
                 add(CheckItem("UDP 53", !dnsBusy,
