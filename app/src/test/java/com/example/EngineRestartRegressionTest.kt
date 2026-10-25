@@ -47,6 +47,26 @@ class EngineRestartRegressionTest {
         } finally { dir.deleteRecursively(); outside.delete() }
     }
 
+    @Test fun dnsAndMasqueAdaptersRefuseUnsupportedCarrierInsteadOfBypassingIt() {
+        val ctx = SidecarContext(File("."), File("unused"), 41001, "user", "pass", OperationalMode.DAILY, upstreamSocks = 42001)
+        listOf(DnsttSidecar(), SlipstreamSidecar(), MasqueSidecar).forEach { engine ->
+            assertThrows(IllegalArgumentException::class.java) {
+                engine.prepare(MasqueSidecar.profile(), AppSettings(), ctx)
+            }
+        }
+    }
+
+    @Test fun mihomoPassesAuthenticatedCarrierCredentialsAndRejectsPartialPair() {
+        val ctx = SidecarContext(File("."), File("unused"), 41001, "user", "pass", OperationalMode.DAILY,
+            upstreamSocks = 42001, upstreamUser = "carrier-user", upstreamPass = "carrier-pass")
+        val proxy = JSONObject().put("type", "socks5").put("server", "example.com").put("port", 1080)
+        val hops = MihomoSidecar.config(proxy, ctx).getJSONArray("proxies")
+        assertEquals("maximus-upstream", hops.getJSONObject(0).getString("dialer-proxy"))
+        assertEquals("carrier-user", hops.getJSONObject(1).getString("username"))
+        assertEquals("carrier-pass", hops.getJSONObject(1).getString("password"))
+        assertThrows(IllegalArgumentException::class.java) { MihomoSidecar.config(proxy, ctx.copy(upstreamPass = null)) }
+    }
+
     @Test fun reuseRejectsChangedNetworkDeadEngineAndUnverifiedRoute() {
         listOf("tor", "soar", "cotten-dns").forEach { id ->
             assertTrue(ModeSwitchReuse.allowed(id, true, true, true, true))

@@ -48,6 +48,7 @@ class SlipstreamSidecar : SidecarEngine {
         runCatching { settings(profile) }.exceptionOrNull()?.message
 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
+        require(context.upstreamSocks == null) { "Slipstream cannot skip a requested carrier hop" }
         val s = settings(profile)
         val certFile = s.certPem.takeIf { it.isNotBlank() }?.let {
             File(context.workDir, CERT_FILE).apply {
@@ -255,3 +256,4 @@ class SlipstreamSidecar : SidecarEngine {
         }.getOrElse { throw IllegalArgumentException("The pinned certificate in the link is not valid.") }
     }
 }
+

@@ -12,9 +12,11 @@ Baseline: main fa9a75b3a4e28685cf91dcedc5cd025b93fb8f45, versionName 1.0.2 / ver
 - A cancelled/throwing chain-hop readiness wait now stops its process before propagating the exception; the chain runner cannot clean a hop that was never returned to it.
 - A delayed post-connect subscription refresh now checks its originating attempt ID.
 
+- DNSTT, Slipstream and MASQUE now refuse an unsupported upstream carrier at the adapter boundary; they must not silently dial directly. Mihomo now forwards upstream SOCKS credentials and rejects incomplete pairs. Added regression coverage.
+
 ## Review scope and limits
 
-Read current service/Smart Connect flow, failover manager, LAB controller, panel manager, common sidecar lifecycle and Tor/SOAR/CottenDNS adapters. This is not an exhaustive audit of every engine or server installer. No guarantee of zero bugs is possible.
+Read current service/Smart Connect flow, failover manager, LAB controller, panel manager, common sidecar lifecycle and all shipped sidecar adapters. This is not an exhaustive audit of every engine or server installer. No guarantee of zero bugs is possible.
 
 Remaining: actual per-bridge cooldown/circuit-aware scheduling, unified watchdog decisions, exact Android TUN and external DNS leak proof, native-engine crash/device tests, all-engine mode-transition matrix, panel install/rollback on real servers, UI benchmarks. HTTP 503 remains a subscription-service fault requiring its own investigation. Log aggregation does not suppress Tor's retries.
 

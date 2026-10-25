@@ -95,6 +95,9 @@ object MihomoSidecar : SidecarEngine {
                 node.put("dialer-proxy", UPSTREAM)
                 val upstream = JSONObject().put("name", UPSTREAM).put("type", "socks5")
                     .put("server", "127.0.0.1").put("port", up)
+                require((context.upstreamUser == null) == (context.upstreamPass == null)) { "Incomplete carrier credentials" }
+                context.upstreamUser?.let { upstream.put("username", it) }
+                context.upstreamPass?.let { upstream.put("password", it) }
                 base.put("proxies", JSONArray().put(node).put(upstream))
             }
         }
@@ -172,3 +175,4 @@ object MihomoSidecar : SidecarEngine {
         return proxy
     }
 }
+
