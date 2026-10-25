@@ -157,8 +157,13 @@ internal fun ServersOverlay(
                     onRotatePort = { vm.rotatePort(id, it) },
                     onRotateKey = { vm.rotateKey(id, it) },
                     onOpenPanel = { toolId ->
-                        if (toolId == ServerToolCatalog.HIDDIFY) vm.hiddifyAdminUrl(id)?.let { url ->
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                        if (toolId == ServerToolCatalog.HIDDIFY) {
+                            vm.openHiddifyAdmin(id) { url ->
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                                    .onFailure {
+                                        android.widget.Toast.makeText(context, "Could not open Hiddify in a browser", android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                            }
                         } else vm.panelIdFor(id)?.let { pid -> vm.close(); onOpenPanel(pid) }
                     },
                     onBackup = { vm.backup(id, it) },
