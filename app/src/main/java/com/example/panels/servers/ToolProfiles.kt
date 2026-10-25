@@ -3,10 +3,56 @@ package com.example.panels.servers
 import com.example.data.model.VlessProfile
 import com.example.vpn.engine.ProtocolLinks
 import com.example.vpn.sidecar.DnsttSidecar
+import com.example.vpn.sidecar.SoarSidecar
+import com.example.vpn.sidecar.CottenDnsSidecar
+import org.json.JSONObject
+import org.json.JSONArray
+import java.util.Base64
 import java.net.URLEncoder
 
 /** The VPN profiles and share links for tools installed on the user's servers. */
 object ToolProfiles {
+    const val SOAR_PUBKEY = "soarPubkey"
+    const val COTTEN_KEY = "cottenKey"
+    private val fallbackDns = listOf("1.1.1.1", "8.8.8.8")
+
+    fun soarProfile(server: ManagedServer, tool: InstalledTool): VlessProfile =
+        SoarSidecar.profile(tool.settings[DNSTT_DOMAIN].orEmpty(), tool.settings[SOAR_PUBKEY].orEmpty(),
+            fallbackDns, JSONObject(), "Soar · ${server.displayName}")
+
+    fun cottenProfile(server: ManagedServer, tool: InstalledTool): VlessProfile =
+        CottenDnsSidecar.profile(CottenDnsSidecar.Settings(
+            domain = tool.settings[DNSTT_DOMAIN].orEmpty(),
+            key = tool.settings[COTTEN_KEY].orEmpty(),
+            resolvers = fallbackDns,
+            mode = "legacy"
+        ), "CottenDNS · ${server.displayName}")
+
+    private fun whiteLink(engine: String, profile: JSONObject): String {
+        val root = JSONObject().put("schema", "whitedns.profile").put("version", 1).put("profile", profile)
+        val text = Base64.getUrlEncoder().withoutPadding().encodeToString(root.toString().toByteArray(Charsets.UTF_8))
+        return "$engine://$text"
+    }
+
+    fun soarLink(server: ManagedServer, tool: InstalledTool): String {
+        val domain = tool.settings[DNSTT_DOMAIN].orEmpty()
+        val key = tool.settings[SOAR_PUBKEY].orEmpty()
+        SoarSidecar.profile(domain, key, fallbackDns, JSONObject(), "Validate")
+        return whiteLink("soar", JSONObject().put("id", server.id).put("name", "Soar · ${server.displayName}")
+            .put("resolvers", JSONArray(fallbackDns))
+            .put("server", JSONObject().put("domain", domain).put("public_key", key)))
+    }
+
+    fun cottenLink(server: ManagedServer, tool: InstalledTool): String {
+        val domain = tool.settings[DNSTT_DOMAIN].orEmpty()
+        val key = tool.settings[COTTEN_KEY].orEmpty()
+        CottenDnsSidecar.validate(CottenDnsSidecar.Settings(domain, key, fallbackDns, mode = "legacy"))
+        return whiteLink("cottendns", JSONObject().put("engine", "cottendns")
+            .put("id", server.id).put("name", "CottenDNS · ${server.displayName}")
+            .put("resolvers", JSONArray(fallbackDns))
+            .put("server", JSONObject().put("domain", domain).put("encryption_key", key).put("encryption_method", 5)))
+    }
+
     const val DNSTT_DOMAIN = "domain"
     const val DNSTT_BASE = "baseDomain"
     const val DNSTT_LABEL = "label"
