@@ -96,7 +96,7 @@ data class WizardUi(
     val backups: List<String> get() = DnsDelegation.parseBackups(backupDomains)
     val checksPass: Boolean get() = checks != null && checks.none { it.blocking }
     val settingsValid: Boolean get() = when (tool.id) {
-        ServerToolCatalog.DNSTT -> DnsDelegation.problem(baseDomain, tunnelLabel) == null &&
+        ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> DnsDelegation.problem(baseDomain, tunnelLabel) == null &&
             DnsDelegation.backupProblem(baseDomain, backups) == null
         ServerToolCatalog.HYSTERIA2 -> port.isBlank() || port.toIntOrNull() in 1..65535
         else -> true
@@ -256,19 +256,21 @@ private fun CheckRow(c: CheckItem) {
 @Composable
 private fun SettingsStage(ui: WizardUi, actions: WizardActions) {
     when (ui.tool.id) {
-        ServerToolCatalog.DNSTT -> {
-            SectionLabel("Domain")
+        ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> {
+            SectionLabel("Delegated domain")
             SvField(ui.baseDomain, { actions.onChange(ui.copy(baseDomain = it.trim(), dnsChecks = null)) }, "Your domain",
                 placeholder = "example.com", keyboard = KeyboardType.Uri, mono = true,
                 supporting = "Any domain you own. The tunnel uses one name under it.")
             SvField(ui.tunnelLabel, { actions.onChange(ui.copy(tunnelLabel = it.trim().lowercase().take(22), dnsChecks = null)) },
                 "Tunnel name", mono = true, supporting = "Short is faster: every DNS query carries it.")
+            if (ui.tool.id == ServerToolCatalog.DNSTT) {
             SectionLabel("Backup domains")
             val backupProblem = DnsDelegation.backupProblem(ui.baseDomain, ui.backups)
             SvField(ui.backupDomains, { actions.onChange(ui.copy(backupDomains = it.take(300), dnsChecks = null)) }, "Backup domains (optional)",
                 placeholder = "example.net, example.org", keyboard = KeyboardType.Uri, mono = true,
                 supporting = backupProblem ?: "Other domains you own, up to ${DnsDelegation.MAX_BACKUPS}. If the main one is blocked, " +
                     "the app moves to the next without dropping the connection.")
+            }
             if (ui.records.isNotEmpty()) DnsRecordsCard(ui, actions)
         }
         ServerToolCatalog.HYSTERIA2 -> {
@@ -357,7 +359,7 @@ private fun SummaryStage(ui: WizardUi) {
             RowDivider(0.dp)
         }
         when (ui.tool.id) {
-            ServerToolCatalog.DNSTT -> KeyValue("Tunnel name", DnsDelegation.tunnelDomain(ui.baseDomain, ui.tunnelLabel))
+            ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> KeyValue("Tunnel name", DnsDelegation.tunnelDomain(ui.baseDomain, ui.tunnelLabel))
             ServerToolCatalog.HYSTERIA2 -> KeyValue("UDP port", ui.port.ifBlank { "random" })
         }
         if (ui.renew) KeyValue("Keys", "new")
