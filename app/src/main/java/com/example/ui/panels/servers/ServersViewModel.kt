@@ -291,6 +291,12 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             ServerToolCatalog.XUI -> ToolRowUi(id, title, status, running, t.port?.let { "Panel on port $it" }.orEmpty(),
                 canRestart = true, canLogs = true, canOpenPanel = t.panelId != null,
                 canBackup = true, canStart = f != null && !running, canStop = f != null && running)
+            ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> ToolRowUi(id, title, status, running,
+                t.settings[ToolProfiles.DNSTT_DOMAIN].orEmpty(),
+                canTest = true, canRestart = true, canLogs = true,
+                link = runCatching {
+                    if (id == ServerToolCatalog.SOAR) ToolProfiles.soarLink(s, t) else ToolProfiles.cottenLink(s, t)
+                }.getOrNull(), testResult = test?.second, testOk = test?.first)
             ServerToolCatalog.DNSTT -> ToolRowUi(id, title, status, running, t.settings[ToolProfiles.DNSTT_DOMAIN].orEmpty(),
                 canTest = true, canRestart = true, canLogs = true, canRotateKey = true,
                 link = runCatching { ToolProfiles.dnsttLink(s, t) }.getOrNull(), testResult = test?.second, testOk = test?.first)
@@ -489,6 +495,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val repo = RayApplication.instance.serverRepository
         return t.profileId?.let { repo.getProfileById(it) } ?: when (toolId) {
             ServerToolCatalog.DNSTT -> ToolProfiles.dnsttProfile(s, t)
+            ServerToolCatalog.SOAR -> ToolProfiles.soarProfile(s, t)
+            ServerToolCatalog.COTTEN -> ToolProfiles.cottenProfile(s, t)
             ServerToolCatalog.HYSTERIA2 -> ToolProfiles.hysteriaProfile(s, t)
             else -> null
         }
@@ -613,9 +621,10 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun WizardUi.withRecords(s: ManagedServer?): WizardUi =
-        if (tool.id == ServerToolCatalog.DNSTT && s != null && DnsDelegation.problem(baseDomain, tunnelLabel) == null)
+        if (tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) &&
+            s != null && DnsDelegation.problem(baseDomain, tunnelLabel) == null)
             copy(records = DnsDelegation.records(baseDomain, tunnelLabel, s.host,
-                backups.takeIf { DnsDelegation.backupProblem(baseDomain, it) == null }.orEmpty()))
+                backups.takeIf { tool.id == ServerToolCatalog.DNSTT && DnsDelegation.backupProblem(baseDomain, it) == null }.orEmpty()))
         else copy(records = emptyList())
 
     // A DNS write operates on a frozen preview. Do not let the form change its target mid-write.
@@ -637,7 +646,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         if (prev == null) close() else _state.update { it.copy(wizard = w.copy(stage = prev)) }
     }
 
-    private fun hasSettings(w: WizardUi) = w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.HYSTERIA2)
+    private fun hasSettings(w: WizardUi) = w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.HYSTERIA2)
 
     fun wizardNext() {
         val w = _state.value.wizard ?: return
@@ -680,7 +689,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun provisionDns() {
         val w = _state.value.wizard ?: return
-        if (w.tool.id != ServerToolCatalog.DNSTT || w.records.isEmpty() ||
+        if (w.tool.id !in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) || w.records.isEmpty() ||
             w.dnsProvisioning || w.dnsChecking) return
         _state.update { it.copy(wizard = w.copy(dnsProvisioning = true, dnsProvisionResult = "")) }
         viewModelScope.launch {
@@ -727,6 +736,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val s = server(w.serverId) ?: return
         val steps = when (w.tool.id) {
             ServerToolCatalog.DNSTT -> ToolScripts.DNSTT_STEPS
+            ServerToolCatalog.SOAR -> com.example.panels.servers.DnsServerScripts.SOAR_STEPS
+            ServerToolCatalog.COTTEN -> com.example.panels.servers.DnsServerScripts.COTTEN_STEPS
             ServerToolCatalog.HYSTERIA2 -> ToolScripts.HYSTERIA_STEPS
             ServerToolCatalog.XUI -> manager.xuiSteps
             ServerToolCatalog.HIDDIFY -> HiddifyScripts.INSTALL_STEPS
@@ -758,7 +769,9 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                     st.copy(wizard = st.wizard?.copy(
                         stage = WizardStage.DONE, currentStep = steps.size + 1, summary = out.summary,
                         link = out.link, profileName = out.profile?.name, serverId = saved.id,
-                        records = if (w.tool.id == ServerToolCatalog.DNSTT) DnsDelegation.records(w.baseDomain, w.tunnelLabel, saved.host, w.backups) else emptyList()
+                        records = if (w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN))
+                            DnsDelegation.records(w.baseDomain, w.tunnelLabel, saved.host,
+                                if (w.tool.id == ServerToolCatalog.DNSTT) w.backups else emptyList()) else emptyList()
                     ))
                 }
                 emit(ServersEvent.Success)
