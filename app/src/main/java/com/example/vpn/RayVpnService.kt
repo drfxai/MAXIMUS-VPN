@@ -297,7 +297,7 @@ class RayVpnService : VpnService() {
             XrayLogManager.i("VPN", "Mode switched from ${oldMode.name} to ${newMode.name}; " +
                 if (retain) "applying routing while preserving the running ${engine?.id} engine; traffic will be reverified."
                 else "applying routing with a fresh engine start.")
-            connectLocked(profile, reuseSidecar = if (retain) sidecarForwardProfile else null)
+            lifecycle.newIntent() // Older queued failover must not undo the user\'s new mode (especially TRADE).\n            connectLocked(profile, reuseSidecar = if (retain) sidecarForwardProfile else null)
         }
     }
 
