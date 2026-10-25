@@ -58,13 +58,15 @@ class CloudflareDnsttProvisionTest {
     @Test fun conflictPreflightNeverPostsPartialRecords() {
         MockWebServer().use { server ->
             server.enqueue(ok(zone))
-            server.enqueue(ok("""{"success":true,"result":[{"id":"used","name":"ns.example.com","type":"A","content":"198.51.100.1","proxied":false}]}"""))
             server.enqueue(ok(empty))
+            server.enqueue(ok("""{"success":true,"result":[{"id":"used","name":"t.example.com","type":"A","content":"198.51.100.1","proxied":false}]}"""))
             val api = CloudflareDnsApi(base = server.url("/client/v4").toString().trimEnd('/'))
             assertNotNull(runCatching {
                 api.provisionDnstt("tok", DnsDelegation.records("example.com", "t", "203.0.113.10"))
             }.exceptionOrNull())
             assertEquals(3, server.requestCount)
+            // Both preflight reads happened; the second is a conflict. Nothing was written.
+            repeat(3) { assertEquals("GET", server.takeRequest().method) }
         }
     }
 }
