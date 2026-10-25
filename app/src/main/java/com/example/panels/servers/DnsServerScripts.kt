@@ -29,8 +29,20 @@ object DnsServerScripts {
             fi
             ensure_user
             [ ! -f /etc/systemd/system/maximus-soar.service ] || { echo 'Already installed; do not replace a running server' >&2; exit 22; }
+            [ ! -e $dir ] || { echo 'Previous Soar data found; refusing to overwrite it' >&2; exit 22; }
             stage=§(mktemp -d)
-            trap 'rm -rf "§stage"' EXIT
+            mutated=0
+            rollback() {
+              rc=§?
+              if [ "§rc" -ne 0 ] && [ "§mutated" = 1 ]; then
+                §SUDO systemctl disable --now maximus-soar >/dev/null 2>&1 || true
+                §SUDO rm -f /etc/systemd/system/maximus-soar.service /usr/local/bin/maximus-soar-server
+                §SUDO rm -rf $dir
+                §SUDO systemctl daemon-reload >/dev/null 2>&1 || true
+              fi
+              rm -rf "§stage"
+            }
+            trap rollback EXIT
             step 2
             GOBIN="§stage" GOTOOLCHAIN=auto GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
               go install github.com/getlantern/soar/cmd/soar-server@v0.2.4 || exit 31
@@ -39,6 +51,7 @@ object DnsServerScripts {
             "§stage/soar-server" keygen | awk '§1=="private"{print §2}' > "§stage/key"
             [ "§(wc -c < "§stage/key")" -ge 40 ] || exit 40
             step 4
+            mutated=1
             §SUDO install -d -m 0750 -o root -g maximus $dir
             §SUDO install -m 0640 -o root -g maximus "§stage/key" $dir/key
             §SUDO install -m 0755 "§stage/soar-server" /usr/local/bin/maximus-soar-server
@@ -76,8 +89,20 @@ object DnsServerScripts {
             have unzip || pkg_install unzip
             have sha256sum || exit 21
             [ ! -f /etc/systemd/system/maximus-cotten.service ] || { echo 'Already installed; do not replace a running server' >&2; exit 22; }
+            [ ! -e $dir ] || { echo 'Previous Cotten data found; refusing to overwrite it' >&2; exit 22; }
             stage=§(mktemp -d)
-            trap 'rm -rf "§stage"' EXIT
+            mutated=0
+            rollback() {
+              rc=§?
+              if [ "§rc" -ne 0 ] && [ "§mutated" = 1 ]; then
+                §SUDO systemctl disable --now maximus-cotten >/dev/null 2>&1 || true
+                §SUDO rm -f /etc/systemd/system/maximus-cotten.service /usr/local/bin/maximus-cotten-server
+                §SUDO rm -rf $dir
+                §SUDO systemctl daemon-reload >/dev/null 2>&1 || true
+              fi
+              rm -rf "§stage"
+            }
+            trap rollback EXIT
             step 2
             url=https://github.com/WhiteDNS/CottenDNS/releases/download/v2026.10.24.183015-7db7b73/$prefix.zip
             curl -fLsS --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 20 --max-time 180 -o "§stage/server.zip" "§url" || exit 31
@@ -97,6 +122,7 @@ object DnsServerScripts {
             sed -i 's/^DATA_ENCRYPTION_METHOD[[:space:]]*=.*/DATA_ENCRYPTION_METHOD = 5/' "§stage/config"
             "§stage/server" --config "§stage/config" --check-config || exit 30
             step 4
+            mutated=1
             §SUDO install -d -m 0770 -o root -g maximus $dir
             §SUDO install -m 0755 "§stage/server" /usr/local/bin/maximus-cotten-server
             §SUDO install -m 0640 -o root -g maximus "§stage/config" $dir/server_config.toml
