@@ -52,11 +52,15 @@ class SidecarProcess(
         while (System.currentTimeMillis() < deadline) {
             if (!isAlive) {
                 logThread.join(200) // Let the bounded diagnostic reader publish the exit reason.
+                if (startupFailure == null) startupFailure = "Engine process exited before local readiness (exit ${runCatching { process.exitValue() }.getOrNull() ?: "unknown"}); inspect engine logs."
                 return false
             }
             if (sawReadyLine && portOpen(socksPort)) return true
             Thread.sleep(100)
         }
+        if (startupFailure == null) startupFailure = if (portOpen(socksPort) && !sawReadyLine)
+            "Local proxy socket opened, but the required transport readiness marker was not observed within ${timeoutMs / 1000}s; traffic is unverified."
+        else "Engine did not open a ready local proxy within ${timeoutMs / 1000}s; inspect engine logs."
         return false
     }
 
@@ -81,4 +85,3 @@ class SidecarProcess(
         }
     }
 }
-

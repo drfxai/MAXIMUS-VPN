@@ -41,9 +41,9 @@ object HiddifyScripts {
     const val EXIT_PORTS = 51
     const val EXIT_OS = 52
 
-    /** Enabled Hiddify units, one per line; nothing else is ever restarted or stopped. */
+    /** Registered Hiddify units (including disabled ones); no unrelated units. */
     private const val UNITS = "systemctl list-unit-files --type=service --no-legend 'hiddify-*' 2>/dev/null | " +
-        "awk '§2==\"enabled\"{sub(/\\.service§/, \"\", §1); print §1}' | grep -E '^[A-Za-z0-9_.@-]+§' || true"
+        "awk '{sub(/[.]service§/, \"\", §1); print §1}' | grep -E '^hiddify-[A-Za-z0-9_.@-]+§' || true"
 
     /** Masks URL paths (Hiddify's secret admin and user paths) in installer output before it reaches the log. */
     private const val REDACT = "sed -u -E 's#(https?://[^/ \"]+)/[^ \"]*#\\1/…#g'"
@@ -201,22 +201,51 @@ object HiddifyScripts {
             step 1
             args=""
             for u in §($UNITS); do args="§args -u §u"; done
-            if [ -z "§args" ]; then echo 'No Hiddify services found' >&2; exit 53; fi
+            if [ -z "§args" ]; then
+              echo 'Hiddify files detected but no registered services found; installation health is unverified.'
+              args="-u hiddify-panel"
+            fi
+            §SUDO systemctl show hiddify-panel -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus 2>&1 || true
             §SUDO journalctl §args -n $lines --no-pager -o short-iso 2>&1 | tail -n $lines | $REDACT
             """,
             listOf("Read logs")
         )
     }
 
-    /** Hiddify's own uninstaller: stops and disables its services; [purge] also deletes its files and data. */
+    /** Non-purging removal: only Hiddify units are stopped. Incomplete, data-free files are
+     * quarantined atomically. Never execute a partially installed remote uninstaller or stop netdata. */
     fun uninstall(purge: Boolean): ToolScript = ToolScripts.script(
         """
         step 1
-        if ! §SUDO test -f $DIR/scripts/uninstall.sh; then echo 'Hiddify uninstaller not found' >&2; exit 53; fi
-        §SUDO bash $DIR/scripts/uninstall.sh${if (purge) " purge" else ""} 2>&1 | tail -n 20 | $REDACT
-        result UNINSTALLED ${if (purge) "purge" else "services"}
+        ${if (purge) "echo 'Automatic data purge is not supported; back up and inspect the installation first.' >&2; exit 57" else ""}
+        if §SUDO test -L $DIR; then echo 'Refusing to operate on a symlinked Hiddify folder' >&2; exit 57; fi
+        unit_files=§(systemctl list-unit-files --type=service --no-legend 'hiddify-*' 2>/dev/null) || { echo 'Could not inspect Hiddify services; no files changed.' >&2; exit 57; }
+        unit_instances=§(systemctl list-units --all --plain --type=service --no-legend 'hiddify-*' 2>/dev/null) || { echo 'Could not inspect running Hiddify services; no files changed.' >&2; exit 57; }
+        units=§(printf '%s\n%s\n' "§unit_files" "§unit_instances" | awk '{sub(/[.]service§/, "", §1); print §1}' | grep -E '^hiddify-[A-Za-z0-9_.@-]+§' | sort -u || true)
+        if [ -n "§units" ]; then
+          for u in §units; do
+            §SUDO systemctl stop "§u" || exit 57
+            §SUDO systemctl disable "§u" || exit 57
+          done
+          echo 'Hiddify services stopped and disabled. Files and databases were retained.'
+          result UNINSTALLED services
+          exit 0
+        fi
+        if ! §SUDO test -d $DIR; then result UNINSTALLED absent; exit 0; fi
+        if §SUDO test -e $DIR/data/current.json || §SUDO test -x $DIR/.venv313/bin/hiddify-panel-cli || §SUDO test -x $DIR/.venv/bin/hiddify-panel-cli; then
+          echo 'Hiddify application or configuration data exists without managed services; removal is refused to preserve it. Inspect and back it up first.' >&2; exit 57
+        fi
+        if §SUDO test -d $DIR/data && [ -n "§(§SUDO find $DIR/data -type f -print -quit)" ]; then
+          echo 'Hiddify data files exist; partial cleanup is refused. Back up and inspect this installation first.' >&2; exit 57
+        fi
+        backup="$DIR.incomplete-§(date -u +%Y%m%dT%H%M%SZ)-§§"
+        if §SUDO test -e "§backup"; then echo 'Backup destination already exists; no files changed.' >&2; exit 57; fi
+        §SUDO mv -- $DIR "§backup"
+        result BACKUP "§backup"
+        echo 'Incomplete Hiddify files moved to a recoverable backup; no other service was changed.'
+        result UNINSTALLED incomplete
         """,
-        listOf("Uninstall Hiddify")
+        listOf("Remove Hiddify safely")
     )
 }
 
@@ -236,16 +265,16 @@ class HiddifyPanelProvider(
 
     override fun status(server: ManagedServer): PanelStatus {
         val r = runCatching { read(server) }.getOrElse {
-            return PanelStatus(id, PanelState.UNKNOWN, detail = it.message.orEmpty().take(160))
+            return PanelStatus(id, PanelState.UNKNOWN, detail = com.example.panels.servers.ServerLogSanitizer.redact(it.message.orEmpty()).take(2000))
         }
-        val installed = r["INSTALLED"] == "1"
         val services = servicesOf(r)
-        val state = stateOf(installed, false, services)
+        val installed = r["INSTALLED"] == "1" || services.isNotEmpty()
+        val state = if (installed && services.isEmpty()) PanelState.STOPPED else stateOf(installed, false, services)
         return PanelStatus(id, state, r["VERSION"]?.ifBlank { null }, services, when (state) {
             PanelState.NOT_INSTALLED -> "not on this server"
             PanelState.RUNNING -> "all ${services.size} services active"
             PanelState.DEGRADED -> services.filterValues { it != "active" }.keys.joinToString(prefix = "not active: ")
-            PanelState.STOPPED -> "installed, no service active"
+            PanelState.STOPPED -> if (services.isEmpty()) "Hiddify files found, but no services detected; installation is incomplete or unverified" else "installed, no service active"
             else -> "services could not be read"
         })
     }
@@ -254,7 +283,7 @@ class HiddifyPanelProvider(
         val facts = connect(server).use { ServerFacts.parse(it.run(ServerFacts.SCRIPT, 60_000L).output) }
         installBlocker(server, facts)?.let { error(it) }
         val r = connect(server).use { it.runTool(HiddifyScripts.install(update = false), progress, INSTALL_TIMEOUT_MS) }
-        return outcome(server, r, facts, "Hiddify ${r["VERSION"].orEmpty()} installed")
+        return outcome(server, r, "Hiddify ${r["VERSION"].orEmpty()} installed")
     }
 
     /**
@@ -263,7 +292,8 @@ class HiddifyPanelProvider(
      */
     fun import(server: ManagedServer): InstallOutcome {
         val st = status(server)
-        check(st.state != PanelState.NOT_INSTALLED && st.state != PanelState.UNKNOWN) { "No Hiddify found on this server" }
+        check(st.state != PanelState.NOT_INSTALLED) { "No Hiddify files found on this server" }
+        check(st.state != PanelState.UNKNOWN) { "Could not inspect Hiddify over SSH: ${st.detail}" }
         val tool = InstalledTool(id, settings = mapOfNotNull(K_VERSION to st.version, K_IMPORTED to "1"))
         return InstallOutcome(server.withTool(tool), tool, summary = "Hiddify ${st.version.orEmpty()} found and added")
     }
@@ -317,9 +347,17 @@ class HiddifyPanelProvider(
         return server.withoutTool(id)
     }
 
-    private fun outcome(server: ManagedServer, r: Map<String, String>, facts: ServerFacts, summary: String): InstallOutcome {
+    private fun outcome(server: ManagedServer, r: Map<String, String>, summary: String): InstallOutcome {
         val tool = InstalledTool(id, port = 443, settings = mapOfNotNull(K_VERSION to r["VERSION"], K_ADMIN_URL to validatedAdminUrl(r["ADMIN_URL"])))
-        return InstallOutcome(server.withTool(tool).copy(facts = facts, checkedAt = System.currentTimeMillis()), tool, summary = summary)
+        val fresh = runCatching {
+            connect(server).use { shell ->
+                val result = shell.run(ServerFacts.SCRIPT, 60_000L)
+                check(result.exitCode == 0 && result.output.contains(ServerFacts.BEGIN)) { "Could not refresh Hiddify service state" }
+                ServerFacts.parse(result.output)
+            }
+        }.getOrNull()
+        return InstallOutcome(server.withTool(tool).copy(facts = fresh,
+            checkedAt = if (fresh == null) 0L else System.currentTimeMillis()), tool, summary = summary)
     }
 
     companion object {
@@ -383,4 +421,3 @@ class HiddifyPanelProvider(
 
 internal fun mapOfNotNull(vararg pairs: Pair<String, String?>): Map<String, String> =
     pairs.mapNotNull { (k, v) -> v?.takeIf { it.isNotBlank() }?.let { k to it } }.toMap()
-

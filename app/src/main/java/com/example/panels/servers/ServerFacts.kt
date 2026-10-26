@@ -104,7 +104,7 @@ data class ServerFacts(
             if [ -d /opt/hiddify-manager ]; then
               echo HIDDIFY=1
               echo "HIDDIFY_VERSION=§(head -n1 /opt/hiddify-manager/VERSION 2>/dev/null | tr -cd '0-9A-Za-z.-')"
-              for u in §(systemctl list-unit-files --type=service --no-legend 'hiddify-*' 2>/dev/null | awk '§2=="enabled"{sub(/[.]service§/, "", §1); print §1}' | grep -E '^[A-Za-z0-9_.@-]+§'); do
+              for u in §(systemctl list-unit-files --type=service --no-legend 'hiddify-*' 2>/dev/null | awk '{sub(/[.]service§/, "", §1); print §1}' | grep -E '^[A-Za-z0-9_.@-]+§'); do
                 echo "SVC_§u=§(systemctl is-active "§u" 2>/dev/null || true)"
               done
             else echo HIDDIFY=0; fi

@@ -498,7 +498,7 @@ private fun DoneStage(ui: WizardUi, actions: WizardActions) {
         }
     }
     if (ui.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) && ui.records.isNotEmpty()) {
-        Notice("The tunnel works once your DNS records are live. The first test can fail while DNS updates.")
+        Notice("Server installation does not verify a tunnel. Check the service, NS delegation, resolver path and real traffic; a timeout alone does not establish the cause.")
     }
     if (ui.log.isNotEmpty()) LogCard(ui.log)
 }
@@ -527,4 +527,3 @@ private fun WizardBottomBar(ui: WizardUi, actions: WizardActions) {
         }
     }
 }
-

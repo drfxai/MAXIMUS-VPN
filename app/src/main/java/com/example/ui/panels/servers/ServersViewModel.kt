@@ -280,7 +280,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val t = s.tool(id) ?: return null
         val title = ServerToolCatalog.byId(id)?.title ?: id
         val units = ToolScripts.UNITS[id]
-        val running = units == null || f == null || units.all { f.active(it) }
+        val running = units == null || f != null && units.all { f.active(it) }
         val status = when {
             units == null -> "On"
             f == null -> "Unknown"
@@ -294,7 +294,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 canBackup = true, canStart = f != null && !running, canStop = f != null && running)
             ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> ToolRowUi(id, title, status, running,
                 t.settings[ToolProfiles.DNSTT_DOMAIN].orEmpty(),
-                canTest = true, canRestart = true, canLogs = true,
+                canTest = true, canRestart = true, canLogs = true, canStart = !running, canStop = running,
                 link = runCatching {
                     if (id == ServerToolCatalog.SOAR) ToolProfiles.soarLink(s, t) else ToolProfiles.cottenLink(s, t)
                 }.getOrNull(), testResult = test?.second, testOk = test?.first)
@@ -331,7 +331,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val units = hiddifyUnits(f)
         return listOfNotNull(f.hiddifyVersion.ifBlank { null }?.let { "Version $it" },
             units.takeIf { it.isNotEmpty() }?.let { u -> "${u.count { it.value == "active" }} of ${u.size} services active" })
-            .joinToString(" · ").ifBlank { "Found in /opt/hiddify-manager" }
+            .joinToString(" · ").ifBlank { "Files found; no services detected. Installation is unverified." }
     }
 
     private fun hiddifyRow(t: com.example.panels.servers.InstalledTool, f: ServerFacts?): ToolRowUi {
@@ -340,26 +340,27 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val down = units.filterValues { it != "active" }.keys
         val version = f?.hiddifyVersion?.ifBlank { null } ?: t.settings[HiddifyPanelProvider.K_VERSION]
         val status = when {
-            f == null || units.isEmpty() -> "Unknown"
+            f == null -> "Unknown"
+            units.isEmpty() -> "Needs repair"
             down.isEmpty() -> "Running"
             active == 0 -> "Stopped"
             else -> "${down.size} of ${units.size} down"
         }
         val backup = t.settings[ServerManager.K_LAST_BACKUP]?.toLongOrNull()
         return ToolRowUi(
-            ServerToolCatalog.HIDDIFY, "Hiddify", status, healthy = f == null || down.isEmpty() && units.isNotEmpty(),
+            ServerToolCatalog.HIDDIFY, "Hiddify", status, healthy = down.isEmpty() && units.isNotEmpty(),
             detail = listOfNotNull(version?.let { "v$it" }, "ports 80, 443",
                 if (t.settings[HiddifyPanelProvider.K_IMPORTED] == "1") "added from server" else null).joinToString(" · "),
             warn = active > 0 && down.isNotEmpty(),
             stats = if (units.isEmpty()) emptyList() else listOf(
                 "Services" to "$active of ${units.size} active",
                 "Last backup" to (backup?.let { whenText(it) } ?: "None from this phone")),
-            warning = if (active > 0 && down.isNotEmpty())
+            warning = if (f != null && units.isEmpty()) "Hiddify files exist but no managed services were detected. Use Diagnostics or Remove Hiddify to inspect or recover this incomplete installation." else if (active > 0 && down.isNotEmpty())
                 down.take(3).joinToString(" and ") + (if (down.size > 3) " and ${down.size - 3} more" else "") +
                     (if (down.size == 1) " is" else " are") + " not active. Restart, or open Logs to see why." else null,
             // The action can recover a missing admin link over SSH; never hide the entry point.
             canOpenPanel = true,
-            canBackup = units.isNotEmpty(), canRestart = true, canLogs = true,
+            canBackup = units.isNotEmpty(), canRestart = units.isNotEmpty(), canLogs = true,
             canUpdate = version != null && PanelStatus.compareVersions(HiddifyScripts.VERSION, version) > 0,
             canStart = f != null && active < units.size, canStop = active > 0
         )
@@ -447,7 +448,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             emit(ServersEvent.PanelsChanged)
         }
         save(updated)
-        emit(ServersEvent.Message("${toolTitle(toolId)} removed"))
+        emit(ServersEvent.Message(if (toolId == ServerToolCatalog.HIDDIFY)
+            "Hiddify removal completed; retained files may still be detected." else "${toolTitle(toolId)} removed"))
     }
 
     fun backup(id: String, toolId: String) = serverAction(id, "Backing up ${toolTitle(toolId)}…") { s ->
@@ -470,7 +472,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun importHiddify(id: String) = serverAction(id, "Adding Hiddify…") { s ->
         save(withContext(Dispatchers.IO) { manager.importHiddify(s) })
-        emit(ServersEvent.Message("Hiddify added. Nothing on the server changed."))
+        emit(ServersEvent.Message("Hiddify files registered for management; service and traffic health are separate checks. Nothing on the server changed."))
         emit(ServersEvent.Success)
     }
 
@@ -551,6 +553,19 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val profile = profileFor(s, toolId) ?: error("No config for this tool on this phone")
         val result = testProfile(profile)
         _state.update { it.copy(tests = it.tests + ("${s.id}/$toolId" to result)) }
+        if (!result.first && toolId in setOf(ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT)) {
+            // Keep phone/engine evidence separate from a read-only server snapshot.
+            try {
+                val checked = withContext(Dispatchers.IO) { manager.check(s) }
+                save(checked)
+                val lines = withContext(Dispatchers.IO) { manager.logs(checked, toolId) }
+                _state.update { it.copy(logs = "${toolTitle(toolId)} server diagnostics (phone test failed)" to lines) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                val detail = com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "SSH unavailable")
+                _state.update { it.copy(logs = "Server diagnostics unavailable" to listOf(detail)) }
+            }
+        }
     }
 
     fun panelIdFor(id: String): String? = server(id)?.tool(ServerToolCatalog.XUI)?.panelId
@@ -920,5 +935,3 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         fun locationLabel(l: ServerLocation) = if (l == ServerLocation.IRAN) "Iran" else "Abroad"
     }
 }
-
-

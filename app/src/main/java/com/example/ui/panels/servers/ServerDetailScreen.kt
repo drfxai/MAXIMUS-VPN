@@ -217,6 +217,9 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
         if (ui.tools.any { it.id == ServerToolCatalog.HIDDIFY }) {
             SectionLabel("Hiddify management")
             GroupCard {
+                ListRow("Remove Hiddify", subtitle = "Stop the panel or safely recover incomplete files; confirmation required",
+                    trailing = { TextAction("Remove", { actions.onUninstall(ServerToolCatalog.HIDDIFY) }, enabled = idle) })
+                RowDivider(0.dp)
                 ListRow(
                     "Open admin panel",
                     subtitle = "Recover your secure admin link over SSH if needed",
@@ -358,14 +361,15 @@ private fun ToolBlock(t: ToolRowUi, actions: ServerDetailActions, idle: Boolean)
             if (t.canOpenPanel) add(ToolAction("Open panel", Icons.AutoMirrored.Rounded.OpenInNew) { actions.onOpenPanel(t.id) })
             if (t.canOpenTunnel) add(ToolAction("Open tunnel", Icons.AutoMirrored.Rounded.OpenInNew) { actions.onOpenTunnel() })
             if (t.link != null) add(ToolAction("Copy link", Icons.Rounded.ContentCopy) { actions.onCopy(t.link) })
+            if (t.canLogs && !t.healthy) add(ToolAction("Diagnostics", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })
             // With services down, fixing comes before backing up or updating.
             // 3X-UI keeps its bar; its backup sits in the menu.
             if (t.canBackup && t.warning == null) add(ToolAction("Back up", Icons.Rounded.Download, menu = t.id == ServerToolCatalog.XUI) { actions.onBackup(t.id) })
             if (t.canRestart) add(ToolAction("Restart", Icons.Rounded.RestartAlt) { actions.onRestart(t.id) })
-            if (t.canLogs && t.warning != null) add(ToolAction("Logs", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })
+            if (t.canLogs && t.healthy && t.warning != null) add(ToolAction("Logs", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })
             if (t.canUpdate) add(ToolAction("Update", Icons.Rounded.Upgrade) { actions.onUpdate(t.id) })
             if (t.canBackup && t.warning != null) add(ToolAction("Back up", Icons.Rounded.Download) { actions.onBackup(t.id) })
-            if (t.canLogs && t.warning == null) add(ToolAction("Logs", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })
+            if (t.canLogs && t.healthy && t.warning == null) add(ToolAction("Logs", Icons.AutoMirrored.Rounded.Subject) { actions.onLogs(t.id) })
             if (t.canStart) add(ToolAction("Start", Icons.Rounded.PlayArrow) { actions.onStart(t.id) })
             if (t.canStop) add(ToolAction("Stop", Icons.Rounded.Stop) { actions.onStop(t.id) })
             if (t.canRotatePort) add(ToolAction("New port", Icons.Rounded.SwapHoriz) { actions.onRotatePort(t.id) })
@@ -408,17 +412,17 @@ private fun FoundHiddifyCard(summary: String, actions: ServerDetailActions, idle
                 ToolBadge(ServerToolCatalog.HIDDIFY, 34.dp)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Hiddify found on this server", color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Hiddify files detected", color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Text(summary, color = Sv.Muted, fontSize = 13.sp)
                 }
             }
-            Notice("Add it to manage it from this phone: status, backups, restart and logs. Nothing on the server " +
-                "changes, and the app never installs over it.", NoticeKind.OK)
+            Notice("A folder alone does not prove a complete installation. Add it for diagnostics, inspect logs, or remove an incomplete installation. Adding changes nothing on the server.", NoticeKind.WARN)
             PrimaryButton("Add Hiddify", actions.onImportHiddify, Modifier.fillMaxWidth(), enabled = idle)
+            GhostButton("Diagnostics", { actions.onLogs(ServerToolCatalog.HIDDIFY) }, Modifier.fillMaxWidth(), enabled = idle)
+            GhostButton("Remove Hiddify", { actions.onUninstall(ServerToolCatalog.HIDDIFY) }, Modifier.fillMaxWidth(), enabled = idle)
             GhostButton("Not now", actions.onDismissFound, Modifier.fillMaxWidth())
         }
     }
 }
 
 internal fun toolTitle(id: String): String = ServerToolCatalog.byId(id)?.title ?: id
-

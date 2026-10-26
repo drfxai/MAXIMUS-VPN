@@ -119,7 +119,7 @@ class ServerManager(
                             ToolProfiles.DNSTT_LABEL to options.tunnelLabel,
                             keyName to key
                         ))
-                        val updated = server.withTool(installed).copy(facts = facts, checkedAt = System.currentTimeMillis())
+                        val updated = postInstallCheck(shell, server.withTool(installed))
                         val profile = if (toolId == ServerToolCatalog.SOAR) ToolProfiles.soarProfile(updated, installed)
                             else ToolProfiles.cottenProfile(updated, installed)
                         val link = if (toolId == ServerToolCatalog.SOAR) ToolProfiles.soarLink(updated, installed)
@@ -155,7 +155,7 @@ class ServerManager(
                                 ToolProfiles.DNSTT_BACKUPS to backups.joinToString(",")
                             ))
                         )
-                        val updated = server.withTool(installed).copy(facts = facts, checkedAt = System.currentTimeMillis())
+                        val updated = postInstallCheck(shell, server.withTool(installed))
                         InstallOutcome(updated, installed, ToolProfiles.dnsttProfile(updated, installed), ToolProfiles.dnsttLink(updated, installed),
                             summary = "DNS tunnel ready on $domain")
                     }
@@ -172,7 +172,7 @@ class ServerManager(
                             toolId, port = port, profileId = previous?.profileId,
                             settings = mapOf(ToolProfiles.HY_AUTH to auth, ToolProfiles.HY_OBFS to obfs, ToolProfiles.HY_PIN to pin)
                         )
-                        val updated = server.withTool(installed).copy(facts = facts, checkedAt = System.currentTimeMillis())
+                        val updated = postInstallCheck(shell, server.withTool(installed))
                         InstallOutcome(updated, installed, ToolProfiles.hysteriaProfile(updated, installed), ToolProfiles.hysteriaLink(updated, installed),
                             summary = "Hysteria2 ready on UDP $port")
                     }
@@ -271,9 +271,21 @@ class ServerManager(
         else -> throw IllegalArgumentException("${ServerToolCatalog.byId(toolId)?.title ?: toolId} is not a panel")
     }
 
+    /** A pre-install snapshot cannot describe the service just created. A failed refresh is unknown. */
+    private fun postInstallCheck(shell: RemoteShell, server: ManagedServer): ManagedServer {
+        val fresh = runCatching {
+            val result = shell.run(ServerFacts.SCRIPT, 60_000L)
+            check(result.exitCode == 0 && result.output.contains(ServerFacts.BEGIN)) { "Could not refresh service state" }
+            ServerFacts.parse(result.output)
+        }.getOrNull()
+        return server.copy(facts = fresh, checkedAt = if (fresh == null) 0L else System.currentTimeMillis())
+    }
+
     /** Starts or stops a panel's services (3x-ui, Hiddify). */
     fun setPanelRunning(server: ManagedServer, toolId: String, run: Boolean, progress: ActionProgress): ManagedServer {
-        if (run) panel(toolId).start(server, progress) else panel(toolId).stop(server, progress)
+        if (toolId in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)) {
+            connect(server).use { it.runTool(ToolScripts.service(toolId, if (run) "start" else "stop"), progress, 60_000L) }
+        } else if (run) panel(toolId).start(server, progress) else panel(toolId).stop(server, progress)
         return check(server)
     }
 
@@ -333,5 +345,3 @@ class ServerManager(
         const val K_LAST_BACKUP = "lastBackup"
     }
 }
-
-
