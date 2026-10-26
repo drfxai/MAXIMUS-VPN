@@ -1,10 +1,10 @@
 V1.0.2 Android versionCode 37
-Authorized signed release refresh: master engineering directive 2026-10-25.
-Reviewed combined source: 231218c37552752da90a4908ba67000204d82d9e.
-Merged PR128 head 8e38260937d69dedd8b01010544a39bcc9cfa894: Checks 40222073341, transport 40222073197, SOAR 40222073339 and CottenDNS 40222073423 all SUCCESS.
-Merged PR129 head 1ba19171a6f43142126246ef8aa830381151fabd: Checks 40222806932 and transport 40222806905 SUCCESS.
-Includes reviewed standalone mode-switch sidecar preservation, DNS-engine restart repair, chain carrier/auth fixes, read-only Hiddify link recovery, capability-URL redaction and clearer installation evidence.
-Preserve versionName 1.0.2, versionCode 37 and permanent signing identity.
-Release workflow must pass fresh Android unit/lint/build, packaging, signer and Android15 install/launch checks before publication.
-No physical-device, Iranian-field, full TUN/DNS-leak or performance improvement claim.
-Remaining work and acceptance matrix: docs/MASTER_REMAINING_WORK_20261025.md.
+Authorized signed release refresh: user master directive, 2026-10-26 Hiddify and DNS field repair.
+Reviewed source: 1766d0519598c7099a2746627b3f4d994ba3b42d (merged PR130).
+PR130 final head dcedcd045a3ebc68e2db1e395b001928a016d12c: Checks 40311109440 and 40311102712 SUCCESS; transport 40311109346 and 40311102733 SUCCESS.
+Includes Hiddify v14.0.5 quick user creation and saved subscription import, real Telegram/Web proxy link retrieval, domain and Hiddify All Configurations recognition, full Xray array preservation, CottenDNS generated-key validation repair, DNS evidence messages and capability URL redaction.
+Preserve versionName 1.0.2, versionCode 37 and permanent signing identity; native engine pins unchanged.
+Release workflow must pass fresh Android unit/lint/build, native packaging, signer and Android15 install/launch checks before publication.
+No actual Hiddify/VPS/Irancell, Telegram-CDN, SOAR egress, full TUN/DNS-leak or performance verification claim.
+Known field blockers: trusted certificate must match the subscription hostname; DNS tunnel NS delegation and live egress require server-side verification.
+Audit: docs/HIDDIFY_DNS_FIELD_REPAIR_20261026.md. Broader remaining work: docs/MASTER_REMAINING_WORK_20261025.md.
