@@ -14,7 +14,7 @@ object SubscriptionSources {
     fun parseInput(text: String): Pair<String, List<String>> {
         val urls = text.split(Regex("[\\s,]+"))
             .map { it.trim() }
-            .filter { it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true) }
+            .mapNotNull(SubscriptionInput::url)
             .distinct()
         return (urls.firstOrNull() ?: text.trim()) to urls.drop(1)
     }
@@ -71,3 +71,4 @@ object SubscriptionSources {
         }
     }
 }
+

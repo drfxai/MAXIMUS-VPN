@@ -1,0 +1,24 @@
+# Hiddify quick configuration and DNS installation field repair
+
+Baseline: main `6a0e1b846ba5a914bfd0850880370c4102bbee16`, versionName 1.0.2 / versionCode 37, release Build93.
+Baseline Checks, transport checks and signed release all succeeded. PR129 was re-read: closed and merged.
+No application version, signer, native engine, VPS service or production DNS setting is changed by this branch.
+
+## Evidence and causes
+
+* Field subscription failure is TLS hostname mismatch: the supplied sslip hostname is not covered by the certificate reported by Android. Opening a browser page after a certificate exception does not establish a secure subscription endpoint. The app retains certificate and hostname validation. A trusted certificate covering the exact chosen hostname must be installed by the server operator, or a correctly certified panel-provided address used. Do not automatically rewrite the hostname to an IP, use HTTP, or turn off TLS validation.
+* Hiddify actions previously all opened the same admin page. Quick creation now uses official v14.0.5 `GET/POST /<admin-path>/api/v2/admin/users/`, Hiddify-API-Key authentication, returned `link_domains`, and `/<user-path>/<uuid>/sub/`. The admin UUID is not substituted for a user UUID. A pending operation UUID is persisted in encrypted server storage before writing; a retry checks for this user before sending another POST. A successful user link is saved before subscription import, so import can be retried independently. No redirect or automatic connection retry is permitted for admin API requests. No calls to the supplied live panel were made.
+* Source review: HiddifyPanel `a3a08d66b88cef7b0d4181638db97d9f92befe2c`, `auth.py`, admin `users_page_api.py`, `admins_api.py`, `admin/__init__.py`, user `user.py`, `user/mtproxies.py`, `user/__init__.py`. This is a pinned v14 contract, not a promise of compatibility with every Hiddify release.
+* Telegram links are read from the actual user API `api/v2/user/mtproxies/`. MTProto and Web proxy links are distinguished. This feature does not enable proxies or configure CDN; no raw MTProto-over-CDN claim is made. Actual Telegram/Web proxy connectivity is not tested by copying a link.
+* CottenDNS pinned server `v2026.10.24.183015-7db7b73`: `internal/security/encryption_key.go` returns a **32-character** hex string for method 5 (`requiredKeyLength` default=32). Installer and ServerManager both incorrectly required 64 characters. That can reject a running service and invoke rollback. Both gates now accept the pinned generated credential. No truncation, conversion or replacement of an existing user key is performed. The failure gate now gives a specific diagnostic. New server installs explicitly disable encryption auto-detection, keeping method 5 rather than accepting unencrypted fallback codecs. Existing services are unchanged.
+* SOAR screenshot shows server-installed / traffic-unverified, not proven installation failure. The current-run log only proves local proxy readiness; the phone's request timed out. Delegation, resolver reachability, server authentication and egress remain unproven. No specific SOAR timeout root cause or successful field repair is asserted.
+* Add Node previously parsed a subscription URL as an invalid proxy during text entry. Nodes and subscription input now recognize domain/path and subdomain/path, with HTTPS inferred only for schemeless web input. Existing downloader URL/DNS safety checks remain in force. Hiddify Full Xray arrays (including Base64-wrapped arrays) are handled as configurations with a 500-object bound and existing deduplication.
+
+## Tests / remaining verification
+
+Unit fixtures cover actual request path/header/body, same-origin user-domain selection, pending user recovery without POST, 301/401/403/404 failures, Telegram scheme/type handling, the production Cotten shell key gate, subscription URL recognition, secret-free TLS repair messages, and Full Xray array deduplication.
+These use synthetic identities and mocked panel HTTP responses; they are not real panel, device, DNS delegation or international traffic verification. See PR CI for execution status. No local Android SDK is available.
+
+Required field checks after build: use a trusted matching panel certificate; create one explicitly confirmed test user and verify account quota/expiry in Hiddify; import and test resulting Nodes; retrieve enabled Telegram links; install Cotten on an otherwise free public DNS listener; verify UDP/TCP listener, delegation, client handshake and small bidirectional egress. SOAR needs read-only service journal/listener and authoritative DNS evidence from the actual VPS before further changes. Do not retry destructive installations over existing data.
+
+Rollback: revert the branch changes. Do not delete panel users automatically on a download failure; user creation and subscription import are separate operations. No live server mutation occurred during development.

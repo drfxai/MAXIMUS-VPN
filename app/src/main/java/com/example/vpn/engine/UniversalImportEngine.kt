@@ -143,7 +143,7 @@ object UniversalImportEngine {
         if (!trimmed.startsWith("{") && !trimmed.startsWith("proxies:") && !trimmed.startsWith("vless://") && isLikelyBase64(compactBase64)) {
             val decoded = decodeBase64Safe(compactBase64)
             if (decoded != null && decoded.isNotBlank() && decoded != trimmed &&
-                (decoded.contains("://") || decoded.startsWith("{") || decoded.contains("proxies:"))) {
+                (decoded.contains("://") || decoded.startsWith("{") || decoded.startsWith("[") || decoded.contains("proxies:"))) {
                 return parseRawSource(decoded, fileName, subUrl)
             }
         }
@@ -151,6 +151,21 @@ object UniversalImportEngine {
         // 2. WireGuard / AmneziaWG .conf file
         if (WireGuardConf.looksLikeConf(trimmed)) {
             return listOf(parseWireGuardConf(trimmed, fileName, subUrl))
+        }
+
+        // Hiddify Full Xray subscriptions are arrays of complete configurations, not URI lines.
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            return try {
+                val configs = org.json.JSONArray(trimmed)
+                require(configs.length() <= 500) { "Too many JSON configurations (maximum 500)" }
+                (0 until configs.length()).flatMap { i ->
+                    val config = configs.optJSONObject(i)
+                    if (config == null) listOf(ParsedItem.Invalid("JSON item $i [redacted]", "Expected a configuration object"))
+                    else parseJsonConfig(config.toString(), fileName, subUrl)
+                }
+            } catch (_: Exception) {
+                listOf(ParsedItem.Invalid("JSON subscription [redacted]", "Invalid or oversized JSON configuration array"))
+            }
         }
 
         // 3. Check if JSON (Xray or Sing-box)
@@ -734,4 +749,5 @@ object UniversalImportEngine {
         return result
     }
 }
+
 

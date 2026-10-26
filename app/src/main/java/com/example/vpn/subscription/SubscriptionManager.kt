@@ -259,7 +259,10 @@ class SubscriptionManager(
             .header("User-Agent", "Maximus-VPN/1.0 (Android; Linux)")
             .header("Accept", "*/*")
             .build()
-        client.newCall(request).execute().use { res ->
+        val response = try { client.newCall(request).execute() } catch (e: javax.net.ssl.SSLException) {
+            throw java.io.IOException(SubscriptionInput.failure(e))
+        }
+        response.use { res ->
             if (!res.isSuccessful) throw java.io.IOException(
                 if (res.code == 503) "HTTP 503: subscription service unavailable; this does not establish a tunnel failure"
                 else "HTTP ${res.code}")
@@ -297,7 +300,7 @@ class SubscriptionManager(
      * copy are kept (and restored if they were deleted).
      */
     suspend fun syncSubscription(subscription: SubscriptionInfo): SyncResult = withContext(Dispatchers.IO) {
-        val sanitizedUrl = SecretRedactor.redact(subscription.url)
+        val sanitizedUrl = com.example.panels.servers.ServerLogSanitizer.redact(subscription.url)
         XrayLogManager.i("SUBSCRIPTION", "Syncing subscription '${subscription.name}' from $sanitizedUrl...")
 
         if (!isValidSubscriptionUrl(subscription.url)) {
@@ -386,7 +389,7 @@ class SubscriptionManager(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            val errMsg = e.localizedMessage ?: "Network connection failure"
+            val errMsg = SubscriptionInput.failure(e)
             XrayLogManager.e("SUBSCRIPTION", "Error syncing '${subscription.name}': $errMsg")
             subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
             SyncResult(subscription.id, 0, 0, 0, false, errMsg)
@@ -643,3 +646,4 @@ class SubscriptionManager(
         XrayLogManager.i("SUBSCRIPTION", "Deleted subscription '${subscription.name}' and its associated nodes.")
     }
 }
+

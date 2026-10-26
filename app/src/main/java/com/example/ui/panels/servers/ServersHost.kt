@@ -99,6 +99,8 @@ internal fun ServersOverlay(
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     var confirm by remember { mutableStateOf<Confirm?>(null) }
+    var quickHiddify by remember { mutableStateOf<String?>(null) }
+    var telegramHiddify by remember { mutableStateOf<String?>(null) }
     val copy: (String) -> Unit = {
         clipboard.setText(AnnotatedString(it))
         Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
@@ -171,6 +173,9 @@ internal fun ServersOverlay(
                     onStart = { vm.setRunning(id, it, true) },
                     onStop = { vm.setRunning(id, it, false) },
                     onImportHiddify = { vm.importHiddify(id) },
+                    onQuickHiddify = { quickHiddify = id },
+                    onImportHiddifyConfigs = { vm.importSavedHiddify(id) },
+                    onHiddifyTelegram = { telegramHiddify = id },
                     onDismissFound = { vm.dismissFound(id) },
                     onCopy = copy,
                     onUninstall = { confirm = Confirm.Uninstall(id, it) },
@@ -182,6 +187,8 @@ internal fun ServersOverlay(
             )
         }
     }
+    quickHiddify?.let { id -> HiddifyQuickDialog(vm, id, state.busy.isNotBlank()) { quickHiddify = null } }
+    telegramHiddify?.let { id -> HiddifyTelegramDialog(vm, id, state.busy.isNotBlank(), copy) { telegramHiddify = null } }
     ConfirmHost(vm, confirm) { confirm = null }
     return true
 }
@@ -263,3 +270,4 @@ private fun ConfirmDialog(title: String, text: String, action: String, onConfirm
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Sv.Muted) } }
     )
 }
+
