@@ -143,7 +143,7 @@ class ServerManager(
                             ?: ServerRandom.port(facts.udpPorts + facts.tcpPorts, exclude = setOf(dnsPort))
                         val r = runScript(shell, ToolScripts.dnsttInstall(domain, arch, dnsPort, socksPort, options.renew, backups), progress)
                         val pubkey = r["PUBKEY"].orEmpty()
-                        require(pubkey.matches(Regex("[0-9a-fA-F]{32}"))) { "The server did not return the tunnel key" }
+                        require(pubkey.matches(Regex("[0-9a-fA-F]{64}"))) { "The server did not return the tunnel key" }
                         val installed = InstalledTool(
                             toolId, port = 53, profileId = previous?.profileId,
                             settings = mapOf(

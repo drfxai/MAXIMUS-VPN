@@ -315,6 +315,23 @@ class ServerToolsTest {
         override fun log(line: String) {}
     }
 
+    @Test fun pinnedCottenInstallAcceptsItsGeneratedKeyWithoutChangingDnsttKeyContract() {
+        val fake = FakeServer(factsText)
+        val key = "0123456789abcdef".repeat(2)
+        fake.answer = { 0 to listOf("##STEP 6", "##RESULT COTTEN_KEY=$key") }
+        val out = ServerManager(connect = fake::connect).install(server, ServerToolCatalog.COTTEN,
+            InstallOptions("example.com", "tun"), noProgress())
+        assertEquals(key, out.tool!!.settings[ToolProfiles.COTTEN_KEY])
+        assertTrue(out.link!!.startsWith("cottendns://"))
+        assertNotNull(out.profile)
+        fake.answer = { 0 to listOf("##RESULT COTTEN_KEY=${key + key}") }
+        try {
+            ServerManager(connect = fake::connect).install(server, ServerToolCatalog.COTTEN,
+                InstallOptions("example.com", "tun"), noProgress())
+            fail("Pinned server must return its actual 32-character credential")
+        } catch (_: IllegalArgumentException) { }
+    }
+
     @Test fun aDnsTunnelInstallReturnsAWorkingProfile() {
         val fake = FakeServer(factsText)
         val key = "0123456789abcdef".repeat(4)
@@ -402,3 +419,4 @@ class ServerToolsTest {
         assertTrue(merged.perResolver)
     }
 }
+

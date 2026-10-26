@@ -12,6 +12,15 @@ object SubscriptionInput {
         val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
         if (uri.host.isNullOrBlank() || uri.userInfo != null || uri.port !in -1..65535 || uri.port == 0) return null
         if (!text.contains("://") && !uri.host.contains('.')) return null
+        // Hiddify's shared All Configurations URL is a browser page; request its official
+        // machine-readable endpoint instead. Match the explicit UI marker and UUID shape,
+        // never rewrite arbitrary provider URLs or their hostname/certificate identity.
+        val parts = uri.rawPath.orEmpty().split('/').filter { it.isNotEmpty() }
+        if (uri.rawQuery.orEmpty().split('&').any { it.equals("allConfigs=true", true) } &&
+            parts.size == 2 && parts[0].matches(Regex("[A-Za-z0-9_-]{1,256}")) &&
+            runCatching { java.util.UUID.fromString(parts[1]).toString() == parts[1] }.getOrDefault(false)) {
+            return URI(uri.scheme, null, uri.host, uri.port, "/${parts[0]}/${parts[1]}/sub/", null, null).toASCIIString()
+        }
         return candidate
     }
 
