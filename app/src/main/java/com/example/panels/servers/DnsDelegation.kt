@@ -71,16 +71,18 @@ object DnsDelegation {
             a == null -> Check(aRec, Status.UNKNOWN, "Could not ask DNS")
             aRec.value.lowercase() in a.second -> Check(aRec, Status.OK, "Points to ${aRec.value}")
             a.second.isNotEmpty() -> Check(aRec, Status.WRONG, "Points to ${a.second.joinToString()} instead of ${aRec.value}")
-            else -> Check(aRec, Status.MISSING, "Not found yet (new records can take a few minutes)")
+            a.first !in listOf(0, 3) -> Check(aRec, Status.UNKNOWN, "DNS query failed (rcode ${a.first}); address reachability is not established")
+            else -> Check(aRec, Status.MISSING, "No address record returned. Check the exact name and DNS-only A/AAAA record; propagation is not established as the cause.")
         }
         val ns = answers(nsJson, 2)
         val nsCheck = when {
             ns == null -> Check(nsRec, Status.UNKNOWN, "Could not ask DNS")
             nsRec.value in ns.second -> Check(nsRec, Status.OK, "Delegated to ${nsRec.value}")
             ns.second.isNotEmpty() -> Check(nsRec, Status.WRONG, "Delegated to ${ns.second.joinToString()} instead of ${nsRec.value}")
-            ns.first == 2 -> Check(nsRec, Status.UNKNOWN, "Resolvers reach your server but cannot list it; the real test decides")
-            else -> Check(nsRec, Status.MISSING, "Not found yet (new records can take a few minutes)")
+            ns.first !in listOf(0, 3) -> Check(nsRec, Status.UNKNOWN, "DNS query failed (rcode ${ns.first}); this does not prove the resolver reached your tunnel server")
+            else -> Check(nsRec, Status.MISSING, "No NS delegation returned. Check the parent zone NS record for this exact tunnel name; server installation alone cannot create delegation.")
         }
         return listOf(aCheck, nsCheck)
     }
 }
+

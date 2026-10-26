@@ -119,6 +119,8 @@ object DnsServerScripts {
             sed -i 's/^DOMAIN[[:space:]]*=.*/DOMAIN = ["$domain"]/' "§stage/config"
             sed -i 's/^ZONE_NS[[:space:]]*=.*/ZONE_NS = ["$ns"]/' "§stage/config"
             sed -i 's/^TCP_IPV6_ENABLED[[:space:]]*=.*/TCP_IPV6_ENABLED = false/' "§stage/config"
+            sed -i '/^ENCRYPTION_AUTO_DETECT[[:space:]]*=/d' "§stage/config"
+            printf '\nENCRYPTION_AUTO_DETECT = false\n' >> "§stage/config"
             sed -i 's/^DATA_ENCRYPTION_METHOD[[:space:]]*=.*/DATA_ENCRYPTION_METHOD = 5/' "§stage/config"
             "§stage/server" --config "§stage/config" --check-config || exit 30
             step 4
@@ -142,8 +144,9 @@ object DnsServerScripts {
               sleep 1
             done
             key=§(§SUDO cat $dir/encrypt_key.txt 2>/dev/null | tr -d ' \r\n')
-            printf '%s' "§key" | grep -Eq '^[a-fA-F0-9]{64}§' || exit 40
+            printf '%s' "§key" | grep -Eq '^[a-fA-F0-9]{32}§' || { echo 'CottenDNS did not produce the pinned method-5 key (32 hexadecimal characters)' >&2; exit 40; }
             result COTTEN_KEY "§key"
         """.replace("__PREFIX__", prefix + "_v[A-Za-z0-9._-]+"), COTTEN_STEPS, mapOf("UNIT" to unit))
     }
 }
+

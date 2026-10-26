@@ -143,7 +143,7 @@ object UniversalImportEngine {
         if (!trimmed.startsWith("{") && !trimmed.startsWith("proxies:") && !trimmed.startsWith("vless://") && isLikelyBase64(compactBase64)) {
             val decoded = decodeBase64Safe(compactBase64)
             if (decoded != null && decoded.isNotBlank() && decoded != trimmed &&
-                (decoded.contains("://") || decoded.startsWith("{") || decoded.contains("proxies:"))) {
+                (decoded.contains("://") || decoded.startsWith("{") || decoded.startsWith("[") || decoded.contains("proxies:"))) {
                 return parseRawSource(decoded, fileName, subUrl)
             }
         }
@@ -151,6 +151,32 @@ object UniversalImportEngine {
         // 2. WireGuard / AmneziaWG .conf file
         if (WireGuardConf.looksLikeConf(trimmed)) {
             return listOf(parseWireGuardConf(trimmed, fileName, subUrl))
+        }
+
+        // Hiddify Full Xray subscriptions are arrays of complete configurations, not URI lines.
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            return try {
+                val configs = org.json.JSONArray(trimmed)
+                require(configs.length() <= 500) { "Too many JSON configurations (maximum 500)" }
+                (0 until configs.length()).flatMap { i ->
+                    val config = configs.optJSONObject(i)
+                    if (config == null) listOf(ParsedItem.Invalid("JSON item $i [redacted]", "Expected a configuration object"))
+                    else {
+                        val parsed = parseJsonConfig(config.toString(), fileName, subUrl)
+                        // Keep the complete Xray route, not flattened outbounds that can drop chain hops
+                        // or transport fields. Distinct full configurations need distinct identities.
+                        val complete = parsed.filterIsInstance<ParsedItem.Success>().filter { it.profile.rawConfig.isNotBlank() }
+                        if (complete.isEmpty()) parsed else complete.map { item ->
+                            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                                .digest(item.profile.rawConfig.toByteArray(Charsets.UTF_8))
+                                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                            ParsedItem.Success(item.profile.copy(canonicalFingerprint = "xray-json:$digest"))
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                listOf(ParsedItem.Invalid("JSON subscription [redacted]", "Invalid or oversized JSON configuration array"))
+            }
         }
 
         // 3. Check if JSON (Xray or Sing-box)
@@ -734,4 +760,5 @@ object UniversalImportEngine {
         return result
     }
 }
+
 

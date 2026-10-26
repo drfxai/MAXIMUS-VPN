@@ -129,6 +129,9 @@ data class ServerDetailActions(
     val onStart: (String) -> Unit = {},
     val onStop: (String) -> Unit = {},
     val onImportHiddify: () -> Unit = {},
+    val onQuickHiddify: () -> Unit = {},
+    val onImportHiddifyConfigs: () -> Unit = {},
+    val onHiddifyTelegram: () -> Unit = {},
     val onDismissFound: () -> Unit = {},
     val onInstall: (String) -> Unit,
     val onInstallCenter: () -> Unit,
@@ -210,8 +213,7 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
         }
 
         // Expose Hiddify's setup entry points even when its admin URL was not captured during install.
-        // All actions open the official Hiddify Admin V2 UI; Maximus does not pretend to have
-        // implemented direct Hiddify user/CDN/Telegram APIs yet.
+        // Quick creation and Telegram use the reviewed v14 API; domain management opens the official UI.
         if (ui.tools.any { it.id == ServerToolCatalog.HIDDIFY }) {
             SectionLabel("Hiddify management")
             GroupCard {
@@ -223,10 +225,13 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
                 )
                 RowDivider(0.dp)
                 ListRow(
-                    "Users & configs",
-                    subtitle = "Open Admin V2, then Manager > Users to add users and obtain subscriptions",
-                    trailing = { TextAction("Manage", { actions.onOpenPanel(ServerToolCatalog.HIDDIFY) }, enabled = idle) }
+                    "Quick create config",
+                    subtitle = "Create a user with a quota and expiry, then import its subscription into Nodes",
+                    trailing = { TextAction("Create", actions.onQuickHiddify, enabled = idle) }
                 )
+                RowDivider(0.dp)
+                ListRow("Import saved configs", subtitle = "Refresh the last user subscription without creating another user",
+                    trailing = { TextAction("Import", actions.onImportHiddifyConfigs, enabled = idle) })
                 RowDivider(0.dp)
                 ListRow(
                     "CDN & domains",
@@ -236,8 +241,8 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
                 RowDivider(0.dp)
                 ListRow(
                     "Telegram proxy",
-                    subtitle = "Open Admin V2 to configure Telegram proxy separately from CDN domains",
-                    trailing = { TextAction("Manage", { actions.onOpenPanel(ServerToolCatalog.HIDDIFY) }, enabled = idle) }
+                    subtitle = "Read MTProto or Web proxy links from your user account; CDN compatibility depends on the proxy",
+                    trailing = { TextAction("Get links", actions.onHiddifyTelegram, enabled = idle) }
                 )
             }
         }
@@ -416,3 +421,4 @@ private fun FoundHiddifyCard(summary: String, actions: ServerDetailActions, idle
 }
 
 internal fun toolTitle(id: String): String = ServerToolCatalog.byId(id)?.title ?: id
+

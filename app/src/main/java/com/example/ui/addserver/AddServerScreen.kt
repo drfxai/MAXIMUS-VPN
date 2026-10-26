@@ -91,6 +91,7 @@ fun AddServerScreen(
     var simpleUrl by remember { mutableStateOf("") }
     var parsedPreview by remember { mutableStateOf<VlessProfile?>(null) }
     var parseError by remember { mutableStateOf<String?>(null) }
+    var downloadingSubscription by remember { mutableStateOf(false) }
 
     // --- Advanced Mode States ---
     var advName by remember { mutableStateOf("Custom VLESS") }
@@ -206,7 +207,10 @@ fun AddServerScreen(
                 onValueChange = { input ->
                     simpleUrl = input
                     testResultStatus = null
-                    if (input.isNotBlank()) {
+                    if (com.example.vpn.subscription.SubscriptionInput.url(input) != null) {
+                        parsedPreview = null
+                        parseError = null
+                    } else if (input.isNotBlank()) {
                         try {
                             val profiles = com.example.vpn.engine.ConfigurationAdapter.importConfiguration(input)
                             if (profiles.isNotEmpty()) {
@@ -228,7 +232,7 @@ fun AddServerScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("vless_url_input"),
-                placeholder = { Text("vless://, ss://, trojan://, hy2://, Xray JSON, Mihomo YAML, or http(s):// subscription", color = AppTheme.colors.textMuted, fontSize = 12.sp) },
+                placeholder = { Text("vless://, ss://, trojan://, hy2://, Xray JSON, Mihomo YAML, or HTTPS subscription or domain/path", color = AppTheme.colors.textMuted, fontSize = 12.sp) },
                 maxLines = 6,
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -253,7 +257,10 @@ fun AddServerScreen(
                         val clip = clipboardManager.getText()?.text ?: ""
                         if (clip.isNotBlank()) {
                             simpleUrl = clip
-                            try {
+                            if (com.example.vpn.subscription.SubscriptionInput.url(clip) != null) {
+                                parsedPreview = null
+                                parseError = null
+                            } else try {
                                 val profiles = com.example.vpn.engine.ConfigurationAdapter.importConfiguration(clip)
                                 if (profiles.isNotEmpty()) {
                                     parsedPreview = profiles.first()
@@ -348,13 +355,15 @@ fun AddServerScreen(
             }
 
             // Remote Download Button if input is a URL
-            if (simpleUrl.trim().startsWith("http://") || simpleUrl.trim().startsWith("https://")) {
+            if (com.example.vpn.subscription.SubscriptionInput.url(simpleUrl) != null) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
                     onClick = {
-                        val targetUrl = simpleUrl.trim()
-                        Toast.makeText(context, "Downloading subscription...", Toast.LENGTH_SHORT).show()
+                        val targetUrl = requireNotNull(com.example.vpn.subscription.SubscriptionInput.url(simpleUrl))
+                        downloadingSubscription = true
+                        parseError = null
                         serverViewModel.fetchRemoteSubscription(targetUrl) { res ->
+                            downloadingSubscription = false
                             when (res) {
                                 is AppResult.Success -> {
                                     val count = res.data
@@ -363,16 +372,17 @@ fun AddServerScreen(
                                 }
                                 is AppResult.Error -> {
                                     val err = res.userFriendlyMessage
-                                    Toast.makeText(context, "Failed to download: $err", Toast.LENGTH_LONG).show()
+                                    parseError = err
                                 }
                             }
                         }
                     },
+                    enabled = !downloadingSubscription,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Download & Import Remote Subscription", color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(if (downloadingSubscription) "Downloading…" else "Download & Import Subscription", color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
 
@@ -782,3 +792,4 @@ private fun buildProfileFromAdvanced(
         null
     }
 }
+

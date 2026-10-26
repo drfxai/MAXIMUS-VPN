@@ -491,6 +491,57 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun hiddifyApi() = com.example.panels.servers.panel.HiddifyQuickSetup(
+        http.newBuilder().dns(RayApplication.instance.subscriptionManager.managedPanelDns()).build())
+
+    /** Explicit UI confirmation starts one creation; a pending UUID survives a lost response/restart. */
+    fun quickHiddifyUser(id: String, name: String, days: Int, quotaGb: Int, onDone: () -> Unit) =
+        serverAction(id, "Creating Hiddify user and importing subscription…") { original ->
+            var current = original
+            if (hiddifyAdminUrl(id) == null) {
+                current = withContext(Dispatchers.IO) { manager.hiddify.restoreAdminUrl(current) }
+                save(current)
+            }
+            val tool = requireNotNull(current.tool(ServerToolCatalog.HIDDIFY))
+            val operation = tool.settings["quick_pending_user"] ?: java.util.UUID.randomUUID().toString()
+            current = current.withTool(tool.copy(settings = tool.settings + ("quick_pending_user" to operation)))
+            save(current)
+            val userUrl = withContext(Dispatchers.IO) {
+                hiddifyApi().createUser(
+                    requireNotNull(hiddifyAdminUrl(id)), name, days, quotaGb, operation)
+            }
+            val updatedTool = requireNotNull(current.tool(ServerToolCatalog.HIDDIFY))
+            // Persist the result before importing: a failed download must not create another account.
+            save(current.withTool(updatedTool.copy(settings = (updatedTool.settings - "quick_pending_user") +
+                ("quick_user_url" to userUrl))))
+            onDone()
+            importHiddifyUserSubscription(userUrl)
+        }
+
+    private suspend fun importHiddifyUserSubscription(userUrl: String) {
+        val result = withContext(Dispatchers.IO) {
+            RayApplication.instance.subscriptionManager.addAndSyncSubscription("Hiddify", "${userUrl}sub/")
+        }
+        check(result.isSuccess) { "User link saved; import failed. Use Import saved configs to retry. " + (result.errorMessage ?: "No subscription data") }
+        emit(ServersEvent.Message("Hiddify subscription imported: ${result.addedCount} new nodes. Traffic is not yet verified."))
+    }
+
+    fun importSavedHiddify(id: String) = serverAction(id, "Importing saved Hiddify configs…") { s ->
+        val link = s.tool(ServerToolCatalog.HIDDIFY)?.settings?.get("quick_user_url")
+            ?: error("Create a user first, or paste your existing user subscription in Nodes > Add")
+        importHiddifyUserSubscription(link)
+    }
+
+    fun hiddifyTelegram(id: String, userLink: String,
+        onLinks: (List<com.example.panels.servers.panel.HiddifyQuickSetup.TelegramLink>) -> Unit) =
+        serverAction(id, "Reading Telegram proxy links…") { s ->
+            val link = userLink.ifBlank { s.tool(ServerToolCatalog.HIDDIFY)?.settings?.get("quick_user_url").orEmpty() }
+            require(link.isNotBlank()) { "Paste a Hiddify user link, or create a user first" }
+            val links = withContext(Dispatchers.IO) { hiddifyApi().telegram(link) }
+            check(links.isNotEmpty()) { "The panel returned no Telegram proxies. Enable them in Hiddify first; CDN support is not implied." }
+            onLinks(links)
+        }
+
     fun remove(id: String) {
         store.delete(id)
         _state.update { it.copy(servers = it.servers.filterNot { s -> s.id == id }, route = ServersRoute.None) }
@@ -817,7 +868,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 emit(ServersEvent.Success)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _state.update { st -> st.copy(wizard = st.wizard?.copy(stage = WizardStage.FAILED, error = e.message ?: "The install stopped")) }
+                _state.update { st -> st.copy(wizard = st.wizard?.copy(stage = WizardStage.FAILED, error = com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "The install stopped"))) }
             }
         }
     }
@@ -869,4 +920,5 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         fun locationLabel(l: ServerLocation) = if (l == ServerLocation.IRAN) "Iran" else "Abroad"
     }
 }
+
 

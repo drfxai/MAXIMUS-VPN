@@ -112,7 +112,7 @@ class ServerManager(
                             require(runCatching { java.util.Base64.getDecoder().decode(key).size == 32 }.getOrDefault(false)) {
                                 "Soar did not return its public key"
                             }
-                        else require(key.matches(Regex("[0-9a-fA-F]{64}"))) { "CottenDNS did not return a valid shared key" }
+                        else require(key.matches(Regex("[0-9a-fA-F]{32}"))) { "CottenDNS did not return a valid shared key" }
                         val installed = InstalledTool(toolId, port = 53, settings = mapOf(
                             ToolProfiles.DNSTT_DOMAIN to domain,
                             ToolProfiles.DNSTT_BASE to DnsDelegation.normalizeBase(options.baseDomain),
@@ -333,4 +333,5 @@ class ServerManager(
         const val K_LAST_BACKUP = "lastBackup"
     }
 }
+
 

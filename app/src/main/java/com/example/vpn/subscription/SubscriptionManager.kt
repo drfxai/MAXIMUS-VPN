@@ -1,6 +1,5 @@
 package com.example.vpn.subscription
 
-import com.example.core.SecretRedactor
 import com.example.data.model.SubscriptionInfo
 import com.example.data.repository.ServerRepository
 import com.example.data.repository.SubscriptionRepository
@@ -197,6 +196,9 @@ class SubscriptionManager(
         }
     }
 
+    /** Reuse the existing DNS validation/fallback for user-requested managed panel HTTPS calls. */
+    internal fun managedPanelDns(): okhttp3.Dns = resilientDns
+
     private val safeRedirectInterceptor = Interceptor { chain ->
         var request = chain.request()
         var response = chain.proceed(request)
@@ -259,7 +261,10 @@ class SubscriptionManager(
             .header("User-Agent", "Maximus-VPN/1.0 (Android; Linux)")
             .header("Accept", "*/*")
             .build()
-        client.newCall(request).execute().use { res ->
+        val response = try { client.newCall(request).execute() } catch (e: javax.net.ssl.SSLException) {
+            throw java.io.IOException(SubscriptionInput.failure(e))
+        }
+        response.use { res ->
             if (!res.isSuccessful) throw java.io.IOException(
                 if (res.code == 503) "HTTP 503: subscription service unavailable; this does not establish a tunnel failure"
                 else "HTTP ${res.code}")
@@ -297,7 +302,7 @@ class SubscriptionManager(
      * copy are kept (and restored if they were deleted).
      */
     suspend fun syncSubscription(subscription: SubscriptionInfo): SyncResult = withContext(Dispatchers.IO) {
-        val sanitizedUrl = SecretRedactor.redact(subscription.url)
+        val sanitizedUrl = com.example.panels.servers.ServerLogSanitizer.redact(subscription.url)
         XrayLogManager.i("SUBSCRIPTION", "Syncing subscription '${subscription.name}' from $sanitizedUrl...")
 
         if (!isValidSubscriptionUrl(subscription.url)) {
@@ -353,12 +358,12 @@ class SubscriptionManager(
                     snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
                     val viaMirror = outcome.url.takeIf { it != subscription.url }
                     outcome.failures.forEach { (url, why) ->
-                        XrayLogManager.w("SUBSCRIPTION", "Source ${SecretRedactor.redact(url)} failed: ${SecretRedactor.redact(why)}")
+                        XrayLogManager.w("SUBSCRIPTION", "Source ${com.example.panels.servers.ServerLogSanitizer.redact(url)} failed: ${com.example.panels.servers.ServerLogSanitizer.redact(why)}")
                     }
                     subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), error = null)
                     XrayLogManager.i(
                         "SUBSCRIPTION",
-                        "Subscription '${subscription.name}' sync complete${viaMirror?.let { " via ${SecretRedactor.redact(it)}" }.orEmpty()}: " +
+                        "Subscription '${subscription.name}' sync complete${viaMirror?.let { " via ${com.example.panels.servers.ServerLogSanitizer.redact(it)}" }.orEmpty()}: " +
                             "${importResult.configurationsFound} found, ${inserted.size} added, ${duplicates.size} duplicates."
                     )
                     SyncResult(subscription.id, importResult.configurationsFound, inserted.size, duplicates.size, true, viaMirror = viaMirror)
@@ -370,7 +375,7 @@ class SubscriptionManager(
                     if (isFree) return@withContext keepFreeListAfterFailure(subscription, snapshot, outcome, reason, tried)
                     if (snapshot == null) {
                         val errMsg = if (tried > 1) "All $tried sources failed. First: $reason" else reason
-                        XrayLogManager.e("SUBSCRIPTION", "Sync failed for '${subscription.name}': ${SecretRedactor.redact(errMsg)}")
+                        XrayLogManager.e("SUBSCRIPTION", "Sync failed for '${subscription.name}': ${com.example.panels.servers.ServerLogSanitizer.redact(errMsg)}")
                         subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
                         return@withContext SyncResult(subscription.id, 0, 0, 0, false, errMsg)
                     }
@@ -378,7 +383,7 @@ class SubscriptionManager(
                     val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
                     val day = java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(java.util.Date(snapshot.savedAt))
                     val errMsg = "Offline copy from $day in use. Every source failed ($reason)."
-                    XrayLogManager.w("SUBSCRIPTION", "'${subscription.name}': ${SecretRedactor.redact(errMsg)} ${inserted.size} servers restored.")
+                    XrayLogManager.w("SUBSCRIPTION", "'${subscription.name}': ${com.example.panels.servers.ServerLogSanitizer.redact(errMsg)} ${inserted.size} servers restored.")
                     subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), errMsg)
                     SyncResult(subscription.id, importResult.configurationsFound, inserted.size, duplicates.size, false, errMsg, fromOfflineCopy = true)
                 }
@@ -386,7 +391,7 @@ class SubscriptionManager(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            val errMsg = e.localizedMessage ?: "Network connection failure"
+            val errMsg = SubscriptionInput.failure(e)
             XrayLogManager.e("SUBSCRIPTION", "Error syncing '${subscription.name}': $errMsg")
             subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
             SyncResult(subscription.id, 0, 0, 0, false, errMsg)
@@ -415,10 +420,10 @@ class SubscriptionManager(
         snapshots?.runCatching { save(subscription.id, outcome.url, outcome.payload) }
         val viaMirror = outcome.url.takeIf { it != subscription.url }
         outcome.failures.forEach { (url, why) ->
-            XrayLogManager.w("SUBSCRIPTION", "Source ${SecretRedactor.redact(url)} failed: ${SecretRedactor.redact(why)}")
+            XrayLogManager.w("SUBSCRIPTION", "Source ${com.example.panels.servers.ServerLogSanitizer.redact(url)} failed: ${com.example.panels.servers.ServerLogSanitizer.redact(why)}")
         }
         subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), error = null)
-        XrayLogManager.i("SUBSCRIPTION", "Signed subscription '${subscription.name}' verified${viaMirror?.let { " via ${SecretRedactor.redact(it)}" }.orEmpty()}: " +
+        XrayLogManager.i("SUBSCRIPTION", "Signed subscription '${subscription.name}' verified${viaMirror?.let { " via ${com.example.panels.servers.ServerLogSanitizer.redact(it)}" }.orEmpty()}: " +
             "${plan.insert.size} added, ${plan.delete.size} removed, ${plan.kept} kept, ${plan.retained} kept because in use or favourite.")
         return SyncResult(subscription.id, importResult.configurationsFound, plan.insert.size, 0, true, viaMirror = viaMirror)
     }
@@ -447,7 +452,7 @@ class SubscriptionManager(
         if (saved > 0 || snapshot == null) {
             // The screen shows "Refresh failed — existing verified configurations retained." with this reason.
             XrayLogManager.w("SUBSCRIPTION", "'${subscription.name}' refresh failed; existing verified configurations retained " +
-                "($saved unchanged): ${SecretRedactor.redact(why)}")
+                "($saved unchanged): ${com.example.panels.servers.ServerLogSanitizer.redact(why)}")
             subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), why)
             return SyncResult(subscription.id, 0, 0, 0, false, why, poolBefore = saved, keptCount = saved)
         }
@@ -497,7 +502,7 @@ class SubscriptionManager(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                XrayLogManager.w("SUBSCRIPTION", "Intelligence rules not taken: ${SecretRedactor.redact(e.message.orEmpty())}")
+                XrayLogManager.w("SUBSCRIPTION", "Intelligence rules not taken: ${com.example.panels.servers.ServerLogSanitizer.redact(e.message.orEmpty())}")
             }
             // Probe targets for multi-target verification, from the same signed manifest; a failure keeps the
             // last valid manifest or the built-in targets (ProbeManifestStore).
@@ -507,17 +512,17 @@ class SubscriptionManager(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                XrayLogManager.w("SUBSCRIPTION", "Probe manifest not taken: ${SecretRedactor.redact(e.message.orEmpty())}")
+                XrayLogManager.w("SUBSCRIPTION", "Probe manifest not taken: ${com.example.panels.servers.ServerLogSanitizer.redact(e.message.orEmpty())}")
             }
         }
         val viaMirror = outcome.url.takeIf { it != subscription.url }
         outcome.failures.forEach { (url, why) ->
-            XrayLogManager.w("SUBSCRIPTION", "Source ${SecretRedactor.redact(url)} failed: ${SecretRedactor.redact(why)}")
+            XrayLogManager.w("SUBSCRIPTION", "Source ${com.example.panels.servers.ServerLogSanitizer.redact(url)} failed: ${com.example.panels.servers.ServerLogSanitizer.redact(why)}")
         }
         subscriptionRepository.updateSyncStatus(subscription.id, nodeCountOf(subscription), error = null)
         XrayLogManager.i(
             "SUBSCRIPTION",
-            "Free list '${subscription.name}' replaced${viaMirror?.let { " via ${SecretRedactor.redact(it)}" }.orEmpty()}: " +
+            "Free list '${subscription.name}' replaced${viaMirror?.let { " via ${com.example.panels.servers.ServerLogSanitizer.redact(it)}" }.orEmpty()}: " +
                 "${importResult.configurationsFound} candidates, ${plan.insert.size} added, ${plan.delete.size} removed, " +
                 "${plan.kept.size} kept, ${plan.retained.size} retained (last-known-good or in use); ${saved.size} before."
         )
@@ -643,3 +648,4 @@ class SubscriptionManager(
         XrayLogManager.i("SUBSCRIPTION", "Deleted subscription '${subscription.name}' and its associated nodes.")
     }
 }
+
