@@ -1,9 +1,7 @@
 V1.0.2 Android versionCode 37
-Authorized signed release refresh: existing user master directive; 2026-10-26 panel recovery and DNS own-link field repair.
-Reviewed merge: c020af02e2789dcef1d8beb9d380476aa10ef8a4 (PR131); tree exactly matches tested head 85d6338015c74db8cf2b8a9fe5dda27033b4333e.
-Final Checks 40336629087 / 40336621118 SUCCESS; transport 40336629147 / 40336620805 SUCCESS.
-Includes Cotten own-link 32/64-hex import and wrapped-link round trips, fresh service facts after install, bounded apt lock wait, stable service startup checks, scoped Hiddify partial recovery/non-purging removal and service diagnostics.
-Preserve versionName 1.0.2, versionCode 37, permanent signing identity and native engine pins.
-Release workflow must pass fresh unit/lint/build, packaging/checksum/signer and Android15 emulator install/launch before publication.
-No live VPS, physical ARM64 phone, SOAR/Cotten Iranian egress, full TUN, runtime DoH or external leak test claim; no production DNS/Worker change.
-Audit: docs/PANEL_FIELD_RECOVERY_20261026.md; broader ledger: docs/MASTER_REMAINING_WORK_20261025.md.
+Authorized release refresh for reviewed PR132 and PR133.
+Source: 3fc42f64bd965ae69c4e44eb11b0a77823794ccf.
+Checks 40362715255 and transport recovery 40362715450 succeeded.
+Preserve custom resolver ports during UDP-to-TCP burst fallback; correct Cotten legacy encrypted-DNS fallback disclosure.
+Keep permanent signing identity and native source pins. Require build, unit tests, lint, packaging, signature and Android15 launch verification before publication.
+Real device/VPS DNS tunnel traffic remains unverified. Resolver automation and integrated Hiddify CDN provisioning are not included in this release.
