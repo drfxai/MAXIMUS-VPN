@@ -11,6 +11,7 @@ git -C "$SRC" init -q
 git -C "$SRC" fetch --depth=1 https://github.com/WhiteDNS/CottenDNS.git "$REV"
 git -C "$SRC" checkout --detach FETCH_HEAD
 test "$(git -C "$SRC" rev-parse HEAD)" = "$REV"
+python3 "$TASK_ROOT/scripts/engines/cotten-strict-dns.py" "$SRC"
 mkdir -p "$OUT"
 output="$(cd "$OUT" && pwd)/libcottendns.so"
 (cd "$SRC" && go mod download && go mod verify && \

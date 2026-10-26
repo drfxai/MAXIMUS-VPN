@@ -4,12 +4,14 @@ on:
     branches: ['**']
     paths:
       - 'scripts/engines/cottendns.sh'
+      - 'scripts/engines/cotten-strict-dns.py'
       - 'scripts/engines/common.sh'
       - 'app/src/main/java/com/example/vpn/sidecar/CottenDnsSidecar.kt'
       - '.github/workflows/cotten-engine.yml'
   pull_request:
     paths:
       - 'scripts/engines/cottendns.sh'
+      - 'scripts/engines/cotten-strict-dns.py'
       - 'scripts/engines/common.sh'
       - 'app/src/main/java/com/example/vpn/sidecar/CottenDnsSidecar.kt'
       - '.github/workflows/cotten-engine.yml'
@@ -39,6 +41,7 @@ jobs:
       - name: Configuration, client recovery and authenticated transfer tests
         working-directory: ${{ runner.temp }}/cotten-source
         run: |
+          python3 "$GITHUB_WORKSPACE/scripts/engines/cotten-strict-dns.py" .
           go mod download
           go mod verify
           go test -mod=readonly -count=1 -timeout 240s ./internal/config ./internal/cottenmax ./internal/client
