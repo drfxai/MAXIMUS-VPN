@@ -294,7 +294,7 @@ object ResolverIntelligence {
                 val answer = if (tcpOnly) tcp(network, server, query, BURST_TIMEOUT_MS, r.port)
                     else completeAnswer(
                         { runCatching { udp(network, server, query, BURST_TIMEOUT_MS, r.port) }.getOrNull() },
-                        { if (r.tcp == true) { usedTcp = true; tcp(network, server, query, BURST_TIMEOUT_MS) } else null }
+                        { if (r.tcp == true) { usedTcp = true; tcp(network, server, query, BURST_TIMEOUT_MS, r.port) } else null }
                     )
                 answer
                     ?.let { it.rcode == 0 && !it.truncated && it.addresses.any { a -> !com.example.vpn.EndpointResolver.isBlockedAnswer(a) } } == true
