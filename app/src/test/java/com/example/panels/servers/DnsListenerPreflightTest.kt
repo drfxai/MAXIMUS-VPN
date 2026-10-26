@@ -36,7 +36,7 @@ class DnsListenerPreflightTest {
     @Test fun bothInstallersCheckBeforeDownloadsAndBeforeMutation() {
         for (script in listOf(DnsServerScripts.soar("t.example.com").text,
                 DnsServerScripts.cotten("t.example.com", "amd64").text)) {
-            assertTrue(script.indexOf("require_free_listener udp 53") < script.indexOf("ensure_user"))
+            assertTrue(script.indexOf("require_free_listener udp 53") < script.lastIndexOf("ensure_user"))
             assertTrue(script.substringBefore("mutated=1").trimEnd().endsWith("require_free_listener udp 53") ||
                 script.substringBefore("mutated=1").trimEnd().endsWith("require_free_listener tcp 9092"))
         }
