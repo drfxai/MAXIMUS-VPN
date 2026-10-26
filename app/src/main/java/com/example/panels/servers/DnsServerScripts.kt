@@ -11,6 +11,22 @@ object DnsServerScripts {
     val SOAR_STEPS = listOf("Check toolchain", "Build pinned Soar", "Create Ed25519 key", "Install systemd", "Open UDP 53", "Verify server")
     val COTTEN_STEPS = listOf("Check system", "Verify CottenDNS SHA-256", "Configure server", "Install systemd", "Open DNS ports", "Verify server")
 
+    /** Wildcard listeners also conflict with loopback DNS stubs. Never stop their owner. */
+    internal val LISTENER_PREFLIGHT = """
+        require_free_listener() {
+          proto=§1
+          port=§2
+          command -v ss >/dev/null 2>&1 || { echo 'Cannot inspect listeners: install iproute2 before retrying' >&2; exit 23; }
+          if [ "§proto" = udp ]; then flags=-Hlnu; else flags=-Hlnt; fi
+          listeners=§(ss "§flags" 2>/dev/null) || { echo 'Cannot inspect listeners; no installation changes made' >&2; exit 23; }
+          occupied=§(printf '%s\n' "§listeners" | awk -v port="§port" '{n=split(§4,a,":"); if (a[n] == port) print §4}')
+          if [ -n "§occupied" ]; then
+            echo "Cannot bind §proto port §port: existing listener(s): §occupied. Wildcard binding includes loopback. Use a separate server or explicitly reconfigure the owning service; Maximus will not stop it." >&2
+            exit 23
+          fi
+        }
+    """.trimIndent()
+
     fun soar(domain: String): ToolScript {
         require(ToolScripts.DOMAIN.matches(domain))
         val dir = "/etc/maximus/soar"
@@ -18,7 +34,9 @@ object DnsServerScripts {
             listOf("ExecStart=/usr/local/bin/maximus-soar-server -zone $domain -key-file $dir/key -listen :53 -allow-ports 80,443"),
             extra = listOf("AmbientCapabilities=CAP_NET_BIND_SERVICE", "CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "ReadOnlyPaths=$dir"))
         return ToolScripts.script("""
+            @@PREFLIGHT@@
             step 1
+            require_free_listener udp 53
             have systemctl || exit 21
             have go || pkg_install golang-go
             gov=§(go version | sed -n 's/.*go\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p')
@@ -51,6 +69,7 @@ object DnsServerScripts {
             "§stage/soar-server" keygen | awk '§1=="private"{print §2}' > "§stage/key"
             [ "§(wc -c < "§stage/key")" -ge 40 ] || exit 40
             step 4
+            require_free_listener udp 53
             mutated=1
             §SUDO install -d -m 0750 -o root -g maximus $dir
             §SUDO install -m 0640 -o root -g maximus "§stage/key" $dir/key
@@ -68,7 +87,7 @@ object DnsServerScripts {
             pub=§(§SUDO /usr/local/bin/maximus-soar-server pubkey $dir/key)
             [ -n "§pub" ] || exit 40
             result PUBKEY "§pub"
-        """, SOAR_STEPS, mapOf("UNIT" to unit))
+        """, SOAR_STEPS, mapOf("UNIT" to unit, "PREFLIGHT" to LISTENER_PREFLIGHT))
     }
 
     fun cotten(domain: String, arch: String): ToolScript {
@@ -82,7 +101,11 @@ object DnsServerScripts {
             listOf("WorkingDirectory=$dir", "ExecStart=/usr/local/bin/maximus-cotten-server -config $dir/server_config.toml -metrics-address 127.0.0.1:9092"),
             extra = listOf("AmbientCapabilities=CAP_NET_BIND_SERVICE", "CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "ReadWritePaths=$dir"))
         return ToolScripts.script("""
+            @@PREFLIGHT@@
             step 1
+            require_free_listener udp 53
+            require_free_listener tcp 53
+            require_free_listener tcp 9092
             have systemctl || exit 21
             ensure_user
             have curl || pkg_install curl ca-certificates
@@ -124,6 +147,9 @@ object DnsServerScripts {
             sed -i 's/^DATA_ENCRYPTION_METHOD[[:space:]]*=.*/DATA_ENCRYPTION_METHOD = 5/' "§stage/config"
             "§stage/server" --config "§stage/config" --check-config || exit 30
             step 4
+            require_free_listener udp 53
+            require_free_listener tcp 53
+            require_free_listener tcp 9092
             mutated=1
             §SUDO install -d -m 0770 -o root -g maximus $dir
             §SUDO install -m 0755 "§stage/server" /usr/local/bin/maximus-cotten-server
@@ -146,7 +172,7 @@ object DnsServerScripts {
             key=§(§SUDO cat $dir/encrypt_key.txt 2>/dev/null | tr -d ' \r\n')
             printf '%s' "§key" | grep -Eq '^[a-fA-F0-9]{32}§' || { echo 'CottenDNS did not produce the pinned method-5 key (32 hexadecimal characters)' >&2; exit 40; }
             result COTTEN_KEY "§key"
-        """.replace("__PREFIX__", prefix + "_v[A-Za-z0-9._-]+"), COTTEN_STEPS, mapOf("UNIT" to unit))
+        """.replace("__PREFIX__", prefix + "_v[A-Za-z0-9._-]+"), COTTEN_STEPS, mapOf("UNIT" to unit, "PREFLIGHT" to LISTENER_PREFLIGHT))
     }
 }
 
