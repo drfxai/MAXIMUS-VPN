@@ -11,7 +11,7 @@ object SubscriptionInput {
         val candidate = if (text.contains("://")) text else "https://$text"
         val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
         if (uri.host.isNullOrBlank() || uri.userInfo != null || uri.port !in -1..65535 || uri.port == 0) return null
-        if (!text.contains("://") && (!uri.host.contains('.') || uri.rawPath.isNullOrEmpty())) return null
+        if (!text.contains("://") && !uri.host.contains('.')) return null
         return candidate
     }
 

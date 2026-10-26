@@ -9,6 +9,7 @@ class SubscriptionInputTest {
     @Test fun detectsDomainAndSubdomainLinksWithOrWithoutScheme() {
         assertEquals("https://sub.example.com/user/path?allConfigs=true", SubscriptionInput.url("sub.example.com/user/path?allConfigs=true"))
         assertEquals("https://sub.example.com/user/path#name", SubscriptionInput.url("https://sub.example.com/user/path#name"))
+        assertEquals("https://sub.example.com", SubscriptionInput.url("sub.example.com"))
         val parsed = SubscriptionSources.parseInput("sub.example.com/path\nhttps://mirror.example.com/path")
         assertEquals("https://sub.example.com/path", parsed.first)
         assertEquals(listOf("https://mirror.example.com/path"), parsed.second)
