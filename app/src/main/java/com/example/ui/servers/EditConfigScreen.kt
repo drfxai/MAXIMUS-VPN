@@ -944,7 +944,7 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
             EditField("TLS certificate name (optional, for dot/doh)", tlsName, monospace = true) { tlsName = it }
             EditField("Backup domains on compatible servers (up to three)", backups, monospace = true, minLines = 2) { backups = it }
             Hint("The server key is preserved. Import a new CottenDNS link to replace it. TLS certificate checks remain enabled.")
-            Hint(if (initial?.mode == "legacy") "Legacy mode: if DoT or DoH fails, this engine can retry using unencrypted DNS over UDP/TCP. The tunnel payload remains encrypted." else "CottenMax: encrypted DNS does not fall back to plaintext.")
+            Hint("DoT and DoH keep the resolver connection encrypted: if they fail, the connection stops instead of retrying over plain DNS. Auto mode allows UDP/TCP DNS recovery. CottenMax and Legacy remain separate server modes.")
         }
     }
     if (discard) ConfirmDialog("Discard changes?", "Unsaved edits will be lost.", "Discard", { onBack() }, { discard = false })
