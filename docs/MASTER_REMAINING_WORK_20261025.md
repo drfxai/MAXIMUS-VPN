@@ -76,3 +76,14 @@ Y means implementation exists, not a universal connectivity guarantee. Pending a
 No live VPS credentials, explicit production Cloudflare record-change target, or attached Android debugging device were available to this execution. Those are external test blockers, not a reason to label unfinished code complete. No secret supplied in public profile examples is copied into this ledger or the repository.
 
 Merge only final reviewed heads with successful CI; inspect combined main before release. Signed release must pass packaging, permanent signer, Android15 install/launch and updater-metadata checks. A successful launch is not a censorship or TUN leak test. Preserve version/signing. Rollback uses prior reviewed release/source; never delete healthy server data to make a test pass.
+
+
+## 26 October field recovery follow-up (PR130 / PR131)
+
+This dated update refines the earlier snapshot above; it does not mark the broader acceptance matrix complete.
+
+- Build94 / PR130 added pinned Hiddify v14.0.5 quick user creation and saved subscription import, read-only Telegram/Web proxy link retrieval, domain/Hiddify All Configurations recognition and full Xray arrays. Full panel dashboard, plans management and server CDN enablement remain separate work; retrieval of an existing Telegram link is not CDN provisioning.
+- PR131 final head 85d6338015c74db8cf2b8a9fe5dda27033b4333e, merged as c020af02e2789dcef1d8beb9d380476aa10ef8a4, repairs the missed Cotten 32/64-hex own-link importer, fresh post-install facts (DNS/Hiddify/Hysteria), bounded native apt-lock waiting, sustained service checks, read-only failure diagnostics and visible Hiddify partial-install recovery/non-purging removal. Final PR/push Checks and transport recovery checks passed. See PANEL_FIELD_RECOVERY_20261026.md for exact run IDs and boundaries.
+- New user field reports show one Snowflake initial connect at 461253 ms and four warm mode changes at 2235–2689 ms, keeping the Tor process. Two later failed checks recovered without a switch. This supports that specific field mode-continuity case, not all engines, cold connects, lossless TUN transitions or leak freedom.
+- E1 remains BLOCKED for live server diagnosis: SOAR/Cotten phone egress not verified; current resolver SERVFAIL/no-response evidence is not a proved missing delegation. Real SSH journal/listener/firewall and authenticated phone egress are still required. No VPS or DNS records were changed by this execution.
+- F2 dead-bridge retry health, F4 full Android TUN/leak verification, runtime DoH proof, Worker503 production cause and other engine/endurance/performance gates remain open. Signed release checks are independent of Iranian network acceptance.
