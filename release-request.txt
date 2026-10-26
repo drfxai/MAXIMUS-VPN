@@ -1,9 +1,8 @@
 V1.0.2 Android versionCode 37
-User-authorized latest-source APK refresh after PR134 and PR135.
-Reviewed source: 45323ff8da35e310fba2840f924599ac8e1834d4.
-Main Checks 40374243866 and transport checks 40374243910 succeeded.
-Native Cotten checks 40367577100 succeeded on ARM64, ARM32 and x86_64.
-Includes strict legacy DoT/DoH no-plaintext fallback, matching editor text and dedicated CottenMax import/edit/launch contract regression.
-Retain permanent signing identity and existing native revision with reviewed strict-DNS patch.
-Require fresh build/unit/lint, packaging/signature/checksums and Android15 launch verification before publication.
-No physical device/VPS connectivity claim; smart resolver provisioning and integrated Hiddify CDN remain separate unfinished work.
+User-authorized signed release refresh for PR136.
+Source: eebad9915b2d7fa6573f35d7dd6f034271c6aa0d.
+Checks 40408558549 and transport recovery 40408558536 succeeded on the reviewed PR head.
+Detect Soar/Cotten wildcard listener conflicts including loopback before installation and recheck before writing engine files. Check Cotten TCP DNS and metrics listeners; never stop existing DNS services automatically.
+DNSTT installation success explicitly leaves traffic verification outstanding.
+Keep permanent signing identity and pinned native sources. Require fresh unit tests, lint, packaging, signature, checksums and Android 15 install/launch verification before publication.
+Real server DNS delegation and device tunnel traffic are not verified by this release.
