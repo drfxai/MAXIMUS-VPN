@@ -157,7 +157,7 @@ class ServerManager(
                         )
                         val updated = postInstallCheck(shell, server.withTool(installed))
                         InstallOutcome(updated, installed, ToolProfiles.dnsttProfile(updated, installed), ToolProfiles.dnsttLink(updated, installed),
-                            summary = "DNS tunnel ready on $domain")
+                            summary = "DNS tunnel installed on $domain; traffic not yet verified")
                     }
                     ServerToolCatalog.HYSTERIA2 -> {
                         val previous = server.tool(toolId)
