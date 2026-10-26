@@ -491,6 +491,9 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun hiddifyApi() = com.example.panels.servers.panel.HiddifyQuickSetup(
+        http.newBuilder().dns(RayApplication.instance.subscriptionManager.managedPanelDns()).build())
+
     /** Explicit UI confirmation starts one creation; a pending UUID survives a lost response/restart. */
     fun quickHiddifyUser(id: String, name: String, days: Int, quotaGb: Int, onDone: () -> Unit) =
         serverAction(id, "Creating Hiddify user and importing subscription…") { original ->
@@ -504,7 +507,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             current = current.withTool(tool.copy(settings = tool.settings + ("quick_pending_user" to operation)))
             save(current)
             val userUrl = withContext(Dispatchers.IO) {
-                com.example.panels.servers.panel.HiddifyQuickSetup().createUser(
+                hiddifyApi().createUser(
                     requireNotNull(hiddifyAdminUrl(id)), name, days, quotaGb, operation)
             }
             val updatedTool = requireNotNull(current.tool(ServerToolCatalog.HIDDIFY))
@@ -534,7 +537,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         serverAction(id, "Reading Telegram proxy links…") { s ->
             val link = userLink.ifBlank { s.tool(ServerToolCatalog.HIDDIFY)?.settings?.get("quick_user_url").orEmpty() }
             require(link.isNotBlank()) { "Paste a Hiddify user link, or create a user first" }
-            val links = withContext(Dispatchers.IO) { com.example.panels.servers.panel.HiddifyQuickSetup().telegram(link) }
+            val links = withContext(Dispatchers.IO) { hiddifyApi().telegram(link) }
             check(links.isNotEmpty()) { "The panel returned no Telegram proxies. Enable them in Hiddify first; CDN support is not implied." }
             onLinks(links)
         }
