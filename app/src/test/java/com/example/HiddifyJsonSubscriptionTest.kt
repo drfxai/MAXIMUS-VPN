@@ -10,6 +10,9 @@ class HiddifyJsonSubscriptionTest {
         val result = UniversalImportEngine.importText("[$config,$config]", sourceSubscriptionUrl = "https://sub.example.com/sub/")
         assertEquals(1, result.validProfiles.size)
         assertEquals(1, result.duplicateCount)
+        assertTrue(result.validProfiles.single().rawConfig.contains("xhttpSettings"))
+        val distinct = UniversalImportEngine.importText("[$config,${config.replace("/test", "/other") }]")
+        assertEquals(2, distinct.validProfiles.size)
         assertEquals("https://sub.example.com/sub/", result.validProfiles.single().sourceSubscription)
     }
 }

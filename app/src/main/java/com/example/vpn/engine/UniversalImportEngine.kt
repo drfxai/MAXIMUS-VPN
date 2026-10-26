@@ -161,7 +161,18 @@ object UniversalImportEngine {
                 (0 until configs.length()).flatMap { i ->
                     val config = configs.optJSONObject(i)
                     if (config == null) listOf(ParsedItem.Invalid("JSON item $i [redacted]", "Expected a configuration object"))
-                    else parseJsonConfig(config.toString(), fileName, subUrl)
+                    else {
+                        val parsed = parseJsonConfig(config.toString(), fileName, subUrl)
+                        // Keep the complete Xray route, not flattened outbounds that can drop chain hops
+                        // or transport fields. Distinct full configurations need distinct identities.
+                        val complete = parsed.filterIsInstance<ParsedItem.Success>().filter { it.profile.rawConfig.isNotBlank() }
+                        if (complete.isEmpty()) parsed else complete.map { item ->
+                            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                                .digest(item.profile.rawConfig.toByteArray(Charsets.UTF_8))
+                                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                            ParsedItem.Success(item.profile.copy(canonicalFingerprint = "xray-json:$digest"))
+                        }
+                    }
                 }
             } catch (_: Exception) {
                 listOf(ParsedItem.Invalid("JSON subscription [redacted]", "Invalid or oversized JSON configuration array"))
