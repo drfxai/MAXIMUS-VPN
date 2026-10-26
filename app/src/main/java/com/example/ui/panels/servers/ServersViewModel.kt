@@ -448,7 +448,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             emit(ServersEvent.PanelsChanged)
         }
         save(updated)
-        emit(ServersEvent.Message("${toolTitle(toolId)} removed"))
+        emit(ServersEvent.Message(if (toolId == ServerToolCatalog.HIDDIFY)
+            "Hiddify removal completed; retained files may still be detected." else "${toolTitle(toolId)} removed"))
     }
 
     fun backup(id: String, toolId: String) = serverAction(id, "Backing up ${toolTitle(toolId)}…") { s ->

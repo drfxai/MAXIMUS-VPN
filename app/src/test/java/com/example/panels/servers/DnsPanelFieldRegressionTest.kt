@@ -77,6 +77,30 @@ class DnsPanelFieldRegressionTest {
         assertTrue(out.server.facts!!.active("maximus-cotten"))
     }
 
+    @Test fun hiddifyInstallAlsoReturnsFreshFactsInsteadOfThePreInstallSnapshot() {
+        var reads = 0
+        val remote = object : RemoteShell {
+            override fun run(script: String, timeoutMs: Long, onLine: (String) -> Unit): ShellResult {
+                if (script == ServerFacts.SCRIPT) {
+                    reads++
+                    return ShellResult(0, "---MX-FACTS---\nOS_ID=ubuntu\nARCH=x86_64\nUID=0\nSYSTEMD=1\n" +
+                        "HIDDIFY=${if (reads == 1) 0 else 1}\nSVC_hiddify-panel=${if (reads == 1) "inactive" else "active"}\n")
+                }
+                val result = "##RESULT VERSION=14.0.5"
+                onLine(result)
+                return ShellResult(0, result)
+            }
+            override fun close() = Unit
+        }
+        val out = HiddifyPanelProvider { remote }.install(server, object : ActionProgress {
+            override fun step(index: Int) = Unit
+            override fun log(line: String) = Unit
+        })
+        assertEquals(2, reads)
+        assertTrue(out.server.facts!!.hiddifyInstalled)
+        assertTrue(out.server.facts!!.active("hiddify-panel"))
+    }
+
     private fun rootScript(script: String) = script.replace("if [ \"$(id -u)\" -ne 0 ]; then", "if false; then")
 
     private fun run(script: String, dir: File, shims: Map<String, String>): Pair<Int, String> {

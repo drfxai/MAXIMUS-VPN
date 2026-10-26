@@ -283,7 +283,7 @@ class HiddifyPanelProvider(
         val facts = connect(server).use { ServerFacts.parse(it.run(ServerFacts.SCRIPT, 60_000L).output) }
         installBlocker(server, facts)?.let { error(it) }
         val r = connect(server).use { it.runTool(HiddifyScripts.install(update = false), progress, INSTALL_TIMEOUT_MS) }
-        return outcome(server, r, facts, "Hiddify ${r["VERSION"].orEmpty()} installed")
+        return outcome(server, r, "Hiddify ${r["VERSION"].orEmpty()} installed")
     }
 
     /**
@@ -347,9 +347,17 @@ class HiddifyPanelProvider(
         return server.withoutTool(id)
     }
 
-    private fun outcome(server: ManagedServer, r: Map<String, String>, facts: ServerFacts, summary: String): InstallOutcome {
+    private fun outcome(server: ManagedServer, r: Map<String, String>, summary: String): InstallOutcome {
         val tool = InstalledTool(id, port = 443, settings = mapOfNotNull(K_VERSION to r["VERSION"], K_ADMIN_URL to validatedAdminUrl(r["ADMIN_URL"])))
-        return InstallOutcome(server.withTool(tool).copy(facts = facts, checkedAt = System.currentTimeMillis()), tool, summary = summary)
+        val fresh = runCatching {
+            connect(server).use { shell ->
+                val result = shell.run(ServerFacts.SCRIPT, 60_000L)
+                check(result.exitCode == 0 && result.output.contains(ServerFacts.BEGIN)) { "Could not refresh Hiddify service state" }
+                ServerFacts.parse(result.output)
+            }
+        }.getOrNull()
+        return InstallOutcome(server.withTool(tool).copy(facts = fresh,
+            checkedAt = if (fresh == null) 0L else System.currentTimeMillis()), tool, summary = summary)
     }
 
     companion object {
