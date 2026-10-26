@@ -138,6 +138,13 @@ object UniversalImportEngine {
     private fun parseRawSource(rawContent: String, fileName: String?, subUrl: String?): List<ParsedItem> {
         val trimmed = rawContent.trim()
 
+        // One WhiteDNS share link can be line-wrapped by a clipboard or chat client.
+        // Do not combine separate links or interpret decoded JSON as an Xray config.
+        if ((trimmed.startsWith("cottendns://", true) || trimmed.startsWith("soar://", true)) &&
+            trimmed.substringAfter("://").all { it.isWhitespace() || it.code < 128 && (it.isLetterOrDigit() || it in "-_/+=") }) {
+            return listOf(parseSingleUri(trimmed.filterNot { it.isWhitespace() }, fileName, subUrl))
+        }
+
         // 1. Check if Base64 encoded subscription/bundle (single-line or multi-line MIME base64)
         val compactBase64 = trimmed.filterNot { it.isWhitespace() }
         if (!trimmed.startsWith("{") && !trimmed.startsWith("proxies:") && !trimmed.startsWith("vless://") && isLikelyBase64(compactBase64)) {
@@ -760,5 +767,3 @@ object UniversalImportEngine {
         return result
     }
 }
-
-

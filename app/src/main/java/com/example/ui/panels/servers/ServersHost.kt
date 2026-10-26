@@ -226,7 +226,7 @@ private fun ConfirmHost(vm: ServersViewModel, confirm: Confirm?, dismiss: () -> 
         null -> Unit
         is Confirm.Uninstall -> ConfirmDialog(
             "Remove ${toolTitle(c.toolId)}?",
-            if (c.toolId == ServerToolCatalog.HIDDIFY) "Hiddify's own uninstaller stops and disables it. Its files and database stay on the server."
+            if (c.toolId == ServerToolCatalog.HIDDIFY) "Stops and disables only Hiddify services; files and databases are retained. If no Hiddify services, application or data exist, incomplete files are moved to a recoverable backup. Automatic data purge is not performed."
             else "It is stopped and deleted from the server, and its config is removed from this phone.",
             "Remove", { vm.uninstall(c.serverId, c.toolId) }, dismiss
         )
@@ -270,4 +270,3 @@ private fun ConfirmDialog(title: String, text: String, action: String, onConfirm
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Sv.Muted) } }
     )
 }
-

@@ -338,7 +338,8 @@ class ServerToolsTest {
         fake.answer = { listOf("##STEP 1", "##STEP 6", "##RESULT PUBKEY=$key") .let { 0 to it } }
         val manager = ServerManager(connect = fake::connect)
         val out = manager.install(server, ServerToolCatalog.DNSTT, InstallOptions("example.com", "t"), noProgress())
-        assertTrue(fake.scripts.last().contains("dnstt-server-linux-arm64"))
+        assertTrue(fake.scripts.any { it.contains("dnstt-server-linux-arm64") })
+        assertEquals(ServerFacts.SCRIPT, fake.scripts.last())
         val tool = out.server.tool(ServerToolCatalog.DNSTT)!!
         assertEquals("t.example.com", tool.settings[ToolProfiles.DNSTT_DOMAIN])
         assertEquals(key, tool.settings[ToolProfiles.DNSTT_PUBKEY])
@@ -419,4 +420,3 @@ class ServerToolsTest {
         assertTrue(merged.perResolver)
     }
 }
-

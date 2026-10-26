@@ -85,11 +85,22 @@ object ToolScripts {
         step() { echo "$STEP§1"; }
         result() { echo "$RESULT§1=§2"; }
         have() { command -v "§1" >/dev/null 2>&1; }
+        apt_run() {
+          §SUDO env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 "§@"
+        }
         pkg_install() {
           if have apt-get; then
-            §SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q "§@" >/dev/null 2>&1 || {
-              §SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null 2>&1 || true
-              §SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -q "§@" >/dev/null; }
+            echo 'Installing dependencies; waiting up to 120 seconds if the package manager is busy.'
+            apt_log=§(mktemp)
+            if apt_run install -y -q "§@" >"§apt_log" 2>&1; then rm -f "§apt_log"; return 0; fi
+            if grep -Eqi 'Could not get lock|Unable to acquire.*lock|is held by process|Unable to lock' "§apt_log"; then
+              tail -n 6 "§apt_log" >&2; rm -f "§apt_log"
+              echo 'Package manager is busy. No lock was removed and no package process was stopped. Retry after it finishes.' >&2
+              return 21
+            fi
+            rm -f "§apt_log"
+            apt_run update -q >/dev/null 2>&1 || true
+            apt_run install -y -q "§@" >/dev/null
           elif have dnf; then §SUDO dnf install -y -q "§@" >/dev/null
           elif have yum; then §SUDO yum install -y -q "§@" >/dev/null
           else echo "No package manager to install §*" >&2; return 1; fi
@@ -130,14 +141,16 @@ object ToolScripts {
         dl_failed() { rm -f "§2"; echo "Could not download §1 from GitHub" >&2; exit 31; }
         wait_active() {
           for u in "§@"; do
-            i=0
-            while ! §SUDO systemctl is-active --quiet "§u"; do
+            i=0; stable=0
+            while [ "§stable" -lt 3 ]; do
               i=§((i + 1))
-              if [ §i -ge 10 ]; then
-                §SUDO journalctl -u "§u" -n 6 --no-pager 2>/dev/null | tail -n 6 >&2 || true
-                echo "§u did not start" >&2; exit 40
+              if §SUDO systemctl is-active --quiet "§u"; then stable=§((stable + 1)); else stable=0; fi
+              if [ "§i" -ge 15 ] && [ "§stable" -lt 3 ]; then
+                §SUDO systemctl show "§u" -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus >&2 || true
+                §SUDO journalctl -u "§u" -n 20 --no-pager 2>/dev/null | tail -n 20 >&2 || true
+                echo "§u did not remain active; inspect service diagnostics before testing DNS traffic" >&2; exit 40
               fi
-              sleep 1
+              if [ "§stable" -lt 3 ]; then sleep 1; fi
             done
           done
         }
@@ -619,18 +632,23 @@ object ToolScripts {
         return script("step 1\n" + body.trimIndent() + "\nresult REMOVED $toolId", UNINSTALL_STEPS)
     }
 
-    /** Restarts the units of [toolId] and waits for them. */
-    fun restart(toolId: String): ToolScript {
-        val units = requireNotNull(UNITS[toolId]) { "Nothing to restart for $toolId" }.joinToString(" ")
-        return script("step 1\n§SUDO systemctl restart $units\nwait_active $units\nresult RESTARTED $toolId", listOf("Restart"))
+    /** Changes only the allowlisted systemd units belonging to this tool. */
+    fun service(toolId: String, action: String): ToolScript {
+        require(action in setOf("start", "stop", "restart"))
+        val units = requireNotNull(UNITS[toolId]) { "No managed service for $toolId" }.joinToString(" ")
+        val verify = if (action == "stop") "" else "wait_active $units"
+        return script("step 1\n§SUDO systemctl $action $units\n$verify\nresult DONE $action", listOf(action))
     }
+
+    fun restart(toolId: String): ToolScript = service(toolId, "restart")
 
     /** The last [lines] journal lines of [toolId]'s units. */
     fun logs(toolId: String, lines: Int = 40): ToolScript {
         val units = requireNotNull(UNITS[toolId]) { "No logs for $toolId" }
         require(lines in 1..200)
         return script(
-            "step 1\n§SUDO journalctl ${units.joinToString(" ") { "-u $it" }} -n $lines --no-pager -o short-iso 2>&1 | tail -n $lines",
+            "step 1\n§SUDO systemctl show ${units.joinToString(" ")} -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus 2>&1 || true\n" +
+                "§SUDO journalctl ${units.joinToString(" ") { "-u $it" }} -n $lines --no-pager -o short-iso 2>&1 | tail -n $lines",
             listOf("Read logs")
         )
     }

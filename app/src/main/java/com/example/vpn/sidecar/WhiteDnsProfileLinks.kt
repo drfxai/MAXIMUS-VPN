@@ -8,9 +8,10 @@ import java.util.Base64
 object WhiteDnsProfileLinks {
     fun parse(link: String): VlessProfile {
         require(link.length <= 32768) { "DNS profile link is too large" }
-        val scheme = link.substringBefore("://").lowercase()
+        val text = link.trim()
+        val scheme = text.substringBefore("://").lowercase()
         require(scheme in setOf("cottendns", "soar")) { "Unsupported DNS profile" }
-        val payload = link.substringAfter("://", "")
+        val payload = text.substringAfter("://", "").filterNot { it.isWhitespace() }
         require(payload.isNotEmpty() && payload.all { it.isLetterOrDigit() && it.code < 128 || it in "-_/+=" }) { "Invalid DNS profile encoding" }
         val bytes = try { Base64.getUrlDecoder().decode(payload) } catch (_: IllegalArgumentException) { Base64.getDecoder().decode(payload) }
         val root = JSONObject(bytes.toString(Charsets.UTF_8))
@@ -24,7 +25,7 @@ object WhiteDnsProfileLinks {
         return if (scheme == "cottendns") {
             require(p.getString("engine") == "cottendns" && server.getInt("encryption_method") == 5) { "Only authenticated CottenDNS method 5 is supported" }
             val key = server.getString("encryption_key")
-            require(key.matches(Regex("[a-fA-F0-9]{64}"))) { "Invalid CottenDNS key" }
+            require(key.matches(Regex("(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{64})"))) { "Invalid CottenDNS key" }
             // Standard WhiteDNS Cotten links select the native Cotten protocol, not CottenMax.
             CottenDnsSidecar.profile(CottenDnsSidecar.Settings(server.getString("domain"), key, resolvers, mode = "legacy"), name)
         } else {
