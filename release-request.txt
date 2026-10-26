@@ -1,7 +1,9 @@
 V1.0.2 Android versionCode 37
-Authorized release refresh for reviewed PR132 and PR133.
-Source: 3fc42f64bd965ae69c4e44eb11b0a77823794ccf.
-Checks 40362715255 and transport recovery 40362715450 succeeded.
-Preserve custom resolver ports during UDP-to-TCP burst fallback; correct Cotten legacy encrypted-DNS fallback disclosure.
-Keep permanent signing identity and native source pins. Require build, unit tests, lint, packaging, signature and Android15 launch verification before publication.
-Real device/VPS DNS tunnel traffic remains unverified. Resolver automation and integrated Hiddify CDN provisioning are not included in this release.
+User-authorized latest-source APK refresh after PR134 and PR135.
+Reviewed source: 45323ff8da35e310fba2840f924599ac8e1834d4.
+Main Checks 40374243866 and transport checks 40374243910 succeeded.
+Native Cotten checks 40367577100 succeeded on ARM64, ARM32 and x86_64.
+Includes strict legacy DoT/DoH no-plaintext fallback, matching editor text and dedicated CottenMax import/edit/launch contract regression.
+Retain permanent signing identity and existing native revision with reviewed strict-DNS patch.
+Require fresh build/unit/lint, packaging/signature/checksums and Android15 launch verification before publication.
+No physical device/VPS connectivity claim; smart resolver provisioning and integrated Hiddify CDN remain separate unfinished work.
