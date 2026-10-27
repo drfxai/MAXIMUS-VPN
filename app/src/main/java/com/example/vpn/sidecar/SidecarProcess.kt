@@ -60,6 +60,8 @@ class SidecarProcess(
         }
         if (startupFailure == null) startupFailure = if (portOpen(socksPort) && !sawReadyLine)
             "Local proxy socket opened, but the required transport readiness marker was not observed within ${timeoutMs / 1000}s; traffic is unverified."
+        else if (readyLine != null) "Engine never reported a connected session with its server within ${timeoutMs / 1000}s: " +
+            "no reply came back through its transport (for a DNS tunnel: check the NS delegation and the resolvers); inspect engine logs."
         else "Engine did not open a ready local proxy within ${timeoutMs / 1000}s; inspect engine logs."
         return false
     }

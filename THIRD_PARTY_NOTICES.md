@@ -560,7 +560,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 The original MAXIMUS adapter invokes a separately built CottenDNS program from
 https://github.com/WhiteDNS/CottenDNS at commit
-`e50a43ef75ad10ae2ffbfa106d13c50de3e77624`.
+`7db7b73658c791cce62300d29647e4d369d6e1e4`.
 CottenDNS preserves the MIT notices of Amin Mahmoudi (MasterDnsVPN),
 NullRoute1970 (StormDNS) and tajirax (CottenDNS). CottenMax includes Soar-derived
 components under Apache-2.0; bundled QUIC/qpack notices retain their own terms.

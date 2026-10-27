@@ -56,6 +56,8 @@ object ToolProfiles {
     const val DNSTT_DOMAIN = "domain"
     const val DNSTT_BASE = "baseDomain"
     const val DNSTT_LABEL = "label"
+    /** "1" when the tunnel has its own name server host, ns-<label>.<domain>. */
+    const val DNSTT_OWN_NS = "ownNameServer"
     const val DNSTT_PUBKEY = "pubkey"
     const val DNSTT_PORT = "dnsPort"
     /** Backup base domains as typed, and the backup tunnel names under them, comma-separated. */

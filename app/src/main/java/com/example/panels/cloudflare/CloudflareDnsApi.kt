@@ -68,8 +68,12 @@ class CloudflareDnsApi(
         val planned = targets.map { target ->
             val decision = DnsTunnelProvisioning.decide(
                 target.record, records(token, target.zone, target.record.name))
-            require(decision !is Action.Conflict) {
-                (decision as? Action.Conflict)?.why ?: "DNS record conflict"
+            if (decision is Action.Conflict) {
+                val taken = decision.existing
+                // The shared name server host already points at another address (often an older server).
+                if (target.record.type in setOf("A", "AAAA") && taken.type == target.record.type &&
+                    taken.content.trim().lowercase() != target.record.content) throw NameServerTaken(target.record.name, taken.content)
+                throw IllegalArgumentException(decision.why)
             }
             target to decision
         }
@@ -95,6 +99,10 @@ class CloudflareDnsApi(
         }
         return created.size
     }
+
+    /** [name] already has an address record pointing at [address], not at this server; nothing was written. */
+    class NameServerTaken(val name: String, val address: String) :
+        IllegalStateException("$name already points at $address; it was left as it is")
 
     /** Deletes the record [want] describes, only when it still points where Maximus put it. */
     fun remove(token: String, zone: Zone, want: Record): Boolean {

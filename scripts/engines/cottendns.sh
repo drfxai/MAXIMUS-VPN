@@ -4,7 +4,7 @@
 set -euo pipefail
 . "$(dirname "$0")/common.sh"
 TASK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REV=e50a43ef75ad10ae2ffbfa106d13c50de3e77624
+REV=7db7b73658c791cce62300d29647e4d369d6e1e4
 SRC="$(mktemp -d)"
 trap 'rm -rf "$SRC"' EXIT
 git -C "$SRC" init -q

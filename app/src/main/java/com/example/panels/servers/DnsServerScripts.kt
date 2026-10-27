@@ -126,13 +126,14 @@ object DnsServerScripts {
         """, SOAR_STEPS, mapOf("UNIT" to unit, "PREFLIGHT" to LISTENER_PREFLIGHT))
     }
 
-    fun cotten(domain: String, arch: String): ToolScript {
+    /** [ns] is the name server host the tunnel is delegated to; it must match the NS record. */
+    fun cotten(domain: String, arch: String, ns: String = "ns." + domain.substringAfter('.')): ToolScript {
         require(ToolScripts.DOMAIN.matches(domain))
+        require(ToolScripts.DOMAIN.matches(ns)) { "Invalid name server" }
         val a = ToolScripts.arch(arch)
         val sha = COTTEN_SHA.getValue(a)
         val prefix = "CottenDns_Server_Linux_" + a.uppercase()
         val dir = "/etc/maximus/cotten"
-        val ns = "ns." + domain.substringAfter('.')
         val unit = ToolScripts.unit("MAXIMUS CottenDNS Normal and Max",
             listOf("WorkingDirectory=$dir", "ExecStart=/usr/local/bin/maximus-cotten-server -config $dir/server_config.toml -metrics-address 127.0.0.1:9092"),
             extra = listOf("AmbientCapabilities=CAP_NET_BIND_SERVICE", "CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "ReadWritePaths=$dir"))
