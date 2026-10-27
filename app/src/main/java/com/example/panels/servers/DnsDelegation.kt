@@ -36,15 +36,26 @@ object DnsDelegation {
     }
 
     fun tunnelDomain(base: String, label: String) = "$label.${normalizeBase(base)}"
-    fun nameServer(base: String) = "ns.${normalizeBase(base)}"
+    /**
+     * The name server host for [base]: `ns.<base>`, or `ns-<label>.<base>` when the tunnel has its own
+     * ([ownFor] is its label). A shared `ns.<base>` can point at only one server, so a second server on
+     * the same domain needs its own name or every tunnel on that domain is delegated to the first one.
+     */
+    fun nameServer(base: String, ownFor: String? = null) =
+        if (ownFor.isNullOrBlank()) "ns.${normalizeBase(base)}" else "ns-$ownFor.${normalizeBase(base)}"
 
-    /** Two records per domain, the main domain first: the name server's address, then the delegation. */
-    fun records(base: String, label: String, serverIp: String, backups: List<String> = emptyList()): List<Record> =
+    /**
+     * Two records per domain, the main domain first: the name server's address, then the delegation.
+     * [ownNameServer] gives this tunnel its own name server host (see [nameServer]).
+     */
+    fun records(base: String, label: String, serverIp: String, backups: List<String> = emptyList(),
+                ownNameServer: Boolean = false): List<Record> =
         (listOf(base) + backups).flatMapIndexed { i, b ->
+            val nameServer = nameServer(b, label.takeIf { ownNameServer })
             listOf(
-                Record(nameServer(b), if (serverIp.contains(':')) "AAAA" else "A", serverIp,
+                Record(nameServer, if (serverIp.contains(':')) "AAAA" else "A", serverIp,
                     if (i == 0) "Your server. On Cloudflare keep it \"DNS only\" (grey cloud)." else "Backup domain: your server again."),
-                Record(tunnelDomain(b, label), "NS", nameServer(b),
+                Record(tunnelDomain(b, label), "NS", nameServer,
                     if (i == 0) "Hands the tunnel name to your server." else "Used when the main name is blocked.")
             )
         }
@@ -70,7 +81,9 @@ object DnsDelegation {
         val aCheck = when {
             a == null -> Check(aRec, Status.UNKNOWN, "Could not ask DNS")
             aRec.value.lowercase() in a.second -> Check(aRec, Status.OK, "Points to ${aRec.value}")
-            a.second.isNotEmpty() -> Check(aRec, Status.WRONG, "Points to ${a.second.joinToString()} instead of ${aRec.value}")
+            a.second.isNotEmpty() -> Check(aRec, Status.WRONG, "Points to ${a.second.joinToString()} instead of ${aRec.value}. " +
+                "Every tunnel delegated to ${aRec.name} goes to that address, so this server never sees its queries. " +
+                "Change ${aRec.name} to ${aRec.value}, or, if that address is another server you still use, give this tunnel its own name server.")
             a.first !in listOf(0, 3) -> Check(aRec, Status.UNKNOWN, "DNS query failed (rcode ${a.first}); address reachability is not established")
             else -> Check(aRec, Status.MISSING, "No address record returned. Check the exact name and DNS-only A/AAAA record; propagation is not established as the cause.")
         }

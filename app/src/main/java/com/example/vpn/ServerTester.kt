@@ -103,6 +103,14 @@ object ServerTester {
         e.localizedMessage ?: "Invalid configuration"
     }
 
+    private val DNS_TUNNEL_ENGINES = setOf(
+        com.example.vpn.sidecar.DnsttSidecar.ID, com.example.vpn.sidecar.CottenDnsSidecar.ID,
+        com.example.vpn.sidecar.SoarSidecar.ID, com.example.vpn.sidecar.SlipstreamSidecar.ID
+    )
+
+    internal fun isDnsTunnel(profile: VlessProfile): Boolean =
+        com.example.vpn.sidecar.Sidecars.forProfile(profile)?.id in DNS_TUNNEL_ENGINES
+
     /**
      * Reachability probe: DNS, TCP, TLS and WebSocket upgrade. It does not authenticate a proxy
      * request, so a Cloudflare Worker config passes it even when it carries no traffic.
@@ -117,6 +125,12 @@ object ServerTester {
         ) {
             // A UDP server answers no TCP or TLS probe; only a request through the proxy tells.
             XrayLogManager.d("SERVER", "Skipping the reachability check for UDP server '${profile.name}'; it is tested with a real request while the VPN is off.")
+            return ServerTestResult(serverId = profile.id, status = ServerTestStatus.Idle)
+        }
+        if (isDnsTunnel(profile)) {
+            // The address is the delegated tunnel name: it has no A record and no TCP listener, so a
+            // lookup or connect would report a working tunnel as down. Only a request through it tells.
+            XrayLogManager.d("SERVER", "Skipping the reachability check for DNS tunnel '${profile.name}'; it is tested with a real request through its engine.")
             return ServerTestResult(serverId = profile.id, status = ServerTestStatus.Idle)
         }
         XrayLogManager.d("SERVER", "Initiating reachability check for '${profile.name}' (${profile.address}:${profile.port}, transport=${profile.transport}, sec=${profile.security})...")

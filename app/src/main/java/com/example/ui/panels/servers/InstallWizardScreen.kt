@@ -78,6 +78,8 @@ data class WizardUi(
     val renew: Boolean = false,
     val records: List<DnsDelegation.Record> = emptyList(),
     val dnsChecks: List<DnsDelegation.Check>? = null,
+    /** This tunnel gets its own name server host because the shared ns.<domain> points elsewhere. */
+    val ownNameServer: Boolean = false,
     val dnsChecking: Boolean = false,
     val dnsProvisioning: Boolean = false,
     val dnsProvisionResult: String = "",
@@ -498,6 +500,11 @@ private fun DoneStage(ui: WizardUi, actions: WizardActions) {
         }
     }
     if (ui.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) && ui.records.isNotEmpty()) {
+        // A delegation to another address explains a failed test before any engine or resolver does.
+        ui.dnsChecks?.filter { it.status == DnsDelegation.Status.WRONG || it.status == DnsDelegation.Status.MISSING }
+            ?.forEach { c -> Notice("DNS: ${c.record.name} (${c.record.type}): ${c.detail}", NoticeKind.WARN) }
+        if (ui.dnsChecks?.all { it.status == DnsDelegation.Status.OK } == true)
+            Notice("DNS records point at this server.", NoticeKind.OK)
         Notice("Server installation does not verify a tunnel. Check the service, NS delegation, resolver path and real traffic; a timeout alone does not establish the cause.")
     }
     if (ui.log.isNotEmpty()) LogCard(ui.log)

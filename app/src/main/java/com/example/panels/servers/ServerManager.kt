@@ -19,7 +19,9 @@ data class InstallOptions(
     val port: Int? = null,
     val swapMb: Int = 1024,
     /** Replace keys or secrets that already exist on the server. */
-    val renew: Boolean = false
+    val renew: Boolean = false,
+    /** The DNS tunnel uses its own name server host, ns-<label>.<domain> (see [DnsDelegation.nameServer]). */
+    val ownNameServer: Boolean = false
 )
 
 /** What an install produced. */
@@ -103,8 +105,9 @@ class ServerManager(
                             "Port 53 is occupied by another service. Stop or move it before installing a DNS tunnel."
                         }
                         val domain = DnsDelegation.tunnelDomain(options.baseDomain, options.tunnelLabel)
+                        val nameServer = DnsDelegation.nameServer(options.baseDomain, options.tunnelLabel.takeIf { options.ownNameServer })
                         val script = if (toolId == ServerToolCatalog.SOAR) DnsServerScripts.soar(domain)
-                            else DnsServerScripts.cotten(domain, arch)
+                            else DnsServerScripts.cotten(domain, arch, nameServer)
                         val r = runScript(shell, script, progress, 20 * 60_000L)
                         val keyName = if (toolId == ServerToolCatalog.SOAR) ToolProfiles.SOAR_PUBKEY else ToolProfiles.COTTEN_KEY
                         val key = r[if (toolId == ServerToolCatalog.SOAR) "PUBKEY" else "COTTEN_KEY"].orEmpty()
@@ -118,7 +121,7 @@ class ServerManager(
                             ToolProfiles.DNSTT_BASE to DnsDelegation.normalizeBase(options.baseDomain),
                             ToolProfiles.DNSTT_LABEL to options.tunnelLabel,
                             keyName to key
-                        ))
+                        ) + ownNameServer(options))
                         val updated = postInstallCheck(shell, server.withTool(installed))
                         val profile = if (toolId == ServerToolCatalog.SOAR) ToolProfiles.soarProfile(updated, installed)
                             else ToolProfiles.cottenProfile(updated, installed)
@@ -150,7 +153,7 @@ class ServerManager(
                                 ToolProfiles.DNSTT_DOMAIN to domain, ToolProfiles.DNSTT_BASE to DnsDelegation.normalizeBase(options.baseDomain),
                                 ToolProfiles.DNSTT_LABEL to options.tunnelLabel, ToolProfiles.DNSTT_PUBKEY to pubkey.lowercase(),
                                 ToolProfiles.DNSTT_PORT to dnsPort.toString(), ToolProfiles.SOCKS_PORT to socksPort.toString()
-                            ) + (if (options.backupBases.isEmpty()) emptyMap() else mapOf(
+                            ) + ownNameServer(options) + (if (options.backupBases.isEmpty()) emptyMap() else mapOf(
                                 ToolProfiles.DNSTT_BACKUP_BASES to options.backupBases.joinToString(","),
                                 ToolProfiles.DNSTT_BACKUPS to backups.joinToString(",")
                             ))
@@ -272,6 +275,9 @@ class ServerManager(
     }
 
     /** A pre-install snapshot cannot describe the service just created. A failed refresh is unknown. */
+    private fun ownNameServer(options: InstallOptions): Map<String, String> =
+        if (options.ownNameServer) mapOf(ToolProfiles.DNSTT_OWN_NS to "1") else emptyMap()
+
     private fun postInstallCheck(shell: RemoteShell, server: ManagedServer): ManagedServer {
         val fresh = runCatching {
             val result = shell.run(ServerFacts.SCRIPT, 60_000L)

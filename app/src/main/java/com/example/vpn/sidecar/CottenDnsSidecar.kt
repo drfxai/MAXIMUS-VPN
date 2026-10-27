@@ -49,7 +49,7 @@ class CottenDnsSidecar : SidecarEngine {
     companion object {
         const val ID = "cotten-dns"
         const val BINARY = "cottendns"
-        const val REVISION = "e50a43ef75ad10ae2ffbfa106d13c50de3e77624"
+        const val REVISION = "7db7b73658c791cce62300d29647e4d369d6e1e4"
         // MAXIMUS-specific round-trip format; WhiteDNS links use WhiteDnsProfileLinks.
         const val SCHEME = "maximus-cotten"
         internal fun domain(raw: String): String {

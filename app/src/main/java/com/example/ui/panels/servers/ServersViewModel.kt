@@ -551,7 +551,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun test(id: String, toolId: String) = serverAction(id, "Testing ${toolTitle(toolId)} from this phone…") { s ->
         val profile = profileFor(s, toolId) ?: error("No config for this tool on this phone")
-        val result = testProfile(profile)
+        val result = withDelegation(s, toolId, testProfile(profile))
         _state.update { it.copy(tests = it.tests + ("${s.id}/$toolId" to result)) }
         if (!result.first && toolId in setOf(ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT)) {
             // Keep phone/engine evidence separate from a read-only server snapshot.
@@ -580,6 +580,24 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             ServerToolCatalog.HYSTERIA2 -> ToolProfiles.hysteriaProfile(s, t)
             else -> null
         }
+    }
+
+    /**
+     * A failed DNS tunnel test with the DNS records that do not point at [s] in front: a delegation to
+     * another address explains the failure on its own, before any engine, resolver or server setting.
+     */
+    private suspend fun withDelegation(s: ManagedServer, toolId: String, result: Pair<Boolean, String>): Pair<Boolean, String> {
+        if (result.first || toolId !in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)) return result
+        val t = s.tool(toolId) ?: return result
+        val base = t.settings[ToolProfiles.DNSTT_BASE] ?: return result
+        val label = t.settings[ToolProfiles.DNSTT_LABEL] ?: return result
+        if (DnsDelegation.problem(base, label) != null) return result
+        val records = DnsDelegation.records(base, label, s.host, ownNameServer = t.settings[ToolProfiles.DNSTT_OWN_NS] == "1").take(2)
+        val bad = withContext(Dispatchers.IO) {
+            runCatching { DnsDelegation.judge(records, doh(records[0].name, records[0].type), doh(records[1].name, "NS")) }.getOrDefault(emptyList())
+        }.filter { it.status == DnsDelegation.Status.WRONG || it.status == DnsDelegation.Status.MISSING }
+        if (bad.isEmpty()) return result
+        return false to (bad.joinToString(" ") { "DNS ${it.record.type} ${it.record.name}: ${it.detail}" } + " " + result.second)
     }
 
     /** A real request through the profile: sidecar engines in an isolated run, Xray configs through the tester. */
@@ -730,13 +748,19 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         if (tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) &&
             s != null && DnsDelegation.problem(baseDomain, tunnelLabel) == null)
             copy(records = DnsDelegation.records(baseDomain, tunnelLabel, s.host,
-                backups.takeIf { tool.id == ServerToolCatalog.DNSTT && DnsDelegation.backupProblem(baseDomain, it) == null }.orEmpty()))
+                backups.takeIf { tool.id == ServerToolCatalog.DNSTT && DnsDelegation.backupProblem(baseDomain, it) == null }.orEmpty(),
+                ownNameServer))
         else copy(records = emptyList())
 
     // A DNS write operates on a frozen preview. Do not let the form change its target mid-write.
     fun changeWizard(ui: WizardUi) = _state.update { state ->
         if (state.wizard?.dnsProvisioning == true) state
-        else state.copy(wizard = ui.withRecords(server(ui.serverId)))
+        else {
+            // A name server chosen for one domain or tunnel name does not carry over to another.
+            val old = state.wizard
+            val keepOwn = old != null && old.baseDomain == ui.baseDomain && old.tunnelLabel == ui.tunnelLabel
+            state.copy(wizard = ui.copy(ownNameServer = ui.ownNameServer && keepOwn).withRecords(server(ui.serverId)))
+        }
     }
 
     fun wizardBack() {
@@ -799,24 +823,44 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             w.dnsProvisioning || w.dnsChecking) return
         _state.update { it.copy(wizard = w.copy(dnsProvisioning = true, dnsProvisionResult = "")) }
         viewModelScope.launch {
+            var records = w.records
+            var own = w.ownNameServer
+            var moved: CloudflareDnsApi.NameServerTaken? = null
             val outcome = withContext(Dispatchers.IO) {
                 runCatching {
                     val token = SmartDomainsStore(getApplication()).token()
                     require(token.isNotBlank()) {
                         "First connect your Cloudflare DNS token in Panels > Cloudflare > Smart domains."
                     }
-                    CloudflareDnsApi().provisionDnstt(token, w.records)
+                    try {
+                        CloudflareDnsApi().provisionDnstt(token, records)
+                    } catch (taken: CloudflareDnsApi.NameServerTaken) {
+                        // ns.<domain> belongs to another address. Leave it, and give this tunnel its own
+                        // name server instead of delegating it to a server that does not run it.
+                        val server = server(w.serverId)
+                        if (own || server == null) throw taken
+                        own = true
+                        moved = taken
+                        records = DnsDelegation.records(w.baseDomain, w.tunnelLabel, server.host,
+                            if (w.tool.id == ServerToolCatalog.DNSTT) w.backups else emptyList(), ownNameServer = true)
+                        CloudflareDnsApi().provisionDnstt(token, records)
+                    }
                 }
             }
             // Never apply a late result to a different server or a changed domain.
             val current = _state.value.wizard
             if (current?.serverId != w.serverId || current?.records != w.records) return@launch
+            val note = moved?.let { "${it.name} already points at ${it.address}, not this server, so it was left as it is " +
+                "and this tunnel uses its own name server ${records.first().name}. " }.orEmpty()
             val message = outcome.fold(
-                onSuccess = { n -> "Created $n DNS records in Cloudflare (existing matching records kept). Check propagation, then test the tunnel." },
-                onFailure = { e -> e.message ?: "Cloudflare setup failed; check your token and domain permissions." }
+                onSuccess = { n -> note + "Created $n DNS records in Cloudflare (existing matching records kept). Check propagation, then test the tunnel." },
+                onFailure = { e -> (if (e is CloudflareDnsApi.NameServerTaken) "${e.message}. Every tunnel delegated to ${e.name} goes to ${e.address}, " +
+                    "not this server. Point it at this server in Cloudflare, or delete that record if the old server is gone."
+                    else note + (e.message ?: "Cloudflare setup failed; check your token and domain permissions.")) }
             )
             _state.update { st ->
-                st.copy(wizard = st.wizard?.copy(dnsProvisioning = false, dnsProvisionResult = message))
+                st.copy(wizard = st.wizard?.let { cur -> cur.copy(dnsProvisioning = false, dnsProvisionResult = message,
+                    records = records, ownNameServer = own, dnsChecks = if (records != w.records) null else cur.dnsChecks) })
             }
             if (outcome.isSuccess) checkDns()
         }
@@ -866,7 +910,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         }
         val options = InstallOptions(baseDomain = w.baseDomain, tunnelLabel = w.tunnelLabel.ifBlank { "t" },
             backupBases = if (w.tool.id == ServerToolCatalog.DNSTT) w.backups else emptyList(),
-            port = w.port.toIntOrNull(), renew = w.renew)
+            port = w.port.toIntOrNull(), renew = w.renew, ownNameServer = w.ownNameServer)
         job = viewModelScope.launch {
             try {
                 val out = withContext(Dispatchers.IO) { manager.install(s, w.tool.id, options, progress) }
@@ -877,9 +921,11 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                         link = out.link, profileName = out.profile?.name, serverId = saved.id,
                         records = if (w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN))
                             DnsDelegation.records(w.baseDomain, w.tunnelLabel, saved.host,
-                                if (w.tool.id == ServerToolCatalog.DNSTT) w.backups else emptyList()) else emptyList()
+                                if (w.tool.id == ServerToolCatalog.DNSTT) w.backups else emptyList(), w.ownNameServer) else emptyList()
                     ))
                 }
+                // The delegation decides whether any query reaches the new server: show it on the result.
+                if (w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)) checkDns()
                 emit(ServersEvent.Success)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -902,7 +948,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(wizard = w.copy(testing = true, testResult = null, testOk = null)) }
         viewModelScope.launch {
             val r = try {
-                profileFor(s, w.tool.id)?.let { testProfile(it) } ?: (false to "No config to test")
+                profileFor(s, w.tool.id)?.let { withDelegation(s, w.tool.id, testProfile(it)) } ?: (false to "No config to test")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
