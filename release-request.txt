@@ -1,7 +1,8 @@
-V1.0.2 Android versionCode 37
-User-authorized signed refresh: DNS listener binding and complete panel removal.
-Bind Soar and Cotten to assigned server IPv4 without disabling local DNS.
-Check DNS forwarding conflicts, fail closed on DNSTT firewall errors, clean stale redirects on removal.
-Expose cleanup for incomplete DNS installations; enable explicit Hiddify data purge.
-Keep permanent signing identity and pinned native sources. Require tests, lint, signature and Android 15 smoke checks.
-Real VPS and phone network traffic still require field verification.
+V1.0.3 Android versionCode 38
+User-requested GitHub release update from the latest verified main branch on 2026-10-27.
+Includes the merged Soar/Cotten IPv4 DNS listener corrections, port-53 preflight logic, DNSTT redirect/error handling, and complete ownership-scoped panel cleanup from PR #137.
+The prior V1.0.2 build 99 already included these fixes; this is a versioned maintenance refresh, not a claim of additional field-tested VPN functionality.
+Preserve permanent Android signing certificate, pinned native sources and configuration compatibility.
+Require Android tests and release lint, native engines, APK packaging and signing verification, checksums, and Android 15 install/launch smoke check before publication.
+Do not merge PR #20 until independent signed Iranian-network probe infrastructure and deployment prerequisites exist.
+No live SSH access to a VPS or physical ARM64/Iran-network end-to-end traffic validation was performed.
