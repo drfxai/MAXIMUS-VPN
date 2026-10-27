@@ -44,7 +44,9 @@ class CottenDnsSidecar : SidecarEngine {
     }
 
     data class Settings(val domain: String, val key: String, val resolvers: List<String>,
-                        val transport: String = "auto", val backups: List<String> = emptyList(), val tlsName: String = "", val mode: String = "cottenmax")
+                        val transport: String = "auto", val backups: List<String> = emptyList(), val tlsName: String = "", val mode: String = "cottenmax",
+                        /** AES-GCM method 3, 4 or 5; only a MasterDNS server may use other than 5. */
+                        val method: Int = 5)
 
     companion object {
         const val ID = "cotten-dns"
@@ -52,6 +54,8 @@ class CottenDnsSidecar : SidecarEngine {
         const val REVISION = "7db7b73658c791cce62300d29647e4d369d6e1e4"
         // MAXIMUS-specific round-trip format; WhiteDNS links use WhiteDnsProfileLinks.
         const val SCHEME = "maximus-cotten"
+        /** Native CottenDNS, CottenMax, and the CottenDNS client talking to a MasterDNS server. */
+        val MODES = setOf("cottenmax", "legacy", "masterdns")
         internal fun domain(raw: String): String {
             val d = IDN.toASCII(raw.trim().trimEnd('.')).lowercase(Locale.ROOT)
             require(d.length in 3..253 && d.contains('.') && d.split('.').all {
@@ -77,7 +81,8 @@ class CottenDnsSidecar : SidecarEngine {
             require(s.key.length in 16..512 && s.key.none { it.isISOControl() }) { "Paste the existing server key (16 to 512 characters)" }
             require(s.resolvers.size in 1..64) { "Choose one to 64 explicit DNS resolvers" }
             require(s.transport in setOf("auto", "udp", "tcp", "dot", "doh")) { "Unsupported DNS transport" }
-            require(s.mode in setOf("cottenmax", "legacy")) { "Unsupported CottenDNS mode" }
+            require(s.mode in MODES) { "Unsupported CottenDNS mode" }
+            require(s.method == 5 || s.mode == "masterdns" && s.method in 3..5) { "Unsupported CottenDNS encryption method" }
             val d = domain(s.domain)
             val rs = s.resolvers.map(::resolver)
             require(rs.distinct().size == rs.size) { "Duplicate DNS resolver" }
@@ -95,7 +100,8 @@ class CottenDnsSidecar : SidecarEngine {
             val s = validate(settings)
             val extras = JSONObject().put("engine", ID).put("mode", s.mode).put("domain", s.domain)
                 .put("resolvers", JSONArray(s.resolvers)).put("transport", s.transport)
-                .put("backups", JSONArray(s.backups)).put("tlsName", s.tlsName).toString()
+                .put("backups", JSONArray(s.backups)).put("tlsName", s.tlsName)
+                .apply { if (s.method != 5) put("method", s.method) }.toString()
             val fingerprint = java.security.MessageDigest.getInstance("SHA-256")
                 .digest((extras + "|" + s.key).toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
             return profile.copy(address = s.domain, port = 53, uuid = s.key, extraSettings = extras, canonicalFingerprint = fingerprint,
@@ -105,9 +111,9 @@ class CottenDnsSidecar : SidecarEngine {
         }
         fun settings(profile: VlessProfile): Settings {
             val o = ProfileExtras.read(profile)
-            require(o.optString("engine") == ID && o.optString("mode") in setOf("cottenmax", "legacy")) { "Not a CottenDNS profile" }
+            require(o.optString("engine") == ID && o.optString("mode") in MODES) { "Not a CottenDNS profile" }
             fun list(key: String): List<String> = o.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
-            return validate(Settings(o.getString("domain"), profile.uuid, list("resolvers"), o.optString("transport", "auto"), list("backups"), o.optString("tlsName"), o.getString("mode")))
+            return validate(Settings(o.getString("domain"), profile.uuid, list("resolvers"), o.optString("transport", "auto"), list("backups"), o.optString("tlsName"), o.getString("mode"), o.optInt("method", 5)))
         }
         fun parse(link: String): VlessProfile {
             require(link.length <= 8192) { "CottenDNS link is too large" }
@@ -116,17 +122,19 @@ class CottenDnsSidecar : SidecarEngine {
             fun decode(s: String) = URLDecoder.decode(s, "UTF-8")
             val pairs = uri.rawQuery.orEmpty().split('&').filter { it.isNotEmpty() }.map { decode(it.substringBefore('=')) to decode(it.substringAfter('=', "")) }
             val single = pairs.filter { it.first !in setOf("resolver", "backup") }
-            require(single.map { it.first }.distinct().size == single.size && pairs.all { it.first in setOf("key", "mode", "transport", "resolver", "backup", "tls") }) { "Duplicate or unknown CottenDNS option" }
+            require(single.map { it.first }.distinct().size == single.size && pairs.all { it.first in setOf("key", "mode", "transport", "resolver", "backup", "tls", "method") }) { "Duplicate or unknown CottenDNS option" }
             val p = single.toMap()
-            require(p["mode"] in setOf("cottenmax", "legacy")) { "Explicit CottenDNS mode is required" }
+            require(p["mode"] in MODES) { "Explicit CottenDNS mode is required" }
             return profile(Settings(requireNotNull(uri.host) { "Missing tunnel domain" }, p["key"].orEmpty(), pairs.filter { it.first == "resolver" }.map { it.second },
-                p["transport"] ?: "auto", pairs.filter { it.first == "backup" }.map { it.second }, p["tls"].orEmpty(), p.getValue("mode")), decode(uri.rawFragment ?: "CottenDNS · Max beta"))
+                p["transport"] ?: "auto", pairs.filter { it.first == "backup" }.map { it.second }, p["tls"].orEmpty(), p.getValue("mode"),
+                p["method"]?.toIntOrNull() ?: 5), decode(uri.rawFragment ?: "CottenDNS · Max beta"))
         }
         fun toLink(profile: VlessProfile): String {
             val s = settings(profile)
             fun enc(v: String) = URLEncoder.encode(v, "UTF-8")
             val pairs = listOf("mode" to s.mode, "key" to s.key, "transport" to s.transport) +
-                s.resolvers.map { "resolver" to it } + s.backups.map { "backup" to it } + listOf("tls" to s.tlsName)
+                s.resolvers.map { "resolver" to it } + s.backups.map { "backup" to it } + listOf("tls" to s.tlsName) +
+                (if (s.method != 5) listOf("method" to s.method.toString()) else emptyList())
             return "$SCHEME://${s.domain}?" + pairs.joinToString("&") { (k,v) -> "$k=${enc(v)}" } + "#${enc(profile.name)}"
         }
         private fun quote(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
@@ -135,20 +143,21 @@ class CottenDnsSidecar : SidecarEngine {
             require(context.socksPort in 1..65535 && context.socksUser.none { it.isISOControl() } && context.socksPass.none { it.isISOControl() })
             fun array(v: List<String>) = v.joinToString(",", "[", "]", transform = ::quote)
             return """
-                TUNNEL_MODE = ${quote(s.mode)}
+                TUNNEL_MODE = ${quote(if (s.mode == "cottenmax") "cottenmax" else "legacy")}
+                LEGACY_SESSION_ID = ${s.mode == "masterdns"}
                 CONFIG_PRESET = "survival"
                 DOMAINS = ${array(listOf(s.domain))}
                 STANDBY_DOMAINS = ${array(s.backups)}
                 ENCRYPTION_KEY = ${quote(s.key)}
-                DATA_ENCRYPTION_METHOD = 5
+                DATA_ENCRYPTION_METHOD = ${s.method}
                 RESOLVER_TRANSPORT = ${quote(s.transport)}
                 RESOLVER_TLS_SERVER_NAME = ${quote(s.tlsName)}
                 RESOLVER_TLS_INSECURE_SKIP_VERIFY = false
                 RESOLVER_HTTP3_FALLBACK = false
                 RESOLVER_DISCOVERY_ENABLED = false
                 RESOLVER_DISCOVERY_SAMPLE_RANGES = 0
-                QUERY_RATE_LIMIT_PER_SECOND = ${if (s.mode == "legacy") "4.0" else "0.0"}
-                QUERY_RATE_LIMIT_BURST = ${if (s.mode == "legacy") "1" else "0"}
+                QUERY_RATE_LIMIT_PER_SECOND = ${if (s.mode != "cottenmax") "4.0" else "0.0"}
+                QUERY_RATE_LIMIT_BURST = ${if (s.mode != "cottenmax") "1" else "0"}
                 PROTOCOL_TYPE = "SOCKS5"
                 LISTEN_IP = "127.0.0.1"
                 LISTEN_PORT = ${context.socksPort}

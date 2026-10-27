@@ -18,15 +18,15 @@ object LiveTunnelProbe {
      * fail while the rest of the internet works. Explicit VPN binding prevents a late probe from
      * falling back to the ISP after disconnect.
      */
-    suspend fun latency(context: Context): Long = withContext(Dispatchers.IO) {
+    suspend fun latency(context: Context, stepTimeoutMs: Int = 4_000): Long = withContext(Dispatchers.IO) {
         com.example.vpn.verify.TrafficCheck(
-            com.example.vpn.verify.RouteDialers.vpn(context), stepTimeoutMs = 4_000
+            com.example.vpn.verify.RouteDialers.vpn(context), stepTimeoutMs = stepTimeoutMs
         ).smallRequest()
     }
 
     /** Latency through the tunnel, plus the exit country and address when Cloudflare's trace page is reachable. */
-    suspend fun measure(context: Context): Sample {
-        val latency = latency(context)
+    suspend fun measure(context: Context, stepTimeoutMs: Int = 4_000): Sample {
+        val latency = latency(context, stepTimeoutMs)
         val exit = try {
             trace(context)
         } catch (e: kotlinx.coroutines.CancellationException) {

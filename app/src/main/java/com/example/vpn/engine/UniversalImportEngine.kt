@@ -140,7 +140,7 @@ object UniversalImportEngine {
 
         // One WhiteDNS share link can be line-wrapped by a clipboard or chat client.
         // Do not combine separate links or interpret decoded JSON as an Xray config.
-        if ((trimmed.startsWith("cottendns://", true) || trimmed.startsWith("soar://", true)) &&
+        if ((trimmed.startsWith("cottendns://", true) || trimmed.startsWith("soar://", true) || trimmed.startsWith("masterdns://", true)) &&
             trimmed.substringAfter("://").all { it.isWhitespace() || it.code < 128 && (it.isLetterOrDigit() || it in "-_/+=") }) {
             return listOf(parseSingleUri(trimmed.filterNot { it.isWhitespace() }, fileName, subUrl))
         }
@@ -243,7 +243,7 @@ object UniversalImportEngine {
                     else -> ParsedItem.Invalid(uriString.take(60), problem)
                 }
             }
-            lower.startsWith("cottendns://") || lower.startsWith("soar://") -> try {
+            lower.startsWith("cottendns://") || lower.startsWith("soar://") || lower.startsWith("masterdns://") -> try {
                 ParsedItem.Success(com.example.vpn.sidecar.WhiteDnsProfileLinks.parse(uriString)
                     .copy(sourceFile = fileName, sourceSubscription = subUrl))
             } catch (_: Exception) {
