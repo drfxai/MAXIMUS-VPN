@@ -3,6 +3,7 @@ on:
   push:
     branches: ['**']
     paths:
+      - 'app/src/main/java/com/example/panels/servers/DnsServerScripts.kt'
       - 'scripts/engines/soar.sh'
       - 'tools/soar-client/**'
       - 'scripts/engines/common.sh'
@@ -10,6 +11,7 @@ on:
       - '.github/workflows/soar-engine.yml'
   pull_request:
     paths:
+      - 'app/src/main/java/com/example/panels/servers/DnsServerScripts.kt'
       - 'scripts/engines/soar.sh'
       - 'tools/soar-client/**'
       - 'scripts/engines/common.sh'

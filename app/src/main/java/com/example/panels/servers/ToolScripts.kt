@@ -215,6 +215,9 @@ object ToolScripts {
             DIR=$DNSTT_DIR
             FRESH=1
             if §SUDO test -f /etc/systemd/system/maximus-dnstt.service; then FRESH=0; fi
+            if [ "§FRESH" = 1 ] && §SUDO test -e "§DIR"; then
+              echo 'Previous DNSTT data found. Use Clean up before reinstalling; existing keys were not changed.' >&2; exit 22
+            fi
             rollback() {
               §SUDO systemctl disable --now maximus-dnstt maximus-socks >/dev/null 2>&1 || true
               §SUDO rm -f /etc/systemd/system/maximus-dnstt.service /etc/systemd/system/maximus-socks.service \
@@ -225,6 +228,14 @@ object ToolScripts {
             trap 'rc=§?; if [ §rc -ne 0 ] && [ "§FRESH" = 1 ]; then echo "Install failed, undoing its changes" >&2; rollback; fi' EXIT
 
             step 1
+            @@DNS_PREFLIGHT@@
+            select_dns_bind
+            if [ "§FRESH" = 1 ]; then
+              require_free_listener udp 53
+              require_free_listener udp $dnsPort
+              require_free_listener tcp $socksPort 127.0.0.1
+              require_no_dns_redirect
+            fi
             have systemctl || { echo 'systemd is required' >&2; exit 21; }
             ensure_user
             have iptables || pkg_install iptables
@@ -234,15 +245,21 @@ object ToolScripts {
             #!/bin/sh
             # Sends incoming UDP 53 to the DNS tunnel port while the service runs (add) and removes it (del).
             action="§1"; port="§2"
-            for t in iptables ip6tables; do
-              command -v "§t" >/dev/null 2>&1 || continue
-              if [ "§action" = add ]; then
-                "§t" -t nat -C PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" 2>/dev/null \
-                  || "§t" -t nat -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" 2>/dev/null || true
-              else
-                while "§t" -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" 2>/dev/null; do :; done
-              fi
-            done
+            # IPv4 is the provisioned endpoint. Do not silently accept a failed firewall rule.
+            t=iptables
+            command -v "§t" >/dev/null 2>&1 || exit 23
+            case "§port" in ''|*[!0-9]*) exit 23;; esac
+            if [ "§action" = add ]; then
+              "§t" -t nat -C PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" 2>/dev/null \
+                || "§t" -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" || exit 23
+            elif [ "§action" = del ]; then
+              for t in iptables ip6tables; do
+                command -v "§t" >/dev/null 2>&1 || continue
+                while "§t" -t nat -C PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" 2>/dev/null; do
+                  "§t" -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" || exit 23
+                done
+              done
+            else exit 23; fi
             exit 0
             HELPER
 
@@ -280,7 +297,7 @@ object ToolScripts {
             result SOCKS_PORT $socksPort
             """,
             DNSTT_STEPS,
-            mapOf("SOCKS_UNIT" to socksUnit, "DNSTT_UNIT" to dnsttUnit)
+            mapOf("SOCKS_UNIT" to socksUnit, "DNSTT_UNIT" to dnsttUnit, "DNS_PREFLIGHT" to DnsServerScripts.LISTENER_PREFLIGHT)
         )
     }
 
@@ -576,7 +593,20 @@ object ToolScripts {
         port?.let { port(it, "tool") }
         val body = when (toolId) {
             ServerToolCatalog.DNSTT -> """
+                old_port=§(§SUDO sed -n 's/.*dnstt-redirect add \([0-9][0-9]*\).*/\1/p' /etc/systemd/system/maximus-dnstt.service 2>/dev/null | head -n 1)
                 §SUDO systemctl disable --now maximus-dnstt maximus-socks >/dev/null 2>&1 || true
+                for u in maximus-dnstt maximus-socks; do
+                  if §SUDO systemctl is-active --quiet "§u"; then echo 'Service still active; removal stopped' >&2; exit 40; fi
+                done
+                case "§old_port" in ''|*[!0-9]*) old_port=${port ?: 0};; esac
+                if [ "§old_port" -gt 0 ] && [ "§old_port" -le 65535 ]; then
+                  for t in iptables ip6tables; do
+                    command -v "§t" >/dev/null 2>&1 || continue
+                    while §SUDO "§t" -t nat -C PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§old_port" 2>/dev/null; do
+                      §SUDO "§t" -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§old_port" || exit 40
+                    done
+                  done
+                fi
                 §SUDO rm -f /etc/systemd/system/maximus-dnstt.service /etc/systemd/system/maximus-socks.service \
                   /usr/local/bin/maximus-dnstt-server /usr/local/bin/maximus-socks /usr/local/lib/maximus/dnstt-redirect
                 §SUDO rm -rf $DNSTT_DIR
@@ -586,6 +616,7 @@ object ToolScripts {
             """
             ServerToolCatalog.SOAR -> """
                 §SUDO systemctl disable --now maximus-soar >/dev/null 2>&1 || true
+                if §SUDO systemctl is-active --quiet maximus-soar; then echo 'Service still active; removal stopped' >&2; exit 40; fi
                 §SUDO rm -f /etc/systemd/system/maximus-soar.service /usr/local/bin/maximus-soar-server
                 §SUDO rm -rf /etc/maximus/soar
                 §SUDO systemctl daemon-reload
@@ -593,6 +624,7 @@ object ToolScripts {
             """
             ServerToolCatalog.COTTEN -> """
                 §SUDO systemctl disable --now maximus-cotten >/dev/null 2>&1 || true
+                if §SUDO systemctl is-active --quiet maximus-cotten; then echo 'Service still active; removal stopped' >&2; exit 40; fi
                 §SUDO rm -f /etc/systemd/system/maximus-cotten.service /usr/local/bin/maximus-cotten-server
                 §SUDO rm -rf /etc/maximus/cotten
                 §SUDO systemctl daemon-reload
@@ -601,6 +633,7 @@ object ToolScripts {
             """
             ServerToolCatalog.HYSTERIA2 -> """
                 §SUDO systemctl disable --now maximus-hysteria >/dev/null 2>&1 || true
+                if §SUDO systemctl is-active --quiet maximus-hysteria; then echo 'Service still active; removal stopped' >&2; exit 40; fi
                 §SUDO rm -f /etc/systemd/system/maximus-hysteria.service /usr/local/bin/maximus-hysteria /etc/sysctl.d/60-maximus-hysteria.conf
                 §SUDO rm -rf $HYSTERIA_DIR
                 §SUDO systemctl daemon-reload
@@ -608,6 +641,7 @@ object ToolScripts {
             """
             ServerToolCatalog.XUI -> """
                 §SUDO systemctl disable --now x-ui >/dev/null 2>&1 || true
+                if §SUDO systemctl is-active --quiet x-ui; then echo 'Service still active; removal stopped' >&2; exit 40; fi
                 §SUDO rm -rf /usr/local/x-ui /etc/x-ui /etc/systemd/system/x-ui.service /usr/bin/x-ui
                 §SUDO systemctl daemon-reload
             """

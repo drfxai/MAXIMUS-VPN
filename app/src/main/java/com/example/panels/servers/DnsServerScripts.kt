@@ -11,19 +11,51 @@ object DnsServerScripts {
     val SOAR_STEPS = listOf("Check toolchain", "Build pinned Soar", "Create Ed25519 key", "Install systemd", "Open UDP 53", "Verify server")
     val COTTEN_STEPS = listOf("Check system", "Verify CottenDNS SHA-256", "Configure server", "Install systemd", "Open DNS ports", "Verify server")
 
-    /** Wildcard listeners also conflict with loopback DNS stubs. Never stop their owner. */
+    /** Select an assigned IPv4 address; never disable the system resolver. */
     internal val LISTENER_PREFLIGHT = """
+        select_dns_bind() {
+          command -v ip >/dev/null 2>&1 || { echo 'iproute2 is required to select the DNS listener address' >&2; exit 23; }
+          addresses=§(ip -o -4 addr show scope global | awk '{split(§4,a,"/"); print a[1]}')
+          ssh_local=§(printf '%s\n' "§{SSH_CONNECTION:-}" | awk '{print §3}')
+          DNS_BIND=§(printf '%s\n' "§addresses" | grep -Fx "§ssh_local" || true)
+          if [ -z "§DNS_BIND" ]; then
+            [ "§(printf '%s\n' "§addresses" | awk 'NF {n++} END {print n+0}')" = 1 ] || {
+              echo 'Cannot choose one assigned IPv4 address; reconnect SSH using the intended server address.' >&2; exit 23;
+            }
+            DNS_BIND=§addresses
+          fi
+          printf '%s\n' "§DNS_BIND" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++) if(§i !~ /^[0-9]+§/ || §i>255) exit 1; if(§1==127 || §1==0) exit 1}' || exit 23
+          echo "DNS listener address: §DNS_BIND (system DNS unchanged)"
+        }
         require_free_listener() {
           proto=§1
           port=§2
+          bind=§{3:-§DNS_BIND}
           command -v ss >/dev/null 2>&1 || { echo 'Cannot inspect listeners: install iproute2 before retrying' >&2; exit 23; }
           if [ "§proto" = udp ]; then flags=-Hlnu; else flags=-Hlnt; fi
           listeners=§(ss "§flags" 2>/dev/null) || { echo 'Cannot inspect listeners; no installation changes made' >&2; exit 23; }
-          occupied=§(printf '%s\n' "§listeners" | awk -v port="§port" '{n=split(§4,a,":"); if (a[n] == port) print §4}')
+          occupied=§(printf '%s\n' "§listeners" | awk -v port="§port" -v bind="§bind" '{
+            endpoint=§4; n=split(endpoint,a,":"); if(a[n]!=port) next;
+            sub(/:[^:]*§/, "", endpoint); sub(/%[^%]*§/, "", endpoint);
+            if(endpoint==bind || endpoint=="0.0.0.0" || endpoint=="*" || endpoint=="[::]" || endpoint=="::" || endpoint=="[::ffff:" bind "]") print §4
+          }')
           if [ -n "§occupied" ]; then
-            echo "Cannot bind §proto port §port: existing listener(s): §occupied. Wildcard binding includes loopback. Use a separate server or explicitly reconfigure the owning service; Maximus will not stop it." >&2
+            echo "Cannot bind §proto §bind:§port: conflicting listener(s): §occupied. Remove or move that tool first; system DNS is not stopped." >&2
             exit 23
           fi
+        }
+        require_no_dns_redirect() {
+          for command in iptables nft; do
+            command -v "§command" >/dev/null 2>&1 || continue
+            if [ "§command" = iptables ]; then
+              rules=§(§SUDO iptables -t nat -S) || { echo 'Cannot inspect DNS NAT rules' >&2; exit 23; }
+              conflict=§(printf '%s\n' "§rules" | grep -E -- '--dport(s)? (53([ ,:]|§)|[0-9]+:53([ ,]|§))' | grep -E -- '-j (REDIRECT|DNAT)' || true)
+            else
+              rules=§(§SUDO nft list ruleset) || { echo 'Cannot inspect nftables rules' >&2; exit 23; }
+              conflict=§(printf '%s\n' "§rules" | grep -E 'dport (53|\{[^}]*53[^}]*\})' | grep -E 'redirect|dnat' || true)
+            fi
+            [ -z "§conflict" ] || { echo 'Existing DNS port forwarding detected. Remove the previous DNS tunnel before installing another engine.' >&2; exit 23; }
+          done
         }
     """.trimIndent()
 
@@ -31,11 +63,13 @@ object DnsServerScripts {
         require(ToolScripts.DOMAIN.matches(domain))
         val dir = "/etc/maximus/soar"
         val unit = ToolScripts.unit("MAXIMUS Soar DNS tunnel",
-            listOf("ExecStart=/usr/local/bin/maximus-soar-server -zone $domain -key-file $dir/key -listen :53 -allow-ports 80,443"),
+            listOf("ExecStart=/usr/local/bin/maximus-soar-server -zone $domain -key-file $dir/key -listen DNS_BIND_ADDRESS:53 -allow-ports 80,443"),
             extra = listOf("AmbientCapabilities=CAP_NET_BIND_SERVICE", "CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "ReadOnlyPaths=$dir"))
         return ToolScripts.script("""
             @@PREFLIGHT@@
             step 1
+            select_dns_bind
+            require_no_dns_redirect
             require_free_listener udp 53
             have systemctl || exit 21
             have go || pkg_install golang-go
@@ -69,6 +103,7 @@ object DnsServerScripts {
             "§stage/soar-server" keygen | awk '§1=="private"{print §2}' > "§stage/key"
             [ "§(wc -c < "§stage/key")" -ge 40 ] || exit 40
             step 4
+            require_no_dns_redirect
             require_free_listener udp 53
             mutated=1
             §SUDO install -d -m 0750 -o root -g maximus $dir
@@ -77,6 +112,7 @@ object DnsServerScripts {
             write_file /etc/systemd/system/maximus-soar.service 0644 <<'UNIT'
             @@UNIT@@
             UNIT
+            §SUDO sed -i "s/DNS_BIND_ADDRESS/§DNS_BIND/g" /etc/systemd/system/maximus-soar.service
             §SUDO systemctl daemon-reload
             step 5
             fw_allow 53 udp
@@ -103,9 +139,11 @@ object DnsServerScripts {
         return ToolScripts.script("""
             @@PREFLIGHT@@
             step 1
+            select_dns_bind
+            require_no_dns_redirect
             require_free_listener udp 53
             require_free_listener tcp 53
-            require_free_listener tcp 9092
+            require_free_listener tcp 9092 127.0.0.1
             have systemctl || exit 21
             ensure_user
             have curl || pkg_install curl ca-certificates
@@ -139,6 +177,8 @@ object DnsServerScripts {
             chmod 0700 "§stage/server"
             "§stage/server" --capabilities | grep -q cottenmax || exit 30
             step 3
+            grep -q '^UDP_HOST[[:space:]]*=' "§stage/config" || { echo 'Pinned config has no UDP_HOST' >&2; exit 30; }
+            sed -i "s/^UDP_HOST[[:space:]]*=.*/UDP_HOST = \"§DNS_BIND\"/" "§stage/config"
             sed -i 's/^DOMAIN[[:space:]]*=.*/DOMAIN = ["$domain"]/' "§stage/config"
             sed -i 's/^ZONE_NS[[:space:]]*=.*/ZONE_NS = ["$ns"]/' "§stage/config"
             sed -i 's/^TCP_IPV6_ENABLED[[:space:]]*=.*/TCP_IPV6_ENABLED = false/' "§stage/config"
@@ -147,9 +187,10 @@ object DnsServerScripts {
             sed -i 's/^DATA_ENCRYPTION_METHOD[[:space:]]*=.*/DATA_ENCRYPTION_METHOD = 5/' "§stage/config"
             "§stage/server" --config "§stage/config" --check-config || exit 30
             step 4
+            require_no_dns_redirect
             require_free_listener udp 53
             require_free_listener tcp 53
-            require_free_listener tcp 9092
+            require_free_listener tcp 9092 127.0.0.1
             mutated=1
             §SUDO install -d -m 0770 -o root -g maximus $dir
             §SUDO install -m 0755 "§stage/server" /usr/local/bin/maximus-cotten-server

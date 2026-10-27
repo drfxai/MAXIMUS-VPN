@@ -194,6 +194,40 @@ class DnsPanelFieldRegressionTest {
         } finally { dir.deleteRecursively() }
     }
 
+    @Test fun explicitHiddifyPurgeDeletesOnlyPanelDataAndCanBeRepeated() {
+        val dir = Files.createTempDirectory("hiddify-purge").toFile()
+        try {
+            val target = File(dir, "panel/data").apply { mkdirs() }.parentFile!!
+            File(target, "current.json").writeText("fixture")
+            val unrelated = File(dir, "unrelated").apply { writeText("keep") }
+            val script = HiddifyScripts.uninstall(true).text.replace(HiddifyScripts.DIR, target.absolutePath)
+            repeat(2) {
+                val (code, output) = run(script, dir, mapOf("systemctl" to "exit 0"))
+                assertEquals(output, 0, code)
+                assertTrue(output.contains("UNINSTALLED=purged"))
+                assertFalse(target.exists())
+                assertEquals("keep", unrelated.readText())
+            }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun failedHiddifyStopNeverDeletesPanelData() {
+        val dir = Files.createTempDirectory("hiddify-purge-failure").toFile()
+        try {
+            val target = File(dir, "panel").apply { mkdirs() }
+            val data = File(target, "data.json").apply { writeText("keep") }
+            val script = HiddifyScripts.uninstall(true).text.replace(HiddifyScripts.DIR, target.absolutePath)
+            val systemctl = """
+                case "${'$'}1" in
+                  list-unit-files) echo 'hiddify-panel.service enabled';;
+                  stop) exit 1;;
+                esac
+            """.trimIndent()
+            assertEquals(57, run(script, dir, mapOf("systemctl" to systemctl)).first)
+            assertEquals("keep", data.readText())
+        } finally { dir.deleteRecursively() }
+    }
+
     @Test fun disabledHiddifyUnitsAreStillDetectedWithCanonicalUnitNames() {
         val dir = Files.createTempDirectory("hiddify-disabled").toFile()
         try {

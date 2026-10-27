@@ -212,12 +212,24 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
             }
         }
 
+        if (!ui.needsSignIn) {
+            SectionLabel("Remove incomplete installation")
+            GroupCard {
+                listOf(ServerToolCatalog.SOAR to "Soar", ServerToolCatalog.COTTEN to "CottenDNS",
+                    ServerToolCatalog.DNSTT to "DNSTT").filter { candidate -> ui.tools.none { it.id == candidate.first } }
+                    .forEach { (id, title) ->
+                        ListRow(title, subtitle = "Delete leftover server files and services",
+                            trailing = { TextAction("Clean up", { actions.onUninstall(id) }, Sv.Red, enabled = idle) })
+                    }
+            }
+        }
+
         // Expose Hiddify's setup entry points even when its admin URL was not captured during install.
         // Quick creation and Telegram use the reviewed v14 API; domain management opens the official UI.
         if (ui.tools.any { it.id == ServerToolCatalog.HIDDIFY }) {
             SectionLabel("Hiddify management")
             GroupCard {
-                ListRow("Remove Hiddify", subtitle = "Stop the panel or safely recover incomplete files; confirmation required",
+                ListRow("Remove Hiddify", subtitle = "Delete panel files, database and services from this server",
                     trailing = { TextAction("Remove", { actions.onUninstall(ServerToolCatalog.HIDDIFY) }, enabled = idle) })
                 RowDivider(0.dp)
                 ListRow(
@@ -374,7 +386,7 @@ private fun ToolBlock(t: ToolRowUi, actions: ServerDetailActions, idle: Boolean)
             if (t.canStop) add(ToolAction("Stop", Icons.Rounded.Stop) { actions.onStop(t.id) })
             if (t.canRotatePort) add(ToolAction("New port", Icons.Rounded.SwapHoriz) { actions.onRotatePort(t.id) })
             if (t.canRotateKey) add(ToolAction("New keys", Icons.Rounded.VpnKey) { actions.onRotateKey(t.id) })
-            if (t.canUninstall) add(ToolAction("Uninstall", Icons.Rounded.Delete, Sv.Red) { actions.onUninstall(t.id) })
+            if (t.canUninstall) add(ToolAction("Delete completely", Icons.Rounded.Delete, Sv.Red) { actions.onUninstall(t.id) })
         }
         if (all.isEmpty()) return@Column
         val shown = all.filter { it.color != Sv.Red && !it.menu }.take(3)

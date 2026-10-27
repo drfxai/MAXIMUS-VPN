@@ -217,7 +217,7 @@ object HiddifyScripts {
     fun uninstall(purge: Boolean): ToolScript = ToolScripts.script(
         """
         step 1
-        ${if (purge) "echo 'Automatic data purge is not supported; back up and inspect the installation first.' >&2; exit 57" else ""}
+
         if §SUDO test -L $DIR; then echo 'Refusing to operate on a symlinked Hiddify folder' >&2; exit 57; fi
         unit_files=§(systemctl list-unit-files --type=service --no-legend 'hiddify-*' 2>/dev/null) || { echo 'Could not inspect Hiddify services; no files changed.' >&2; exit 57; }
         unit_instances=§(systemctl list-units --all --plain --type=service --no-legend 'hiddify-*' 2>/dev/null) || { echo 'Could not inspect running Hiddify services; no files changed.' >&2; exit 57; }
@@ -226,11 +226,29 @@ object HiddifyScripts {
           for u in §units; do
             §SUDO systemctl stop "§u" || exit 57
             §SUDO systemctl disable "§u" || exit 57
+            ${if (purge) "if §SUDO systemctl is-active --quiet \"§u\"; then echo 'Service still active; no data deleted' >&2; exit 57; fi" else ""}
           done
-          echo 'Hiddify services stopped and disabled. Files and databases were retained.'
-          result UNINSTALLED services
-          exit 0
+          ${if (purge) "" else "echo 'Hiddify services stopped and disabled. Files and databases were retained.'"}
+          ${if (purge) "" else "result UNINSTALLED services\nexit 0"}
         fi
+        ${if (purge) """
+        # Explicit complete removal from the app. Only Hiddify-owned paths are removed.
+        for u in §units; do
+          for base in /etc/systemd/system /lib/systemd/system /usr/lib/systemd/system; do
+            §SUDO rm -f -- "§base/§u.service"
+            §SUDO rm -rf -- "§base/§u.service.d"
+          done
+        done
+        §SUDO rm -rf -- $DIR
+        §SUDO systemctl daemon-reload
+        for u in §units; do
+          if §SUDO systemctl is-active --quiet "§u"; then echo 'A Hiddify service is still active; removal incomplete' >&2; exit 57; fi
+          §SUDO systemctl reset-failed "§u" >/dev/null 2>&1 || true
+        done
+        §SUDO test ! -e $DIR || exit 57
+        result UNINSTALLED purged
+        exit 0
+        """.trimIndent() else ""}
         if ! §SUDO test -d $DIR; then result UNINSTALLED absent; exit 0; fi
         if §SUDO test -e $DIR/data/current.json || §SUDO test -x $DIR/.venv313/bin/hiddify-panel-cli || §SUDO test -x $DIR/.venv/bin/hiddify-panel-cli; then
           echo 'Hiddify application or configuration data exists without managed services; removal is refused to preserve it. Inspect and back it up first.' >&2; exit 57
@@ -341,9 +359,9 @@ class HiddifyPanelProvider(
         return out.lines
     }
 
-    /** Stops and disables Hiddify; its files and database stay on the server. */
+    /** User-confirmed deletion of Hiddify units, installation and panel data. */
     override fun uninstall(server: ManagedServer, progress: ActionProgress): ManagedServer {
-        connect(server).use { it.runTool(HiddifyScripts.uninstall(purge = false), progress, 5 * 60_000L) }
+        connect(server).use { it.runTool(HiddifyScripts.uninstall(purge = true), progress, 5 * 60_000L) }
         return server.withoutTool(id)
     }
 

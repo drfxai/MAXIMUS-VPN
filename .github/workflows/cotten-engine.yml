@@ -3,6 +3,7 @@ on:
   push:
     branches: ['**']
     paths:
+      - 'app/src/main/java/com/example/panels/servers/DnsServerScripts.kt'
       - 'scripts/engines/cottendns.sh'
       - 'scripts/engines/cotten-strict-dns.py'
       - 'scripts/engines/common.sh'
@@ -10,6 +11,7 @@ on:
       - '.github/workflows/cotten-engine.yml'
   pull_request:
     paths:
+      - 'app/src/main/java/com/example/panels/servers/DnsServerScripts.kt'
       - 'scripts/engines/cottendns.sh'
       - 'scripts/engines/cotten-strict-dns.py'
       - 'scripts/engines/common.sh'
@@ -44,7 +46,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/engines/cotten-strict-dns.py" .
           go mod download
           go mod verify
-          go test -mod=readonly -count=1 -timeout 240s ./internal/config ./internal/cottenmax ./internal/client
+          go test -mod=readonly -count=1 -timeout 240s ./internal/config ./internal/cottenmax ./internal/client ./internal/udpserver
   android-native:
     runs-on: ubuntu-latest
     timeout-minutes: 20
