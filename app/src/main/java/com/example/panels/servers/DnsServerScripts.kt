@@ -37,7 +37,7 @@ object DnsServerScripts {
           occupied=§(printf '%s\n' "§listeners" | awk -v port="§port" -v bind="§bind" '{
             endpoint=§4; n=split(endpoint,a,":"); if(a[n]!=port) next;
             sub(/:[^:]*§/, "", endpoint); sub(/%[^%]*§/, "", endpoint);
-            if(endpoint==bind || endpoint=="0.0.0.0" || endpoint=="*" || endpoint=="[::]" || endpoint=="::" || endpoint=="[::ffff:" bind "]") print §4
+            if(bind=="*" || endpoint==bind || endpoint=="0.0.0.0" || endpoint=="*" || endpoint=="[::]" || endpoint=="::" || endpoint=="[::ffff:" bind "]") print §4
           }')
           if [ -n "§occupied" ]; then
             echo "Cannot bind §proto §bind:§port: conflicting listener(s): §occupied. Remove or move that tool first; system DNS is not stopped." >&2

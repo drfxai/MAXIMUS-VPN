@@ -232,7 +232,7 @@ object ToolScripts {
             select_dns_bind
             if [ "§FRESH" = 1 ]; then
               require_free_listener udp 53
-              require_free_listener udp $dnsPort
+              require_free_listener udp $dnsPort "*"
               require_free_listener tcp $socksPort 127.0.0.1
               require_no_dns_redirect
             fi

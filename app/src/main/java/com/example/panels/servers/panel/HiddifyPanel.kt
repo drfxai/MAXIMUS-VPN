@@ -212,8 +212,8 @@ object HiddifyScripts {
         )
     }
 
-    /** Non-purging removal: only Hiddify units are stopped. Incomplete, data-free files are
-     * quarantined atomically. Never execute a partially installed remote uninstaller or stop netdata. */
+    /** Purge deletes only Hiddify-owned files. Non-purging cleanup remains available for recovery.
+     * Never execute an unverified remote uninstaller or purge shared OS packages. */
     fun uninstall(purge: Boolean): ToolScript = ToolScripts.script(
         """
         step 1
@@ -238,6 +238,15 @@ object HiddifyScripts {
             §SUDO rm -f -- "§base/§u.service"
             §SUDO rm -rf -- "§base/§u.service.d"
           done
+        done
+        # Remove only scheduled jobs that explicitly refer to this installation.
+        for job in /etc/cron.d/hiddify*; do
+          [ -e "§job" ] || continue
+          if §SUDO grep -Fq '$DIR/' "§job"; then §SUDO rm -f -- "§job"; fi
+        done
+        for link in /usr/bin/hiddify /etc/bash_completion.d/hiddify /etc/profile.d/hiddify.sh /etc/sysctl.d/hiddify.conf; do
+          target=§(§SUDO readlink -f "§link" 2>/dev/null || true)
+          case "§target" in $DIR/*) §SUDO rm -f -- "§link";; esac
         done
         §SUDO rm -rf -- $DIR
         §SUDO systemctl daemon-reload
