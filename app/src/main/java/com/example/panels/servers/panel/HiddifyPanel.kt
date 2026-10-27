@@ -234,6 +234,21 @@ object HiddifyScripts {
         fi
         ${if (purge) """
         # Explicit complete removal from the app. Only Hiddify-owned paths are removed.
+        # WireGuard units are shared templates: remove only profiles proven to belong to this panel.
+        for iface in hiddifywg warp; do
+          conf="/etc/wireguard/§iface.conf"
+          owned=0
+          target=§(§SUDO readlink -f "§conf" 2>/dev/null || true)
+          case "§target" in $DIR/*) owned=1;; esac
+          if [ "§iface" = warp ] && §SUDO test -f $DIR/data/services/warp/wireguard/wgcf-profile.conf &&
+             §SUDO cmp -s "§conf" $DIR/data/services/warp/wireguard/wgcf-profile.conf; then owned=1; fi
+          if [ "§owned" = 1 ]; then
+            §SUDO systemctl stop "wg-quick@§iface" || exit 57
+            §SUDO systemctl disable "wg-quick@§iface" || exit 57
+            if §SUDO systemctl is-active --quiet "wg-quick@§iface"; then exit 57; fi
+            §SUDO rm -f -- "§conf"
+          fi
+        done
         for u in §units; do
           for base in /etc/systemd/system /lib/systemd/system /usr/lib/systemd/system; do
             §SUDO rm -f -- "§base/§u.service"
