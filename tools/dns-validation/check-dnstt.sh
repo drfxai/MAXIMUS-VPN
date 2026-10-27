@@ -19,6 +19,7 @@ PY
 for patch_name in dnstt-query-rate dnstt-multipath dnstt-timing-jitter; do
     patch -d "$work/src" -p1 --batch < "$root/scripts/engines/$patch_name.patch"
 done
+patch -d "$work/src" -p1 --batch < "$root/scripts/server-tools/dnstt-server-domains.patch"
 cp "$root/tools/dns-validation/querypace_test.go" "$work/src/dnstt-client/jitter_test.go"
 cd "$work/src"
-go test -race -count=1 ./dnstt-client
+go test -race -count=1 ./...

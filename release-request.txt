@@ -1,8 +1,7 @@
 V1.0.2 Android versionCode 37
-User-authorized signed release refresh for PR136.
-Source: eebad9915b2d7fa6573f35d7dd6f034271c6aa0d.
-Checks 40408558549 and transport recovery 40408558536 succeeded on the reviewed PR head.
-Detect Soar/Cotten wildcard listener conflicts including loopback before installation and recheck before writing engine files. Check Cotten TCP DNS and metrics listeners; never stop existing DNS services automatically.
-DNSTT installation success explicitly leaves traffic verification outstanding.
-Keep permanent signing identity and pinned native sources. Require fresh unit tests, lint, packaging, signature, checksums and Android 15 install/launch verification before publication.
-Real server DNS delegation and device tunnel traffic are not verified by this release.
+User-authorized signed refresh: DNS listener binding and complete panel removal.
+Bind Soar and Cotten to assigned server IPv4 without disabling local DNS.
+Check DNS forwarding conflicts, fail closed on DNSTT firewall errors, clean stale redirects on removal.
+Expose cleanup for incomplete DNS installations; enable explicit Hiddify data purge.
+Keep permanent signing identity and pinned native sources. Require tests, lint, signature and Android 15 smoke checks.
+Real VPS and phone network traffic still require field verification.

@@ -226,7 +226,7 @@ private fun ConfirmHost(vm: ServersViewModel, confirm: Confirm?, dismiss: () -> 
         null -> Unit
         is Confirm.Uninstall -> ConfirmDialog(
             "Remove ${toolTitle(c.toolId)}?",
-            if (c.toolId == ServerToolCatalog.HIDDIFY) "Stops and disables only Hiddify services; files and databases are retained. If no Hiddify services, application or data exist, incomplete files are moved to a recoverable backup. Automatic data purge is not performed."
+            if (c.toolId == ServerToolCatalog.HIDDIFY) "Permanently deletes Hiddify services, its installation directory, databases, users and keys. Export a backup first if needed. Other panels, system DNS and SSH are not removed."
             else "It is stopped and deleted from the server, and its config is removed from this phone.",
             "Remove", { vm.uninstall(c.serverId, c.toolId) }, dismiss
         )
