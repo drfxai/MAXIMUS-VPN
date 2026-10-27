@@ -224,6 +224,7 @@ object HiddifyScripts {
         units=§(printf '%s\n%s\n' "§unit_files" "§unit_instances" | awk '{sub(/[.]service§/, "", §1); print §1}' | grep -E '^hiddify-[A-Za-z0-9_.@-]+§' | sort -u || true)
         if [ -n "§units" ]; then
           for u in §units; do
+            case "§u" in *@) continue;; esac
             §SUDO systemctl stop "§u" || exit 57
             §SUDO systemctl disable "§u" || exit 57
             ${if (purge) "if §SUDO systemctl is-active --quiet \"§u\"; then echo 'Service still active; no data deleted' >&2; exit 57; fi" else ""}

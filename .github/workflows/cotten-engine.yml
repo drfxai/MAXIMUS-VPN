@@ -46,7 +46,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/engines/cotten-strict-dns.py" .
           go mod download
           go mod verify
-          go test -mod=readonly -count=1 -timeout 240s ./internal/config ./internal/cottenmax ./internal/client ./internal/udpserver
+          go test -mod=readonly -count=1 -timeout 240s ./...
   android-native:
     runs-on: ubuntu-latest
     timeout-minutes: 20
