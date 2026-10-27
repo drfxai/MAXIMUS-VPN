@@ -16,7 +16,7 @@ object SecretRedactor {
 
     /** vmess:// and legacy ss:// links carry the whole config, credentials included, as base64. */
     private val BASE64_LINK_PATTERN = Pattern.compile(
-        "\\b(vmess|ss|ssr|cottendns|soar)://([A-Za-z0-9+/=_-]{12,})", Pattern.CASE_INSENSITIVE
+        "\\b(vmess|ss|ssr|cottendns|soar|masterdns)://([A-Za-z0-9+/=_-]{12,})", Pattern.CASE_INSENSITIVE
     )
 
     private val HTTP_USERINFO_PATTERN = Pattern.compile(

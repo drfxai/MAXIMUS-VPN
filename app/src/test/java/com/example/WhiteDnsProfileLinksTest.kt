@@ -56,4 +56,22 @@ class WhiteDnsProfileLinksTest {
         assertFalse(SecretRedactor.redact(link("cottendns")).contains("eyJ"))
         assertFalse(SecretRedactor.redact(link("cottendns").replace("cottendns://", "COTTENDNS://")).contains("eyJ"))
     }
+    @Test fun masterDnsLinkWithoutResolversUsesTheLegacySessionFormat() {
+        // WhiteDNS panel MasterDNS links have no resolver list.
+        val server = JSONObject().put("domain", "mdns-1.example.com").put("encryption_key", "ab".repeat(32)).put("encryption_method", 5)
+        val p = JSONObject().put("id", "x:masterdns").put("name", "Panel · MasterDNS").put("engine", "masterdns").put("server", server)
+        val root = JSONObject().put("schema", "whitedns.profile").put("version", 1).put("profile", p)
+        val link = "masterdns://" + Base64.getUrlEncoder().withoutPadding().encodeToString(root.toString().toByteArray())
+        val result = UniversalImportEngine.importText(link)
+        assertEquals(1, result.validCount)
+        val profile = WhiteDnsProfileLinks.parse(link)
+        val s = CottenDnsSidecar.settings(profile)
+        assertEquals("masterdns", s.mode)
+        assertEquals(listOf("1.1.1.1:53", "8.8.8.8:53"), s.resolvers)
+        assertEquals(s, CottenDnsSidecar.settings(CottenDnsSidecar.parse(CottenDnsSidecar.toLink(profile))))
+        assertFalse(SecretRedactor.redact(link).contains("eyJ"))
+        server.put("encryption_method", 1)
+        val weak = "masterdns://" + Base64.getUrlEncoder().withoutPadding().encodeToString(root.toString().toByteArray())
+        assertThrows(IllegalArgumentException::class.java) { WhiteDnsProfileLinks.parse(weak) }
+    }
 }

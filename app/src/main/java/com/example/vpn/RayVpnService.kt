@@ -87,6 +87,9 @@ class RayVpnService : VpnService() {
         /** Requests through a new tunnel before it counts as unverified, and the pause between them. */
         private const val VERIFY_ATTEMPTS = 3
         private const val VERIFY_RETRY_MS = 1_500L
+        private const val SLOW_PROBE_STEP_MS = 20_000
+        private const val SLOW_VERIFY_STEP_MS = 25_000L
+        private const val SLOW_VERIFY_CONFIG_MS = 90_000L
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
         const val NOTIFICATION_ID = 1001
@@ -1853,7 +1856,7 @@ class RayVpnService : VpnService() {
                 try {
                     com.example.vpn.diagnostics.ConnectionMetrics.activeTunnelChecks.incrementAndGet()
                     val sample = if (engineEndpoint != null) com.example.vpn.diagnostics.LiveTunnelProbe.Sample(routeLatency(), null)
-                        else com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService)
+                        else com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService, probeStepMs())
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     if (_vpnState.value.attemptId == attemptId) passEvent("tunnel.recheck", sample.latencyMs)
                     passive?.recordActiveSuccess()
@@ -1903,7 +1906,8 @@ class RayVpnService : VpnService() {
         val engine = com.example.vpn.connectivity.MultiProbeHealthEngine(
             com.example.vpn.connectivity.ProbeBudget(
                 maxRetries = VERIFY_ATTEMPTS - 1, retryBackoffMs = VERIFY_RETRY_MS, maxBackoffMs = VERIFY_RETRY_MS,
-                perStepTimeoutMs = 11_000, perConfigTimeoutMs = 40_000
+                perStepTimeoutMs = if (slowTunnel()) SLOW_VERIFY_STEP_MS else 11_000L,
+                perConfigTimeoutMs = if (slowTunnel()) SLOW_VERIFY_CONFIG_MS else 40_000L
             )
         )
         val report = engine.run(
@@ -1934,11 +1938,21 @@ class RayVpnService : VpnService() {
      * local port when the app is left out of its own tunnel (see [engineEndpoint]).
      */
     private suspend fun routeLatency(): Long {
-        val endpoint = engineEndpoint ?: return com.example.vpn.diagnostics.LiveTunnelProbe.latency(this)
+        val endpoint = engineEndpoint ?: return com.example.vpn.diagnostics.LiveTunnelProbe.latency(this, probeStepMs())
         return withContext(Dispatchers.IO) {
-            com.example.vpn.verify.TrafficCheck(com.example.vpn.verify.RouteDialers.engine(endpoint), stepTimeoutMs = 4_000).smallRequest()
+            com.example.vpn.verify.TrafficCheck(com.example.vpn.verify.RouteDialers.engine(endpoint), stepTimeoutMs = probeStepMs()).smallRequest()
         }
     }
+
+    /**
+     * Every round trip of a DNS tunnel is a DNS query through a public resolver, so one HTTPS request
+     * takes several seconds (about 10 s on a filtered mobile network). A 4 s request limit would call a
+     * working DNS tunnel dead; other servers keep the short limit.
+     */
+    private fun slowTunnel(): Boolean =
+        _vpnState.value.activeProfile?.let { com.example.vpn.ServerTester.isDnsTunnel(it) } == true
+
+    private fun probeStepMs(): Int = if (slowTunnel()) SLOW_PROBE_STEP_MS else 4_000
 
     /**
      * After the first verified request: a download counted byte for byte and an upload the far side echoes,

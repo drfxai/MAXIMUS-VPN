@@ -77,5 +77,12 @@ class CottenDnsSidecarTest {
         assertThrows(IllegalArgumentException::class.java) { CottenDnsSidecar.validate(settings().copy(resolvers = (1..65).map { "1.1.1.$it" })) }
         assertThrows(IllegalArgumentException::class.java) { CottenDnsSidecar.validate(settings().copy(backups = listOf("t.example.com"))) }
     }
+    @Test fun masterDnsModeUsesTheOneByteSessionFormatAndItsMethod() {
+        val config = CottenDnsSidecar.configuration(settings().copy(mode = "masterdns", method = 3), context(File(".")))
+        for (line in listOf("TUNNEL_MODE = \"legacy\"", "LEGACY_SESSION_ID = true", "DATA_ENCRYPTION_METHOD = 3", "QUERY_RATE_LIMIT_PER_SECOND = 4.0"))
+            assertTrue(line, config.lines().contains(line))
+        assertTrue(CottenDnsSidecar.configuration(settings().copy(mode = "legacy"), context(File("."))).lines().contains("LEGACY_SESSION_ID = false"))
+        // Native CottenDNS profiles stay on method 5.
+        assertThrows(IllegalArgumentException::class.java) { CottenDnsSidecar.validate(settings().copy(mode = "legacy", method = 3)) }
+    }
 }
-

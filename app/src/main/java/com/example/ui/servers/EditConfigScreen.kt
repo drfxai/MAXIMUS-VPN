@@ -924,7 +924,7 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
         EditTopBar("CottenDNS", name, saving, { leave() }, { remove = true }) {
             val next = runCatching {
                 com.example.vpn.sidecar.CottenDnsSidecar.withSettings(profile.copy(name = name.trim().ifBlank { "CottenDNS · Max beta" }),
-                    com.example.vpn.sidecar.CottenDnsSidecar.Settings(domain, profile.uuid, lines(resolvers), transport.trim(), lines(backups), tlsName, initial?.mode ?: "cottenmax"))
+                    com.example.vpn.sidecar.CottenDnsSidecar.Settings(domain, profile.uuid, lines(resolvers), transport.trim(), lines(backups), tlsName, initial?.mode ?: "cottenmax", initial?.method ?: 5))
             }.getOrElse { error = it.message ?: "Check the CottenDNS settings"; return@EditTopBar }
             saving = true
             scope.launch {
