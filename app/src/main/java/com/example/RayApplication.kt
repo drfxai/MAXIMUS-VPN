@@ -111,7 +111,10 @@ class RayApplication : Application() {
             endpoints = { network -> endpointScores.validated(network) },
             echCheck = {
                 com.example.vpn.connectivity.EchKeyCheck.check(com.example.vpn.connectivity.RecoveryProfiles.CLOUDFLARE_ECH_DOH) { url ->
-                    val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    // On the phone's own network: during a connect this app's traffic is held in the blocking interface.
+                    val physical = getSystemService(android.net.ConnectivityManager::class.java)
+                        ?.let { com.example.vpn.smart.NetworkCapabilityDetector.physical(it) }
+                    val c = (physical?.openConnection(java.net.URL(url)) ?: java.net.URL(url).openConnection()) as java.net.HttpURLConnection
                     try {
                         c.connectTimeout = 5000; c.readTimeout = 5000
                         c.setRequestProperty("Accept", "application/dns-message")

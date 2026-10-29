@@ -456,6 +456,18 @@ fun PanelManagerScreen(
                         onStopScan = { viewModel.cancel() }
                     )
 
+                    // What the last scan, save or copy did; these actions report nowhere else on this tab.
+                    val outcome = state.error.ifBlank { state.status }
+                    if (outcome.isNotBlank()) {
+                        Text(
+                            text = outcome,
+                            color = if (state.error.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
                     // Auto-Optimize Compatible Configurations Banner
                     if (state.edges.isNotEmpty() && savedProfiles.isNotEmpty()) {
                         Card(
@@ -601,10 +613,8 @@ fun PanelManagerScreen(
                                         selectedReviveTargetProfileId = state.selectedTargetProfileId ?: savedProfiles.firstOrNull()?.id
                                         showReviveDialogForEdge = edge
                                     },
-                                    onSave = {
-                                        viewModel.applyEdge(edge, false)
-                                        Toast.makeText(context, "Clean IP ${edge.ip} saved to configurations", Toast.LENGTH_SHORT).show()
-                                    },
+                                    // The status line above the results says whether it was saved.
+                                    onSave = { viewModel.applyEdge(edge, false) },
                                     onCopy = {
                                         copyWithToast(edge.ip, "Clean IP")
                                     }
@@ -890,7 +900,8 @@ fun PanelManagerScreen(
                                 onDismissRequest = { profileDropdownOpen = false },
                                 modifier = Modifier.background(MaterialTheme.colorScheme.surface)
                             ) {
-                                savedProfiles.forEach { p ->
+                                // Only configs a clean IP can carry (WebSocket, HTTPUpgrade or gRPC over checked TLS).
+                                savedProfiles.filter { CleanIpOptimizer.canRevive(it) }.forEach { p ->
                                     DropdownMenuItem(
                                         text = {
                                             Column {
@@ -959,8 +970,7 @@ fun PanelManagerScreen(
                     if (targetProfile != null) {
                         Surface(
                             onClick = {
-                                val uri = viewModel.copyRevivedUri(targetProfile, edge)
-                                copyWithToast(uri, "Optimized vless:// URL")
+                                viewModel.copyRevivedUri(targetProfile, edge)?.let { copyWithToast(it, "Optimized config link") }
                             },
                             shape = RoundedCornerShape(8.dp),
                             color = Color(0xFF0D2138),
@@ -976,7 +986,7 @@ fun PanelManagerScreen(
                             ) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = null, tint = PanelColors.CyanAccent, modifier = Modifier.size(13.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Copy Optimized vless:// Config Link", color = PanelColors.CyanAccent, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Copy optimized config link", color = PanelColors.CyanAccent, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }

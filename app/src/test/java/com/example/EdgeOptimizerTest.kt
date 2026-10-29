@@ -55,6 +55,43 @@ class EdgeOptimizerTest {
         assertFalse(CleanIpOptimizer.isCloudflareCompatible(profile.copy(address = "1.2.3.4", sni = "", host = "")))
     }
 
+    @Test fun onlyConfigsWithCheckedTlsCanTakeACleanIp() {
+        assertTrue(CleanIpOptimizer.canRevive(profile))
+        assertTrue(CleanIpOptimizer.canRevive(profile.copy(protocolType = com.example.data.model.ProtocolType.VMESS)))
+        // Each of these made "Optimize all" fail for every config, or the copy-link button crash the app.
+        assertFalse(CleanIpOptimizer.canRevive(profile.copy(security = "none", port = 80)))
+        assertFalse(CleanIpOptimizer.canRevive(profile.copy(allowInsecure = true)))
+        assertFalse(CleanIpOptimizer.canRevive(profile.copy(rawConfig = "{}")))
+        assertFalse(CleanIpOptimizer.canRevive(profile.copy(security = "reality")))
+        assertThrows(IllegalArgumentException::class.java) {
+            CleanIpOptimizer.reviveProfile(profile.copy(allowInsecure = true), CleanIpOptimizer.Result("104.16.1.1", 100, 5, 3))
+        }
+    }
+
+    @Test fun copiesOfCopiesKeepOneNameAndGrade() {
+        val first = CleanIpOptimizer.variant(profile.copy(name = "US 16"), CleanIpOptimizer.Result("104.16.1.1", 100, 0, 3))
+        assertEquals("⚡ [CF-Optimized] US 16 (A+)", first.name)
+        assertTrue(CleanIpOptimizer.isCleanIpCopy(first))
+        val again = CleanIpOptimizer.variant(first, CleanIpOptimizer.Result("104.16.1.2", 200, 0, 3))
+        assertEquals("⚡ [CF-Optimized] US 16 (B)", again.name)
+        assertFalse(CleanIpOptimizer.isCleanIpCopy(profile))
+        assertEquals("Server (A) one", CleanIpOptimizer.baseName("Server (A) one"))
+    }
+
+    @Test fun scanSocketsUseTheVpnProtectorWhileTheVpnRuns() {
+        val protected = mutableListOf<java.net.Socket>()
+        CleanIpOptimizer.socketProtector = { protected += it; true }
+        try {
+            CleanIpOptimizer.directSocket().close()
+            assertEquals(1, protected.size)
+            CleanIpOptimizer.socketProtector = { false }
+            assertThrows(IllegalStateException::class.java) { CleanIpOptimizer.directSocket() }
+        } finally {
+            CleanIpOptimizer.socketProtector = null
+        }
+        CleanIpOptimizer.directSocket().close()
+    }
+
     @Test fun downloadSpeedImprovesScoreRank() {
         val fast = CleanIpOptimizer.Result("104.16.1.1", 100, 5, 3, downloadSpeedKbps = 5000)
         val slow = CleanIpOptimizer.Result("104.16.1.2", 100, 5, 3, downloadSpeedKbps = 100)

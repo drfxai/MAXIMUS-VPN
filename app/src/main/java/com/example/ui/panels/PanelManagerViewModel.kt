@@ -158,7 +158,7 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun assertScanNetwork() {
         if (VpnController.connectionState.value.isVpnInterfaceActive) {
-            appendLog("[WARN] Active VPN detected • measuring exit route")
+            appendLog("[INFO] VPN is on • probes bypass it and measure the phone's own network")
         }
         val current = connectivity.activeNetwork
         if (current != null) {
@@ -296,13 +296,19 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         val profiles = app.serverRepository.getAllProfilesOnce()
         val targetId = _state.value.selectedTargetProfileId
             ?: app.settingsRepository.settingsFlow.value.selectedProfileId
-        val profile = profiles.firstOrNull { it.id == targetId }
-            ?: profiles.firstOrNull()
+        val chosen = profiles.firstOrNull { it.id == targetId }
+        // A config that cannot take a clean IP (Reality, raw TCP, DNS tunnels) is not scanned through: every
+        // edge would fail its checks. Without a usable choice, the first config that can take one is used.
+        val profile = chosen?.takeIf { CleanIpOptimizer.canRevive(it) }
+            ?: profiles.firstOrNull { CleanIpOptimizer.canRevive(it) }?.takeIf { chosen == null }
 
         scannedNetwork = connectivity.activeNetwork
         scannedProfile = profile
         val profileLabel = profile?.name ?: "General Cloudflare CDN"
         resetLogs("[CF_SCANNER_START] region=$region port=$port target=$profileLabel speedTest=$speedTest")
+        if (chosen != null && profile == null) {
+            appendLog("[INFO] '${chosen.name}' cannot use a Cloudflare clean IP (it needs WebSocket, HTTPUpgrade or gRPC over TLS); scanning general Cloudflare edges")
+        }
         _state.update {
             it.copy(
                 edges = emptyList(),
@@ -355,7 +361,8 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         }
         _state.value.copy(
             edges = edges,
-            status = "Found ${edges.size} verified clean Cloudflare IPs for $region.",
+            status = if (profile != null) "Found ${edges.size} clean Cloudflare IPs that reach '${profile.name}'."
+                else "Found ${edges.size} Cloudflare IPs that answer from this network.",
             scanPaused = false
         )
     }
@@ -375,11 +382,7 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun applyEdge(edge: CleanIpOptimizer.Result, connect: Boolean) =
         runJob(if (connect) "Saving clean IP and connecting…" else "Saving clean IP…") {
             val app = RayApplication.instance
-            val profile = scannedProfile
-                ?: app.settingsRepository.settingsFlow.value.selectedProfileId?.let { id ->
-                    app.serverRepository.getAllProfilesOnce().firstOrNull { it.id == id }
-                }
-                ?: app.serverRepository.getAllProfilesOnce().firstOrNull()
+            val profile = cleanIpTarget()
                 ?: com.example.data.model.VlessProfile(
                     name = "Clean IP ${edge.ip}",
                     address = edge.ip,
@@ -418,11 +421,7 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         asClone: Boolean,
         connectNow: Boolean
     ) = runJob(if (connectNow) "Optimizing configuration and connecting…" else "Optimizing configuration…") {
-        if (targetProfile.security.equals("reality", ignoreCase = true)) {
-            return@runJob _state.value.copy(
-                status = "Reality nodes cannot use Cloudflare Clean IPs. Reality endpoints require direct VPS connection. Use DPI Desync or God Mode."
-            )
-        }
+        check(CleanIpOptimizer.canRevive(targetProfile)) { cannotTakeCleanIp(targetProfile) }
         val app = RayApplication.instance
         val revived = CleanIpOptimizer.reviveProfile(targetProfile, edge, asClone)
 
@@ -459,9 +458,10 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         check(edges.isNotEmpty()) { "No clean IPs available. Run a scan first." }
         check(all.isNotEmpty()) { "No configurations to optimize. Import or create a configuration first." }
 
-        val eligible = all.filter { CleanIpOptimizer.isCloudflareCompatible(it) }
+        // Copies made by an earlier run are not copied again (that only piled up duplicates).
+        val eligible = all.filter { CleanIpOptimizer.canRevive(it) && !CleanIpOptimizer.isCleanIpCopy(it) }
         check(eligible.isNotEmpty()) {
-            "No compatible Cloudflare CDN configurations found. Reality, Direct TCP, and WireGuard configurations require direct endpoints and cannot be routed through Cloudflare clean IPs."
+            "No config can take a Cloudflare clean IP. It needs WebSocket, HTTPUpgrade or gRPC over TLS with a checked certificate; Reality, raw TCP, WireGuard and DNS tunnels connect to their server directly."
         }
 
         val revivedList = eligible.mapIndexed { index, profile ->
@@ -475,22 +475,47 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         inserted.firstOrNull()?.let { app.settingsRepository.setSelectedProfileId(it.id) }
 
         _state.value.copy(
-            status = "Successfully optimized $totalRevived compatible Cloudflare configurations with verified clean IPs!"
+            status = "Saved $totalRevived copies on clean IPs (originals unchanged). The IPs were checked against " +
+                "'${scannedProfile?.name ?: "Cloudflare"}'; test each copy before relying on it."
         )
     }
 
-    fun copyRevivedUri(profile: com.example.data.model.VlessProfile, edge: CleanIpOptimizer.Result): String {
-        val revived = CleanIpOptimizer.reviveProfile(profile, edge, asClone = false)
-        return com.example.vless.VlessParser.toUri(revived)
+    /** The config on [edge] as a link (vless://) or share code, or null with the reason in the status line. */
+    fun copyRevivedUri(profile: com.example.data.model.VlessProfile, edge: CleanIpOptimizer.Result): String? {
+        if (!CleanIpOptimizer.canRevive(profile)) {
+            _state.update { it.copy(error = cannotTakeCleanIp(profile)) }
+            return null
+        }
+        return runCatching { com.example.ui.share.shareText(CleanIpOptimizer.reviveProfile(profile, edge, asClone = false)) }
+            .onFailure { e -> _state.update { it.copy(error = e.message ?: "Unable to build the link") } }
+            .getOrNull()
+    }
+
+    /** The config a clean IP is saved into: the scanned one, else the chosen one, else the first that can take one. */
+    private suspend fun cleanIpTarget(): com.example.data.model.VlessProfile? {
+        scannedProfile?.let { return it }
+        val app = RayApplication.instance
+        val all = app.serverRepository.getAllProfilesOnce()
+        val id = _state.value.selectedTargetProfileId ?: app.settingsRepository.settingsFlow.value.selectedProfileId
+        all.firstOrNull { it.id == id }?.let { chosen ->
+            check(CleanIpOptimizer.canRevive(chosen)) { cannotTakeCleanIp(chosen) }
+            return chosen
+        }
+        return all.firstOrNull { CleanIpOptimizer.canRevive(it) }
+            ?: if (all.isEmpty()) null else error("No config can take a Cloudflare clean IP. It needs WebSocket, HTTPUpgrade or gRPC over TLS.")
+    }
+
+    private fun cannotTakeCleanIp(p: com.example.data.model.VlessProfile): String = when {
+        p.security.equals("reality", true) -> "'${p.name}' uses Reality, which connects to its server directly; a Cloudflare clean IP cannot carry it."
+        !CleanIpOptimizer.isCloudflareCompatible(p) -> "'${p.name}' does not go through Cloudflare (it needs WebSocket, HTTPUpgrade or gRPC with a domain)."
+        p.allowInsecure -> "'${p.name}' skips the certificate check; a clean IP is only used with a checked certificate."
+        p.rawConfig.isNotBlank() -> "'${p.name}' is a raw JSON config; its address cannot be replaced safely."
+        else -> "'${p.name}' does not use TLS, so it cannot be moved to a clean IP."
     }
 
     fun applyEdges() = runJob("Saving ranked clean-IP configurations…") {
         val app = RayApplication.instance
-        val profile = scannedProfile
-            ?: app.settingsRepository.settingsFlow.value.selectedProfileId?.let { id ->
-                app.serverRepository.getAllProfilesOnce().firstOrNull { it.id == id }
-            }
-            ?: app.serverRepository.getAllProfilesOnce().firstOrNull()
+        val profile = cleanIpTarget()
             ?: com.example.data.model.VlessProfile(
                 name = "Cloudflare Clean IP",
                 address = "104.16.0.1",
