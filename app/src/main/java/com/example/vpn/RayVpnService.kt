@@ -266,6 +266,8 @@ class RayVpnService : VpnService() {
         observeSettingsFlow()
         // Real-delay probes must bypass this VPN while it exists.
         com.example.xray.RealDelayProbe.socketProtector = { fd -> safeProtectFd(fd) }
+        // Clean-IP scans and checks measure the phone's network, not this VPN (or its blocking interface).
+        com.example.panels.CleanIpOptimizer.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
     }
 
     private fun observeSettingsFlow() {
@@ -565,11 +567,7 @@ class RayVpnService : VpnService() {
         val scanNetwork = com.example.vpn.smart.NetworkKey.current(this)
         val cached = com.example.RayApplication.instance.endpointScores.validated(scanNetwork)
         val candidates = withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
-            com.example.panels.CleanIpOptimizer.findCleanIpsSync(port = profile.port, openSocket = {
-                Socket().also { socket ->
-                    if (!safeProtectSocket(socket)) { socket.close(); error("Clean-IP socket protection failed") }
-                }
-            })
+            com.example.panels.CleanIpOptimizer.findCleanIpsSync(port = profile.port)
         }.orEmpty()
         val attempt = kotlinx.coroutines.currentCoroutineContext()[Job]
         return com.example.vpn.Abandonable.run {
@@ -1648,6 +1646,7 @@ class RayVpnService : VpnService() {
             mode = settings.operationalMode
         )
         val launch = engine.prepare(profile, settings, context)
+        if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
         showForegroundNotification("Starting the ${engine.id} engine...")
         val process = com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
             ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort))
@@ -1662,6 +1661,36 @@ class RayVpnService : VpnService() {
         XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
         watchSidecar(engine, process)
         return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, context, launch)
+    }
+
+    /**
+     * Before a CottenDNS engine starts: one plain DNS question to each of its resolvers (up to four, at once),
+     * from this app, which like the engine is outside the VPN. The log then says which resolvers this phone
+     * reaches; the engine itself reports an unreachable one only as "UPLOAD_MTU value=0". When none can even
+     * be sent to, the connect stops here instead of after the engine's 45 s start-up limit.
+     */
+    private fun checkDnsTunnelResolvers(engine: com.example.vpn.sidecar.SidecarEngine, profile: VlessProfile) {
+        val s = runCatching { com.example.vpn.sidecar.CottenDnsSidecar.settings(profile) }.getOrNull() ?: return
+        // The question goes over UDP/53: it says nothing about a TCP, DoT or DoH resolver.
+        if (s.transport !in setOf("auto", "udp")) return
+        val resolvers = s.resolvers.take(4)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(resolvers.size)
+        val outcomes = try {
+            pool.invokeAll(resolvers.map { r ->
+                java.util.concurrent.Callable { com.example.vpn.sidecar.ResolverReach.check(r, s.domain, timeoutMs = 2_500) }
+            }).map { it.get() }
+        } finally {
+            pool.shutdownNow()
+        }
+        resolvers.zip(outcomes).forEach { (r, o) ->
+            val line = com.example.vpn.sidecar.ResolverReach.describe(r, o)
+            if (o is com.example.vpn.sidecar.ResolverReach.Outcome.Answered) XrayLogManager.i("DNS", line) else XrayLogManager.w("DNS", line)
+        }
+        if (outcomes.all { it is com.example.vpn.sidecar.ResolverReach.Outcome.Blocked }) {
+            com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "resolvers unreachable")
+            error("None of this config's DNS resolvers can be reached from this phone " +
+                "(${(outcomes.first() as com.example.vpn.sidecar.ResolverReach.Outcome.Blocked).reason}), so the ${engine.id} engine cannot start")
+        }
     }
 
     /** The network key the engine ledger files evidence under (the same one route memory uses). */
@@ -2260,6 +2289,7 @@ class RayVpnService : VpnService() {
 
     override fun onDestroy() {
         com.example.xray.RealDelayProbe.socketProtector = null
+        com.example.panels.CleanIpOptimizer.socketProtector = null
         supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.SERVICE_DESTROYED)
         connectJob?.cancel()
         serviceScope.coroutineContext[Job]?.cancel()

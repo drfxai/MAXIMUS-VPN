@@ -33,7 +33,7 @@ import kotlin.random.Random
  * 3. End-to-end TLS SNI & RFC 6455 WebSocket Upgrade validation against the real target domain.
  * 4. Active CDN verification & real download throughput / speed testing (like CFScanner).
  */
-class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
+class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }) {
 
     data class Result(
         val ip: String,
@@ -143,6 +143,23 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
             p.security.equals("tls", true) && p.sni.isNotBlank() &&
             p.rawConfig.isBlank()
 
+        /**
+         * Protects a socket from this app's own VPN; the VPN service installs it while it runs. Without it a
+         * scan made while connected (or while Smart Connect holds traffic blocked) measures the tunnel or the
+         * blocking interface instead of the phone's network.
+         */
+        @Volatile
+        var socketProtector: ((Socket) -> Boolean)? = null
+
+        /** A socket on the phone's own network, outside this app's VPN. */
+        fun directSocket(): Socket = Socket().also { socket ->
+            val protect = socketProtector ?: return@also
+            if (!com.example.vpn.protectTcpSocket(socket, protect)) {
+                socket.close()
+                error("Clean-IP socket protection failed")
+            }
+        }
+
         fun isCloudflareCompatible(p: VlessProfile): Boolean {
             if (p.security.equals("reality", ignoreCase = true)) return false
             val tr = p.transport.lowercase()
@@ -151,6 +168,19 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
             if (host.isBlank() || (host.matches(Regex("^[0-9.]+$")) && p.sni.isBlank())) return false
             return true
         }
+
+        /** Configs [reviveProfile] can rebind to a clean IP: Cloudflare-compatible, TLS with a checked certificate, not raw JSON. */
+        fun canRevive(p: VlessProfile): Boolean = isCloudflareCompatible(p) && p.security.equals("tls", true) &&
+            !p.allowInsecure && p.rawConfig.isBlank()
+
+        /** The name a clean-IP copy is based on: earlier clean-IP prefixes and grade suffixes removed. */
+        fun baseName(name: String): String = name
+            .removePrefix("⚡ [Revived] ")
+            .removePrefix("⚡ [CF-Optimized] ")
+            .replace(Regex(" \\((?:A\\+|A|B|C)\\)$"), "")
+
+        /** True for a copy an earlier clean-IP save or "Optimize all" made. */
+        fun isCleanIpCopy(p: VlessProfile): Boolean = p.name.startsWith("⚡ [CF-Optimized] ")
 
         fun ranked(results: List<Result>, limit: Int = 15): List<Result> = results
             .filter { it.successes >= 2 }
@@ -184,7 +214,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
             cleanIp: Result,
             asClone: Boolean = false
         ): VlessProfile {
-            require(isCloudflareCompatible(original) && original.security.equals("tls", true) && !original.allowInsecure && original.rawConfig.isBlank()) {
+            require(canRevive(original)) {
                 "Clean-IP recovery requires a structured CDN-compatible TLS profile"
             }
             com.example.vpn.experimental.FrontedTunnel.publicAddress(cleanIp.ip)
@@ -198,11 +228,8 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
             val effectiveTransport = original.transport
             val effectiveSecurity = original.security
 
-            val baseName = original.name
-                .removePrefix("⚡ [Revived] ")
-                .removePrefix("⚡ [CF-Optimized] ")
             val newName = if (asClone) {
-                "⚡ [CF-Optimized] $baseName (${cleanIp.qualityGrade})"
+                "⚡ [CF-Optimized] ${baseName(original.name)} (${cleanIp.qualityGrade})"
             } else {
                 original.name
             }
@@ -233,7 +260,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
          */
         suspend fun findBestCleanIpSync(region: String = "Iran"): Result? = findCleanIpsSync(region).firstOrNull()
 
-        suspend fun findCleanIpsSync(region: String = "Iran", port: Int = 443, openSocket: () -> Socket = { Socket() }): List<Result> = withContext(Dispatchers.IO) {
+        suspend fun findCleanIpsSync(region: String = "Iran", port: Int = 443, openSocket: () -> Socket = { directSocket() }): List<Result> = withContext(Dispatchers.IO) {
             require(port in 1..65535)
             val candidates = generateCandidates(region, 24)
             val results = mutableListOf<Result>()
@@ -457,15 +484,20 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { Socket() }) {
     ): List<Result> = withContext(Dispatchers.IO) {
         assertNetwork()
 
-        val isTls = targetPort in CLOUDFLARE_PORTS_TLS || (p?.security?.equals("tls", true) == true)
-        val sniTarget = (p?.sni?.ifBlank { p.host.ifBlank { "speed.cloudflare.com" } } ?: "speed.cloudflare.com")
+        // A config that cannot go through Cloudflare (Reality, raw TCP, DNS tunnels) would make every edge fail
+        // its TLS or HTTP check; scan for a generic Cloudflare edge instead.
+        val target = p?.takeIf { isCloudflareCompatible(it) }
+        val isTls = targetPort in CLOUDFLARE_PORTS_TLS || (target?.security?.equals("tls", true) == true)
+        // The config's own domain is its SNI and Host when neither is set (as reviveProfile does).
+        val domain = target?.address?.takeUnless { it.matches(Regex("[0-9.]+")) || it.contains(':') }.orEmpty()
+        val sniTarget = (target?.sni?.ifBlank { target.host.ifBlank { domain } }?.ifBlank { null } ?: "speed.cloudflare.com")
             .replace("\r", "").replace("\n", "")
-        val hostHeader = (p?.host?.ifBlank { p.sni.ifBlank { "speed.cloudflare.com" } } ?: "speed.cloudflare.com")
+        val hostHeader = (target?.host?.ifBlank { target.sni.ifBlank { domain } }?.ifBlank { null } ?: "speed.cloudflare.com")
             .replace("\r", "").replace("\n", "")
-        val path = (p?.path?.ifBlank { "/" } ?: "/")
+        val path = (target?.path?.ifBlank { "/" } ?: "/")
             .replace("\r", "").replace("\n", "")
             .let { if (it.startsWith('/')) it else "/$it" }
-        val isWs = p?.transport?.equals("ws", ignoreCase = true) == true
+        val isWs = target?.transport?.equals("ws", ignoreCase = true) == true
 
         val candidatePool = generateCandidates(region, candidateCount, customSubnet)
         val total = candidatePool.size
