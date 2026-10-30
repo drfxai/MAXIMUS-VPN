@@ -93,6 +93,7 @@ class RayVpnService : VpnService() {
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
         const val NOTIFICATION_ID = 1001
+        private const val NOTIFICATION_ACCENT = 0xFFD4AF37.toInt()
 
         private val _vpnState = MutableStateFlow(ConnectionState())
         val vpnState: StateFlow<ConnectionState> = _vpnState.asStateFlow()
@@ -245,6 +246,9 @@ class RayVpnService : VpnService() {
         network to recipe.id
     }.onFailure { XrayLogManager.w("SMART", "Could not remember the route: ${it.javaClass.simpleName}") }.getOrNull()
     private var activeEngine: VpnEngine = XrayEngineImpl.instance
+    /** Engine name and start time the connected notification shows next to its timer. */
+    @Volatile private var notificationCore = "Xray"
+    @Volatile private var notificationSince = 0L
     private var failoverManager: com.example.vpn.smart.FailoverManager? = null
     private val serviceTxBytes = java.util.concurrent.atomic.AtomicLong(0)
     private val serviceRxBytes = java.util.concurrent.atomic.AtomicLong(0)
@@ -1346,6 +1350,9 @@ class RayVpnService : VpnService() {
             }
 
             updateState(_vpnState.value.copy(activeEngineName = activeEngine.engineVersion))
+            notificationCore = ConnectedNotification.coreLabel(
+                kotlinTunnel = runtime == EngineSelectionPolicy.Runtime.KOTLIN_TUNNEL,
+                sidecarId = sidecarEngine?.id, chain = engineChain != null)
 
             updateState(_vpnState.value.copy(status = ConnectionStatus.PROXY_CONNECTING))
             showForegroundNotification("Connecting Proxy via ${activeEngine.engineType.displayName}...")
@@ -1456,7 +1463,7 @@ class RayVpnService : VpnService() {
                 com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, check.first != null, check.first, System.currentTimeMillis(), check.second)
             }
             if (_vpnState.value.isConnected) {
-                showForegroundNotification("Connected to ${profile.name}")
+                showConnectedNotification()
                 XrayLogManager.i("VPN", "[DIAGNOSTICS] 10. Traffic verified through the tunnel (${check.first} ms). Final state: CONNECTED.")
                 val connectMs = System.currentTimeMillis() - connectStartedAt
                 com.example.vpn.diagnostics.ConnectionMetrics.recordConnectTime(connectMs)
@@ -1838,6 +1845,7 @@ class RayVpnService : VpnService() {
 
     private fun startDurationAndPingWatchers(profile: VlessProfile, startTime: Long) {
         durationJob?.cancel()
+        notificationSince = startTime
         var lastTx = 0L
         var lastRx = 0L
         durationJob = serviceScope.launch {
@@ -1875,6 +1883,8 @@ class RayVpnService : VpnService() {
                     uploadSpeedBps = speedTx,
                     downloadSpeedBps = speedRx
                 ))
+                // Degraded and failed states keep their own message; only a working tunnel shows live speeds.
+                if (_vpnState.value.isConnected) refreshConnectedNotification()
             }
         }
 
@@ -1905,7 +1915,7 @@ class RayVpnService : VpnService() {
                     }
                     if (!wasConnected && _vpnState.value.isConnected && _vpnState.value.attemptId == attemptId) {
                         XrayLogManager.i("VPN", "Traffic now goes through the tunnel (${sample.latencyMs} ms): CONNECTED.")
-                        showForegroundNotification("Connected to ${profile.name}")
+                        showConnectedNotification()
                         _vpnState.value.activeProfile?.let { onTrafficVerified(it, sample.latencyMs) }
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -2228,27 +2238,31 @@ class RayVpnService : VpnService() {
         }
     }
 
-    private fun showForegroundNotification(statusText: String): Boolean {
+    private fun openAppPendingIntent(): PendingIntent {
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        val openAppPendingIntent = PendingIntent.getActivity(
+        return PendingIntent.getActivity(
             this,
             0,
             openAppIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+    }
 
+    private fun disconnectPendingIntent(): PendingIntent {
         val disconnectIntent = Intent(this, RayVpnService::class.java).apply {
             action = ACTION_DISCONNECT
         }
-        val disconnectPendingIntent = PendingIntent.getService(
+        return PendingIntent.getService(
             this,
             1,
             disconnectIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+    }
 
+    private fun showForegroundNotification(statusText: String): Boolean {
         val reconnectIntent = Intent(this, RayVpnService::class.java).apply {
             action = ACTION_RECONNECT
         }
@@ -2261,18 +2275,60 @@ class RayVpnService : VpnService() {
 
         val profileName = activeProfile?.name ?: "VLESS Tunnel"
 
-        val notification: Notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+        val notification: Notification = baseNotification()
             .setContentTitle("Maximus — $profileName")
             .setContentText(statusText)
-            .setContentIntent(openAppPendingIntent)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent())
             .addAction(android.R.drawable.ic_menu_rotate, "Reconnect", reconnectPendingIntent)
             .build()
+        return startForegroundWith(notification)
+    }
 
+    private fun baseNotification(): NotificationCompat.Builder =
+        NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_maximus)
+            .setColor(NOTIFICATION_ACCENT)
+            .setContentIntent(openAppPendingIntent())
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+
+    /**
+     * Connected: the server name, the engine and a running timer in the header, live speeds below, and
+     * expanded, the full server name with the session totals and one Disconnect button.
+     */
+    private fun connectedNotification(): Notification {
+        val state = _vpnState.value
+        val server = state.activeProfile?.name ?: activeProfile?.name ?: "Maximus VPN"
+        val since = notificationSince.takeIf { it > 0 } ?: System.currentTimeMillis()
+        return baseNotification()
+            .setContentTitle(server)
+            .setContentText(ConnectedNotification.speedLine(state.downloadSpeedBps, state.uploadSpeedBps))
+            .setSubText(notificationCore)
+            .setWhen(since)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setStyle(NotificationCompat.BigTextStyle()
+                .setBigContentTitle(server)
+                .bigText(ConnectedNotification.expandedText(state.downloadSpeedBps, state.uploadSpeedBps,
+                    state.downloadBytes, state.uploadBytes)))
+            .addAction(0, "Disconnect", disconnectPendingIntent())
+            .build()
+    }
+
+    private fun showConnectedNotification(): Boolean = startForegroundWith(connectedNotification())
+
+    /** Once a second while connected; the service is already in the foreground, so a plain update is enough. */
+    private fun refreshConnectedNotification() {
+        try {
+            getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, connectedNotification())
+        } catch (e: Exception) {
+            XrayLogManager.w("VPN", "Could not refresh the connected notification: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun startForegroundWith(notification: Notification): Boolean {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 try {
