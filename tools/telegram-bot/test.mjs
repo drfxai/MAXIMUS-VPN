@@ -379,6 +379,16 @@ async function call(env, path, { body, data, now = NOW } = {}) {
   assert.match(r.body.error, /only 9 characters/);
   assert.ok(!r.body.error.includes("AIzaShort"));
   assert.match((await call(env, "gemini/key", { body: { key: "  " } })).body.error, /empty/);
+  // Google's 2026 Auth keys have an AQ. prefix; keep the dot intact and test with Google.
+  const authKey = "AQ.A" + "b".repeat(49);
+  r = await call(env, "gemini/key", { body: { key: authKey } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.valid, true);
+  assert.equal(await unseal(env, kv.get("gemini_key_enc")), authKey);
+  assert.equal((await call(env, "gemini/validate", { body: {} })).body.ok, true);
+  assert.equal(scrub("exposed " + authKey), "exposed [API_KEY]");
+  // A dot in arbitrary positions must not be accepted as a key.
+  assert.equal((await call(env, "gemini/key", { body: { key: "AIza.bad_format_0123456789ABCDEFGHIJKLMNOP" } })).status, 400);
   r = await call(env, "gemini/key", { body: { key: "AIzaSyPanelKey_0123456789ABCD" } });
   assert.equal(r.status, 200);
   assert.equal(r.body.valid, true);
