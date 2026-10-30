@@ -40,8 +40,8 @@ fun GodBrowserScreen(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
 
-    var urlInput by remember { mutableStateOf("https://duckduckgo.com") }
-    var currentUrl by remember { mutableStateOf("https://duckduckgo.com") }
+    var urlInput by remember { mutableStateOf(GodBrowser.HOME) }
+    var currentUrl by remember { mutableStateOf(GodBrowser.HOME) }
     var pageTitle by remember { mutableStateOf("GOD Mode Secure Sandbox") }
     var isLoading by remember { mutableStateOf(false) }
     var blockedTrackerCount by remember { mutableIntStateOf(0) }
@@ -62,6 +62,7 @@ fun GodBrowserScreen(
         onDispose {
             currentWebView?.apply {
                 stopLoading()
+                clearCache(true)
                 // WebViewClient is non-null in current Android SDK stubs. Replace the
                 // app client with an inert one before destroying the view.
                 webViewClient = WebViewClient()
@@ -179,13 +180,7 @@ fun GodBrowserScreen(
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = {
                             focusManager.clearFocus()
-                            val target = if (urlInput.startsWith("http://") || urlInput.startsWith("https://")) {
-                                urlInput
-                            } else if (urlInput.contains(".") && !urlInput.contains(" ")) {
-                                "https://$urlInput"
-                            } else {
-                                "https://duckduckgo.com/?q=" + java.net.URLEncoder.encode(urlInput, "UTF-8")
-                            }
+                            val target = GodBrowser.target(urlInput)
                             currentUrl = target
                             webViewInstance?.loadUrl(target)
                         }),
@@ -221,7 +216,9 @@ fun GodBrowserScreen(
                                 allowContentAccess = false
                                 setGeolocationEnabled(false)
                                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                                cacheMode = WebSettings.LOAD_NO_CACHE
+                                // Cached scripts and images make repeat pages much faster on a slow tunnel;
+                                // the cache is wiped when the browser closes and by the wipe button.
+                                cacheMode = WebSettings.LOAD_DEFAULT
                                 userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
                             }
 
@@ -235,8 +232,18 @@ fun GodBrowserScreen(
                                     view: WebView?,
                                     request: WebResourceRequest?
                                 ): WebResourceResponse? {
-                                    val reqUrl = request?.url?.toString() ?: return null
-                                    if (TrackerBlocker.isBlocked(reqUrl)) {
+                                    if (request == null) return null
+                                    val reqUrl = request.url?.toString() ?: return null
+                                    if (com.example.vpn.RayVpnService.appOutsideVpn) {
+                                        // This engine leaves the app outside the VPN, so the page would load
+                                        // over the normal connection. Nothing loads instead.
+                                        return if (request.isForMainFrame) {
+                                            WebResourceResponse("text/html", "UTF-8", GodBrowser.OUTSIDE_VPN_PAGE.byteInputStream())
+                                        } else {
+                                            WebResourceResponse("text/plain", "UTF-8", null)
+                                        }
+                                    }
+                                    if (!request.isForMainFrame && TrackerBlocker.isBlocked(reqUrl)) {
                                         view?.post { blockedTrackerCount++ }
                                         return WebResourceResponse("text/plain", "UTF-8", null)
                                     }
