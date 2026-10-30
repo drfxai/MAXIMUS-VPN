@@ -46,6 +46,13 @@ class TrafficCheckTest {
         }
     }
 
+    @Test fun slowRoutesGetMoreTimePerTransfer() {
+        assertEquals(TrafficCheck.STEP_TIMEOUT_MS, TrafficCheck.stepTimeoutFor(null))
+        assertEquals(TrafficCheck.STEP_TIMEOUT_MS, TrafficCheck.stepTimeoutFor(300))
+        assertEquals(18_000, TrafficCheck.stepTimeoutFor(3_000))
+        assertEquals(30_000, TrafficCheck.stepTimeoutFor(9_000))
+    }
+
     @Test fun aFailedSmallReferenceDoesNotRejectAWorkingRoute() {
         server.enqueue(MockResponse().setResponseCode(503))
         server.enqueue(MockResponse().setResponseCode(204))

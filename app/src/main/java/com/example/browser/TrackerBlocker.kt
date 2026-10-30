@@ -1,7 +1,5 @@
 package com.example.browser
 
-import android.net.Uri
-
 object TrackerBlocker {
 
     private val BLOCKED_DOMAINS = setOf(
@@ -41,16 +39,24 @@ object TrackerBlocker {
         "intercom.io"
     )
 
+    /**
+     * Matches the request's host (and, for entries with a path, the start of its path) only. The query string
+     * is never looked at, so a search for "segment.com" or "telemetry" is not mistaken for a tracker.
+     */
     fun isBlocked(url: String): Boolean {
-        try {
-            val uri = Uri.parse(url)
-            val host = uri.host?.lowercase() ?: return false
-
-            return BLOCKED_DOMAINS.any { blocked ->
-                host == blocked || host.endsWith(".$blocked") || host.contains(blocked) || url.contains(blocked)
+        val uri = try { java.net.URI(url) } catch (_: Exception) { return false }
+        val host = uri.host?.lowercase()?.trimEnd('.') ?: return false
+        val path = uri.rawPath.orEmpty()
+        return BLOCKED_DOMAINS.any { blocked ->
+            when {
+                blocked == "telemetry" -> host.split('.').any { it.contains(blocked) }
+                '/' in blocked -> {
+                    val domain = blocked.substringBefore('/')
+                    val prefix = "/" + blocked.substringAfter('/')
+                    (host == domain || host.endsWith(".$domain")) && (path == prefix || path.startsWith("$prefix/"))
+                }
+                else -> host == blocked || host.endsWith(".$blocked")
             }
-        } catch (_: Exception) {
-            return false
         }
     }
 }

@@ -97,6 +97,13 @@ class RayVpnService : VpnService() {
         private val _vpnState = MutableStateFlow(ConnectionState())
         val vpnState: StateFlow<ConnectionState> = _vpnState.asStateFlow()
 
+        /**
+         * True while the current VPN interface leaves this app out (separate engine programs need that).
+         * The app's own web pages, such as the God Mode browser, would then load over the normal connection.
+         */
+        @Volatile var appOutsideVpn = false
+            private set
+
         /** Set at each Connect: true only when the Smart Connect button started the session. */
         @Volatile private var smartStarted = false
 
@@ -1243,7 +1250,8 @@ class RayVpnService : VpnService() {
             com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { builder.addRoute(it.address, it.prefix) }
             val sidecarEngine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
             val engineChain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
-            if (sidecarEngine != null || engineChain != null) {
+            appOutsideVpn = sidecarEngine != null || engineChain != null
+            if (appOutsideVpn) {
                 // A separate engine program cannot ask Android to keep its own sockets out of the VPN,
                 // so the app's own traffic is left out; every other app still goes through the tunnel.
                 builder.addDisallowedApplication(packageName)
@@ -1459,7 +1467,7 @@ class RayVpnService : VpnService() {
                     com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService) == routeNetwork) {
                     com.example.vpn.smart.EngineRouteHints.record(this@RayVpnService, routeNetwork, requestedProfile)
                 }
-                launchTrafficCheck()
+                launchTrafficCheck(check.first)
             } else {
                 val stage = check.second ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN
                 showForegroundNotification("Tunnel up, no traffic yet (${stage.name})")
@@ -1795,6 +1803,7 @@ class RayVpnService : VpnService() {
     private fun createBlockingInterface(excludeApp: Boolean = false): ParcelFileDescriptor = Builder().setSession("Maximus traffic protection")
             .setMtu(1280).setBlocking(true)
             .apply {
+                appOutsideVpn = excludeApp
                 if (excludeApp) addDisallowedApplication(packageName)
                 com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { addAddress(it.address, it.prefix) }
                 com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { addRoute(it.address, it.prefix) }
@@ -1988,7 +1997,7 @@ class RayVpnService : VpnService() {
      * along the same route. Runs in the background so it never delays the connection, and its result only
      * counts for the attempt and network it was measured on. A stalled bulk transfer is reported, not acted on.
      */
-    private fun launchTrafficCheck() {
+    private fun launchTrafficCheck(requestMs: Long?) {
         val state = _vpnState.value
         val attemptId = state.attemptId ?: return
         val generation = state.networkGeneration
@@ -1997,7 +2006,11 @@ class RayVpnService : VpnService() {
         val path = if (endpoint != null) com.example.vpn.verify.ProbePath.ENGINE_PROXY else com.example.vpn.verify.ProbePath.TUN
         trafficCheckJob?.cancel()
         trafficCheckJob = serviceScope.launch(Dispatchers.IO) {
-            val evidence = runCatching { com.example.vpn.verify.TrafficCheck(dialer).both(attemptId, generation, path) }
+            val evidence = runCatching {
+                val step = if (slowTunnel()) SLOW_VERIFY_STEP_MS.toInt()
+                    else com.example.vpn.verify.TrafficCheck.stepTimeoutFor(requestMs)
+                com.example.vpn.verify.TrafficCheck(dialer, stepTimeoutMs = step).both(attemptId, generation, path)
+            }
                 .onFailure { XrayLogManager.w("VPN", "Upload/download check could not run: ${it.javaClass.simpleName}") }
                 .getOrNull() ?: return@launch
             if (!isActive) return@launch
@@ -2153,6 +2166,7 @@ class RayVpnService : VpnService() {
         if (!protectionRequested) {
             try { vpnInterface?.close() } catch (_: Exception) {}
             vpnInterface = null
+            appOutsideVpn = false
         }
 
     }

@@ -230,6 +230,16 @@ class TrafficCheck(
         const val DOWNLOAD_BYTES = 65_536
         const val UPLOAD_BYTES = 24_576
         const val STEP_TIMEOUT_MS = 10_000
+        private const val MAX_STEP_TIMEOUT_MS = 30_000
+
+        /**
+         * The time one transfer gets on a route whose verified small request took [requestMs]. A transfer is
+         * that request plus its payload (and, for the upload, the echo coming back), so a route that needs
+         * several seconds for one small request gets proportionally longer instead of a fixed 10 s.
+         * Never shorter than 10 s nor longer than 30 s.
+         */
+        fun stepTimeoutFor(requestMs: Long?): Int =
+            ((requestMs ?: 0L) * 6).coerceIn(STEP_TIMEOUT_MS.toLong(), MAX_STEP_TIMEOUT_MS.toLong()).toInt()
         private const val CHUNK = 4096
         private const val MAX_HEAD = 16 * 1024
         private const val MAX_BODY = 256 * 1024
