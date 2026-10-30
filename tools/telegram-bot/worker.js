@@ -608,7 +608,7 @@ const MAX_TOOL_ROUNDS = 6;
 const KEY_ENC = "gemini_key_enc";
 const KEY_META = "gemini_key_meta";
 const LEGACY_KEY = "gemini_key";
-const KEY_FORMAT = /^[A-Za-z0-9_-]{20,200}$/;
+const KEY_FORMAT = /^(?:AQ\.[A-Za-z0-9_-]{17,197}|[A-Za-z0-9_-]{20,200})$/;
 
 /**
  * A pasted key often carries characters nobody can see: spaces or line breaks from copying, and on
@@ -622,9 +622,9 @@ export function cleanKey(raw) {
 /** Why a cleaned key was refused, without repeating any of it. */
 function keyProblem(key) {
   if (!key) return "The key field was empty. Paste the key and press Save again.";
-  if (key.length < 20) return `That is only ${key.length} characters; a Gemini API key from aistudio.google.com is usually 39 and starts with AIza.`;
-  if (key.length > 200) return `That is ${key.length} characters, far longer than a Gemini API key (usually 39, starting with AIza). Copy only the key.`;
-  return "The key has characters a Gemini API key never contains (only letters, digits, - and _). Copy it again with the copy button in aistudio.google.com.";
+  if (key.length < 20) return `That is only ${key.length} characters; a Gemini API key from AI Studio is commonly an AQ. auth key or an older AIza standard key.`;
+  if (key.length > 200) return `That is ${key.length} characters, longer than a supported Gemini API key. Copy only the complete key from AI Studio.`;
+  return "The key contains unsupported characters. Gemini Auth keys start with AQ. (a dot after AQ); older standard keys may start with AIza. Copy the complete key from aistudio.google.com.";
 }
 const utf8 = new TextEncoder();
 
@@ -1122,6 +1122,7 @@ export async function freeStatus(env, now = Date.now()) {
 export function scrub(text) {
   return redact(String(text || "")).text
     .replace(/\b\d{6,12}:[A-Za-z0-9_-]{30,}/g, "[BOT_TOKEN]")
+    .replace(/\bAQ\.[A-Za-z0-9_-]{17,197}\b/g, "[API_KEY]")
     .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[API_KEY]")
     .replace(/\b[A-Za-z0-9_+/-]{32,}={0,2}/g, "[TOKEN]")
     .slice(0, 300);
