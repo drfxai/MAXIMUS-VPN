@@ -330,7 +330,12 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
             enableSpeedTest = speedTest,
             candidateCount = 100,
             assertNetwork = ::assertScanNetwork,
-            checkpoint = ::scanCheckpoint
+            checkpoint = ::scanCheckpoint,
+            // Addresses that passed on this network before are retested first.
+            preferred = runCatching {
+                RayApplication.instance.endpointScores.remembered(
+                    com.example.vpn.smart.NetworkKey.current(getApplication<android.app.Application>()))
+            }.getOrDefault(emptyList())
         ) { progress ->
             _state.update {
                 it.copy(

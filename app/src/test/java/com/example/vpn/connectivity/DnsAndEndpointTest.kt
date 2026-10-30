@@ -96,6 +96,21 @@ class DnsAndEndpointTest {
         assertTrue(s.validated("wifi").isEmpty())
     }
 
+    @Test fun rememberedEndpointsOutliveValidationAndComeMostRecentFirst() {
+        val s = scores()
+        s.record(listOf(m("104.16.1.1", true), m("104.16.1.3", false, null)))
+        now += 60_000
+        s.record(listOf(m("104.16.1.2", true), m("104.16.1.1", false, null), m("104.16.1.1", false, null)))
+        // A once-good address that has failed since is still worth one more test; one that never passed is not.
+        assertEquals(listOf("104.16.1.2", "104.16.1.1"), s.remembered("wifi"))
+        assertTrue(s.remembered("cell").isEmpty())
+        now += EndpointScoringEngine.VALID_FOR_MS + 1
+        assertTrue(s.validated("wifi").isEmpty())
+        assertEquals(listOf("104.16.1.2", "104.16.1.1"), s.remembered("wifi"))
+        now += EndpointScoringEngine.TTL_MS
+        assertTrue(s.remembered("wifi").isEmpty())
+    }
+
     @Test fun validatedEndpointsBecomeRecoveryAlternativesBehindTheGate() {
         var ledger: String? = null
         val engine = BpbRecoveryEngine(ledger = RecoveryLedger({ ledger }, { ledger = it }), clock = { RecoveryProfiles.REVIEWED_AT + 1 },

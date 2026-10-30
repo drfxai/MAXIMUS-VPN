@@ -48,7 +48,9 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
         val verificationStatus: String = "TCP only; traffic not verified",
         val originVerified: Boolean = false,
         val tlsHandshakeMs: Long? = null,
-        val httpRequestMs: Long? = null
+        val httpRequestMs: Long? = null,
+        /** True when a download was attempted; a failed one then counts against the address. */
+        val speedTested: Boolean = false
     ) {
         val lossPercent: Double
             get() = (((totalTries - successes).toDouble() / totalTries.toDouble()) * 100.0).coerceIn(0.0, 100.0)
@@ -68,11 +70,16 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
                 else -> "C"
             }
 
-        // Composite rank score: lowest is best. High download speed lowers score (improves rank).
+        // Composite rank score: lowest is best. Throughput weighs as much as latency once measured: a
+        // 50 KB/s edge costs about 600 ms, a 1 MB/s one about 30 ms, and a failed download more than either.
         val score: Double
             get() {
-                val speedBonus = (downloadSpeedKbps / 100.0).coerceAtMost(50.0)
-                return (medianMs + (jitterMs * 1.5) + (lossPercent * 25.0) - speedBonus).coerceAtLeast(1.0)
+                val speedCost = when {
+                    downloadSpeedKbps > 0 -> SPEED_COST_FACTOR / downloadSpeedKbps
+                    speedTested -> SPEED_FAILED_COST
+                    else -> 0.0
+                }
+                return (medianMs + (jitterMs * 1.5) + (lossPercent * 25.0) + speedCost).coerceAtLeast(1.0)
             }
     }
 
@@ -125,6 +132,48 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
         /** The scan scopes the UI offers: all of Cloudflare's ranges, or the user's own CIDR list. */
         const val SCOPE_ALL = "All Cloudflare ranges"
         const val SCOPE_CUSTOM = "Custom CIDR / Subnet"
+
+        /** Score cost of throughput: this divided by KB/s. */
+        const val SPEED_COST_FACTOR = 30_000.0
+        const val SPEED_FAILED_COST = 1_000.0
+        /** The quick download every passing address gets, and the longer one the best few get. */
+        const val QUICK_SPEED_BYTES = 50_000
+        const val FINAL_SPEED_BYTES = 256_000
+        const val FINAL_SPEED_TESTS = 5
+
+        /**
+         * The candidate pool: addresses that worked on this network before come first (they are probed like
+         * any other, so one that stopped working simply drops out), then fresh samples. A custom CIDR scan
+         * tests only the user's ranges.
+         */
+        fun candidatePool(
+            preferred: List<String>,
+            regionQuery: String,
+            count: Int,
+            customSubnet: String?
+        ): List<Triple<String, String, Pair<String, String>>> {
+            val usable = if (customSubnet.isNullOrBlank()) preferred else emptyList()
+            val known = usable.filter { ip -> runCatching { ipv4(ip) }.isSuccess }.distinct()
+                .map { Triple(it, "CF", Pair("🌐", "Worked on this network before")) }
+            val fresh = generateCandidates(regionQuery, count, customSubnet).filter { c -> known.none { it.first == c.first } }
+            return known + fresh
+        }
+
+        /** Reads past the HTTP headers; false when they do not end within [limit] bytes. */
+        fun skipHeaders(input: InputStream, limit: Int = 8192): Boolean {
+            var tail = 0
+            repeat(limit) {
+                val b = input.read()
+                if (b == -1) return false
+                tail = (tail shl 8) or b
+                if (tail == 0x0d0a0d0a) return true
+            }
+            return false
+        }
+
+        /** Status code of an HTTP/1.x status line, or null. */
+        fun statusCode(line: String): Int? =
+            Regex("^HTTP/1\\.[01] ([0-9]{3})(?: .*)?$").matchEntire(line)?.groupValues?.get(1)?.toIntOrNull()
 
         /** A random usable host inside [cidr] (network and broadcast addresses skipped). */
         fun randomHostIn(cidr: String): String {
@@ -480,6 +529,12 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
         candidateCount: Int = 100,
         assertNetwork: () -> Unit = {},
         checkpoint: suspend () -> Unit = {},
+        /** Addresses that worked on this network before; tested first. */
+        preferred: List<String> = emptyList(),
+        /** Stop once this many addresses passed (a time-bound caller needs a few good ones, not all). */
+        enough: Int = Int.MAX_VALUE,
+        /** Each address as it passes, so a caller that times the scan out keeps what was found. */
+        onAccepted: (Result) -> Unit = {},
         progress: (ScanProgress) -> Unit
     ): List<Result> = withContext(Dispatchers.IO) {
         assertNetwork()
@@ -498,8 +553,9 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
             .replace("\r", "").replace("\n", "")
             .let { if (it.startsWith('/')) it else "/$it" }
         val isWs = target?.transport?.equals("ws", ignoreCase = true) == true
+        val isUpgrade = target?.transport?.equals("httpupgrade", ignoreCase = true) == true
 
-        val candidatePool = generateCandidates(region, candidateCount, customSubnet)
+        val candidatePool = candidatePool(preferred, region, candidateCount, customSubnet)
         val total = candidatePool.size
         val accepted = mutableListOf<Result>()
         var testedCount = 0
@@ -544,7 +600,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
                         // Probe 3: Real HTTP / WebSocket Handshake Verification
                         var verificationStatus = "Verified"
                         var originVerified = false
-                        val httpResult = testHttpEndpoint(ip, targetPort, isTls, sniTarget, hostHeader, path, isWs)
+                        val httpResult = testHttpEndpoint(ip, targetPort, isTls, sniTarget, hostHeader, path, isWs, isUpgrade)
                         if (httpResult != null) {
                             verificationStatus = httpResult.first
                             originVerified = httpResult.second
@@ -556,14 +612,15 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
                         // A TCP/TLS handshake alone is not a clean-IP result. For a selected
                         // WebSocket profile require an actual 101 from that origin; for a
                         // generic Cloudflare scan require a successful CDN HTTP response.
-                        if (isWs && !originVerified) return@async null
-                        if (!isWs && !verificationStatus.contains("200 OK") &&
+                        // HTTPUpgrade has no challenge, but only the config's own server answers its path with 101.
+                        if ((isWs || isUpgrade) && !originVerified) return@async null
+                        if (!isWs && !isUpgrade && !verificationStatus.contains("200 OK") &&
                             !verificationStatus.contains("204 OK")) return@async null
 
                         // Probe 4: Speed Test (CFScanner style)
                         var downloadSpeed = 0L
                         if (enableSpeedTest) {
-                            downloadSpeed = downloadSpeedTest(ip, targetPort, isTls, 2500) ?: 0L
+                            downloadSpeed = downloadSpeedTest(ip, targetPort, isTls, 2500, QUICK_SPEED_BYTES) ?: 0L
                         }
 
                         val sorted = latencies.sorted()
@@ -583,7 +640,8 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
                             verificationStatus = verificationStatus,
                             originVerified = originVerified,
                             tlsHandshakeMs = tlsMs,
-                            httpRequestMs = httpResult?.third
+                            httpRequestMs = httpResult?.third,
+                            speedTested = enableSpeedTest
                         )
                     }
                 }.awaitAll()
@@ -591,6 +649,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
 
             for (res in batchResults.filterNotNull()) {
                 accepted.add(res)
+                onAccepted(res)
             }
             testedCount += chunk.size
             progress(
@@ -602,9 +661,24 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
                     stage = "Testing ${chunk.lastOrNull()?.first.orEmpty()}"
                 )
             )
+            if (accepted.size >= enough) break
         }
 
         assertNetwork()
+        // A 50 KB download mostly measures TCP slow start. The best few get a longer one, one at a time so
+        // they do not share the phone's bandwidth, and are ranked by that sustained speed.
+        if (enableSpeedTest) {
+            val finalists = ranked(accepted, FINAL_SPEED_TESTS)
+            finalists.forEachIndexed { i, r ->
+                ensureActive()
+                checkpoint()
+                progress(ScanProgress(testedCount, accepted.size, r.ip, total, "Measuring speed ${i + 1}/${finalists.size}"))
+                val kbps = downloadSpeedTest(r.ip, targetPort, isTls, 4000, FINAL_SPEED_BYTES) ?: return@forEachIndexed
+                val at = accepted.indexOfFirst { it.ip == r.ip }
+                if (at >= 0) accepted[at] = accepted[at].copy(downloadSpeedKbps = kbps)
+            }
+            assertNetwork()
+        }
         ranked(accepted)
     }
 
@@ -662,7 +736,8 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
         sniHost: String,
         hostHeader: String,
         path: String,
-        isWebSocket: Boolean
+        isWebSocket: Boolean,
+        isUpgrade: Boolean = false
     ): Triple<String, Boolean, Long>? {
         val start = System.currentTimeMillis()
         return try {
@@ -687,7 +762,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
                 }
 
                 val key = Base64.getEncoder().encodeToString(ByteArray(16).apply { SecureRandom().nextBytes(this) })
-                val request = if (isWebSocket) {
+                val request = if (isWebSocket || isUpgrade) {
                     "GET $path HTTP/1.1\r\n" +
                         "Host: $hostHeader\r\n" +
                         "Upgrade: websocket\r\n" +
@@ -696,8 +771,10 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
                         "Sec-WebSocket-Version: 13\r\n" +
                         "User-Agent: CFScanner/1.0\r\n\r\n"
                 } else {
+                    // Cloudflare refuses a Host that differs from the SNI, so the trace goes to the config's
+                    // own name (every proxied name serves /cdn-cgi/trace); a general scan uses speed.cloudflare.com.
                     "GET /cdn-cgi/trace HTTP/1.1\r\n" +
-                        "Host: speed.cloudflare.com\r\n" +
+                        "Host: $hostHeader\r\n" +
                         "User-Agent: CFScanner/1.0\r\n" +
                         "Connection: close\r\n\r\n"
                 }
@@ -709,11 +786,15 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
 
                 val statusLine = readLine(socket.getInputStream())
                 val latency = (System.currentTimeMillis() - start).coerceAtLeast(1L)
-                val code = Regex("^HTTP/1\\.[01] ([0-9]{3})(?: .*)?$").matchEntire(statusLine)?.groupValues?.get(1)?.toIntOrNull()
+                val code = statusCode(statusLine)
 
                 when (code) {
-                    101 -> if (isWebSocket && com.example.vpn.experimental.WebSocketUpgrade.valid(socket.getInputStream(), key))
-                        Triple("WS challenge verified", true, latency) else null
+                    101 -> when {
+                        isWebSocket && com.example.vpn.experimental.WebSocketUpgrade.valid(socket.getInputStream(), key) ->
+                            Triple("WS challenge verified", true, latency)
+                        isUpgrade -> Triple("HTTPUpgrade accepted", true, latency)
+                        else -> null
+                    }
                     200 -> Triple("CDN 200 OK", !isWebSocket, latency)
                     204 -> Triple("HTTP 204 OK", false, latency)
                     521 -> Triple("HTTP 521 (Origin Down)", false, latency)
@@ -728,9 +809,10 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
     }
 
     /**
-     * CFScanner download speed test using Cloudflare's official /__down?bytes=50000 endpoint.
+     * Download speed through this edge from Cloudflare's /__down endpoint, in KB/s from the first body
+     * byte. Null when the edge does not answer 200 or sends nothing.
      */
-    private fun downloadSpeedTest(ip: String, port: Int, isTls: Boolean, timeoutMs: Int = 2500): Long? {
+    private fun downloadSpeedTest(ip: String, port: Int, isTls: Boolean, timeoutMs: Int = 2500, bytes: Int = QUICK_SPEED_BYTES): Long? {
         val start = System.currentTimeMillis()
         return try {
             openSocket().use { rawSocket ->
@@ -751,7 +833,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
                     rawSocket
                 }
 
-                val request = "GET /__down?bytes=50000 HTTP/1.1\r\n" +
+                val request = "GET /__down?bytes=$bytes HTTP/1.1\r\n" +
                     "Host: speed.cloudflare.com\r\n" +
                     "User-Agent: CFScanner/1.0\r\n" +
                     "Connection: close\r\n\r\n"
@@ -762,30 +844,19 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
                 }
 
                 val input = socket.getInputStream()
-                // Read HTTP response header
-                var prev = 0
-                var headerBytes = 0
-                while (headerBytes < 4096) {
-                    val b = input.read()
-                    if (b == -1) break
-                    headerBytes++
-                    if (prev == '\r'.code && b == '\n'.code) {
-                        val next1 = input.read()
-                        val next2 = input.read()
-                        if (next1 == '\r'.code && next2 == '\n'.code) break
-                    }
-                    prev = b
-                }
+                // An error page or block page is not throughput.
+                if (statusCode(readLine(input)) != 200 || !skipHeaders(input)) return null
 
                 val buf = ByteArray(8192)
                 var totalBodyBytes = 0
                 val bodyStart = System.currentTimeMillis()
-                while (totalBodyBytes < 50000) {
+                while (totalBodyBytes < bytes) {
                     val read = input.read(buf)
                     if (read <= 0) break
                     totalBodyBytes += read
                     if (System.currentTimeMillis() - bodyStart > timeoutMs) break
                 }
+                if (totalBodyBytes == 0) return null
                 val elapsedMs = (System.currentTimeMillis() - bodyStart).coerceAtLeast(10L)
                 val kbps = (totalBodyBytes.toLong() * 1000L) / (elapsedMs * 1024L)
                 kbps.coerceAtLeast(1L)

@@ -133,6 +133,7 @@ class RayApplication : Application() {
                 val scanNetwork = com.example.vpn.smart.NetworkKey.current(this)
                 val found = kotlinx.coroutines.runBlocking {
                     com.example.panels.CleanIpOptimizer().scan(profile, targetPort = profile.port, enableSpeedTest = false, candidateCount = 64,
+                        preferred = endpointScores.remembered(network),
                         assertNetwork = { check(com.example.vpn.smart.NetworkKey.current(this@RayApplication) == scanNetwork) { "Network changed during clean-IP scan" } }) { }
                 }.take(6)
                 check(com.example.vpn.smart.NetworkKey.current(this) == scanNetwork) { "Network changed during clean-IP scan" }
