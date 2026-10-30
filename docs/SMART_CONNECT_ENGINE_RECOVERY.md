@@ -44,6 +44,30 @@ are preserved. Trade and exact/manual sessions do not switch exits automatically
 - Stop interrupts isolated startup waits. Engine processes, registration children,
   generated credentials and LAB work folders are cleaned up on failure/cancellation.
 
+### Choosing among working servers
+
+Pressing Smart Connect no longer takes the first server that answers one request.
+
+- The selected server answering is not the end of the search: it competes with the
+  other saved servers. The race goes on until three servers carried a request (or the
+  rounds run out), then the best five are rechecked twice, at least 3 s apart, the
+  same stability window the LAB's Full Analysis uses.
+- Order: a server that passed every recheck beats one that passed once and was then
+  cut; among those, what the latest Full Analysis on this network (last 12 h) found
+  working comes first; then the median request time, plus 150 ms per step down
+  REALITY, CDN, TLS, QUIC, WireGuard, plain, plus what this network measured before.
+- After each connect the download check records the rate, or a stall, per server and
+  network (`RouteSpeedBook`, 3 days). A stall in the last 6 h counts as 5 s of extra
+  request time; a slow download up to 0.6 s. A remembered route is replayed by Smart
+  Connect only when its upload and download went through and it has not stalled since.
+- When the chosen server's download stalls while small requests pass, Smart Connect
+  moves to the next server that also passed the comparison, at most twice per press.
+  The power button and Trade mode never move.
+- The engine-route recheck before the race (Tor, DNS tunnels, Psiphon) is left to the
+  recovery stage after the comparison when the user pressed Smart Connect, since a
+  working saved server is much faster. Failover and reconnects keep the fast
+  first-answer race.
+
 ## Clean IP scanning
 
 TCP timing is only a shortlist. Smart Connect probes several edges using the actual

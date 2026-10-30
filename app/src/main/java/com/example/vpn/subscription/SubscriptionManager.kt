@@ -266,7 +266,7 @@ class SubscriptionManager(
         }
         response.use { res ->
             if (!res.isSuccessful) throw java.io.IOException(
-                if (res.code == 503) "HTTP 503: subscription service unavailable; this does not establish a tunnel failure"
+                if (res.code == 503) "HTTP 503: subscription service unavailable (the VPN connection is not affected)"
                 else "HTTP ${res.code}")
             val body = res.body ?: throw java.io.IOException("empty response")
             // Protect mobile users with strict 5MB response limit

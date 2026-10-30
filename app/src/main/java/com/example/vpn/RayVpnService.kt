@@ -90,6 +90,8 @@ class RayVpnService : VpnService() {
         private const val SLOW_PROBE_STEP_MS = 20_000
         private const val SLOW_VERIFY_STEP_MS = 25_000L
         private const val SLOW_VERIFY_CONFIG_MS = 90_000L
+        /** Moves to the next working path after a stalled download, per Smart Connect. */
+        private const val MAX_STALL_SWITCHES = 2
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
         const val NOTIFICATION_ID = 1001
@@ -496,6 +498,13 @@ class RayVpnService : VpnService() {
     /** The session was started with the power button: only the selected config, as saved (see [EXTRA_EXACT]). */
     @Volatile private var exactSession = false
 
+    /**
+     * Paths that also carried traffic when Smart Connect compared them, best first: the next one is used when
+     * the download check finds the chosen one stalls (see [switchAfterStall]). Cleared by every user Connect.
+     */
+    @Volatile private var smartRunnersUp: List<com.example.vpn.smart.ServerRace.Winner> = emptyList()
+    @Volatile private var stallSwitches = 0
+
     /** What worked on each carrier or Wi-Fi: stealth alternates, kinds of connection, probe time limits. */
     private val networkMemory: com.example.vpn.smart.NetworkMemory get() = com.example.RayApplication.instance.networkMemory
 
@@ -510,16 +519,31 @@ class RayVpnService : VpnService() {
         timeoutSec: Int,
         finder: com.example.vpn.stealth.StealthPathFinder,
         /** Also try the [exclude]d servers in disguise (only their saved form was tested). */
-        retryDisguised: Boolean
+        retryDisguised: Boolean,
+        /**
+         * The user pressed Smart Connect: compare several working paths (rechecked, LAB results and measured
+         * speeds on [routeNetwork] counted) instead of taking the first that answers (see ServerRace).
+         */
+        compare: Boolean = false,
+        /** Paths that work now (the selected server just passed) and compete in the comparison. */
+        seed: List<com.example.vpn.smart.ServerRace.Winner> = emptyList(),
+        routeNetwork: String = network
     ): com.example.vpn.smart.ServerRace.Winner? {
         // Profiles carried by an engine program cannot be measured before it runs, so they are not raced.
         val all = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
             .filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }
         val intel = runCatching { com.example.RayApplication.instance.iranIntel.current() }.getOrNull()
+        // What the LAB's Full Analysis found working here, and what the download check measured through each server here.
+        val proven = if (compare) runCatching { com.example.RayApplication.instance.lab.provenOn(routeNetwork).toSet() }.getOrDefault(emptySet())
+            else emptySet()
+        val speeds = networkMemory.speeds
+        val penalty = { p: VlessProfile -> speeds.penaltyMs(routeNetwork, p.id) }
+        if (proven.isNotEmpty()) XrayLogManager.i("SMART", "${proven.size} config(s) the LAB's Full Analysis found working here go first.")
         val ranked = com.example.vpn.smart.ServerRace.rank(
-            all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude,
+            all, networkMemory.workingKinds(network), networkMemory.recentFailures(network), exclude = exclude + seed.map { it.owner.id },
             limit = com.example.vpn.smart.ServerRace.FULL_LIMIT,
-            adjust = { p -> intel?.adjustmentFor(p, network)?.value ?: 0.0 }
+            adjust = { p -> intel?.adjustmentFor(p, network)?.value ?: 0.0 },
+            preferred = proven, penaltyMs = penalty
         )
         // UDP where UDP is blocked, IPv6 where there is no IPv6: skipped, not hammered (TransportCapabilityEngine).
         val ordered = com.example.vpn.connectivity.TransportCapabilityEngine.order(ranked, transportCapabilities(network))
@@ -532,8 +556,9 @@ class RayVpnService : VpnService() {
         }
         // Servers left out because their saved form just failed are still tried in disguise.
         val dead = if (retryDisguised) all.filter { it.id in exclude } else emptyList()
-        if (candidates.isEmpty() && dead.isEmpty()) return null
-        XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}.")
+        if (candidates.isEmpty() && dead.isEmpty()) return seed.firstOrNull()
+        XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}" +
+            if (compare) "; comparing the working ones before choosing." else ".")
         val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
         val raceJob = kotlinx.coroutines.currentCoroutineContext()[Job]
         // Abandonable: a Stop returns from here at once; the round already running finishes on its own.
@@ -542,8 +567,11 @@ class RayVpnService : VpnService() {
                 timeoutSec.coerceAtLeast(com.example.vpn.smart.ServerRace.FULL_MIN_TIMEOUT_SEC),
                 maxBatches = com.example.vpn.smart.ServerRace.FULL_BATCHES, onFailure = {
                 networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
-            }, disguiseOnly = dead, shouldStop = { raceJob?.isActive == false })
+            }, disguiseOnly = dead, shouldStop = { raceJob?.isActive == false },
+                contenders = if (compare) com.example.vpn.smart.ContenderPick.CONTENDERS else 1,
+                seed = seed, preferred = proven, penaltyMs = penalty)
         }?.let { return it }
+        seed.firstOrNull()?.let { return it }
         val best = candidates.firstOrNull() ?: return null
         val choice = com.example.vpn.Abandonable.run { runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() } ?: return null
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
@@ -719,6 +747,12 @@ class RayVpnService : VpnService() {
             val exact = exactSession || reuseSidecar != null
             val lockExit = policy.lockExit || exact
             val raceFirst = !lockExit && (smart || policy.alwaysSmartConnect)
+            // Smart Connect pressed by the user compares working paths; failover and reconnects take the first.
+            val compare = raceFirst && smart && startedByUser && !force
+            if (startedByUser) {
+                smartRunnersUp = emptyList()
+                stallSwitches = 0
+            }
 
             updateState(fresh(ConnectionStatus.PREPARING))
 
@@ -866,7 +900,11 @@ class RayVpnService : VpnService() {
             // config's own route first; with Smart Connect, then the best other remembered route. Each has
             // to carry a real request here now; a failure counts against it and the normal search goes on.
             if (!lockExit && !force) {
-                val remembered = networkMemory.routes.forNetwork(routeNetwork)
+                // Smart Connect replays only a route whose upload and download went through here and whose
+                // download did not stall since; anything weaker competes in the comparison instead.
+                val remembered = networkMemory.routes.forNetwork(routeNetwork).filter {
+                    !compare || it.bidirectional && networkMemory.speeds.sample(routeNetwork, it.profileId)?.stalled != true
+                }
                 val ordered = remembered.filter { it.profileId == requestedProfile.id } +
                     if (raceFirst) remembered.filter { it.profileId != requestedProfile.id && it.profileId !in exclude }.take(1) else emptyList()
                 if (ordered.isNotEmpty()) showForegroundNotification("Trying the route that worked here before...")
@@ -913,7 +951,9 @@ class RayVpnService : VpnService() {
             }
 
             // Recheck the exact successful engine recipe before scanning unrelated servers or registering WARP.
-            if (!raced && raceFirst && !lockExit && !force) {
+            // Not when the user pressed Smart Connect: engine routes (Tor, DNS tunnels, Psiphon) are much slower
+            // than a saved server that works, so they wait for the recovery stage after the comparison.
+            if (!raced && raceFirst && !lockExit && !force && !compare) {
                 val early = withTimeoutOrNull(com.example.vpn.smart.RecoveryAttemptPolicy.TOR_WINDOW_MS + 10_000L) {
                     com.example.RayApplication.instance.lab.fastRecovery(
                         exclude = exclude, deadlineMs = System.currentTimeMillis() + 90_000L,
@@ -952,6 +992,19 @@ class RayVpnService : VpnService() {
                         raced = true
                         networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(first.profile), outcome.latencyMs)
                         tracker.finish(com.example.vpn.smart.SearchStage.SELECTED, verified = true)
+                        // Smart Connect: the selected server answering is not enough; it competes with the best
+                        // other servers, the ones the LAB proved here first, and the most stable, fastest one wins.
+                        if (compare) {
+                            showForegroundNotification("Comparing the fastest servers...")
+                            tracker.start(com.example.vpn.smart.SearchStage.OTHER_SERVERS)
+                            val selected = com.example.vpn.smart.ServerRace.Winner(first.profile, requestedProfile, outcome.latencyMs, first.variantKey)
+                            val best = raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder, retryDisguised = false,
+                                compare = true, seed = listOf(selected), routeNetwork = routeNetwork)
+                            if (best != null && best.owner.id != requestedProfile.id) adopt(best)
+                            else chosenVariant = best?.variantKey ?: first.variantKey
+                            smartRunnersUp = best?.runnersUp.orEmpty()
+                            tracker.finish(com.example.vpn.smart.SearchStage.OTHER_SERVERS, verified = true)
+                        }
                     }
                     is com.example.xray.RealDelayProbe.Outcome.Failed -> {
                         firstFailed = true
@@ -962,7 +1015,11 @@ class RayVpnService : VpnService() {
                         tracker.finish(com.example.vpn.smart.SearchStage.SELECTED, verified = false)
                         ladder.advance(com.example.vpn.connectivity.RecoveryStage.SAVED_PROFILE_RACE)
                         tracker.start(com.example.vpn.smart.SearchStage.OTHER_SERVERS)
-                        raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder, retryDisguised = true)?.let { adopt(it) }
+                        raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder, retryDisguised = true,
+                            compare = compare, routeNetwork = routeNetwork)?.let {
+                            adopt(it)
+                            if (compare) smartRunnersUp = it.runnersUp
+                        }
                         tracker.finish(com.example.vpn.smart.SearchStage.OTHER_SERVERS, verified = raced)
                     }
                     is com.example.xray.RealDelayProbe.Outcome.NotRun -> tracker.finish(com.example.vpn.smart.SearchStage.SELECTED, verified = false,
@@ -2043,6 +2100,7 @@ class RayVpnService : VpnService() {
         val endpoint = engineEndpoint
         val dialer = endpoint?.let { com.example.vpn.verify.RouteDialers.engine(it) } ?: com.example.vpn.verify.RouteDialers.vpn(this)
         val path = if (endpoint != null) com.example.vpn.verify.ProbePath.ENGINE_PROXY else com.example.vpn.verify.ProbePath.TUN
+        val measuredOn = tunMtu?.first
         trafficCheckJob?.cancel()
         trafficCheckJob = serviceScope.launch(Dispatchers.IO) {
             val evidence = runCatching {
@@ -2061,6 +2119,16 @@ class RayVpnService : VpnService() {
             if (evidence.bulkStalled) {
                 XrayLogManager.w("VPN", "Small requests pass but a bulk transfer stalled: a path MTU black hole or throttling is suspected.")
             }
+            // What the download measured through this server here steers the next Smart Connect (RouteSpeedBook).
+            val downloadStalled = (evidence.download as? com.example.vpn.verify.LegResult.Failed)?.stalled == true
+            val measured = _vpnState.value.takeIf { it.attemptId == attemptId }?.activeProfile
+            if (measured != null && measuredOn != null) {
+                networkMemory.speeds.record(measuredOn, measured.id,
+                    (evidence.download as? com.example.vpn.verify.LegResult.Passed)?.bytesPerSecond, downloadStalled)
+                // A route whose download stalls is not the one to replay first next time.
+                if (downloadStalled) activeRoute?.let { (net, id) -> networkMemory.routes.drop(net, id) }
+            }
+            if (downloadStalled && measured != null) switchAfterStall(attemptId, measured.id)
             // Only a check through the tunnel itself says anything about the tunnel's MTU.
             val mtuTest = tunMtu
             if (path == com.example.vpn.verify.ProbePath.TUN && mtuTest != null && _vpnState.value.attemptId == attemptId) {
@@ -2079,6 +2147,32 @@ class RayVpnService : VpnService() {
                 "path" to path.name,
                 "detail" to evidence.describe()
             ))
+        }
+    }
+
+    /**
+     * Smart Connect chose [stalledId] and its download then stalled while small requests passed: move to the
+     * next path that also carried traffic in the same comparison, at most [MAX_STALL_SWITCHES] times per Smart
+     * Connect, the way failover moves (through connectJob, with the intent it began in). Never on the power
+     * button or in Trade mode, which keep the chosen config.
+     */
+    private fun switchAfterStall(attemptId: String, stalledId: String) {
+        if (exactSession || _vpnState.value.attemptId != attemptId || stallSwitches >= MAX_STALL_SWITCHES) return
+        val runnersUp = smartRunnersUp.filter { it.owner.id != stalledId }
+        val next = runnersUp.firstOrNull() ?: return
+        val ticket = lifecycle.current()
+        if (!lifecycle.tryBeginSwitch()) return
+        stallSwitches++
+        smartRunnersUp = runnersUp.drop(1)
+        XrayLogManager.w("SMART", "The download stalled through this server; switching to the next one Smart Connect found working " +
+            "(${com.example.core.SecretRedactor.redact(next.owner.name)}).")
+        mutateState { com.example.data.model.ConnectionVerification.onSwitching(it) }
+        connectJob = serviceScope.launch {
+            try {
+                connect(next.owner, smart = true, exclude = setOf(stalledId), ticket = ticket)
+            } finally {
+                lifecycle.endSwitch()
+            }
         }
     }
 

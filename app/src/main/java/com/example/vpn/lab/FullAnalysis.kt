@@ -170,6 +170,22 @@ object FullAnalysis {
     /** The least time between the first and the last pass for a path to count as stable. */
     const val STABLE_WINDOW_MS = 3_000L
 
+    /**
+     * Saved configs the latest Full Analysis on [network] (a NetworkIdentity key) found carrying traffic, best
+     * first: Smart Connect races them first and prefers them among paths that pass its own rechecks. Only a run
+     * from the last [PROVEN_MAX_AGE_MS]; a path that passed and then failed a recheck (DEGRADED) and derived
+     * copies are left out.
+     */
+    fun provenOn(reports: List<AnalysisReport>, network: String, now: Long): List<String> {
+        val report = reports.filter { it.contextKey.substringBefore('|') == network }.maxByOrNull { it.finishedAt } ?: return emptyList()
+        if (now - report.finishedAt !in 0 until PROVEN_MAX_AGE_MS) return emptyList()
+        return report.ranked.filter { it.stage.carriesTraffic && it.savedConfig && it.status != PathStatus.DEGRADED }
+            .map { it.profileId }.distinct()
+    }
+
+    /** Filters change during the day; a Full Analysis older than this no longer steers Smart Connect. */
+    const val PROVEN_MAX_AGE_MS = 12 * 60 * 60 * 1000L
+
     /** Confidence from what was measured only: passes over attempts, capped below certainty. */
     fun confidence(passes: Int, attempts: Int): Double? = when {
         attempts == 0 -> null
