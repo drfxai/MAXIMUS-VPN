@@ -22,13 +22,18 @@ class NetworkMemory(
     loadRoutes: () -> String? = { null },
     saveRoutes: (String) -> Unit = {},
     loadMtu: () -> String? = { null },
-    saveMtu: (String) -> Unit = {}
+    saveMtu: (String) -> Unit = {},
+    loadSpeeds: () -> String? = { null },
+    saveSpeeds: (String) -> Unit = {}
 ) {
     /** The exact routes that carried verified traffic, per network (see [RouteRecipe]). */
     val routes = RouteBook(loadRoutes, saveRoutes)
 
     /** The tunnel MTU test after a bulk stall, per network (see [TunMtuTrial]). */
     val mtu = TunMtuTrial(loadMtu, saveMtu)
+
+    /** What the download check after each connect measured through each server, per network (see [RouteSpeedBook]). */
+    val speeds = RouteSpeedBook(loadSpeeds, saveSpeeds)
 
     private class Entry(
         val variants: ConcurrentHashMap<String, String> = ConcurrentHashMap(),
@@ -81,13 +86,14 @@ class NetworkMemory(
         persist()
     }
 
-    /** Forgets everything learned about every network: kinds, alternates, latencies and routes. */
+    /** Forgets everything learned about every network: kinds, alternates, latencies, routes and speeds. */
     @Synchronized
     fun clear() {
         entries.clear()
         persist()
         routes.clear()
         mtu.clear()
+        speeds.clear()
     }
 
     @Synchronized

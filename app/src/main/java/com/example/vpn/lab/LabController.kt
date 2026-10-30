@@ -637,6 +637,9 @@ class LabController(
      * [engineWindow], which lets the service open its blocking interface for the app's own engine sockets.
      * Returns at once when a LAB run holds the test core.
      */
+    /** Saved configs the latest Full Analysis on [network] found working, best first (see FullAnalysis.provenOn). */
+    fun provenOn(network: String, now: Long = System.currentTimeMillis()): List<String> = FullAnalysis.provenOn(store.reports(), network, now)
+
     suspend fun fastRecovery(
         exclude: Set<String>,
         deadlineMs: Long,

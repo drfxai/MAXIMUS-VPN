@@ -20,6 +20,12 @@ enum class LogLevel(val label: String) {
 object XrayLogManager {
 
     private const val MAX_LOGS = 500
+
+    /**
+     * Log tags whose errors are never a connection failure. A subscription refresh answered "HTTP 503 ...
+     * this does not establish a tunnel failure" was read as TUN_ESTABLISH_FAILED ("establish" + "tun").
+     */
+    private val NOT_CONNECTION_TAGS = setOf("SUBSCRIPTION")
     private val logQueue = ArrayDeque<String>(MAX_LOGS + 20)
     private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
@@ -88,7 +94,9 @@ object XrayLogManager {
                     name = "log.error.${tag.lowercase()}",
                     severity = if (level == LogLevel.FATAL) com.example.vpn.diagnostics.events.Severity.FATAL else com.example.vpn.diagnostics.events.Severity.ERROR,
                     attributes = mapOf("message" to sanitizedMsg.take(300)),
-                    stage = com.example.vpn.diagnostics.FailureStage.fromText(message).takeIf { it != com.example.vpn.diagnostics.FailureStage.UNKNOWN },
+                    // A subscription refresh is not a connection: its errors carry no connection stage.
+                    stage = if (tag.uppercase() in NOT_CONNECTION_TAGS) null
+                        else com.example.vpn.diagnostics.FailureStage.fromText(message).takeIf { it != com.example.vpn.diagnostics.FailureStage.UNKNOWN },
                     error = throwable
                 )
             }

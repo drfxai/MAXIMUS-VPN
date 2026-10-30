@@ -38,6 +38,8 @@ enum class FailureStage {
     }
 
     companion object {
+        private val TUN_WORD = Regex("\\btun\\b")
+
         /**
          * The stage an exception or an error text points to. Exception classes are checked first
          * (they are certain); message words second (engines report failures as text). The cause chain
@@ -83,7 +85,8 @@ enum class FailureStage {
                 "unknownhost" in t || "unable to resolve" in t || "no address associated" in t ||
                     "cannot resolve" in t || "dns" in t && "fail" in t -> DNS_RESOLUTION_FAILED
                 "timed out" in t || "timeout" in t || "deadline" in t -> TIMEOUT
-                "establish" in t && ("tun" in t || "interface" in t) -> TUN_ESTABLISH_FAILED
+                // "tun" as a word: "tunnel" alone ("does not establish a tunnel failure") is not the TUN interface.
+                "establish" in t && (TUN_WORD.containsMatchIn(t) || "interface" in t) -> TUN_ESTABLISH_FAILED
                 "engine" in t && ("start" in t || "did not" in t) -> ENGINE_START_FAILED
                 "x509" in t || "unknown authority" in t || "certificate verify failed" in t ||
                     "certificate is not valid" in t || "pinned" in t && "cert" in t -> CERTIFICATE_VALIDATION_FAILED
