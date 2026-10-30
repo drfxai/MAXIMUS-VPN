@@ -75,6 +75,16 @@ class EndpointScoringEngine(
             .map { it.ip }
     }
 
+    /**
+     * Addresses that carried a request on [network] at any point in the last [TTL_MS], most recent success
+     * first: worth testing again before fresh samples, but never used without passing a new test.
+     */
+    fun remembered(network: String?, limit: Int = 8): List<String> = scores(network)
+        .filter { it.lastSuccessAt != null }
+        .sortedWith(compareBy<Score>({ -(it.lastSuccessAt ?: 0L) }, { it.ip }))
+        .take(limit)
+        .map { it.ip }
+
     companion object {
         const val TTL_MS = 3L * 24 * 60 * 60 * 1000
         const val VALID_FOR_MS = 24L * 60 * 60 * 1000
