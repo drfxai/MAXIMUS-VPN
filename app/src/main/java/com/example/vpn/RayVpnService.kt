@@ -83,7 +83,7 @@ class RayVpnService : VpnService() {
         /** Re-check interval for a connection whose last checks all passed. */
         private const val PING_HEALTHY_MS = 30_000L
         /** How long a clean-address scan may take before the connect goes on without one. */
-        private const val CLEAN_IP_SCAN_LIMIT_MS = 12_000L
+        private const val CLEAN_IP_SCAN_LIMIT_MS = 15_000L
         /** Requests through a new tunnel before it counts as unverified, and the pause between them. */
         private const val VERIFY_ATTEMPTS = 3
         private const val VERIFY_RETRY_MS = 1_500L
@@ -549,6 +549,14 @@ class RayVpnService : VpnService() {
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
     }
 
+    /**
+     * True when real lookups on [network] in the last day saw its DNS answer server names with block pages.
+     * A connect that skips the lookup (cached answer, IP address, private lookup) must not call the network open.
+     */
+    private fun dnsTamperedOn(network: String?): Boolean = runCatching {
+        com.example.RayApplication.instance.dnsResilience.profile(network, EndpointResolver.DOH_ENDPOINTS).tamperedNames.isNotEmpty()
+    }.getOrDefault(false)
+
     /** What this network was measured to carry, plus how UDP kinds fared here lately. */
     private fun transportCapabilities(network: String): com.example.vpn.connectivity.TransportCapabilityEngine.Capabilities {
         val working = networkMemory.workingKinds(network)
@@ -577,12 +585,28 @@ class RayVpnService : VpnService() {
         showForegroundNotification("Looking for a verified clean path...")
         val scanNetwork = com.example.vpn.smart.NetworkKey.current(this)
         val cached = com.example.RayApplication.instance.endpointScores.validated(scanNetwork)
-        val candidates = withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
-            com.example.panels.CleanIpOptimizer.findCleanIpsSync(port = profile.port)
-        }.orEmpty()
+        // Candidates must pass TLS with this server's own name and its WebSocket/HTTP exchange, not just a TCP
+        // connect: on a filtered network nearly every Cloudflare address accepts TCP and then drops TLS.
+        // Addresses that worked here before are tested first; what passes before the time limit is kept.
+        val found = java.util.Collections.synchronizedList(mutableListOf<String>())
+        withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
+            try {
+                com.example.panels.CleanIpOptimizer().scan(profile, targetPort = profile.port, enableSpeedTest = false,
+                    candidateCount = 48, preferred = com.example.RayApplication.instance.endpointScores.remembered(scanNetwork),
+                    enough = 6, onAccepted = { found += it.ip },
+                    assertNetwork = {
+                        check(com.example.vpn.smart.NetworkKey.current(this@RayVpnService) == scanNetwork) { "Network changed during clean-IP scan" }
+                    }) { }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                XrayLogManager.w("SMART", "Clean-IP scan stopped: ${e.message}")
+            }
+        }
+        val candidates = synchronized(found) { found.toList() }
         val attempt = kotlinx.coroutines.currentCoroutineContext()[Job]
         return com.example.vpn.Abandonable.run {
-            com.example.vpn.smart.CleanPathRace.select(profile, (cached + candidates.map { it.ip }).distinct(),
+            com.example.vpn.smart.CleanPathRace.select(profile, (cached + candidates).distinct(),
                 probe = { paths -> probeAll(paths, timeoutSec) },
                 cancelled = { attempt?.isActive == false || com.example.vpn.smart.NetworkKey.current(this) != scanNetwork })
         }?.also {
@@ -778,7 +802,7 @@ class RayVpnService : VpnService() {
             // probe time limits. The probe's sockets bypass the traffic-blocking interface.
             val network = com.example.vpn.smart.NetworkKey.current(this@RayVpnService)
             val timeouts = networkMemory.timeouts(network)
-            runCatching { com.example.vpn.smart.NetworkEnvironment.observe(this@RayVpnService, networkMemory, dnsPoisoned) }
+            runCatching { com.example.vpn.smart.NetworkEnvironment.observe(this@RayVpnService, networkMemory, dnsPoisoned || dnsTamperedOn(network)) }
                 .onSuccess { report ->
                     _environment.value = report
                     XrayLogManager.i("SMART", "Network: ${report.describe()}")
@@ -1610,11 +1634,16 @@ class RayVpnService : VpnService() {
                     skipSystem = dnsProfile?.skipSystemFor(hostName) == true,
                     onOutcome = { resolver, outcome, ms -> dns?.record(networkKey, resolver, hostName, outcome, ms) }
                 )
-                dnsPoisoned = resolved.viaDoh ||
+                // A private lookup (GOD MODE, Ghost Rider) never asks the network's DNS, so an answer over DoH says
+                // nothing about it; what earlier lookups on this network learned still does.
+                val systemAsked = !privateServerLookup
+                dnsPoisoned = (systemAsked && resolved.viaDoh) || dnsProfile?.tamperedNames?.isNotEmpty() == true ||
                     EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))
-                if (resolved.viaDoh) {
+                if (resolved.viaDoh && systemAsked) {
                     XrayLogManager.w("VPN", "[DIAGNOSTICS] The network's DNS gave a blocked answer for the server; " +
                         "resolved it over DNS-over-HTTPS instead")
+                } else if (resolved.viaDoh) {
+                    XrayLogManager.i("VPN", "[DIAGNOSTICS] Server name looked up privately over DNS-over-HTTPS (the network's DNS was not asked)")
                 }
                 val usesTls = profile.security.equals("tls", true) || profile.security.equals("reality", true)
                 if (!resolved.viaDoh && EndpointResolver.isBlockedAnswer(java.net.InetAddress.getByName(resolved.address))) {
@@ -2070,7 +2099,7 @@ class RayVpnService : VpnService() {
         if (rttMs != null) {
             val network = com.example.vpn.smart.NetworkKey.current(this)
             networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(profile), rttMs)
-            _environment.value = com.example.vpn.smart.NetworkEnvironment.observe(this, networkMemory, dnsPoisoned)
+            _environment.value = com.example.vpn.smart.NetworkEnvironment.observe(this, networkMemory, dnsPoisoned || dnsTamperedOn(network))
         }
         recordFreeOutcome(profile, success = true, rttMs = rttMs, stage = null)
     }

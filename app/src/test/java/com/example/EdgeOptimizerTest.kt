@@ -97,4 +97,35 @@ class EdgeOptimizerTest {
         val slow = CleanIpOptimizer.Result("104.16.1.2", 100, 5, 3, downloadSpeedKbps = 100)
         assertTrue(fast.score < slow.score)
     }
+
+    @Test fun sustainedSpeedOutweighsAFewMillisecondsAndAFailedDownloadCounts() {
+        val nearSlow = CleanIpOptimizer.Result("104.16.1.1", 90, 5, 3, downloadSpeedKbps = 40, speedTested = true)
+        val fartherFast = CleanIpOptimizer.Result("104.16.1.2", 180, 5, 3, downloadSpeedKbps = 1500, speedTested = true)
+        val noDownload = CleanIpOptimizer.Result("104.16.1.3", 80, 5, 3, speedTested = true)
+        assertEquals(listOf("104.16.1.2", "104.16.1.1", "104.16.1.3"),
+            CleanIpOptimizer.ranked(listOf(nearSlow, noDownload, fartherFast)).map { it.ip })
+        // Without a speed test latency alone decides, as before.
+        assertTrue(CleanIpOptimizer.Result("a", 80, 5, 3).score < CleanIpOptimizer.Result("b", 90, 5, 3).score)
+    }
+
+    @Test fun addressesThatWorkedHereBeforeAreTestedFirstAndOnlyOnce() {
+        val pool = CleanIpOptimizer.candidatePool(listOf("104.16.9.9", "not-an-ip", "104.16.9.9", "172.64.1.1"),
+            CleanIpOptimizer.SCOPE_ALL, 20, null)
+        assertEquals(listOf("104.16.9.9", "172.64.1.1"), pool.take(2).map { it.first })
+        assertEquals(pool.size, pool.map { it.first }.distinct().size)
+        assertEquals(22, pool.size)
+        assertTrue(pool.drop(2).all { c -> CleanIpOptimizer.CLOUDFLARE_V4_RANGES.any { CleanIpOptimizer.inCidr(c.first, it) } })
+    }
+
+    @Test fun headersAreSkippedExactlyEvenWithShortLines() {
+        // The old reader lost its place after a one-character header line and swallowed body bytes.
+        val raw = "HTTP/1.1 200 OK\r\na: b\r\nx\r\n\r\nBODY".toByteArray()
+        val input = java.io.ByteArrayInputStream(raw)
+        assertTrue(CleanIpOptimizer.skipHeaders(input))
+        assertEquals("BODY", String(input.readBytes()))
+        assertFalse(CleanIpOptimizer.skipHeaders(java.io.ByteArrayInputStream("HTTP/1.1 200 OK\r\nno end".toByteArray())))
+        assertEquals(200, CleanIpOptimizer.statusCode("HTTP/1.1 200 OK"))
+        assertEquals(403, CleanIpOptimizer.statusCode("HTTP/1.0 403"))
+        assertEquals(null, CleanIpOptimizer.statusCode("<html>"))
+    }
 }
