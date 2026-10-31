@@ -25,7 +25,7 @@ data class SmartOperation(
     val preflightAt: Long,
     val note: String = ""
 ) {
-    enum class Status { RUNNING, VERIFYING, COMPLETED, FAILED, UNCERTAIN }
+    enum class Status { RUNNING, VERIFYING, COMPLETED, FAILED, UNCERTAIN, RECONCILED }
 
     val actionable: Boolean get() = status == Status.UNCERTAIN || status == Status.FAILED
 }
@@ -60,8 +60,8 @@ class SmartOperationStore(context: Context) {
         val permitted = when (current.status) {
             SmartOperation.Status.RUNNING -> setOf(SmartOperation.Status.VERIFYING, SmartOperation.Status.FAILED, SmartOperation.Status.UNCERTAIN)
             SmartOperation.Status.VERIFYING -> setOf(SmartOperation.Status.COMPLETED, SmartOperation.Status.FAILED, SmartOperation.Status.UNCERTAIN)
-            SmartOperation.Status.UNCERTAIN -> setOf(SmartOperation.Status.FAILED, SmartOperation.Status.COMPLETED)
-            SmartOperation.Status.COMPLETED, SmartOperation.Status.FAILED -> emptySet()
+            SmartOperation.Status.UNCERTAIN -> setOf(SmartOperation.Status.RECONCILED)
+            SmartOperation.Status.COMPLETED, SmartOperation.Status.FAILED, SmartOperation.Status.RECONCILED -> emptySet()
         }
         check(status in permitted) { "Invalid operation transition: ${current.status} -> $status" }
         val changed = current.copy(status = status, updatedAt = now)
