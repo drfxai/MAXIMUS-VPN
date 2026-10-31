@@ -18,6 +18,8 @@ import com.example.panels.servers.ManagedServer
 import com.example.panels.servers.ServerFacts
 import com.example.panels.servers.ServerLocation
 import com.example.panels.servers.ServerManager
+import com.example.panels.servers.SmartOperation
+import com.example.panels.servers.SmartOperationStore
 import com.example.panels.servers.ServerRandom
 import com.example.panels.servers.ServerStore
 import com.example.panels.servers.ServerToolCatalog
@@ -92,12 +94,38 @@ sealed interface ServersEvent {
 class ServersViewModel(app: Application) : AndroidViewModel(app) {
     private val store = ServerStore(app)
     private val manager = ServerManager()
+    private val operations = SmartOperationStore(app)
     private val http = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).build()
     private val _state = MutableStateFlow(ServersState(servers = runCatching { store.load() }.getOrDefault(emptyList())))
     val state: StateFlow<ServersState> = _state.asStateFlow()
     private val _events = MutableSharedFlow<ServersEvent>(extraBufferCapacity = 8)
     val events: SharedFlow<ServersEvent> = _events
     private var job: Job? = null
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { operations.markInterrupted() }.onFailure {
+                _state.update { state -> state.copy(error = "Cannot read secure operation history. Server mutations are disabled until storage is repaired.") }
+            }
+        }
+    }
+
+    /** Local audited history: UNCERTAIN requires fresh inspection and manual reconciliation. */
+    fun operationsFor(serverId: String): List<SmartOperation> =
+        runCatching { operations.all().filter { it.serverId == serverId }.takeLast(10).reversed() }
+            .getOrDefault(emptyList())
+
+    fun reconcileUncertainOperation(serverId: String, operationId: String) = serverAction(
+        serverId, "Inspecting server before acknowledging interrupted operation…"
+    ) { s ->
+        val op = withContext(Dispatchers.IO) { operations.all().firstOrNull { it.id == operationId } }
+        require(op != null && op.serverId == serverId && op.status == SmartOperation.Status.UNCERTAIN)
+        val fresh = withContext(Dispatchers.IO) { manager.check(s) }
+        check(fresh.facts?.socketInspectionAvailable == true) { "Cannot safely inspect this VPS yet." }
+        save(fresh)
+        withContext(Dispatchers.IO) { operations.transition(op.id, SmartOperation.Status.RECONCILED) }
+        emit(ServersEvent.Message("Operation acknowledged after SSH inspection; check installed services and profiles before retrying."))
+    }
 
     /** Maximus Tunnel: the Tunnel tab, its setup and the tunnel page. */
     val tunnel = TunnelController(
@@ -882,7 +910,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun install() {
         val w = _state.value.wizard ?: return
-        if (w.dnsProvisioning) return
+        if (w.dnsProvisioning || w.stage != WizardStage.SUMMARY) return
         val s = server(w.serverId) ?: return
         val steps = when (w.tool.id) {
             ServerToolCatalog.DNSTT -> ToolScripts.DNSTT_STEPS
@@ -912,9 +940,27 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             backupBases = if (w.tool.id == ServerToolCatalog.DNSTT) w.backups else emptyList(),
             port = w.port.toIntOrNull(), renew = w.renew, ownNameServer = w.ownNameServer)
         job = viewModelScope.launch {
+            var operation: SmartOperation? = null
             try {
-                val out = withContext(Dispatchers.IO) { manager.install(s, w.tool.id, options, progress) }
+                // Never trust cached or UI-only checks: freshly inspect over pinned SSH immediately
+                // before mutating. Journal durable intent before running any install script.
+                val inspected = withContext(Dispatchers.IO) { manager.check(s) }
+                val facts = requireNotNull(inspected.facts)
+                val blockers = InstallChecks.forTool(w.tool, inspected, facts).filter { it.blocking && !it.ok }
+                check(blockers.isEmpty()) { blockers.joinToString("; ") { it.detail } }
+                operation = withContext(Dispatchers.IO) {
+                    operations.begin(s.id, w.tool.id, inspected.checkedAt)
+                }
+                val out = withContext(Dispatchers.IO) { manager.install(inspected, w.tool.id, options, progress) }
+                withContext(Dispatchers.IO) {
+                    operations.transition(requireNotNull(operation).id, SmartOperation.Status.VERIFYING)
+                }
                 val saved = applyOutcome(out)
+                // COMPLETED means the approved install + local outcome persist succeeded,
+                // not that the Android client has passed a traffic-through-tunnel test.
+                withContext(Dispatchers.IO) {
+                    operations.transition(requireNotNull(operation).id, SmartOperation.Status.COMPLETED)
+                }
                 _state.update { st ->
                     st.copy(wizard = st.wizard?.copy(
                         stage = WizardStage.DONE, currentStep = steps.size + 1, summary = out.summary,
@@ -928,8 +974,14 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 if (w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)) checkDns()
                 emit(ServersEvent.Success)
             } catch (e: Exception) {
+                // We cannot infer whether remote side effects happened from a thrown exception.
+                // Block further installs until a human re-inspects and reconciles this operation.
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    operation?.let { runCatching { operations.transition(it.id, SmartOperation.Status.UNCERTAIN) } }
+                }
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _state.update { st -> st.copy(wizard = st.wizard?.copy(stage = WizardStage.FAILED, error = com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "The install stopped"))) }
+                _state.update { st -> st.copy(wizard = st.wizard?.copy(stage = WizardStage.FAILED,
+                    error = com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "The install stopped"))) }
             }
         }
     }
