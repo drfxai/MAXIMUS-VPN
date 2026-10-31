@@ -2,6 +2,7 @@ package com.example.ui.panels
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -98,7 +99,10 @@ internal fun SmartManagerScreen(
                     Text("OS: ${facts?.osName?.ifBlank { "Unknown" } ?: "Unknown"} · CPU: ${facts?.cpus ?: 0}")
                     Text("RAM: ${facts?.ramAvailableMb ?: 0}/${facts?.ramMb ?: 0} MB available")
                     Text("Disk free: ${facts?.diskFreeMb ?: 0} MB · Services managed: ${server.tools.size}")
+                    Text("Socket inventory: ${if (facts?.socketInspectionAvailable == true) "Collected" else "Unavailable — blocked"}")
                     Text("Ports observed: TCP ${facts?.tcpPorts?.size ?: 0} · UDP ${facts?.udpPorts?.size ?: 0}")
+                    Text("Docker detected: ${facts?.dockerAvailable == true} · Psiphon unit detected: ${facts?.psiphonInstalled == true}")
+                    Text("Interface IPv4: ${facts?.interfaceIpv4?.joinToString()?.ifBlank { "Unknown" } ?: "Unknown"}")
                     OutlinedButton(onClick = { vm.refresh(server.id) },
                         enabled = server.id !in state.checking) {
                         Text(if (server.id in state.checking) "Inspecting…" else "Refresh SSH inspection")
@@ -126,7 +130,8 @@ internal fun SmartManagerScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = smartOrange),
                     onClick = {
                         val url = TokenTemplate.url(TokenTemplate.SMART_DOMAINS, "Maximus Smart Manager")
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                            .onFailure { Toast.makeText(context, "No browser available", Toast.LENGTH_SHORT).show() }
                     }
                 ) { Text("Create Cloudflare API Token") }
                 OutlinedButton(onClick = onOpenCloudflare) { Text("Cloudflare account & DNS") }
