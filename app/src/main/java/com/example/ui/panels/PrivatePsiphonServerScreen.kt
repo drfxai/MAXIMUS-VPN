@@ -1,6 +1,8 @@
 package com.example.ui.panels
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,8 +44,9 @@ internal fun PrivatePsiphonServerScreen(vm: ServersViewModel, state: ServersStat
         if (state.servers.isEmpty()) {
             Button(onClick = { vm.openAdd() }) { Text("Add a VPS first") }
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                state.servers.take(3).forEach { s ->
+            Row(Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.servers.forEach { s ->
                     OutlinedButton(onClick = { chosen = s.id }) { Text(s.displayName.take(16)) }
                 }
             }
