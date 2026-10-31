@@ -23,7 +23,7 @@ class ServerPanelTest {
 
     private fun facts(os: String = "ubuntu", tcp: String = "22", ramKb: Long = 2_000_000, diskFreeKb: Long = 30_000_000, extra: String = "") =
         ServerFacts.parse(
-            "---MX-FACTS---\nOS_ID=$os\nOS_NAME=\"$os\"\nARCH=x86_64\nUID=0\nSYSTEMD=1\nPKG=apt-get\n" +
+            "---MX-FACTS---\nOS_ID=$os\nOS_NAME=\"$os\"\nARCH=x86_64\nUID=0\nSYSTEMD=1\nPKG=apt-get\nSOCKETS=1\n" +
                 "RAM_KB=$ramKb\nDISK_FREE_KB=$diskFreeKb\nTCP=$tcp\nUDP=\n$extra"
         )
 

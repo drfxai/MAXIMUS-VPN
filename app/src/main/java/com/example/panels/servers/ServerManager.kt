@@ -46,7 +46,7 @@ interface ActionProgress {
  */
 internal fun RemoteShell.runTool(script: ToolScript, progress: ActionProgress, timeoutMs: Long = 15 * 60_000L): Map<String, String> {
     val reader = ScriptProgress(onStep = { progress.step(it) }, onLog = { progress.log(it) })
-    val result = run(script.text, timeoutMs) { reader.line(it) }
+    val result = run(InstallerShellLock.wrap(script.text), timeoutMs) { reader.line(it) }
     if (result.exitCode != 0) {
         val tail = result.output.lineSequence().map { it.trim() }
             .filter { it.isNotEmpty() && !it.startsWith("##") }.toList().takeLast(2).joinToString(" · ")
@@ -95,6 +95,7 @@ class ServerManager(
             ServerToolCatalog.KEY_LOGIN -> addKeyLogin(server, progress)
             else -> connect(server).use { shell ->
                 val facts = ServerFacts.parse(shell.run(ServerFacts.SCRIPT, 60_000L).output)
+                check(facts.socketInspectionAvailable) { "Cannot inventory TCP/UDP listeners (ss unavailable); no installation was started." }
                 facts.blocker()?.let { error(it) }
                 val arch = facts.goArch!!
                 when (toolId) {

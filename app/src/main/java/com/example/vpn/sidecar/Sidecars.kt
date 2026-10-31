@@ -12,11 +12,14 @@ object Sidecars {
         listOf(
             ByedpiSidecar,
             MihomoSidecar,
-            PsiphonSidecar {
-                psiphonSettings?.invoke() ?: PsiphonSidecar.assetProvider { name ->
-                    openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
-                }.invoke()
-            },
+            PsiphonSidecar(
+                configProvider = {
+                    psiphonSettings?.invoke() ?: PsiphonSidecar.assetProvider { name ->
+                        openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
+                    }.invoke()
+                },
+                privateConfigProvider = { id -> privatePsiphonSettings?.invoke(id) }
+            ),
             DnsttSidecar(),
             CottenDnsSidecar(),
             SoarSidecar(),
@@ -30,6 +33,8 @@ object Sidecars {
     /** Starts the Tor library; set once by the VPN service. */
     /** Optional per-install settings, encrypted by the application; never written to an APK. */
     @Volatile var psiphonSettings: (() -> String?)? = null
+    /** Only encrypted per-user private server profiles; never falls back to public settings. */
+    @Volatile var privatePsiphonSettings: ((String) -> String?)? = null
 
     @Volatile var torStarter: ((String, Int) -> RunningEngine)? = null
 

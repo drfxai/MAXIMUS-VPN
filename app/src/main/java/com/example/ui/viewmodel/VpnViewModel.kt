@@ -10,6 +10,8 @@ import com.example.data.model.ConnectionStatus
 import com.example.data.model.VlessProfile
 import com.example.data.repository.ServerRepository
 import com.example.data.repository.SettingsRepository
+import com.example.panels.servers.SmartNodeStore
+import com.example.vpn.smart.NetworkKey
 import com.example.vpn.RayVpnService
 import com.example.vpn.VpnController
 import com.example.vpn.smart.SmartConnect
@@ -58,7 +60,14 @@ class VpnViewModel(
         VpnController.connectionState.map { s -> s.status to s.activeProfile?.takeIf { s.status == ConnectionStatus.CONNECTED || s.status == ConnectionStatus.DEGRADED } }.distinctUntilChanged()
     ) { profiles, settings, (_, active) ->
         val book = com.example.vpn.connectivity.ConnectivityBrain.book
-        SmartConnect.rankForCard(profiles, settings.scoringProfile, active = active, count = 3, evidenceOf = { p ->
+        // Read the Keystore-backed provenance on IO, not the Compose/UI dispatcher.
+        // A corrupt/unavailable ledger never unlocks a private Psiphon bootstrap.
+        val managed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { SmartNodeStore(RayApplication.instance).all() }.getOrDefault(emptyList())
+        }
+        SmartConnect.rankForCard(profiles, settings.scoringProfile, active = active, count = 3,
+            managedRecords = managed, networkKey = NetworkKey.current(RayApplication.instance),
+            evidenceOf = { p ->
             runCatching { book.eligibility(com.example.vpn.connectivity.PathRef.of(p)) }.getOrNull()
         })
     }.stateIn(

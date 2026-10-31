@@ -39,7 +39,12 @@ data class ServerFacts(
     val tunnelInstalled: Boolean = false,
     /** Hiddify Manager's folder is on the server. */
     val hiddifyInstalled: Boolean = false,
-    val hiddifyVersion: String = ""
+    val hiddifyVersion: String = "",
+    val socketInspectionAvailable: Boolean = false,
+    val dockerAvailable: Boolean = false,
+    val psiphonInstalled: Boolean = false,
+    val interfaceIpv4: Set<String> = emptySet(),
+    val interfaceIpv6: Set<String> = emptySet()
 ) {
     /** The Go architecture name of the programs this server needs, or null when none is built for it. */
     val goArch: String? get() = when (arch.lowercase()) {
@@ -81,10 +86,18 @@ data class ServerFacts(
             if [ -n "§SUDO" ]; then echo SUDO=1; else echo SUDO=0; fi
             if [ -d /run/systemd/system ]; then echo SYSTEMD=1; else echo SYSTEMD=0; fi
             for p in apt-get dnf yum apk; do if command -v §p >/dev/null 2>&1; then echo "PKG=§p"; break; fi; done
-            if command -v ss >/dev/null 2>&1; then
+            if command -v ss >/dev/null 2>&1 &&
+               ss -Hlnt >/dev/null 2>&1 && ss -Hlnu >/dev/null 2>&1; then
+              echo SOCKETS=1
               echo "TCP=§(ss -Hlnt 2>/dev/null | awk '{print §4}' | grep -vE '^(127[.]|[[]::1[]]|::1)' | sed 's/.*://' | sort -un | tr '\n' ',')"
               echo "UDP=§(ss -Hlnu 2>/dev/null | awk '{print §4}' | grep -vE '^(127[.]|[[]::1[]]|::1)' | sed 's/.*://' | sort -un | tr '\n' ',')"
+            else
+              echo SOCKETS=0
             fi
+            echo "IPV4=§(ip -o -4 addr show scope global 2>/dev/null | awk '{split(§4,a,"/");print a[1]}' | paste -sd, -)"
+            echo "IPV6=§(ip -o -6 addr show scope global 2>/dev/null | awk '{split(§4,a,"/");print a[1]}' | paste -sd, -)"
+            if command -v docker >/dev/null 2>&1; then echo DOCKER=1; else echo DOCKER=0; fi
+            if [ -f /etc/systemd/system/psiphond.service ] || [ -f /etc/systemd/system/maximus-psiphon.service ]; then echo PSIPHON_INSTALLED=1; else echo PSIPHON_INSTALLED=0; fi
             echo "CC=§(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)"
             if command -v ufw >/dev/null 2>&1; then
               if §SUDO ufw status 2>/dev/null | grep -q 'Status: active'; then echo FIREWALL=ufw-active; else echo FIREWALL=ufw-inactive; fi
@@ -96,7 +109,7 @@ data class ServerFacts(
               §SUDO sshd -T 2>/dev/null | awk '/^passwordauthentication /{print "SSH_PASSWORD=" §2}'
             fi
             if grep -qsE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/' /etc/ssh/sshd_config; then echo SSHD_DROPINS=1; else echo SSHD_DROPINS=0; fi
-            for u in x-ui maximus-dnstt maximus-socks maximus-soar maximus-cotten maximus-hysteria maximus-tunnel maximus-tunnel-hy fail2ban; do
+            for u in x-ui maximus-dnstt maximus-socks maximus-soar maximus-cotten maximus-psiphon maximus-hysteria maximus-tunnel maximus-tunnel-hy fail2ban; do
               echo "SVC_§u=§(systemctl is-active §u 2>/dev/null || true)"
             done
             if [ -x /usr/local/x-ui/x-ui ] || [ -f /etc/systemd/system/x-ui.service ]; then echo XUI=1; else echo XUI=0; fi
@@ -150,7 +163,12 @@ data class ServerFacts(
                 xuiInstalled = v["XUI"] == "1",
                 tunnelInstalled = v["MXTUNNEL"] == "1",
                 hiddifyInstalled = v["HIDDIFY"] == "1",
-                hiddifyVersion = v["HIDDIFY_VERSION"].orEmpty()
+                hiddifyVersion = v["HIDDIFY_VERSION"].orEmpty(),
+                socketInspectionAvailable = v["SOCKETS"] == "1",
+                dockerAvailable = v["DOCKER"] == "1",
+                psiphonInstalled = v["PSIPHON_INSTALLED"] == "1",
+                interfaceIpv4 = v["IPV4"].orEmpty().split(',').filter { it.isNotBlank() }.toSet(),
+                interfaceIpv6 = v["IPV6"].orEmpty().split(',').filter { it.isNotBlank() }.toSet()
             )
         }
     }

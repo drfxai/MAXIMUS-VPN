@@ -36,6 +36,7 @@ class ServerToolsTest {
         SUDO=0
         SYSTEMD=1
         PKG=apt-get
+        SOCKETS=1
         TCP=22,2053,443,
         UDP=
         CC=cubic
@@ -307,7 +308,7 @@ class ServerToolsTest {
         } }
     }
 
-    private val factsText = "---MX-FACTS---\nARCH=aarch64\nUID=0\nSYSTEMD=1\nPKG=apt-get\nUDP=\nTCP=22\nDISK_FREE_KB=9000000\n"
+    private val factsText = "---MX-FACTS---\nARCH=aarch64\nUID=0\nSYSTEMD=1\nPKG=apt-get\nSOCKETS=1\nUDP=\nTCP=22\nDISK_FREE_KB=9000000\n"
 
     private fun noProgress() = object : ActionProgress {
         val steps = mutableListOf<Int>()

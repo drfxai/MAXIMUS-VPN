@@ -3,6 +3,7 @@ package com.example.vpn.smart
 import com.example.data.model.ScoringProfile
 import com.example.data.model.ServerCategory
 import com.example.data.model.VlessProfile
+import com.example.panels.servers.ManagedNodeRecord
 
 object SmartConnect {
 
@@ -28,12 +29,17 @@ object SmartConnect {
     fun rankTopNodes(
         profiles: List<VlessProfile>,
         scoringProfile: ScoringProfile = ScoringProfile.BALANCED,
-        count: Int = 3
+        count: Int = 3,
+        managedRecords: List<ManagedNodeRecord> = emptyList(),
+        networkKey: String? = null
     ): List<SmartSelection> {
         if (profiles.isEmpty() || count <= 0) return emptyList()
 
         // Only nodes the core can actually run.
-        val supportedProfiles = profiles.filter { com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
+        val supportedProfiles = profiles.filter {
+            com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null &&
+                ManagedNodeEligibility.allowed(it, managedRecords, networkKey = networkKey)
+        }
         val healthyProfiles = supportedProfiles.filter {
             it.category != ServerCategory.OFFLINE &&
                 it.packetLoss < 40.0 &&
@@ -63,11 +69,14 @@ object SmartConnect {
         scoringProfile: ScoringProfile = ScoringProfile.BALANCED,
         active: VlessProfile? = null,
         evidenceOf: (VlessProfile) -> com.example.vpn.connectivity.PathEligibility? = { null },
-        count: Int = 3
+        count: Int = 3,
+        managedRecords: List<ManagedNodeRecord> = emptyList(),
+        networkKey: String? = null
     ): List<SmartSelection> {
         if (count <= 0) return emptyList()
         val failed = com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED
-        val rated = rankTopNodes(profiles, scoringProfile, count = profiles.size)
+        val rated = rankTopNodes(profiles, scoringProfile, count = profiles.size,
+            managedRecords = managedRecords, networkKey = networkKey)
             .map { it.copy(evidence = evidenceOf(it.profile)) }
             .sortedBy { (it.evidence ?: com.example.vpn.connectivity.PathEligibility.UNTESTED).let { e -> if (e == failed) Int.MAX_VALUE else e.ordinal } }
         val inUse = active?.let { a ->
@@ -81,8 +90,14 @@ object SmartConnect {
     /**
      * Analyzes all available profiles and selects the optimal healthy node for the active scoring profile.
      */
-    fun selectBestNode(profiles: List<VlessProfile>, scoringProfile: ScoringProfile = ScoringProfile.BALANCED): SmartSelection? =
-        rankTopNodes(profiles, scoringProfile, count = 1).firstOrNull()
+    fun selectBestNode(
+        profiles: List<VlessProfile>,
+        scoringProfile: ScoringProfile = ScoringProfile.BALANCED,
+        managedRecords: List<ManagedNodeRecord> = emptyList(),
+        networkKey: String? = null
+    ): SmartSelection? =
+        rankTopNodes(profiles, scoringProfile, count = 1,
+            managedRecords = managedRecords, networkKey = networkKey).firstOrNull()
 
     /** The human-readable rating lines for one node. */
     private fun describe(best: VlessProfile, scoringProfile: ScoringProfile): SmartSelection {

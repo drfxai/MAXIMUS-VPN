@@ -18,6 +18,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -294,15 +295,16 @@ fun PanelManagerScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val tabs = listOf("Servers", "Install", "Cloudflare", "Clean IP", "Tunnel")
+            val tabs = listOf("Servers", "Install", "Cloudflare", "Clean IP", "Tunnel", "Smart Manager", "Psiphon Server")
             tabs.forEachIndexed { index, title ->
                 val isSelected = (selectedPanelId != null && index == 0) || (selectedPanelId == null && selectedTab == index)
                 Surface(
                     modifier = Modifier
-                        .weight(1f)
+                        .width(110.dp)
                         .height(38.dp)
                         .clickable {
                             selectedPanelId = null
@@ -627,6 +629,19 @@ fun PanelManagerScreen(
                 // TAB 4: MAXIMUS TUNNEL (Iran server <-> server abroad)
                 if (selectedTab == 4) {
                     TunnelTabHost(serversVm, serversState, tunnelState, onServers = { selectedTab = 0 })
+                }
+
+                // TAB 5: SMART MANAGER (read-only admission, existing approved workflows)
+                if (selectedTab == 6) {
+                    PrivatePsiphonServerScreen(serversVm, serversState)
+                }
+
+                if (selectedTab == 5) {
+                    SmartManagerScreen(
+                        vm = serversVm, state = serversState,
+                        onOpenCloudflare = { selectedTab = 2 },
+                        onOpenSmartDomains = { showSmartDomains = true }
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))

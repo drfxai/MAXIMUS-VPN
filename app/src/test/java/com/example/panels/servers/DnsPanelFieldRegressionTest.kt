@@ -60,7 +60,7 @@ class DnsPanelFieldRegressionTest {
             override fun run(script: String, timeoutMs: Long, onLine: (String) -> Unit): ShellResult {
                 if (script == ServerFacts.SCRIPT) {
                     reads++
-                    return ShellResult(0, "---MX-FACTS---\nARCH=x86_64\nUID=0\nSYSTEMD=1\nSVC_maximus-cotten=${if (reads == 1) "inactive" else "active"}\n")
+                    return ShellResult(0, "---MX-FACTS---\nARCH=x86_64\nUID=0\nSYSTEMD=1\nSOCKETS=1\nSVC_maximus-cotten=${if (reads == 1) "inactive" else "active"}\n")
                 }
                 val result = "##RESULT COTTEN_KEY=${"a".repeat(32)}"
                 onLine(result)

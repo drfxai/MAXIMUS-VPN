@@ -244,6 +244,9 @@ class RayApplication : Application() {
         com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
         com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
         com.example.vpn.sidecar.Sidecars.torStarter = { torrc, port -> com.example.vpn.sidecar.TorInApp.start(this, torrc, port) }
+        com.example.vpn.sidecar.Sidecars.privatePsiphonSettings = { id ->
+            com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)
+        }
         com.example.vpn.sidecar.Sidecars.psiphonSettings = {
             com.example.data.security.SecureStorage(this).getAndDecrypt("psiphon_network_settings_v1")?.takeIf { it.isNotBlank() }
         }

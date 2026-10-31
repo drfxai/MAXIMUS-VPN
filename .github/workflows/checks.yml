@@ -78,6 +78,9 @@ jobs:
           cache: false
       - name: DNS installation lifecycle regressions
         run: python3 -m unittest discover -s tools/server-tools/tests -v
+      - name: Experimental DNS gateway unit and race tests
+        working-directory: tools/dns-gateway
+        run: go test -race ./...
       - name: SOCKS helper tests
         working-directory: tools/server-tools/socks
         run: GOTOOLCHAIN=go1.26.8 go test ./...
