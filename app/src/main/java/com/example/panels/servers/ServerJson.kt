@@ -80,6 +80,11 @@ object ServerJson {
         .put("autoUpdates", f.autoUpdates).put("sshdDropIns", f.sshdDropIns)
         .apply { f.sshPasswordLogin?.let { put("sshPasswordLogin", it) } }
         .put("services", JSONObject(f.services))
+        .put("socketInspectionAvailable", f.socketInspectionAvailable)
+        .put("dockerAvailable", f.dockerAvailable)
+        .put("psiphonInstalled", f.psiphonInstalled)
+        .put("interfaceIpv4", JSONArray(f.interfaceIpv4.sorted()))
+        .put("interfaceIpv6", JSONArray(f.interfaceIpv6.sorted()))
 
     private fun facts(o: JSONObject): ServerFacts {
         fun ints(k: String) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optInt(it) }.toSet() } ?: emptySet()
@@ -96,7 +101,12 @@ object ServerJson {
             fail2ban = o.optBoolean("fail2ban"), autoUpdates = o.optBoolean("autoUpdates"),
             sshPasswordLogin = if (o.has("sshPasswordLogin")) o.optBoolean("sshPasswordLogin") else null,
             sshdDropIns = o.optBoolean("sshdDropIns"),
-            services = svc.keys().asSequence().associateWith { svc.optString(it) }
+            services = svc.keys().asSequence().associateWith { svc.optString(it) },
+            socketInspectionAvailable = o.optBoolean("socketInspectionAvailable"),
+            dockerAvailable = o.optBoolean("dockerAvailable"),
+            psiphonInstalled = o.optBoolean("psiphonInstalled"),
+            interfaceIpv4 = o.optJSONArray("interfaceIpv4")?.let { a -> (0 until a.length()).map { a.optString(it) }.toSet() } ?: emptySet(),
+            interfaceIpv6 = o.optJSONArray("interfaceIpv6")?.let { a -> (0 until a.length()).map { a.optString(it) }.toSet() } ?: emptySet()
         )
     }
 }
