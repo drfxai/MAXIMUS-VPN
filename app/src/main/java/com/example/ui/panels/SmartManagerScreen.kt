@@ -57,7 +57,7 @@ internal fun SmartManagerScreen(
     var page by rememberSaveable { mutableIntStateOf(0) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val server = state.servers.firstOrNull { it.id == selectedId } ?: state.servers.firstOrNull()
-    val inspection = remember(server) { server?.let(SmartManagerPlanner::inspect) }
+    val inspection = remember(server) { server?.let { SmartManagerPlanner.inspect(it) } }
     val context = LocalContext.current
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -77,7 +77,7 @@ internal fun SmartManagerScreen(
         if (state.servers.isEmpty()) {
             SmartCard("No VPS connected") {
                 Text("Add an Ubuntu VPS using pinned SSH. Smart Manager never installs anything before inspection.")
-                Button(onClick = vm::openAdd) { Text("Connect VPS") }
+                Button(onClick = { vm.openAdd() }) { Text("Connect VPS") }
             }
             return@Column
         }
@@ -162,7 +162,7 @@ internal fun SmartManagerScreen(
                     val units = ToolScripts.UNITS[tool.id]
                     val status = when {
                         server.facts == null || units.isNullOrEmpty() -> "Unknown"
-                        units.all { server.facts.active(it) } -> "Active (systemd only)"
+                        units.all { server.facts?.active(it) == true } -> "Active (systemd only)"
                         else -> "Inactive or failed"
                     }
                     Text("${tool.id}: $status")
