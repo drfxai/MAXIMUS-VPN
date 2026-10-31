@@ -79,6 +79,14 @@ class SmartManagerPhaseAcceptanceTest {
         assertFalse(ManagedNodeEligibility.allowed(profile,
             listOf(managed.copy(state = ManagedNodeRecord.State.AVAILABLE,
                 updatedAt = now - ManagedNodeEligibility.MAX_EVIDENCE_AGE_MS - 1)), now))
+        val wifiVerified = managed.copy(state = ManagedNodeRecord.State.AVAILABLE,
+            networkKey = "wifi")
+        assertTrue(ManagedNodeEligibility.allowed(profile, listOf(wifiVerified), now,
+            networkKey = "wifi"))
+        assertFalse(ManagedNodeEligibility.allowed(profile, listOf(wifiVerified), now,
+            networkKey = "cell:43235"))
+        assertFalse(ManagedNodeEligibility.allowed(profile, listOf(wifiVerified), now,
+            networkKey = ""))
         val manuallyAdded = VlessProfile(name = "manual", address = "203.0.113.30", port = 443, uuid = "test")
         assertTrue(ManagedNodeEligibility.allowed(manuallyAdded, emptyList(), now))
     }
