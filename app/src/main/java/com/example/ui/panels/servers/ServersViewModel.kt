@@ -25,6 +25,7 @@ import com.example.panels.servers.ManagedNodeRecord
 import com.example.panels.servers.PrivatePsiphonServerScripts
 import com.example.vpn.sidecar.PrivatePsiphonStore
 import com.example.vpn.sidecar.PrivatePsiphonEntry
+import com.example.vpn.smart.NetworkKey
 import com.example.vpn.sidecar.PsiphonSidecar
 import com.example.panels.servers.ServerRandom
 import com.example.panels.servers.ServerStore
@@ -126,7 +127,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             val exists = managedNodes.all().any {
                 it.serverId == server.id && it.serviceId == toolId && it.profileId == profileId
             }
-            if (exists) managedNodes.result(server.id, toolId, profileId, traffic)
+            if (exists) managedNodes.result(server.id, toolId, profileId, traffic,
+                networkKey = NetworkKey.current(getApplication()))
         }
     }
 
@@ -180,7 +182,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val test = testProfile(profile)
         withContext(Dispatchers.IO) {
             managedNodes.result(serverId, PrivatePsiphonServerScripts.TOOL_ID,
-                record.profileId, test.first)
+                record.profileId, test.first, networkKey = NetworkKey.current(getApplication()))
         }
         _state.update {
             it.copy(tests = it.tests + ("${serverId}/${PrivatePsiphonServerScripts.TOOL_ID}" to test))
