@@ -63,9 +63,13 @@ class FailoverManager(
     }
 
     private val scope = com.example.core.managerScope("FAILOVER")
+    private fun currentNetworkKey(): String =
+        runCatching { NetworkKey.current(RayApplication.instance) }.getOrDefault("")
+
     private fun vetted(profiles: List<VlessProfile>): List<VlessProfile> {
         val records = managedRecordsProvider()
-        return profiles.filter { ManagedNodeEligibility.allowed(it, records) }
+        val network = currentNetworkKey()
+        return profiles.filter { ManagedNodeEligibility.allowed(it, records, networkKey = network) }
     }
     private var monitorJob: Job? = null
     private var recoveryProbeJob: Job? = null
@@ -334,7 +338,8 @@ class FailoverManager(
             XrayLogManager.w("GOD_MODE", "Nothing is getting through $safeDegraded; trying the other saved servers.")
 
             // Step 1: Secondary Reality / VLESS nodes
-            val bestFallback = SmartConnect.selectBestNode(candidateProfiles, settings.scoringProfile, managedRecordsProvider())
+            val bestFallback = SmartConnect.selectBestNode(candidateProfiles, settings.scoringProfile,
+                managedRecordsProvider(), networkKey = currentNetworkKey())
 
             if (bestFallback != null) {
                 _currentTier.value = CascadeTier.TIER_2_SECONDARY_NODES
