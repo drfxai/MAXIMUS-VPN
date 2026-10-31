@@ -95,6 +95,7 @@ class ServerManager(
             ServerToolCatalog.KEY_LOGIN -> addKeyLogin(server, progress)
             else -> connect(server).use { shell ->
                 val facts = ServerFacts.parse(shell.run(ServerFacts.SCRIPT, 60_000L).output)
+                check(facts.socketInspectionAvailable) { "Cannot inventory TCP/UDP listeners (ss unavailable); no installation was started." }
                 facts.blocker()?.let { error(it) }
                 val arch = facts.goArch!!
                 when (toolId) {
