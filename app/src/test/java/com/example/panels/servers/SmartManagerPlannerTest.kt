@@ -28,6 +28,15 @@ class SmartManagerPlannerTest {
             stale.candidate(ServerToolCatalog.SOAR)?.status)
     }
 
+    @Test fun refusesPlanningWhenPortInventoryCouldNotBeCollected() {
+        val facts = requireNotNull(host().facts).copy(socketInspectionAvailable = false)
+        val plan = SmartManagerPlanner.inspect(host(facts = facts), now)
+        assertEquals(SmartManagerPlanner.Status.BLOCKED,
+            plan.candidate(ServerToolCatalog.DNSTT)?.status)
+        assertTrue(SmartManagerPlanner.bundleBlockers(
+            plan, setOf(ServerToolCatalog.DNSTT)).isNotEmpty())
+    }
+
     @Test fun refusesPort53EvenWhenNoManagedToolWasPreviouslyInstalled() {
         val facts = requireNotNull(host().facts).copy(udpPorts = setOf(53))
         val plan = SmartManagerPlanner.inspect(host(facts = facts), now)
