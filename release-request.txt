@@ -1,8 +1,7 @@
-V1.0.3 Android versionCode 38
-User-requested GitHub release update from the latest verified main branch on 2026-10-27.
-Includes the merged Soar/Cotten IPv4 DNS listener corrections, port-53 preflight logic, DNSTT redirect/error handling, and complete ownership-scoped panel cleanup from PR #137.
-The prior V1.0.2 build 99 already included these fixes; this is a versioned maintenance refresh, not a claim of additional field-tested VPN functionality.
-Preserve permanent Android signing certificate, pinned native sources and configuration compatibility.
-Require Android tests and release lint, native engines, APK packaging and signing verification, checksums, and Android 15 install/launch smoke check before publication.
-Do not merge PR #20 until independent signed Iranian-network probe infrastructure and deployment prerequisites exist.
-No live SSH access to a VPS or physical ARM64/Iran-network end-to-end traffic validation was performed.
+V1.0.4 Android versionCode 39
+Owner-approved source integration of MAXIMUS Smart Manager PR #148 plus V1.0.4 version bump.
+Include six-section Smart Manager planning, pinned SSH host facts, guarded installer journal, cooperative lock, managed-node evidence, per-network Smart Connect eligibility, read-only monitoring and standalone private Psiphon client-entry import and test.
+Experimental Psiphon server provisioning and DNS Gateway must remain disabled pending reviewed pinned artifacts and real Android-to-VPS integration.
+Free-config multi-ASN verification PR #20 is NOT included due to merge conflicts and absence of real enrolled Iranian probe evidence.
+Require signed Android release, Android unit tests, release lint, verified native build, APK signature/expected certificate match, emulator install smoke, artifacts and checksums before publication.
+Do not change user live VPS, Cloudflare zones, or other production infrastructure as part of this release.
