@@ -6,6 +6,9 @@ import com.example.data.model.OperationalMode
 import com.example.data.model.ServerTestStatus
 import com.example.data.model.VlessProfile
 import com.example.data.repository.ServerRepository
+import com.example.panels.servers.ManagedNodeRecord
+import com.example.panels.servers.SmartNodeStore
+import com.example.RayApplication
 import com.example.vpn.connectivity.SmartFailoverPolicy
 import com.example.vpn.godmode.MaximusMeshManager
 import com.example.vpn.godmode.PsiphonConduitBridge
@@ -45,6 +48,10 @@ class FailoverManager(
     private val passive: PassiveHealth? = null,
     /** True while the session must stay on the config the user picked (the power button): nothing is switched. */
     private val staysOnSelected: () -> Boolean = { false },
+    /** Keystore-backed evidence, injected for JVM tests; corruption fails closed for private nodes. */
+    private val managedRecordsProvider: () -> List<ManagedNodeRecord> = {
+        runCatching { SmartNodeStore(RayApplication.instance).all() }.getOrDefault(emptyList())
+    },
     private val onTriggerSwitch: (VlessProfile, String) -> Unit
 ) {
     enum class CascadeTier(val stageNumber: Int, val title: String, val badge: String) {
@@ -56,6 +63,10 @@ class FailoverManager(
     }
 
     private val scope = com.example.core.managerScope("FAILOVER")
+    private fun vetted(profiles: List<VlessProfile>): List<VlessProfile> {
+        val records = managedRecordsProvider()
+        return profiles.filter { ManagedNodeEligibility.allowed(it, records) }
+    }
     private var monitorJob: Job? = null
     private var recoveryProbeJob: Job? = null
     private var failoverJob: Job? = null
@@ -90,7 +101,7 @@ class FailoverManager(
             runCatching {
                 // Backups with recent real-traffic evidence first; the label says what is actually known.
                 val plan = SmartFailoverPolicy.plan(currentProfile,
-                    byFreshEvidence(eligibleFallbacks(serverRepository.allProfiles.first(), currentProfile)), { com.example.vpn.connectivity.BackupEvidence.rank(it) })
+                    byFreshEvidence(vetted(eligibleFallbacks(serverRepository.allProfiles.first(), currentProfile))), { com.example.vpn.connectivity.BackupEvidence.rank(it) })
                 _backupPlan.value = plan
                 fun label(b: SmartFailoverPolicy.Backup?, none: String) =
                     b?.let { "${it.kind} on ${it.failureDomain} (${com.example.vpn.connectivity.BackupEvidence.describe(it.profile)})" } ?: none
@@ -245,7 +256,7 @@ class FailoverManager(
                 if (_currentTier.value.stageNumber > 1) {
                     try {
                         val profiles = serverRepository.allProfiles.first()
-                        val topPrimary = profiles.filter { !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") && !it.id.startsWith("hub-") }
+                        val topPrimary = vetted(profiles.filter { !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") && !it.id.startsWith("hub-") })
                             .maxByOrNull { it.overallScore }
                             ?.takeIf { it.effectiveFingerprint != currentActiveProfile?.effectiveFingerprint }
 
@@ -292,7 +303,7 @@ class FailoverManager(
         val safeDegraded = SecretRedactor.redact(degradedProfile.name)
 
         // Non-degraded candidates pool (excluding current failing node, bridges, mesh)
-        val nonDegraded = eligibleFallbacks(allProfiles, degradedProfile)
+        val nonDegraded = vetted(eligibleFallbacks(allProfiles, degradedProfile))
         // A filter that stops one node usually stops its whole kind (QUIC, a TLS fingerprint, a CDN
         // path), so the next node is of a kind that has not failed during this outage.
         failedFamilies.add(protocolFamily(degradedProfile))
@@ -323,7 +334,7 @@ class FailoverManager(
             XrayLogManager.w("GOD_MODE", "Nothing is getting through $safeDegraded; trying the other saved servers.")
 
             // Step 1: Secondary Reality / VLESS nodes
-            val bestFallback = SmartConnect.selectBestNode(candidateProfiles, settings.scoringProfile)
+            val bestFallback = SmartConnect.selectBestNode(candidateProfiles, settings.scoringProfile, managedRecordsProvider())
 
             if (bestFallback != null) {
                 _currentTier.value = CascadeTier.TIER_2_SECONDARY_NODES
