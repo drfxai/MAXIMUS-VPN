@@ -19,6 +19,41 @@ These checks are advisory: port availability can change between inspections, so 
 
 `Cloudflare` uses the existing `TokenTemplate.SMART_DOMAINS` template for `zone/read` and `dns/edit` on user-reviewed zone scopes. The create-token action opens the **official** Cloudflare dashboard. It never programmatically creates a token or modifies DNS by itself. See https://developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template/.
 
+## Additional staged foundations (subsequent commits; not production-certified)
+
+**Encrypted operation journal:** `SmartOperationStore` stores approved installation attempts
+(RUNNING → VERIFYING → COMPLETED, or UNCERTAIN). An interrupted operation is quarantined
+until a fresh authenticated server inspection and explicit user acknowledgement; the app
+does not retry or roll back automatically. The existing install wizard now refreshes SSH
+facts immediately before executing its original installer. COMPLETED describes the
+install workflow, not a verified VPN tunnel. The journal does **not** yet provide a
+durable remote-side transaction lock, undo log or resumable installation checkpoints.
+
+**Port planner:** `SmartPortPlanner` models protocol/address-specific claims and denies
+occupied sockets, stale/unavailable inventories and conflicting public port requests.
+Because the current remote `ss` snapshot aggregates listeners across interfaces, any
+observed listener on the proposed protocol/port is treated as a conflict. Planning
+does **not** reserve remote sockets, modify firewall/NAT or license DNS multiplexing.
+
+**Private Psiphon client bootstrap:** `PrivatePsiphonStore` stores a validated
+`server-entry.dat` with generated private channel/sponsor identifiers under Android
+Keystore-backed encryption. `PsiphonSidecar` has an independent private configuration
+provider and builds a `TargetServerEntry`-only client config, without needing public
+server-list settings or disabling validation. Existing public Psiphon behavior and its
+one-lambda constructor remain supported. This capability cannot yet be used end-to-end:
+no pinned `psiphond` release artifact, standalone install wizard, generated server-entry
+transfer, tested core version compatibility or real tunnel measurement is included.
+
+**Managed node provenance:** `SmartNodeStore` keeps a separate encrypted lifecycle
+record for profile IDs produced by server tools. Approved installations reset their
+state to CONFIGURED; successful measured client traffic may change it to AVAILABLE,
+and failed tests mark it STALE. Existing manually imported nodes are preserved. The
+main Smart Connect ranking path is **not yet gated** on this ledger.
+
+**Tests added but not considered successful until GitHub Actions confirms:** port
+planning, private Psiphon config isolation, lifecycle decoding and no fabricated
+verification states. No user VPS, Cloudflare zone or production Android VPN was used.
+
 ## Phase 2 — secure transaction coordinator (NOT implemented)
 
 Before offering a full-bundle confirmation, implement server-side durable operation IDs and journals, per-protocol/per-address socket bindings (including IPv6 v6only behavior), advisory locks with expiry, optimistic state versioning, a second preflight check and atomic service activation. Persist idempotent mutation checkpoints and inverse rollback commands. A preview must include affected systemd units, files, firewall ports, DNS changes, ownership and backup hashes. Never run curl-pipe-shell scripts or overwrite unrelated units. Remote installation requires explicit approval **after** displaying the final plan.
