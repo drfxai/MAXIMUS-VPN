@@ -152,12 +152,16 @@ internal fun SmartManagerScreen(
                 Text("There is no one-click bundle deployment until transaction recovery, port reservations and multi-engine compatibility are validated.")
             }
             4 -> SmartCard("Unified Nodes · provenance") {
-                val profiles = server.tools.filter { it.profileId != null }
-                Text("${profiles.size} tools have a stored profile reference on this VPS.")
-                if (profiles.isEmpty()) Text("No linked managed profiles. This does not count manually imported nodes.")
-                profiles.forEach { tool ->
-                    Text("${tool.id}: profile reference exists; live tunnel verification is required.")
+                val managed = vm.managedNodesFor(server.id)
+                Text("${managed.size} generated profiles have managed-provenance records.")
+                if (managed.isEmpty()) Text("No managed profiles tracked yet. Existing manual nodes are preserved.")
+                managed.forEach { node ->
+                    Text("${node.serviceId}: ${node.state.name}")
+                    if (node.state != com.example.panels.servers.ManagedNodeRecord.State.AVAILABLE)
+                        Text("Not eligible as a verified managed connection until real phone traffic passes.",
+                            style = MaterialTheme.typography.bodySmall)
                 }
+                Text("Service inventory is separate from verified Nodes. A stored profile alone is not proof of a usable tunnel.")
                 OutlinedButton(onClick = { vm.openDetail(server.id) }) {
                     Text("Inspect generated profiles & test")
                 }
