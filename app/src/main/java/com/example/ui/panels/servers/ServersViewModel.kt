@@ -24,6 +24,7 @@ import com.example.panels.servers.SmartNodeStore
 import com.example.panels.servers.ManagedNodeRecord
 import com.example.panels.servers.PrivatePsiphonServerScripts
 import com.example.vpn.sidecar.PrivatePsiphonStore
+import com.example.vpn.sidecar.PrivatePsiphonEntry
 import com.example.vpn.sidecar.PsiphonSidecar
 import com.example.panels.servers.ServerRandom
 import com.example.panels.servers.ServerStore
@@ -144,6 +145,14 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 check(!duplicate) { "A private Psiphon profile is already registered for this VPS. Test or review it first." }
+                val description = requireNotNull(PrivatePsiphonEntry.inspect(raw.trim())) {
+                    "Invalid private Psiphon server entry; check the complete psiphond output."
+                }
+                if (PrivatePsiphonEntry.validIp(server.host)) {
+                    check(description.ipAddress == server.host) {
+                        "The server entry targets a different IP than the selected VPS. No profile was saved."
+                    }
+                }
                 val id = withContext(Dispatchers.IO) { PrivatePsiphonStore(getApplication()).save(raw) }
                 val profile = PsiphonSidecar.privateProfile(id, server.displayName, server.host)
                 val stored = storeProfile(null, profile) ?: error("The private profile could not be saved.")
