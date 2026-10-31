@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.example.panels.cloudflare.TokenTemplate
 import com.example.panels.servers.ManagedServer
 import com.example.panels.servers.SmartOperation
+import com.example.panels.servers.SmartServerHealth
 import com.example.panels.servers.SmartManagerPlanner
 import com.example.panels.servers.ToolScripts
 import com.example.ui.panels.servers.ServersState
@@ -167,6 +168,9 @@ internal fun SmartManagerScreen(
                 }
             }
             else -> SmartCard("Smart Connect & Monitoring") {
+                val health = SmartServerHealth.evaluate(server)
+                Text("Infrastructure: ${health.level.name.replace('_', ' ')}", fontWeight = FontWeight.Bold)
+                health.concerns.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
                 Text("Service status comes from the last authenticated systemd inspection. It is not an internet connectivity test.")
                 server.tools.forEach { tool ->
                     val units = ToolScripts.UNITS[tool.id]
