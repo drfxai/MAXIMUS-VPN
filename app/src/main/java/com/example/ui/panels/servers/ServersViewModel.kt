@@ -22,6 +22,9 @@ import com.example.panels.servers.SmartOperation
 import com.example.panels.servers.SmartOperationStore
 import com.example.panels.servers.SmartNodeStore
 import com.example.panels.servers.ManagedNodeRecord
+import com.example.panels.servers.PrivatePsiphonServerScripts
+import com.example.vpn.sidecar.PrivatePsiphonStore
+import com.example.vpn.sidecar.PsiphonSidecar
 import com.example.panels.servers.ServerRandom
 import com.example.panels.servers.ServerStore
 import com.example.panels.servers.ServerToolCatalog
@@ -124,6 +127,57 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (exists) managedNodes.result(server.id, toolId, profileId, traffic)
         }
+    }
+
+    /** Save a private psiphond server entry in Keystore, without claiming the remote VPS is installed. */
+    fun importPrivatePsiphonEntry(serverId: String, raw: String) {
+        val server = server(serverId) ?: return emit(ServersEvent.Message("Select a saved VPS."))
+        if (raw.isBlank() || raw.length > 262_144) {
+            emit(ServersEvent.Message("Paste a bounded private psiphond server-entry.dat value."))
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val duplicate = withContext(Dispatchers.IO) {
+                    managedNodes.all().any {
+                        it.serverId == serverId && it.serviceId == PrivatePsiphonServerScripts.TOOL_ID
+                    }
+                }
+                check(!duplicate) { "A private Psiphon profile is already registered for this VPS. Test or review it first." }
+                val id = withContext(Dispatchers.IO) { PrivatePsiphonStore(getApplication()).save(raw) }
+                val profile = PsiphonSidecar.privateProfile(id, server.displayName, server.host)
+                val stored = storeProfile(null, profile) ?: error("The private profile could not be saved.")
+                withContext(Dispatchers.IO) {
+                    managedNodes.configured(serverId, PrivatePsiphonServerScripts.TOOL_ID, stored)
+                }
+                emit(ServersEvent.Message("Private server entry encrypted and added to Nodes as unverified. Run the phone traffic test."))
+                _state.update { it.copy(tests = it.tests - ("${serverId}/${PrivatePsiphonServerScripts.TOOL_ID}")) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                emit(ServersEvent.Message(com.example.panels.servers.ServerLogSanitizer.redact(
+                    e.message ?: "Private Psiphon import failed.")))
+            }
+        }
+    }
+
+    fun testPrivatePsiphon(serverId: String) = serverAction(serverId, "Testing private Psiphon tunnel from this phone…") { s ->
+        val record = withContext(Dispatchers.IO) {
+            managedNodes.all().firstOrNull {
+                it.serverId == serverId && it.serviceId == PrivatePsiphonServerScripts.TOOL_ID
+            }
+        } ?: error("Import a private Psiphon server entry first.")
+        val profile = RayApplication.instance.serverRepository.getProfileById(record.profileId)
+            ?: error("The imported profile no longer exists.")
+        val test = testProfile(profile)
+        withContext(Dispatchers.IO) {
+            managedNodes.result(serverId, PrivatePsiphonServerScripts.TOOL_ID,
+                record.profileId, test.first)
+        }
+        _state.update {
+            it.copy(tests = it.tests + ("${serverId}/${PrivatePsiphonServerScripts.TOOL_ID}" to test))
+        }
+        emit(ServersEvent.Message(if (test.first) "Private Psiphon: real tunnel traffic verified."
+            else "Private Psiphon not verified: ${test.second}"))
     }
 
     /** Local audited history: UNCERTAIN requires fresh inspection and manual reconciliation. */
