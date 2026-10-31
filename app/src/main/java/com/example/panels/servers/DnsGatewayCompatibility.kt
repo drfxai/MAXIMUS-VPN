@@ -34,7 +34,7 @@ object DnsGatewayCompatibility {
                 it.length > 63 || it.startsWith('-') || it.endsWith('-')
             }) blockers += "Invalid authoritative domain suffix for ${route.engine}."
             if (!loopbackTarget.matches(route.upstream) ||
-                route.upstream.substringAfter(':').toIntOrNull() !in 1..65535)
+                (route.upstream.substringAfter(':').toIntOrNull() ?: -1) !in 1..65535)
                 blockers += "DNS gateway upstream must be a valid loopback UDP endpoint."
         }
         normalized.forEachIndexed { i, a ->
