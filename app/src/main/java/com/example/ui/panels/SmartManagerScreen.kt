@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.panels.cloudflare.TokenTemplate
 import com.example.panels.servers.ManagedServer
+import com.example.panels.servers.SmartOperation
 import com.example.panels.servers.SmartManagerPlanner
 import com.example.panels.servers.ToolScripts
 import com.example.ui.panels.servers.ServersState
@@ -171,6 +172,18 @@ internal fun SmartManagerScreen(
                         else -> "Inactive or failed"
                     }
                     Text("${tool.id}: $status")
+                }
+                Text("Approved install operation journal", fontWeight = FontWeight.SemiBold)
+                vm.operationsFor(server.id).forEach { op ->
+                    Text("${op.toolId}: ${op.status.name}")
+                    if (op.status == SmartOperation.Status.UNCERTAIN) {
+                        Text("Remote effects unknown. Reinspection is required before another install.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = { vm.reconcileUncertainOperation(server.id, op.id) }) {
+                            Text("Reinspect & acknowledge interrupted operation")
+                        }
+                    }
                 }
                 Text("Smart Connect eligibility requires actual current-network tunnel transfer and security checks.")
                 OutlinedButton(onClick = { vm.refresh(server.id) }) {
