@@ -86,12 +86,15 @@ data class ServerFacts(
             if [ -n "§SUDO" ]; then echo SUDO=1; else echo SUDO=0; fi
             if [ -d /run/systemd/system ]; then echo SYSTEMD=1; else echo SYSTEMD=0; fi
             for p in apt-get dnf yum apk; do if command -v §p >/dev/null 2>&1; then echo "PKG=§p"; break; fi; done
-            if command -v ss >/dev/null 2>&1; then
+            if command -v ss >/dev/null 2>&1 &&
+               ss -Hlnt >/dev/null 2>&1 && ss -Hlnu >/dev/null 2>&1; then
               echo SOCKETS=1
               echo "TCP=§(ss -Hlnt 2>/dev/null | awk '{print §4}' | grep -vE '^(127[.]|[[]::1[]]|::1)' | sed 's/.*://' | sort -un | tr '\n' ',')"
               echo "UDP=§(ss -Hlnu 2>/dev/null | awk '{print §4}' | grep -vE '^(127[.]|[[]::1[]]|::1)' | sed 's/.*://' | sort -un | tr '\n' ',')"
             fi
-            if command -v ss >/dev/null 2>&1; then :; else echo SOCKETS=0; fi
+            else
+              echo SOCKETS=0
+            fi
             echo "IPV4=§(ip -o -4 addr show scope global 2>/dev/null | awk '{split(§4,a,"/");print a[1]}' | paste -sd, -)"
             echo "IPV6=§(ip -o -6 addr show scope global 2>/dev/null | awk '{split(§4,a,"/");print a[1]}' | paste -sd, -)"
             if command -v docker >/dev/null 2>&1; then echo DOCKER=1; else echo DOCKER=0; fi
