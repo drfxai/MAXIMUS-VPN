@@ -10,7 +10,7 @@ class SmartManagerPlannerTest {
     private fun host(
         facts: ServerFacts? = ServerFacts(
             osId = "ubuntu", arch = "x86_64", packageManager = "apt-get",
-            root = true, systemd = true, ramMb = 2048, diskFreeMb = 20_000
+            root = true, systemd = true, socketInspectionAvailable = true, ramMb = 2048, diskFreeMb = 20_000
         ),
         tools: List<InstalledTool> = emptyList(),
         checkedAt: Long = now - 2_000
