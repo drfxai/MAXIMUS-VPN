@@ -299,7 +299,7 @@ fun PanelManagerScreen(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val tabs = listOf("Servers", "Install", "Cloudflare", "Clean IP", "Tunnel", "Smart Manager")
+            val tabs = listOf("Servers", "Install", "Cloudflare", "Clean IP", "Tunnel", "Smart Manager", "Psiphon Server")
             tabs.forEachIndexed { index, title ->
                 val isSelected = (selectedPanelId != null && index == 0) || (selectedPanelId == null && selectedTab == index)
                 Surface(
@@ -632,6 +632,10 @@ fun PanelManagerScreen(
                 }
 
                 // TAB 5: SMART MANAGER (read-only admission, existing approved workflows)
+                if (selectedTab == 6) {
+                    PrivatePsiphonServerScreen(serversVm, serversState)
+                }
+
                 if (selectedTab == 5) {
                     SmartManagerScreen(
                         vm = serversVm, state = serversState,
