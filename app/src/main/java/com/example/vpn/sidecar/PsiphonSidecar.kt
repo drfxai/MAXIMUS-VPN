@@ -38,6 +38,9 @@ class PsiphonSidecar(
     private val configProvider: () -> String?,
     private val privateConfigProvider: (String) -> String? = { null }
 ) : SidecarEngine {
+    /** Preserve call sites using PsiphonSidecar { publicSettings } or PsiphonSidecar(provider). */
+    constructor(configProvider: () -> String?) : this(configProvider, { null })
+
     override val id: String = ID
     override val binary: String = BINARY
 
