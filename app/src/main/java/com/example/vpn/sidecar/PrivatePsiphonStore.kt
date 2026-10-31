@@ -46,13 +46,11 @@ class PrivatePsiphonStore(context: Context) {
         private val random = SecureRandom()
         private val ID = Regex("^[0-9a-fA-F-]{36}$")
         private val IDENTIFIER = Regex("^[0-9a-fA-F]{16}$")
-        private val ENTRY = Regex("^[0-9a-fA-F]+$")
-
+        
         fun validId(id: String): Boolean = ID.matches(id) &&
             runCatching { UUID.fromString(id).toString().equals(id, ignoreCase = true) }.getOrDefault(false)
         fun validIdentifier(value: String): Boolean = IDENTIFIER.matches(value)
-        fun validEntry(entry: String): Boolean =
-            entry.length in 64..262_144 && entry.length % 2 == 0 && ENTRY.matches(entry)
+        fun validEntry(entry: String): Boolean = PrivatePsiphonEntry.inspect(entry) != null
 
         private fun randomHex(bytes: Int): String {
             val payload = ByteArray(bytes).also(random::nextBytes)
