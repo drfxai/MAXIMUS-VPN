@@ -46,6 +46,13 @@ Do not assume CoreDNS forwarding supports every DNSTT, SOAR, CottenDNS and Cotte
 
 After successful transport validation, add a lifecycle-aware `Nodes` reconciler with provenance (VPS/service/config version), credential-safe import, syntactic checks, phone-based traffic validation, deduplication and revocation. Integrate only verified nodes into Smart Connect. Include Wi-Fi/cellular-specific history and common VPS failure-domain awareness.
 
+## Verified local checks (source-exact, not Android integration tests)
+
+- The exact Git blob `ServerFacts.kt` (`dbea4c665727ee9167195e6fceb11b49b38933f6`) compiled with the available Kotlin 1.9 compiler; its extracted SSH inspection script passed `sh -n`.
+- The exact Git blob `SmartManagerPlanner.kt` (`dbc10f8dddeb5dc998d8479b0c5d518da6d0f204`) compiled alongside `ServerFacts`, `ManagedServer` and `ServerToolCatalog` in a standalone JVM smoke harness.
+- Six smoke assertions passed covering single DNS admission, unavailable socket inventory, occupied UDP 53, DNS bundle rejection, Hiddify isolation and private-Psiphon gating.
+- These are **not** substitutes for Android Gradle CI, the JUnit suite, a real VPS, or a real VPN tunnel. No emulator screenshot was taken.
+
 ## Release acceptance matrix
 
 | Area | Phase 1 status |
