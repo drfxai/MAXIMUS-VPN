@@ -35,6 +35,9 @@ object InstallChecks {
         add(CheckItem("Signed in over SSH", true, "Host key ${server.hostKeySha256.removePrefix("SHA256:").take(12)}… matches"))
         add(CheckItem("Administrator access", facts.canAdmin,
             if (facts.root) "root" else if (facts.sudo) "passwordless sudo" else "this account needs root or passwordless sudo"))
+        add(CheckItem("Socket inventory", facts.socketInspectionAvailable,
+            if (facts.socketInspectionAvailable) "TCP/UDP listener inspection completed" else "ss/iproute2 unavailable: port assignments cannot be verified",
+            blocking = !facts.socketInspectionAvailable))
         add(CheckItem("System", facts.systemd && facts.goArch != null,
             listOf(facts.osName.ifBlank { "Linux" }, facts.arch).filter { it.isNotBlank() }.joinToString(" · ") +
                 if (!facts.systemd) " · no systemd" else ""))
