@@ -12,11 +12,14 @@ object Sidecars {
         listOf(
             ByedpiSidecar,
             MihomoSidecar,
-            PsiphonSidecar {
-                psiphonSettings?.invoke() ?: PsiphonSidecar.assetProvider { name ->
-                    openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
-                }.invoke()
-            },
+            PsiphonSidecar(
+                configProvider = {
+                    psiphonSettings?.invoke() ?: PsiphonSidecar.assetProvider { name ->
+                        openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
+                    }.invoke()
+                },
+                privateConfigProvider = { id -> privatePsiphonSettings?.invoke(id) }
+            ),
             DnsttSidecar(),
             CottenDnsSidecar(),
             SoarSidecar(),
