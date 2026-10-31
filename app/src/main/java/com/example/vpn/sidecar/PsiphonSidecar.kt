@@ -34,7 +34,10 @@ import java.io.InputStream
  *   to Go's own, which on Android without cgo has no /etc/resolv.conf and asks 127.0.0.1:53. We
  *   therefore give it DNSResolverAlternateServers (plain IPs) unless the build's settings do.
  */
-class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine {
+class PsiphonSidecar(
+    private val configProvider: () -> String?,
+    private val privateConfigProvider: (String) -> String? = { null }
+) : SidecarEngine {
     override val id: String = ID
     override val binary: String = BINARY
 
@@ -42,6 +45,13 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
         ProfileExtras.read(profile).optString(KEY_ENGINE) == ID
 
     override fun problem(profile: VlessProfile): String? {
+        val privateId = privateId(profile)
+        if (privateId.isNotEmpty()) {
+            if (!PrivatePsiphonStore.validId(privateId)) return "Invalid private Psiphon profile identity."
+            val config = privateSettings(privateId)
+                ?: return "Private Psiphon bootstrap unavailable in encrypted storage."
+            return validatePrivateSettings(config)
+        }
         val settings = networkSettings() ?: return MISSING_SETTINGS
         incompleteReason(settings)?.let { return it }
         if (!validRegion(region(profile))) return "The Psiphon region must be a two-letter country code, or empty for any region."
@@ -51,7 +61,12 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
         problem(profile)?.let { throw IllegalStateException(it) }
         val dataDir = File(context.workDir, DATA_DIR).apply { mkdirs() }
-        val config = buildConfig(networkSettings()!!, region(profile), context.socksPort, dataDir, context.upstreamSocks, context.upstreamUser, context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null)
+        val privateId = privateId(profile)
+        val source = if (privateId.isNotEmpty()) requireNotNull(privateSettings(privateId))
+            else requireNotNull(networkSettings())
+        val config = buildConfig(source, if (privateId.isNotEmpty()) "" else region(profile),
+            context.socksPort, dataDir, context.upstreamSocks, context.upstreamUser,
+            context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null)
         val configFile = File(context.workDir, CONFIG_FILE)
         configFile.writeText(config.toString())
         // The settings are not secret in the cryptographic sense, but no other app needs to read them.
@@ -73,6 +88,11 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
         )
     }
 
+    private fun privateSettings(id: String): JSONObject? {
+        if (!PrivatePsiphonStore.validId(id)) return null
+        return runCatching { privateConfigProvider(id)?.let(::JSONObject) }.getOrNull()
+    }
+
     private fun networkSettings(): JSONObject? {
         val raw = runCatching { configProvider() }.getOrNull()?.trim()
         if (raw.isNullOrEmpty()) return null
@@ -86,6 +106,7 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
         const val ASSET_PATH = "psiphon/config.json"
         const val KEY_ENGINE = "engine"
         const val KEY_REGION = "region"
+        const val KEY_PRIVATE_PROFILE_ID = "privateProfileId"
         const val CONFIG_FILE = "psiphon.config"
         const val DATA_DIR = "data"
         /** The port opens early (see the class comment); this only covers a slow first start. */
@@ -126,6 +147,36 @@ class PsiphonSidecar(private val configProvider: () -> String?) : SidecarEngine 
                 protocolType = ProtocolType.MIXED,
                 extraSettings = extras.toString()
             )
+        }
+
+        /** Creates a node with an opaque reference, never the raw server entry. */
+        fun privateProfile(id: String, serverName: String, serverAddress: String): VlessProfile {
+            require(PrivatePsiphonStore.validId(id)) { "Invalid private Psiphon reference" }
+            require(serverAddress.isNotBlank())
+            val extras = JSONObject().put(KEY_ENGINE, ID).put(KEY_PRIVATE_PROFILE_ID, id)
+            return VlessProfile(
+                name = "Psiphon Private · " + serverName.take(48),
+                address = serverAddress, port = 0, uuid = "",
+                profileType = ProfileType.VLESS, protocolType = ProtocolType.MIXED,
+                extraSettings = extras.toString()
+            )
+        }
+
+        fun privateId(profile: VlessProfile): String =
+            ProfileExtras.read(profile).optString(KEY_PRIVATE_PROFILE_ID)
+
+        /** TargetServerEntry exclusively selects the private VPS, without public server lists. */
+        fun validatePrivateSettings(source: JSONObject): String? {
+            if (!PrivatePsiphonStore.validEntry(source.optString("TargetServerEntry")))
+                return "Invalid or missing private Psiphon server entry."
+            if (!PrivatePsiphonStore.validIdentifier(source.optString("SponsorId")) ||
+                !PrivatePsiphonStore.validIdentifier(source.optString("PropagationChannelId")))
+                return "Missing private Psiphon channel or sponsor identifier."
+            if (source.has("RemoteServerListURLs") || source.has("ObfuscatedServerListRootURLs"))
+                return "Private Psiphon bootstrap must not include public server lists."
+            if (source.optBoolean("SkipVerify") || source.optBoolean("DisableTLSValidation"))
+                return "Private Psiphon cannot disable server verification."
+            return null
         }
 
         fun tcpOnly(profile: VlessProfile): Boolean = ProfileExtras.read(profile).optBoolean("tcpOnly")
