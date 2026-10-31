@@ -20,6 +20,8 @@ import com.example.panels.servers.ServerLocation
 import com.example.panels.servers.ServerManager
 import com.example.panels.servers.SmartOperation
 import com.example.panels.servers.SmartOperationStore
+import com.example.panels.servers.SmartNodeStore
+import com.example.panels.servers.ManagedNodeRecord
 import com.example.panels.servers.ServerRandom
 import com.example.panels.servers.ServerStore
 import com.example.panels.servers.ServerToolCatalog
@@ -95,6 +97,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     private val store = ServerStore(app)
     private val manager = ServerManager()
     private val operations = SmartOperationStore(app)
+    private val managedNodes = SmartNodeStore(app)
     private val http = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).build()
     private val _state = MutableStateFlow(ServersState(servers = runCatching { store.load() }.getOrDefault(emptyList())))
     val state: StateFlow<ServersState> = _state.asStateFlow()
@@ -107,6 +110,19 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             runCatching { operations.markInterrupted() }.onFailure {
                 _state.update { state -> state.copy(error = "Cannot read secure operation history. Server mutations are disabled until storage is repaired.") }
             }
+        }
+    }
+
+    fun managedNodesFor(serverId: String): List<ManagedNodeRecord> =
+        runCatching { managedNodes.all().filter { it.serverId == serverId } }.getOrDefault(emptyList())
+
+    private suspend fun recordManagedTest(server: ManagedServer, toolId: String, traffic: Boolean) {
+        val profileId = server.tool(toolId)?.profileId ?: return
+        withContext(Dispatchers.IO) {
+            val exists = managedNodes.all().any {
+                it.serverId == server.id && it.serviceId == toolId && it.profileId == profileId
+            }
+            if (exists) managedNodes.result(server.id, toolId, profileId, traffic)
         }
     }
 
@@ -580,6 +596,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     fun test(id: String, toolId: String) = serverAction(id, "Testing ${toolTitle(toolId)} from this phone…") { s ->
         val profile = profileFor(s, toolId) ?: error("No config for this tool on this phone")
         val result = withDelegation(s, toolId, testProfile(profile))
+        recordManagedTest(s, toolId, result.first)
         _state.update { it.copy(tests = it.tests + ("${s.id}/$toolId" to result)) }
         if (!result.first && toolId in setOf(ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT)) {
             // Keep phone/engine evidence separate from a read-only server snapshot.
@@ -705,6 +722,13 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             emit(ServersEvent.PanelsChanged)
         }
         save(server)
+        if (tool != null) {
+            server.tool(tool.id)?.profileId?.let { profileId ->
+                withContext(Dispatchers.IO) {
+                    managedNodes.configured(server.id, tool.id, profileId)
+                }
+            }
+        }
         return server
     }
 
@@ -1006,6 +1030,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 false to com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "Test failed")
             }
+            runCatching { recordManagedTest(s, w.tool.id, r.first) }
+                .onFailure { emit(ServersEvent.Message("Managed-node verification record could not be updated.")) }
             _state.update { st ->
                 val current = st.wizard
                 if (current == null || generation != wizardTestGeneration || current.serverId != w.serverId ||
