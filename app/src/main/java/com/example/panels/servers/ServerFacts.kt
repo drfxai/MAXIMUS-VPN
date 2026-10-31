@@ -91,7 +91,6 @@ data class ServerFacts(
               echo SOCKETS=1
               echo "TCP=§(ss -Hlnt 2>/dev/null | awk '{print §4}' | grep -vE '^(127[.]|[[]::1[]]|::1)' | sed 's/.*://' | sort -un | tr '\n' ',')"
               echo "UDP=§(ss -Hlnu 2>/dev/null | awk '{print §4}' | grep -vE '^(127[.]|[[]::1[]]|::1)' | sed 's/.*://' | sort -un | tr '\n' ',')"
-            fi
             else
               echo SOCKETS=0
             fi
