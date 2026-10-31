@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.example.PrivatePsiphonFixtures
 import java.security.MessageDigest
 
 class PrivatePsiphonProvisionerTest {
@@ -37,7 +38,7 @@ class PrivatePsiphonProvisionerTest {
             uploaded = true
         }
         override fun download(remotePath: String, maxBytes: Int) =
-            "31".repeat(150).toByteArray()
+            PrivatePsiphonFixtures.entry().toByteArray()
         override fun close() = Unit
     }
 
@@ -48,7 +49,7 @@ class PrivatePsiphonProvisionerTest {
         assertTrue(remote.uploaded)
         assertTrue(remote.installStarted)
         assertEquals(8888, result.port)
-        assertEquals("31".repeat(150), result.serverEntry)
+        assertEquals(PrivatePsiphonFixtures.entry(), result.serverEntry)
         assertEquals(PrivatePsiphonServerScripts.TOOL_ID, result.server.tools.last().id)
     }
 
