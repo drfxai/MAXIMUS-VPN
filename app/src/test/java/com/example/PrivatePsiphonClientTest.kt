@@ -18,7 +18,7 @@ import java.util.UUID
 class PrivatePsiphonClientTest {
     private val id = UUID.randomUUID().toString()
     // Hex-encoded fixture, NOT a real server entry or usable cryptographic key.
-    private val fixture = "31".repeat(300)
+    private val fixture = PrivatePsiphonFixtures.entry()
     private val settings = JSONObject()
         .put("SponsorId", "0123456789ABCDEF")
         .put("PropagationChannelId", "FEDCBA9876543210")
