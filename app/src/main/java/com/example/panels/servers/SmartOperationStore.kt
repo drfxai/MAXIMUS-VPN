@@ -100,9 +100,8 @@ class SmartOperationStore(context: Context) {
 
         /** Unknown or corrupted data may never be promoted to an installed/verified state. */
         fun decode(raw: String): List<SmartOperation> {
-            val values = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
-            return (0 until values.length()).mapNotNull { index ->
-                runCatching {
+            val values = JSONArray(raw) // malformed persisted state must fail closed
+            return (0 until values.length()).map { index ->
                     val v = values.getJSONObject(index)
                     SmartOperation(
                         id = v.getString("id"), serverId = v.getString("serverId"),
@@ -111,7 +110,6 @@ class SmartOperationStore(context: Context) {
                         startedAt = v.getLong("startedAt"), updatedAt = v.getLong("updatedAt"),
                         preflightAt = v.getLong("preflightAt")
                     )
-                }.getOrNull()
             }
         }
     }
