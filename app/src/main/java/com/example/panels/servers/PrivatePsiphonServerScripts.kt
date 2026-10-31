@@ -31,7 +31,7 @@ object PrivatePsiphonServerScripts {
         val octets = address.split('.')
         return octets.size == 4 && octets.all { s ->
             s.isNotBlank() && s.length <= 3 && s.all(Char::isDigit) &&
-                (s.length == 1 || s[0] != '0') && s.toIntOrNull() in 0..255
+                (s.length == 1 || s[0] != '0') && (s.toIntOrNull() ?: -1) in 0..255
         }
     }
 
