@@ -14,7 +14,9 @@ data class ManagedNodeRecord(
     val serviceId: String,
     val profileId: String,
     val state: State,
-    val updatedAt: Long
+    val updatedAt: Long,
+    /** Coarse network category (wifi / ethernet / cell:MCCMNC), never SSID, BSSID or SIM identifier. */
+    val networkKey: String = ""
 ) {
     enum class State { CONFIGURED, TESTING, AVAILABLE, STALE, INVALID }
 }
@@ -46,18 +48,19 @@ class SmartNodeStore(context: Context) {
      */
     @Synchronized
     fun result(serverId: String, serviceId: String, profileId: String, trafficVerified: Boolean,
-               now: Long = System.currentTimeMillis()) {
+               now: Long = System.currentTimeMillis(), networkKey: String = "") {
         change(serverId, serviceId, profileId,
-            if (trafficVerified) ManagedNodeRecord.State.AVAILABLE else ManagedNodeRecord.State.STALE, now)
+            if (trafficVerified && networkKey.isNotBlank()) ManagedNodeRecord.State.AVAILABLE
+            else ManagedNodeRecord.State.STALE, now, networkKey)
     }
 
     private fun change(serverId: String, serviceId: String, profileId: String,
-                       status: ManagedNodeRecord.State, now: Long) {
+                       status: ManagedNodeRecord.State, now: Long, networkKey: String = "") {
         val list = all()
         val entry = list.firstOrNull { it.serverId == serverId && it.serviceId == serviceId }
         require(entry != null && entry.profileId == profileId) { "Managed node identity mismatch; reimport and retest." }
         persist(list.map {
-            if (it == entry) it.copy(state = status, updatedAt = now) else it
+            if (it == entry) it.copy(state = status, updatedAt = now, networkKey = networkKey.take(48)) else it
         })
     }
 
@@ -66,7 +69,7 @@ class SmartNodeStore(context: Context) {
             records.takeLast(MAX).forEach { entry ->
                 put(JSONObject().put("serverId", entry.serverId).put("serviceId", entry.serviceId)
                     .put("profileId", entry.profileId).put("state", entry.state.name)
-                    .put("updatedAt", entry.updatedAt))
+                    .put("updatedAt", entry.updatedAt).put("networkKey", entry.networkKey))
             }
         }.toString())
 
@@ -79,7 +82,7 @@ class SmartNodeStore(context: Context) {
                 array.getJSONObject(index).let {
                     ManagedNodeRecord(it.getString("serverId"), it.getString("serviceId"),
                         it.getString("profileId"), ManagedNodeRecord.State.valueOf(it.getString("state")),
-                        it.getLong("updatedAt"))
+                        it.getLong("updatedAt"), it.optString("networkKey"))
                 }
             }
         }
