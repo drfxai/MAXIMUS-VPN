@@ -45,6 +45,8 @@ object SmartManagerPlanner {
                 else -> emptySet()
             }
             val udp = if (id in dnsEngines) setOf(53) else emptySet()
+            val portPlan = SmartPortPlanner.propose(
+                facts, server.checkedAt, SmartPortPlanner.knownPublicBindings(id), now)
             val condition = when {
                 existing -> Status.INSTALLED to "Detected on this server; ownership and health require verification."
                 !fresh -> Status.NEEDS_INSPECTION to "Refresh authenticated SSH inspection before planning."
@@ -63,6 +65,7 @@ object SmartManagerPlanner {
                     Status.BLOCKED to "Public DNS port 53 is occupied. Never replace the listener automatically."
                 id == ServerToolCatalog.HIDDIFY && (80 in facts.tcpPorts || 443 in facts.tcpPorts) ->
                     Status.BLOCKED to "Hiddify requires free TCP 80 and 443."
+                portPlan.conflicts.isNotEmpty() -> Status.BLOCKED to portPlan.conflicts.joinToString(" ")
                 else -> Status.READY_FOR_WIZARD to "Eligible for the existing per-engine approval wizard; deployment and reachability are not verified."
             }
             Candidate(id, tool.title, condition.first, condition.second, tcp, udp)
