@@ -1030,8 +1030,14 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 false to com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "Test failed")
             }
-            runCatching { recordManagedTest(s, w.tool.id, r.first) }
-                .onFailure { emit(ServersEvent.Message("Managed-node verification record could not be updated.")) }
+            val stillCurrent = _state.value.wizard?.let { current ->
+                generation == wizardTestGeneration && current.serverId == w.serverId &&
+                    current.tool.id == w.tool.id && current.link == w.link
+            } == true
+            if (stillCurrent) {
+                runCatching { recordManagedTest(s, w.tool.id, r.first) }
+                    .onFailure { emit(ServersEvent.Message("Managed-node verification record could not be updated.")) }
+            }
             _state.update { st ->
                 val current = st.wizard
                 if (current == null || generation != wizardTestGeneration || current.serverId != w.serverId ||
