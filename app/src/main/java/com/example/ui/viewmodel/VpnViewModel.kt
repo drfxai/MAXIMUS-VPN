@@ -11,6 +11,7 @@ import com.example.data.model.VlessProfile
 import com.example.data.repository.ServerRepository
 import com.example.data.repository.SettingsRepository
 import com.example.panels.servers.SmartNodeStore
+import com.example.vpn.smart.NetworkKey
 import com.example.vpn.RayVpnService
 import com.example.vpn.VpnController
 import com.example.vpn.smart.SmartConnect
@@ -65,7 +66,8 @@ class VpnViewModel(
             runCatching { SmartNodeStore(RayApplication.instance).all() }.getOrDefault(emptyList())
         }
         SmartConnect.rankForCard(profiles, settings.scoringProfile, active = active, count = 3,
-            managedRecords = managed, evidenceOf = { p ->
+            managedRecords = managed, networkKey = NetworkKey.current(RayApplication.instance),
+            evidenceOf = { p ->
             runCatching { book.eligibility(com.example.vpn.connectivity.PathRef.of(p)) }.getOrNull()
         })
     }.stateIn(
