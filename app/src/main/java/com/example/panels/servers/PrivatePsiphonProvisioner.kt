@@ -1,5 +1,6 @@
 package com.example.panels.servers
 
+import com.example.vpn.sidecar.PrivatePsiphonEntry
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -52,9 +53,10 @@ class PrivatePsiphonProvisioner(
                 // Raw bootstrap stays inside this method until encrypted on Android by PrivatePsiphonStore.
                 val entry = shell.download("${PrivatePsiphonServerScripts.INSTALL_DIR}/server-entry.dat", 262_144)
                     .toString(Charsets.UTF_8).trim()
-                check(entry.length in 64..262_144 && entry.length % 2 == 0 &&
-                    entry.all { it in '0'..'9' || it in 'A'..'F' || it in 'a'..'f' }) {
-                    "Server entry is invalid; do not create a client profile."
+                val description = PrivatePsiphonEntry.inspect(entry)
+                check(description != null && description.ipAddress == publicIp &&
+                    description.sshObfuscatedPort == port) {
+                    "Server entry is invalid or does not describe the reviewed VPS and port."
                 }
                 val newTool = InstalledTool(PrivatePsiphonServerScripts.TOOL_ID, port = port)
                 return Result(server.withTool(newTool), entry, port)
