@@ -36,6 +36,7 @@ class ServerToolsTest {
         SUDO=0
         SYSTEMD=1
         PKG=apt-get
+        SOCKETS=1
         TCP=22,2053,443,
         UDP=
         CC=cubic
