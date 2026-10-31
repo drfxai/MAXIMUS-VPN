@@ -49,6 +49,7 @@ object SmartManagerPlanner {
                 existing -> Status.INSTALLED to "Detected on this server; ownership and health require verification."
                 !fresh -> Status.NEEDS_INSPECTION to "Refresh authenticated SSH inspection before planning."
                 facts == null -> Status.NEEDS_INSPECTION to "No server facts are available."
+                !facts.socketInspectionAvailable -> Status.BLOCKED to "Socket inventory unavailable (ss/iproute2); cannot plan ports safely."
                 facts.blocker() != null -> Status.BLOCKED to facts.blocker()!!
                 !tool.fitsOn(server.location) -> Status.BLOCKED to "This engine requires an exit VPS abroad."
                 tool.aptOnly && !facts.usesApt -> Status.BLOCKED to "Ubuntu/Debian apt is required."
@@ -68,7 +69,7 @@ object SmartManagerPlanner {
         } + Candidate(
             PRIVATE_PSIPHON, "Private Psiphon",
             Status.UNVERIFIED,
-            "Blocked until pinned psiphond provisioning, client bootstrap and real tunnel transfer are validated."
+            if (facts?.psiphonInstalled == true) "psiphond detected, but client activation and tunnel transfer are unverified." else "Blocked until pinned psiphond provisioning, client bootstrap and real tunnel transfer are validated."
         )
         return Inspection(server.id, server.checkedAt, candidates, listOf(
             "DNS gateway multiplexing is NOT certified; DNSTT, SOAR and Cotten require separate listeners or verified isolation.",
