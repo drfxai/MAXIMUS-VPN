@@ -19,6 +19,17 @@ class SmartManagerPlannerTest {
         checkedAt = checkedAt, facts = facts, tools = tools
     )
 
+    @Test fun locallyRecordedInstallationIsNotTreatedAsFreshWhenInspectionExpires() {
+        val saved = listOf(InstalledTool(ServerToolCatalog.XUI))
+        val stale = SmartManagerPlanner.inspect(
+            host(tools = saved, checkedAt = now - INSPECTION_TTL_MS - 1L), now)
+        assertEquals(SmartManagerPlanner.Status.NEEDS_INSPECTION,
+            stale.candidate(ServerToolCatalog.XUI)?.status)
+        val current = SmartManagerPlanner.inspect(host(tools = saved), now)
+        assertEquals(SmartManagerPlanner.Status.INSTALLED,
+            current.candidate(ServerToolCatalog.XUI)?.status)
+    }
+
     @Test fun refusesUnknownOrStaleHostState() {
         val absent = SmartManagerPlanner.inspect(host(facts = null), now)
         assertEquals(SmartManagerPlanner.Status.NEEDS_INSPECTION,
