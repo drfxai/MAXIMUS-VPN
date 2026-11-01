@@ -231,7 +231,7 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
         val port = installPort.toIntOrNull()
         val allowed = server?.canSignIn == true && server.username == "root" &&
             fresh && facts?.let(PrivatePsiphonArtifact::supported) == true &&
-            facts.psiphonInstalled.not() && facts.psiphonDataRetained.not() &&
+            facts?.psiphonInstalled == false && facts.psiphonDataRetained == false &&
             PrivatePsiphonServerScripts.validIpv4(installIp) &&
             port != null && port in 1024..65535 && port !in setOf(22, 53) &&
             port !in facts.tcpPorts && port !in facts.udpPorts &&
