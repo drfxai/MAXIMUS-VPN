@@ -24,9 +24,10 @@ object SmartServerHealth {
                 else -> ToolScripts.UNITS[tool.id].orEmpty()
             }
         }.distinct()
-        val unreported = managedUnits.filter { f.services[it].isNullOrBlank() } +
-            if (server.tools.any { it.id == ServerToolCatalog.HIDDIFY } &&
-                managedUnits.none { it.startsWith("hiddify-") }) listOf("hiddify-*") else emptyList()
+        val unreported = managedUnits.filter {
+            f.services[it] !in setOf("active", "inactive", "failed")
+        } + if (server.tools.any { it.id == ServerToolCatalog.HIDDIFY } &&
+            managedUnits.none { it.startsWith("hiddify-") }) listOf("hiddify-*") else emptyList()
         val failed = managedUnits.filter { f.services[it] == "failed" || f.services[it] == "inactive" }
         if (failed.isNotEmpty()) concerns += "Managed services not active: ${failed.joinToString()}."
         if (unreported.isNotEmpty()) concerns += "Managed units missing from SSH inventory: ${unreported.joinToString()}."
