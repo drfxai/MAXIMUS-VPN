@@ -248,7 +248,9 @@ fun PanelManagerScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = {
-                if (selectedPanelId != null) {
+                if (showPsiphonInInstall) {
+                    showPsiphonInInstall = false
+                } else if (selectedPanelId != null) {
                     selectedPanelId = null
                 } else {
                     onNavigateBack()
@@ -311,7 +313,7 @@ fun PanelManagerScreen(
                         .clickable {
                             selectedPanelId = null
                             selectedTab = index
-                            if (index != 1) showPsiphonInInstall = false
+                            showPsiphonInInstall = false
                         },
                     shape = RoundedCornerShape(12.dp),
                     color = if (isSelected) PanelColors.PrimaryBlue else MaterialTheme.colorScheme.surface,
