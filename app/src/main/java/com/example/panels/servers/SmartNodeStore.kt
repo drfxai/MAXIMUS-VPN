@@ -24,11 +24,11 @@ data class ManagedNodeRecord(
 class SmartNodeStore(context: Context) {
     private val secure = SecureStorage(context.applicationContext)
 
-    @Synchronized
-    fun all(): List<ManagedNodeRecord> = decode(secure.getAndDecrypt(KEY, "[]"))
+    fun all(): List<ManagedNodeRecord> = synchronized(STORE_LOCK) {
+        decode(secure.getAndDecrypt(KEY, "[]"))
+    }
 
-    @Synchronized
-    fun configured(serverId: String, serviceId: String, profileId: String, now: Long = System.currentTimeMillis()) {
+    fun configured(serverId: String, serviceId: String, profileId: String, now: Long = System.currentTimeMillis()) = synchronized(STORE_LOCK) {
         require(serverId.isNotBlank() && serviceId.isNotBlank() && profileId.isNotBlank())
         val records = all()
         // Even when a generated profile ID did not change, reinstall/key rotation invalidates
@@ -37,8 +37,7 @@ class SmartNodeStore(context: Context) {
             ManagedNodeRecord(serverId, serviceId, profileId, ManagedNodeRecord.State.CONFIGURED, now))
     }
 
-    @Synchronized
-    fun testing(serverId: String, serviceId: String, profileId: String, now: Long = System.currentTimeMillis()) {
+    fun testing(serverId: String, serviceId: String, profileId: String, now: Long = System.currentTimeMillis()) = synchronized(STORE_LOCK) {
         change(serverId, serviceId, profileId, ManagedNodeRecord.State.TESTING, now)
     }
 
@@ -46,9 +45,8 @@ class SmartNodeStore(context: Context) {
      * [trafficVerified] MUST come from EngineProbe/ServerTester using a real request through
      * the tunnel. A successful SSH check, systemd active state or synthetic ping is insufficient.
      */
-    @Synchronized
     fun result(serverId: String, serviceId: String, profileId: String, trafficVerified: Boolean,
-               now: Long = System.currentTimeMillis(), networkKey: String = "") {
+               now: Long = System.currentTimeMillis(), networkKey: String = "") = synchronized(STORE_LOCK) {
         change(serverId, serviceId, profileId,
             if (trafficVerified && networkKey.isNotBlank()) ManagedNodeRecord.State.AVAILABLE
             else ManagedNodeRecord.State.STALE, now, networkKey)
@@ -74,6 +72,7 @@ class SmartNodeStore(context: Context) {
         }.toString())
 
     companion object {
+        private val STORE_LOCK = Any()
         private const val KEY = "managed_nodes_provenance_v1"
         private const val MAX = 500
         fun decode(raw: String): List<ManagedNodeRecord> {
