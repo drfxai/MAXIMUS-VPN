@@ -15,6 +15,8 @@ class SidecarProcess(
 ) : RunningEngine {
     @Volatile private var sawReadyLine = readyLine == null
     @Volatile private var stopping = false
+    @Volatile private var ready = false
+    @Volatile private var failureHint: String? = null
     @Volatile override var startupFailure: String? = null
         private set
 
@@ -28,6 +30,18 @@ class SidecarProcess(
                         startupFailure = "registration failed before the local proxy became ready"
                     }
                     if (!sawReadyLine && readyLine?.containsMatchIn(line) == true) sawReadyLine = true
+                    // Only fixed categories are retained: raw output may contain credentials.
+                    if (line.contains("error", true) || line.contains("failed", true) ||
+                        line.contains("no such file", true) || line.contains("unknown argument", true)) {
+                        failureHint = when {
+                            line.contains("no such file", true) || line.contains("not found", true) -> "required file missing"
+                            line.contains("unknown argument", true) || line.contains("unrecognized option", true) -> "unsupported command-line option"
+                            line.contains("permission denied", true) -> "file permission denied"
+                            line.contains("certificate", true) || line.contains("tls", true) -> "TLS or certificate error"
+                            line.contains("config", true) || line.contains("toml", true) -> "configuration rejected"
+                            else -> "engine reported an error"
+                        }
+                    }
                     if (index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line).take(300))
                 }
             }
@@ -35,7 +49,7 @@ class SidecarProcess(
         }
         // Output ends when the program exits: record whether that was asked for.
         val code = runCatching { process.waitFor() }.getOrNull()
-        com.example.vpn.diagnostics.events.RuntimeHealth.engineTerminated(name, code, expected = stopping)
+        com.example.vpn.diagnostics.events.RuntimeHealth.engineTerminated(name, code, expected = stopping, startup = !ready)
     }, "sidecar-$name-log").apply { isDaemon = true; start() }
 
     // Process.isAlive, waitFor(timeout) and destroyForcibly need API 26; the app supports 24.
@@ -52,10 +66,12 @@ class SidecarProcess(
         while (System.currentTimeMillis() < deadline) {
             if (!isAlive) {
                 logThread.join(200) // Let the bounded diagnostic reader publish the exit reason.
-                if (startupFailure == null) startupFailure = "Engine process exited before local readiness (exit ${runCatching { process.exitValue() }.getOrNull() ?: "unknown"}); inspect engine logs."
+                if (startupFailure == null) startupFailure = "Engine process exited before local readiness " +
+                    "(exit ${runCatching { process.exitValue() }.getOrNull() ?: "unknown"}, " +
+                    "${failureHint ?: "no diagnostic category"}); inspect redacted engine logs."
                 return false
             }
-            if (sawReadyLine && portOpen(socksPort)) return true
+            if (sawReadyLine && portOpen(socksPort)) { ready = true; return true }
             Thread.sleep(100)
         }
         if (startupFailure == null) startupFailure = if (portOpen(socksPort) && !sawReadyLine)
