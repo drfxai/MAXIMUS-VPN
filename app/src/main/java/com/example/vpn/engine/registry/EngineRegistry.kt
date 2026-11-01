@@ -116,8 +116,14 @@ object EngineRegistry {
     fun statuses(network: String, ledger: EngineLedger = EngineLedger.shared): List<EngineStatus> = ENGINES.map { d ->
         val engine = com.example.vpn.sidecar.Sidecars.ENGINES.firstOrNull { it.id == d.id }
         val bundled = engine?.let { com.example.vpn.sidecar.Sidecars.isBundled(it) }
-        // Psiphon is the one engine that needs install-wide settings; the others only need a profile.
-        val problem = (engine as? com.example.vpn.sidecar.PsiphonSidecar)?.let { p ->
+        // Account-bound engines must not be shown as AVAILABLE without their private
+        // configuration, even when the native executable is present in the APK.
+        val problem = if (d.id == MATRIX_TRANSPORT.id) {
+            runCatching {
+                com.example.vpn.sidecar.MatrixTransportSidecar.configurationProblem(
+                    java.io.File(com.example.RayApplication.instance.noBackupFilesDir, "engines/matrix-transport"))
+            }.getOrNull()
+        } else (engine as? com.example.vpn.sidecar.PsiphonSidecar)?.let { p ->
             runCatching { p.problem(com.example.vpn.sidecar.PsiphonSidecar.profile()) }.getOrElse { it.message ?: "settings could not be read" }
         }
         ledger.status(d, network, bundled, problem)
