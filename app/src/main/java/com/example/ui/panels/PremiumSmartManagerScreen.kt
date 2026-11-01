@@ -31,6 +31,8 @@ import com.example.panels.cloudflare.SmartDomainsStore
 import com.example.panels.cloudflare.TokenTemplate
 import com.example.panels.servers.ServerToolCatalog
 import com.example.panels.servers.SmartManagerPlanner
+import com.example.panels.servers.SmartBundlePlanner
+import com.example.panels.servers.ServerToolCatalog
 import com.example.panels.servers.SmartServerHealth
 import com.example.ui.panels.servers.ServersState
 import com.example.ui.panels.servers.ServersViewModel
@@ -55,6 +57,8 @@ internal fun PremiumSmartManagerScreen(
     var selectedServer by rememberSaveable { mutableStateOf<String?>(null) }
     var chosen by remember { mutableStateOf(setOf<String>()) }
     var showPlan by remember { mutableStateOf(false) }
+    var batchDomain by rememberSaveable { mutableStateOf("") }
+    var batchLabel by rememberSaveable { mutableStateOf("t") }
     val server = state.servers.firstOrNull { it.id == selectedServer } ?: state.servers.firstOrNull()
     val facts = server?.facts
     var inspectionNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -200,6 +204,25 @@ internal fun PremiumSmartManagerScreen(
                     }
                 }
             }
+            state.bundle?.takeIf { it.serverId == server?.id }?.let { batch ->
+                MxCard("Batch installation", "Sequential VPS changes · never an atomic rollback", Mx.Cyan) {
+                    Text("Selected: ${batch.order.joinToString { id ->
+                        ServerToolCatalog.byId(id)?.title ?: id
+                    }}", color = Mx.White, fontSize = 12.sp)
+                    Text("Completed: ${batch.completed.size}/${batch.order.size}" +
+                        (if (batch.running) " · running ${ServerToolCatalog.byId(batch.active)?.title ?: batch.active}"
+                            else if (batch.finished) " · server-side setup complete" else " · stopped"),
+                        color = if (batch.error.isBlank()) Mx.Green else Mx.Orange,
+                        fontSize = 12.sp)
+                    if (batch.error.isNotBlank()) Text(
+                        "Stopped after ${batch.completed.size} completed installation(s): ${batch.error}. " +
+                            "Earlier tools were preserved; inspect the server and operation journal before retrying.",
+                        color = Mx.Orange, fontSize = 11.sp)
+                    if (batch.finished) Text(
+                        "DNS delegation and end-to-end phone tunnel verification are still required.",
+                        color = Mx.Muted, fontSize = 11.sp)
+                }
+            }
             BoxWithConstraints {
                 if (maxWidth >= 330.dp) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -265,28 +288,47 @@ internal fun PremiumSmartManagerScreen(
 
     if (showPlan) {
         val chosenCandidates = candidates.filter { it.id in chosen }
+        val selectedIds = chosenCandidates.map { it.id }.toSet()
         val blockers = inspection?.let { SmartManagerPlanner.bundleBlockers(it, chosen) }.orEmpty()
-        val canStart = chosenCandidates.size == 1 && blockers.isEmpty() &&
+        val isSingle = chosenCandidates.size == 1
+        val batchPlan = inspection?.takeIf { chosenCandidates.size > 1 }?.let {
+            SmartBundlePlanner.review(it, selectedIds, batchDomain, batchLabel)
+        }
+        val canSingle = isSingle && blockers.isEmpty() &&
             chosenCandidates.single().id != SmartManagerPlanner.PRIVATE_PSIPHON
+        val canBatch = batchPlan?.eligible == true && server != null &&
+            state.bundle?.running != true
         AlertDialog(
             onDismissRequest = { showPlan = false },
             title = { Text("Smart Installation Review") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Selected: ${chosenCandidates.joinToString { it.title }.ifBlank { "None" }}")
-                    if (blockers.isEmpty() && !canStart) Text(
-                        "Atomic multi-engine installation is not yet verified. Each tool requires its own approved wizard, compatibility check and rollback."
-                    )
+                    if (chosenCandidates.size > 1) {
+                        Text("Supported batch: 3X-UI + exactly one DNS tunnel. One approval starts a sequential, stop-on-error installation; it is NOT atomic. Existing successful installs are preserved on later failure.")
+                        OutlinedTextField(value = batchDomain, onValueChange = { batchDomain = it },
+                            singleLine = true, label = { Text("Your DNS domain") },
+                            placeholder = { Text("example.com") })
+                        OutlinedTextField(value = batchLabel, onValueChange = { batchLabel = it },
+                            singleLine = true, label = { Text("Tunnel label") },
+                            placeholder = { Text("t") })
+                        Text("No DNS records will be changed automatically. You must configure delegation and verify traffic after installation.")
+                    }
                     blockers.forEach { Text("• $it", color = MaterialTheme.colorScheme.error) }
-                    if (canStart) Text("One supported engine is eligible. Open its wizard to review configuration and explicitly approve installation.")
+                    batchPlan?.blockers?.filterNot { it in blockers }?.forEach {
+                        Text("• $it", color = MaterialTheme.colorScheme.error)
+                    }
+                    if (canSingle) Text("Open the individual approval wizard before installation.")
+                    if (canBatch) Text("One approval will execute both selected services in sequence; each step is recorded and checked over pinned SSH.")
                 }
             },
             confirmButton = {
-                TextButton(enabled = canStart, onClick = {
-                    val id = chosenCandidates.single().id
-                    vm.openWizard(id, server?.id)
+                TextButton(enabled = canSingle || canBatch, onClick = {
+                    if (canBatch) vm.installApprovedBundle(requireNotNull(server).id,
+                        selectedIds, batchDomain, batchLabel)
+                    else if (canSingle) vm.openWizard(chosenCandidates.single().id, server?.id)
                     showPlan = false
-                }) { Text("Open verified installer") }
+                }) { Text(if (canBatch) "Approve & install both" else "Open verified installer") }
             },
             dismissButton = { TextButton(onClick = { showPlan = false }) { Text("Close") } }
         )
