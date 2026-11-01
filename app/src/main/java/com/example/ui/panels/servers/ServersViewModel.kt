@@ -21,6 +21,9 @@ import com.example.panels.servers.ServerManager
 import com.example.panels.servers.InstallPreflightException
 import com.example.panels.servers.SmartOperation
 import com.example.panels.servers.SmartOperationStore
+import com.example.panels.servers.SmartBundlePlanner
+import com.example.panels.servers.SmartManagerPlanner
+import com.example.panels.servers.DnsDelegation
 import com.example.panels.servers.SmartNodeStore
 import com.example.panels.servers.ManagedNodeRecord
 import com.example.panels.servers.PrivatePsiphonServerScripts
@@ -85,7 +88,19 @@ data class ServersState(
     /** "serverId/toolId" -> (passed, text). */
     val tests: Map<String, Pair<Boolean, String>> = emptyMap(),
     /** Servers whose "Hiddify found" card was closed with Not now (this session only). */
-    val foundDismissed: Set<String> = emptySet()
+    val foundDismissed: Set<String> = emptySet(),
+    val bundle: SmartBatchUi? = null
+)
+
+/** The user-approved bundle is sequential, not atomic and not VPN-traffic-verified. */
+data class SmartBatchUi(
+    val serverId: String,
+    val order: List<String>,
+    val active: String = "",
+    val completed: List<String> = emptyList(),
+    val running: Boolean = true,
+    val error: String = "",
+    val finished: Boolean = false
 )
 
 /** One-off events for the screen: a message to show, or a vibration on success. */
@@ -110,6 +125,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     private val _events = MutableSharedFlow<ServersEvent>(extraBufferCapacity = 8)
     val events: SharedFlow<ServersEvent> = _events
     private var job: Job? = null
+    private var bundleJob: Job? = null
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -796,6 +812,92 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         return server
+    }
+
+    /**
+     * One explicit approval executes only the two-tool plan that was shown to the user.
+     * The batch is sequential, stop-on-first-error, never an atomic rollback. Each tool
+     * gets an independent durable mutation record and a fresh pinned SSH inspection.
+     * A completed VPS service does not imply the phone's tunnel traffic has been tested.
+     */
+    fun installApprovedBundle(serverId: String, selected: Set<String>, domain: String, label: String) {
+        if (bundleJob?.isActive == true || _state.value.busy.isNotBlank() ||
+            _state.value.route is ServersRoute.Wizard) return
+        val initial = server(serverId) ?: return emit(ServersEvent.Message("Select a saved VPS."))
+        val frozenDomain = DnsDelegation.normalizeBase(domain)
+        val frozenLabel = label.trim()
+        val inspection = SmartManagerPlanner.inspect(initial)
+        val plan = SmartBundlePlanner.review(inspection, selected, frozenDomain, frozenLabel)
+        if (!plan.eligible) {
+            emit(ServersEvent.Message(plan.blockers.joinToString("; ")))
+            return
+        }
+        val steps = plan.order.toList()
+        _state.update { it.copy(bundle = SmartBatchUi(serverId, steps), error = "") }
+        bundleJob = viewModelScope.launch {
+            val completed = mutableListOf<String>()
+            var active = ""
+            var operation: SmartOperation? = null
+            try {
+                for (id in steps) {
+                    active = id
+                    operation = null
+                    _state.update { st -> st.copy(bundle = st.bundle?.copy(active = id)) }
+                    val previous = requireNotNull(server(serverId)) { "The target VPS was removed." }
+                    // Re-evaluate the remaining candidate after every completed mutation.
+                    val checked = withContext(Dispatchers.IO) { manager.check(previous) }
+                    val tool = requireNotNull(ServerToolCatalog.byId(id))
+                    val checks = InstallChecks.forTool(tool, checked, requireNotNull(checked.facts))
+                        .filter { it.blocking && !it.ok }
+                    check(checks.isEmpty()) { checks.joinToString("; ") { it.detail } }
+                    val options = if (tool.needsDomain)
+                        InstallOptions(baseDomain = frozenDomain, tunnelLabel = frozenLabel)
+                    else InstallOptions()
+                    withContext(Dispatchers.IO) { manager.preflightInstall(checked, id, options) }
+                    operation = withContext(Dispatchers.IO) {
+                        operations.begin(serverId, id, checked.checkedAt)
+                    }
+                    val quietProgress = object : ActionProgress {
+                        override fun step(index: Int) = Unit
+                        override fun log(line: String) = Unit // never expose secrets in batch logs
+                    }
+                    val out = withContext(Dispatchers.IO) {
+                        manager.install(checked, id, options, quietProgress)
+                    }
+                    withContext(Dispatchers.IO) {
+                        operations.transition(requireNotNull(operation).id, SmartOperation.Status.VERIFYING)
+                    }
+                    applyOutcome(out)
+                    withContext(Dispatchers.IO) {
+                        operations.transition(requireNotNull(operation).id, SmartOperation.Status.COMPLETED)
+                    }
+                    operation = null
+                    completed += id
+                    _state.update { st -> st.copy(bundle = st.bundle?.copy(completed = completed.toList())) }
+                }
+                _state.update { st ->
+                    st.copy(bundle = st.bundle?.copy(running = false, active = "",
+                        finished = true, completed = completed.toList()))
+                }
+                emit(ServersEvent.Success)
+                emit(ServersEvent.Message(
+                    "Server-side install completed for ${completed.size} tools. Configure DNS delegation and test phone-to-VPS traffic; it is not yet verified."))
+            } catch (e: Exception) {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    operation?.let { current ->
+                        val status = if (e is InstallPreflightException) SmartOperation.Status.FAILED
+                            else SmartOperation.Status.UNCERTAIN
+                        runCatching { operations.transition(current.id, status) }
+                    }
+                }
+                _state.update { st ->
+                    st.copy(bundle = st.bundle?.copy(running = false, active = active,
+                        completed = completed.toList(), error = com.example.panels.servers.ServerLogSanitizer
+                            .redact(e.message ?: "The bundle stopped; inspect the VPS before retrying.")))
+                }
+                if (e is kotlinx.coroutines.CancellationException) throw e
+            }
+        }
     }
 
     // ------------------------------------------------------------ install wizard
