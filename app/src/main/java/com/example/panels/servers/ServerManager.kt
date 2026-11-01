@@ -81,17 +81,21 @@ class ServerManager(
      * A failed command or missing framing marker is not an inspection, even if some fields parse.
      * Do not include remote output in the error: output could contain sensitive data.
      */
-    private fun readVerifiedFacts(shell: RemoteShell): ServerFacts {
+    private fun readVerifiedFacts(shell: RemoteShell, beforeMutation: Boolean = false): ServerFacts {
         val out = shell.run(ServerFacts.SCRIPT, 60_000L)
-        check(out.exitCode == 0 && out.output.lineSequence().any { it.trim() == ServerFacts.BEGIN }) {
-            "Server inspection did not complete; no fresh SSH facts were accepted."
+        if (out.exitCode != 0 || out.output.lineSequence().none { it.trim() == ServerFacts.BEGIN }) {
+            // Only the *initial* inventory is known to precede any installer changes.
+            // Post-install reads must keep their uncertain/verification-failed semantics.
+            val message = "Server inspection did not complete; no fresh SSH facts were accepted."
+            if (beforeMutation) throw InstallPreflightException(message)
+            else error(message)
         }
         return ServerFacts.parse(out.output)
     }
 
     /** Signs in once (proving the password or key and the pinned host key) and reads the server. */
     fun check(server: ManagedServer): ManagedServer = connect(server).use { shell ->
-        val facts = readVerifiedFacts(shell)
+        val facts = readVerifiedFacts(shell, beforeMutation = true)
         server.copy(facts = facts, checkedAt = System.currentTimeMillis())
     }
 
@@ -140,7 +144,7 @@ class ServerManager(
             ServerToolCatalog.HIDDIFY -> if (server.tool(toolId) == null) hiddify.install(server, progress) else updateHiddify(server, progress)
             ServerToolCatalog.KEY_LOGIN -> addKeyLogin(server, progress)
             else -> connect(server).use { shell ->
-                val facts = readVerifiedFacts(shell)
+                val facts = readVerifiedFacts(shell, beforeMutation = true)
                 check(facts.socketInspectionAvailable) { "Cannot inventory TCP/UDP listeners (ss unavailable); no installation was started." }
                 facts.blocker()?.let { error(it) }
                 val arch = facts.goArch!!
