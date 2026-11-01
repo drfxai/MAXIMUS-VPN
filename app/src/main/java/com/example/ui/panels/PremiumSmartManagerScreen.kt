@@ -145,6 +145,7 @@ internal fun PremiumSmartManagerScreen(
         // Matching reference: icon tabs with a blue selected surface.
         BoxWithConstraints {
             val columns = if (maxWidth >= 330.dp) 6 else 3
+            val compact = maxWidth < 600.dp
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 tabs.indices.chunked(columns).forEach { group ->
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -154,14 +155,15 @@ internal fun PremiumSmartManagerScreen(
                                 color = if (active) Mx.Blue else Mx.Card,
                                 border = BorderStroke(1.dp, if (active) Mx.Cyan else Mx.Line),
                                 shape = RoundedCornerShape(11.dp)) {
-                                Row(Modifier.padding(horizontal = 5.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center) {
+                                Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = if (compact) 7.dp else 12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Icon(icons[index], null, tint = if (active) Mx.White else Mx.Muted,
-                                        modifier = Modifier.size(14.dp))
-                                    Spacer(Modifier.width(4.dp))
+                                        modifier = Modifier.size(if (compact) 13.dp else 17.dp))
                                     Text(tabs[index], color = if (active) Mx.White else Mx.Muted,
-                                        fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                        fontSize = if (compact) 8.sp else 10.sp,
+                                        fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis)
                                 }
                             }
                         }
@@ -299,8 +301,8 @@ private fun MxInstallSelector(
             val state = when (c.status) {
                 SmartManagerPlanner.Status.INSTALLED -> "Detected"
                 SmartManagerPlanner.Status.READY_FOR_WIZARD -> "Review"
-                SmartManagerPlanner.Status.UNVERIFIED -> "Unverified"
-                SmartManagerPlanner.Status.NEEDS_INSPECTION -> "Scan required"
+                SmartManagerPlanner.Status.UNVERIFIED -> "Review"
+                SmartManagerPlanner.Status.NEEDS_INSPECTION -> "Scan"
                 SmartManagerPlanner.Status.BLOCKED -> "Blocked"
             }
             Surface(color = Mx.Card, shape = RoundedCornerShape(10.dp),
