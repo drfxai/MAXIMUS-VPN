@@ -2101,18 +2101,37 @@ class RayVpnService : VpnService() {
         val dialer = endpoint?.let { com.example.vpn.verify.RouteDialers.engine(it) } ?: com.example.vpn.verify.RouteDialers.vpn(this)
         val path = if (endpoint != null) com.example.vpn.verify.ProbePath.ENGINE_PROXY else com.example.vpn.verify.ProbePath.TUN
         val measuredOn = tunMtu?.first
+        val registry = com.example.vpn.diagnostics.events.Tests.registry
+        registry.beginSession(state.sessionId)
         trafficCheckJob?.cancel()
         trafficCheckJob = serviceScope.launch(Dispatchers.IO) {
+            val testId = registry.queue("bulk.${path.name.lowercase()}", state.sessionId,
+                com.example.vpn.diagnostics.events.DiagEvent.profileRef(state.activeProfile?.id))
+            registry.start(testId)
             val evidence = runCatching {
                 val step = if (slowTunnel()) SLOW_VERIFY_STEP_MS.toInt()
                     else com.example.vpn.verify.TrafficCheck.stepTimeoutFor(requestMs)
                 com.example.vpn.verify.TrafficCheck(dialer, stepTimeoutMs = step).both(attemptId, generation, path)
             }
-                .onFailure { XrayLogManager.w("VPN", "Upload/download check could not run: ${it.javaClass.simpleName}") }
+                .onFailure {
+                    if (it is CancellationException) {
+                        registry.cancel(testId, "connection check cancelled")
+                        throw it
+                    }
+                    registry.finish(testId, false, it.javaClass.simpleName,
+                        com.example.vpn.diagnostics.FailureStage.of(it))
+                    XrayLogManager.w("VPN", "Upload/download check could not run: ${it.javaClass.simpleName}")
+                }
                 .getOrNull() ?: return@launch
-            if (!isActive) return@launch
+            if (!isActive || !evidence.appliesTo(_vpnState.value)) {
+                registry.cancel(testId, "stale connection attempt or network")
+                return@launch
+            }
+            registry.finish(testId, evidence.bidirectional, "${path.name}: ${evidence.describe()}",
+                if (evidence.bidirectional) null else com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED)
             mutateState { if (evidence.appliesTo(it)) it.copy(trafficEvidence = evidence) else it }
-            if (evidence.bidirectional && _vpnState.value.attemptId == attemptId) {
+            if (path == com.example.vpn.verify.ProbePath.TUN &&
+                evidence.bidirectional && _vpnState.value.attemptId == attemptId) {
                 activeRoute?.let { (net, id) -> networkMemory.routes.markBidirectional(net, id) }
             }
             XrayLogManager.i("VPN", "Upload/download check: ${evidence.describe()}.")
@@ -2147,6 +2166,49 @@ class RayVpnService : VpnService() {
                 "path" to path.name,
                 "detail" to evidence.describe()
             ))
+
+            // The engine's loopback SOCKS port proves only that the engine works. For
+            // sidecars, independently check the Android TUN route that other apps use.
+            // A failed/unavailable TUN check must not be advertised as a bulk PASS.
+            if (endpoint != null && isActive && _vpnState.value.attemptId == attemptId) {
+                val tunId = registry.queue("bulk.tun", state.sessionId,
+                    com.example.vpn.diagnostics.events.DiagEvent.profileRef(state.activeProfile?.id))
+                registry.start(tunId)
+                try {
+                    val step = if (slowTunnel()) SLOW_VERIFY_STEP_MS.toInt()
+                        else com.example.vpn.verify.TrafficCheck.stepTimeoutFor(requestMs)
+                    val tunEvidence = com.example.vpn.verify.TrafficCheck(
+                        com.example.vpn.verify.RouteDialers.vpn(this@RayVpnService), stepTimeoutMs = step
+                    ).both(attemptId, generation, com.example.vpn.verify.ProbePath.TUN)
+                    if (!isActive || !tunEvidence.appliesTo(_vpnState.value)) {
+                        registry.cancel(tunId, "stale connection attempt or network")
+                        return@launch
+                    }
+                    registry.finish(tunId, tunEvidence.bidirectional, "TUN: ${tunEvidence.describe()}",
+                        if (tunEvidence.bidirectional) null else com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED)
+                    // Prefer device-level evidence over a PASS only at the engine port.
+                    mutateState { if (tunEvidence.appliesTo(it)) it.copy(trafficEvidence = tunEvidence) else it }
+                    if (tunEvidence.bidirectional) activeRoute?.let { (net, id) ->
+                        networkMemory.routes.markBidirectional(net, id)
+                    }
+                    com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
+                        "result" to if (tunEvidence.bidirectional) "verified" else if (tunEvidence.bulkStalled) "stalled" else "partial",
+                        "path" to "TUN", "detail" to tunEvidence.describe()
+                    ))
+                } catch (e: CancellationException) {
+                    registry.cancel(tunId, "connection check cancelled")
+                    throw e
+                } catch (e: Exception) {
+                    // VPN binding can be unavailable for excluded-app sockets. This is
+                    // untested, never evidence that the physical ISP path worked.
+                    registry.finish(tunId, false, "TUN check unavailable: ${e.javaClass.simpleName}",
+                        com.example.vpn.diagnostics.FailureStage.of(e))
+                    com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
+                        "result" to "not_tested", "path" to "TUN",
+                        "detail" to "TUN probe could not run (${e.javaClass.simpleName})"
+                    ))
+                }
+            }
         }
     }
 
