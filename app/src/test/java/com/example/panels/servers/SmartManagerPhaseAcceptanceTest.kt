@@ -26,7 +26,7 @@ class SmartManagerPhaseAcceptanceTest {
 
     @Test fun privatePsiphonGeneratorUsesPinnedBinaryAndNeverOverwritesExistingUnit() {
         val spec = PrivatePsiphonServerScripts.Request(
-            "203.0.113.15", 9999, "/tmp/maximus-psiphond-${"a".repeat(32)}.bin", "c".repeat(64))
+            "8.8.8.8", 9999, "/tmp/maximus-psiphond-${"a".repeat(32)}.bin", "c".repeat(64))
         val script = PrivatePsiphonServerScripts.install(spec).text
         assertTrue(script.contains("sha256sum"))
         assertTrue(script.contains("-protocol 'OSSH:9999' generate"))
