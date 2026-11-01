@@ -401,7 +401,7 @@ fun PanelManagerScreen(
                         OutlinedButton(onClick = { showPsiphonInInstall = false }) {
                             Text("‹  Back to Panels / Install")
                         }
-                        PrivatePsiphonServerScreen(serversVm, serversState)
+                        PremiumPsiphonScreen(serversVm, serversState)
                     } else {
                         InstallTabHost(serversVm, serversState,
                             onPsiphonServer = { showPsiphonInInstall = true })
@@ -647,7 +647,7 @@ fun PanelManagerScreen(
 
                 // TAB 5: SMART MANAGER (read-only admission, existing approved workflows)
                 if (selectedTab == 5) {
-                    SmartManagerScreen(
+                    PremiumSmartManagerScreen(
                         vm = serversVm, state = serversState,
                         onOpenCloudflare = { selectedTab = 2 },
                         onOpenSmartDomains = { showSmartDomains = true }

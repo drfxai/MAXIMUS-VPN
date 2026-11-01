@@ -1,7 +1,8 @@
-MAXIMUS VPN V1.0.4 REFRESH — Android versionCode 40
-This is an explicitly requested update of the existing V1.0.4 Android release, retaining versionName 1.0.4 for the user but increasing versionCode from 39 to 40 to permit normal in-place upgrades.
-Source baseline: current main with PR #148 (Smart Manager safe infrastructure), PR #149 (V1.0.4), PR #150 (premium AMOLED Smart Manager UI and Panels > Install > Psiphon Server immediately under Hysteria2), plus subsequent capture tooling. Replace the previous published V1.0.4 APK assets only after successful signed release QA.
-The GitHub workflow rebuilds ARM64 and Universal APKs from current source, runs Android tests and release lint, checks permanent signing certificate fingerprint, packaging, SHA-256 checksums, Android 15 emulator smoke, and generates build provenance. Only after those checks pass should the existing V1.0.4 assets and tag be refreshed and the update-info feed updated.
-Do NOT advertise private Psiphon server auto-install or experimental DNS Gateway as verified on live VPS. Do NOT modify any live VPS, Cloudflare DNS, or user credentials.
-PR #20 remains excluded due to merge conflict and unverified carrier probes.
-Release integrity: this refresh deliberately updates the mutable V1.0.4 tag and checksums, replacing build 39 artifacts. The original release's historical binaries should be treated as superseded; avoid presenting both builds as identical.
+MAXIMUS VPN V1.0.4 REFRESH — Android versionCode 41
+Owner-approved reference-accurate UI delivery for Android 15.
+Include MAXIMUS Smart Manager premium AMOLED / navy / cyan / gold design; globe-inspired gold hero, four KPI tiles, authenticated SSH CPU-load / RAM / disk / ports metric cards, six management tabs, selectable multi-engine plan and preflight, Cloudflare scoped Zone Read + DNS Edit token flow with verification, encrypted token storage, zone chooser, and intelligent review.
+Include Panels -> Install -> Hysteria2 -> Psiphon Server matching premium Psiphon design, real SSH facts, readiness checklist, encrypted private server-entry import, client traffic verification and management links.
+Safety: batch multi-install is not certified and must not run without safe rollback and compatible independent engines. Psiphon private server auto-install is not permitted until reviewed SHA-256 and Android-to-VPS testing are integrated. Do not fake online or readiness metrics.
+Keep the versionName 1.0.4 while increasing versionCode from 40 to 41, enabling in-place upgrade and distinguishing the refreshed APK.
+Require unit tests, release lint, native pinned engine build, exact release signing certificate and APK signature, SHA-256 checksums, Android 15 emulator launch and provenance. Refresh the existing V1.0.4 release assets/tag only after all checks pass.
+Do not mutate any live user VPS, Cloudflare DNS or private keys as part of this release. Leave unverified PR #20 excluded.
