@@ -2152,7 +2152,10 @@ class RayVpnService : VpnService() {
                 // A route whose download stalls is not the one to replay first next time.
                 if (downloadStalled) activeRoute?.let { (net, id) -> networkMemory.routes.drop(net, id) }
             }
-            if (downloadStalled && measured != null) switchAfterStall(attemptId, measured.id)
+            // Do not auto-switch a sidecar on a local SOCKS-only stall before the TUN
+            // path has been measured. A verified local port is not device-level proof.
+            if (downloadStalled && measured != null && path == com.example.vpn.verify.ProbePath.TUN)
+                switchAfterStall(attemptId, measured.id)
             // Only a check through the tunnel itself says anything about the tunnel's MTU.
             val mtuTest = tunMtu
             if (path == com.example.vpn.verify.ProbePath.TUN && mtuTest != null && _vpnState.value.attemptId == attemptId) {
@@ -2195,6 +2198,10 @@ class RayVpnService : VpnService() {
                     mutateState { if (tunEvidence.appliesTo(it)) it.copy(trafficEvidence = tunEvidence) else it }
                     if (tunEvidence.bidirectional) activeRoute?.let { (net, id) ->
                         networkMemory.routes.markBidirectional(net, id)
+                    }
+                    val tunDownloadStalled = (tunEvidence.download as? com.example.vpn.verify.LegResult.Failed)?.stalled == true
+                    if (tunDownloadStalled) _vpnState.value.activeProfile?.let { checked ->
+                        if (_vpnState.value.attemptId == attemptId) switchAfterStall(attemptId, checked.id)
                     }
                     com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
                         "result" to if (tunEvidence.bidirectional) "verified" else if (tunEvidence.bulkStalled) "stalled" else "partial",
