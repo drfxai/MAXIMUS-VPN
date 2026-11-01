@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
@@ -54,9 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.panels.cloudflare.TokenTemplate
-import com.example.panels.servers.ManagedServer
 import com.example.panels.servers.SmartManagerPlanner
-import com.example.panels.servers.SmartNodeStore
 import com.example.panels.servers.SmartOperation
 import com.example.panels.servers.SmartServerHealth
 import com.example.panels.servers.ToolScripts
@@ -94,7 +91,7 @@ internal fun SmartManagerScreen(
     val server = state.servers.firstOrNull { it.id == selectedId } ?: state.servers.firstOrNull()
     val inspection = server?.let { SmartManagerPlanner.inspect(it) }
     val context = LocalContext.current
-    val checking = server?.id in state.checking
+    val checking = server?.id?.let { it in state.checking } == true
     val fresh = server != null && server.facts != null && server.checkedAt > 0 &&
         System.currentTimeMillis() >= server.checkedAt &&
         System.currentTimeMillis() - server.checkedAt <= 60_000L
