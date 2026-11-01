@@ -36,6 +36,18 @@ class ServerInspectionIntegrityTest {
         }
     }
 
+    @Test fun initialInstallInventoryFailureIsClassifiedAsNoMutation() {
+        val noProgress = object : ActionProgress {
+            override fun step(index: Int) {}
+            override fun log(line: String) {}
+        }
+        assertThrows(InstallPreflightException::class.java) {
+            manager(1, "---MX-FACTS---\\nUID=0\\n")
+                .install(server, ServerToolCatalog.DNSTT,
+                    InstallOptions(baseDomain = "example.com", tunnelLabel = "t"), noProgress)
+        }
+    }
+
     @Test fun acceptsSuccessfulFramedInspection() {
         val checked = manager(0,
             "---MX-FACTS---\nUID=0\nSYSTEMD=1\nSOCKETS=1\nARCH=x86_64\n")
