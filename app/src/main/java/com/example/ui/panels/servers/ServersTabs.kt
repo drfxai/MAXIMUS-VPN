@@ -204,6 +204,20 @@ private fun TunnelRow(tunnels: Int, onClick: () -> Unit) {
 
 // ------------------------------------------------------------------ Install Center
 
+/** One deterministic catalog order shared by the UI and its unit regression test. */
+internal const val PSIPHON_CATALOG_ROW = "private-psiphon"
+internal val installDisplayGroups = listOf(ToolGroup.TUNNELS, ToolGroup.PROTOCOLS,
+    ToolGroup.PANELS, ToolGroup.SECURITY, ToolGroup.SPEED)
+
+internal fun installCatalogIds(tools: List<ServerTool>): List<String> =
+    installDisplayGroups.flatMap { group ->
+        tools.filter { it.group == group }.flatMap { tool ->
+            if (tool.id == ServerToolCatalog.HYSTERIA2)
+                listOf(tool.id, PSIPHON_CATALOG_ROW)
+            else listOf(tool.id)
+        }
+    }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun InstallCenterTab(
@@ -211,7 +225,8 @@ internal fun InstallCenterTab(
     installedOn: Map<String, Int>,
     advice: List<AdviceUi>,
     onOpen: (String) -> Unit,
-    onAdvice: (AdviceUi) -> Unit
+    onAdvice: (AdviceUi) -> Unit,
+    onPsiphonServer: () -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PageHeader("Install", "Panels, tunnels and protection for your servers")
@@ -228,11 +243,33 @@ internal fun InstallCenterTab(
             SectionLabel("Suggested")
             GroupCard { Rows(advice.take(3), dividerStart = 62.dp) { a -> AdviceRow(a) { onAdvice(a) } } }
         }
-        for (group in ToolGroup.values()) {
+        // Surface working tunnels before optional panels; Psiphon sits directly below Hysteria2.
+        for (group in installDisplayGroups) {
             val inGroup = tools.filter { it.group == group }
             if (inGroup.isEmpty()) continue
             SectionLabel(group.title)
-            GroupCard { Rows(inGroup, dividerStart = 62.dp) { tool -> ToolRow(tool, installedOn[tool.id] ?: 0) { onOpen(tool.id) } } }
+            GroupCard {
+                inGroup.forEachIndexed { index, tool ->
+                    if (index > 0) RowDivider(62.dp)
+                    ToolRow(tool, installedOn[tool.id] ?: 0) { onOpen(tool.id) }
+                    if (installCatalogIds(tools).contains(PSIPHON_CATALOG_ROW) &&
+                        tool.id == ServerToolCatalog.HYSTERIA2) {
+                        // Private Psiphon belongs in the Install catalog, not the global tabs.
+                        RowDivider(62.dp)
+                        ListRow(
+                            title = "Psiphon Server",
+                            subtitle = "Private Psiphon · server entry and phone tunnel test",
+                            caption = {
+                                Text("Abroad · installer pending verification",
+                                    color = Sv.Dim, fontSize = 12.sp)
+                            },
+                            leading = { IconTile(Icons.Rounded.AutoAwesome, accent = true) },
+                            trailing = { Chevron() },
+                            onClick = onPsiphonServer
+                        )
+                    }
+                }
+            }
             if (group == ToolGroup.PANELS && inGroup.any { it.id == ServerToolCatalog.HIDDIFY }) {
                 Text("Hiddify uses ports 80 and 443 and its own web server, so it goes on a server with nothing else on it. " +
                     "A Hiddify you already have can be added as it is from its server page.",
