@@ -1,0 +1,28 @@
+name: Psiphond pinned upstream artifact audit
+on:
+  push:
+    branches: [feat/psiphon-auto-install-v104-20261102]
+    paths: [.github/workflows/psiphond-artifact-audit.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Inspect pinned official Psiphond binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-binaries/e02a99daa375567d2df20740bb3d4673eaec11fe/psiphond/psiphond'
+          curl -fLsS --retry 3 --connect-timeout 15 --max-time 180 -o psiphond "$url"
+          echo '===SHA256==='
+          sha256sum psiphond
+          echo '===ELF==='
+          file psiphond
+          echo '===SIZE==='
+          stat --printf='%s bytes\n' psiphond
+          echo '===GIT_BLOB_SHA1==='
+          git hash-object psiphond
+          test "$(git hash-object psiphond)" = 'a5d9b83d8291676f6e219683710a02b8d33b7038'
+          echo 'Verified matching pinned Git blob; record SHA256 in app source before enabling download.'
