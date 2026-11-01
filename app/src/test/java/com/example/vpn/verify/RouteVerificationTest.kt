@@ -32,6 +32,13 @@ class RouteVerificationTest {
         assertEquals(RouteVerification.BIDIRECTIONAL_VERIFIED, connected.copy(trafficEvidence = evidence()).verification)
     }
 
+    @Test fun engineLocalPortPassingDoesNotProveAndroidVpnBulkTraffic() {
+        val proxyOnly = evidence().copy(path = ProbePath.ENGINE_PROXY)
+        assertTrue(proxyOnly.bidirectional)
+        assertEquals(RouteVerification.TUNNEL_TRAFFIC_VERIFIED,
+            connected.copy(trafficEvidence = proxyOnly).verification)
+    }
+
     @Test fun oneDirectionNotTestedStaysAtTrafficVerified() {
         val s = connected.copy(trafficEvidence = evidence(up = LegResult.NotTested("no reference answered")))
         assertEquals(RouteVerification.TUNNEL_TRAFFIC_VERIFIED, s.verification)
