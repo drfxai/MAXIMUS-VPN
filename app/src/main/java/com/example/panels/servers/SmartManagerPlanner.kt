@@ -47,9 +47,9 @@ object SmartManagerPlanner {
             val udp = bindings.filter { it.protocol == SmartPortPlanner.Protocol.UDP }.map { it.port }.toSet()
             val portPlan = SmartPortPlanner.propose(facts, server.checkedAt, bindings, now)
             val condition = when {
-                existing -> Status.INSTALLED to "Detected on this server; ownership and health require verification."
+                // Local history or old SSH results are not fresh evidence of installation.
                 !fresh -> Status.NEEDS_INSPECTION to "Refresh authenticated SSH inspection before planning."
-                facts == null -> Status.NEEDS_INSPECTION to "No server facts are available."
+                existing -> Status.INSTALLED to "Previously recorded on this server; verify ownership and health."
                 !facts.socketInspectionAvailable -> Status.BLOCKED to "Socket inventory unavailable (ss/iproute2); cannot plan ports safely."
                 facts.blocker() != null -> Status.BLOCKED to facts.blocker()!!
                 !tool.fitsOn(server.location) -> Status.BLOCKED to "This engine requires an exit VPS abroad."
