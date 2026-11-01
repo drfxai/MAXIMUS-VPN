@@ -1,11 +1,15 @@
-MAXIMUS VPN V1.0.4 (versionCode 43) — PSIPHON SERVER AUTO-INSTALL PENDING
+MAXIMUS VPN V1.0.4 REFRESH — versionCode 43 — VERIFIED PSIPHON AUTO-INSTALL
 
-The V1.0.5 release build was cancelled before publication and no V1.0.5 release tag exists. Remove the unpublished version label without altering or clobbering existing V1.0.4 download assets.
+Release approval: publish V1.0.4 only after PR #160 (private Psiphon auto-install) is merged on main with all CI checks green.
 
-Release workflow is temporarily manual-only. No APK publication may occur until the reviewed fixed-SHA256 upstream psiphond binary, authenticated SSH install, private entry encryption, safe rollback and end-to-end Android 15 to VPS tests are integrated and CI is successful.
+Included:
+- Smart Manager reviewed two-tool sequential batch from PR #157
+- Hardened diagnostics and SSH inventory from PRs #154, #155, #156
+- Private Psiphon server approved installation from PR #160, using immutable upstream Linux AMD64 psiphond binary with fixed SHA-256 and 37,799,528-byte length.
+- Only when a user explicitly selects a VPS, port and public IPv4 and confirms: pinned SSH preflight, port-inventory check, isolated Linux service user, validated private bootstrap, encrypted Android Keystore node registration and independent phone-tunnel verification.
+- Fail-closed on unsupported ARM64, unverified binary, unknown SSH outcomes and existing Psiphon keys. No live VPS is contacted by the release workflow.
 
-The app's versionName remains 1.0.4 as requested, while versionCode increases to 43 (above the unreleased 42) so Android in-place upgrades are not blocked for testers with build 42.
+Compatibility: Keep versionName 1.0.4 and monotonic versionCode 43 for upgrade compatibility. Replace the already-published V1.0.4 APK assets only AFTER all signed-release gates pass.
 
-Until the Psiphon auto-install implementation is reviewed, do not claim the feature is active or overwrite existing signed V1.0.4 assets. Keep current real client Psiphon import and traffic verification intact.
-
-Preserve APK signature, native runtime verification, SHA-256 and Android 15 emulator launch checks in the existing release workflow. Never store server private credentials in APK or GitHub logs.
+Gates: testDebugUnitTest, lintRelease, native pinned engines, signed APK manifest, SHA256SUMS, exact permanent signing certificate, Android 15 emulator install+launch, provenance and update metadata.
+No unverified physical phone-to-VPS traffic claims: user must run the in-app tunnel test on the actual target VPS after installation.

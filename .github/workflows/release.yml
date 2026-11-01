@@ -1,8 +1,11 @@
 name: Signed Android release
 
-# Temporarily manual-only while the reviewed Psiphon server provisioner is wired and tested.
-# Prevent accidental clobber of the already published V1.0.4 release assets.
+# Publish V1.0.4 build 43 only when the release manifest is explicitly updated
+# on main, after reviewed Psiphon auto-install has been merged and tested.
 on:
+  push:
+    branches: [main]
+    paths: [release-request.txt]
   workflow_dispatch:
     inputs:
       tag:
