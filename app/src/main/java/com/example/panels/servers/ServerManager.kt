@@ -114,9 +114,13 @@ class ServerManager(
     }
 
     fun install(server: ManagedServer, toolId: String, options: InstallOptions, progress: ActionProgress): InstallOutcome {
-        preflightInstall(server, toolId, options)
-        // Preflight verifies this ID; retain the descriptor for the install result and apt gate.
-        val tool = requireNotNull(ServerToolCatalog.byId(toolId))
+        // The Wizard calls preflightInstall before recording RUNNING. Direct callers
+        // must still be allowed to obtain fresh facts over SSH inside this method.
+        // Never require a cached inspection for the low-level manager itself.
+        val tool = requireNotNull(ServerToolCatalog.byId(toolId)) { "Unknown tool $toolId" }
+        require(!tool.comingLater) { "${tool.title} is not available yet" }
+        val conflict = tool.conflicts.firstOrNull { server.tool(it) != null }
+        check(conflict == null) { "This server already runs ${conflict ?: ""}; DNS tunnel engines cannot share the public DNS listener." }
         return when (toolId) {
             ServerToolCatalog.XUI -> {
                 check(server.tool(ServerToolCatalog.HIDDIFY) == null) { "This server runs Hiddify, which needs the server to itself." }
