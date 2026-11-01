@@ -38,18 +38,18 @@ class PrivatePsiphonProvisionerTest {
             uploaded = true
         }
         override fun download(remotePath: String, maxBytes: Int) =
-            PrivatePsiphonFixtures.entry().toByteArray()
+            PrivatePsiphonFixtures.entry("8.8.8.8", 8888).toByteArray()
         override fun close() = Unit
     }
 
     @Test fun verifiedBinaryCanGenerateBootstrapWithoutExposingItToLogs() {
         val remote = SimulatedShell()
         val result = PrivatePsiphonProvisioner { remote }.installWithPinnedBinary(
-            server, "203.0.113.7", 8888, binary, digest, progress)
+            server, "8.8.8.8", 8888, binary, digest, progress)
         assertTrue(remote.uploaded)
         assertTrue(remote.installStarted)
         assertEquals(8888, result.port)
-        assertEquals(PrivatePsiphonFixtures.entry(), result.serverEntry)
+        assertEquals(PrivatePsiphonFixtures.entry("8.8.8.8", 8888), result.serverEntry)
         assertEquals(PrivatePsiphonServerScripts.TOOL_ID, result.server.tools.last().id)
     }
 
@@ -57,7 +57,7 @@ class PrivatePsiphonProvisionerTest {
         var connected = false
         val worker = PrivatePsiphonProvisioner { connected = true; SimulatedShell() }
         assertThrows(IllegalArgumentException::class.java) {
-            worker.installWithPinnedBinary(server, "203.0.113.7", 8888, binary,
+            worker.installWithPinnedBinary(server, "8.8.8.8", 8888, binary,
                 "0".repeat(64), progress)
         }
         assertFalse(connected)
@@ -67,7 +67,7 @@ class PrivatePsiphonProvisionerTest {
         val remote = SimulatedShell(occupied = true)
         assertThrows(IllegalStateException::class.java) {
             PrivatePsiphonProvisioner { remote }.installWithPinnedBinary(
-                server, "203.0.113.7", 8888, binary, digest, progress)
+                server, "8.8.8.8", 8888, binary, digest, progress)
         }
         assertFalse(remote.uploaded)
     }
@@ -78,7 +78,7 @@ class PrivatePsiphonProvisionerTest {
                 "/tmp/maximus-psiphond-${"a".repeat(32)}.bin", digest)
         }
         assertThrows(IllegalArgumentException::class.java) {
-            PrivatePsiphonServerScripts.Request("203.0.113.7", 53,
+            PrivatePsiphonServerScripts.Request("8.8.8.8", 53,
                 "/tmp/maximus-psiphond-${"a".repeat(32)}.bin", digest)
         }
     }
