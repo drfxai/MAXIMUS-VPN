@@ -236,7 +236,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { st -> st.copy(
                     psiphonInstall = st.psiphonInstall?.copy(stage = "Server started; client traffic unverified",
                         running = false, serverInstalled = true, entryRegistered = true),
-                    tests = st.tests - ("$"+"{serverId}/$"+"{PrivatePsiphonServerScripts.TOOL_ID}")
+                    tests = st.tests - (serverId + "/" + PrivatePsiphonServerScripts.TOOL_ID)
                 ) }
                 emit(ServersEvent.Message("Private Psiphon installed and encrypted client node registered. Now run a real phone traffic test."))
                 emit(ServersEvent.Success)
