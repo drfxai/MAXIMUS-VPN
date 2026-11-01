@@ -5,6 +5,9 @@ package com.example.panels.servers
  * An eligible recommendation only means that the existing, user-approved single-tool
  * wizard may be opened; a new remote inspection must be performed before any mutation.
  */
+/** Shared freshness threshold across planning, UI, health and the operation journal. */
+const val INSPECTION_TTL_MS: Long = 60_000L
+
 object SmartManagerPlanner {
     enum class Status { INSTALLED, READY_FOR_WIZARD, BLOCKED, NEEDS_INSPECTION, UNVERIFIED }
     data class Candidate(
@@ -30,7 +33,7 @@ object SmartManagerPlanner {
     fun inspect(server: ManagedServer, now: Long = System.currentTimeMillis()): Inspection {
         val facts = server.facts
         val fresh = facts != null && server.checkedAt > 0 &&
-            now >= server.checkedAt && now - server.checkedAt <= 60_000L
+            now >= server.checkedAt && now - server.checkedAt <= INSPECTION_TTL_MS
         val existingDns = server.tools.map { it.id }.filter { it in dnsEngines }
         val supported = listOf(ServerToolCatalog.XUI, ServerToolCatalog.DNSTT,
             ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.HIDDIFY)
@@ -39,14 +42,10 @@ object SmartManagerPlanner {
             val existing = server.tool(id) != null ||
                 (id == ServerToolCatalog.XUI && facts?.xuiInstalled == true) ||
                 (id == ServerToolCatalog.HIDDIFY && facts?.hiddifyInstalled == true)
-            val tcp = when (id) {
-                ServerToolCatalog.HIDDIFY -> setOf(80, 443)
-                ServerToolCatalog.COTTEN -> setOf(53)
-                else -> emptySet()
-            }
-            val udp = if (id in dnsEngines) setOf(53) else emptySet()
-            val portPlan = SmartPortPlanner.propose(
-                facts, server.checkedAt, SmartPortPlanner.knownPublicBindings(id), now)
+            val bindings = SmartPortPlanner.knownPublicBindings(id)
+            val tcp = bindings.filter { it.protocol == SmartPortPlanner.Protocol.TCP }.map { it.port }.toSet()
+            val udp = bindings.filter { it.protocol == SmartPortPlanner.Protocol.UDP }.map { it.port }.toSet()
+            val portPlan = SmartPortPlanner.propose(facts, server.checkedAt, bindings, now)
             val condition = when {
                 existing -> Status.INSTALLED to "Detected on this server; ownership and health require verification."
                 !fresh -> Status.NEEDS_INSPECTION to "Refresh authenticated SSH inspection before planning."
@@ -61,10 +60,7 @@ object SmartManagerPlanner {
                     Status.BLOCKED to "Hiddify already controls this VPS."
                 id in dnsEngines && existingDns.isNotEmpty() ->
                     Status.BLOCKED to "DNS listener is already assigned to ${existingDns.joinToString()}; multiplexing is unverified."
-                id in dnsEngines && (53 in facts.udpPorts || (id == ServerToolCatalog.COTTEN && 53 in facts.tcpPorts)) ->
-                    Status.BLOCKED to "Public DNS port 53 is occupied. Never replace the listener automatically."
-                id == ServerToolCatalog.HIDDIFY && (80 in facts.tcpPorts || 443 in facts.tcpPorts) ->
-                    Status.BLOCKED to "Hiddify requires free TCP 80 and 443."
+                // Port allocation is decided by the single SmartPortPlanner table below.
                 portPlan.conflicts.isNotEmpty() -> Status.BLOCKED to portPlan.conflicts.joinToString(" ")
                 else -> Status.READY_FOR_WIZARD to "Eligible for the existing per-engine approval wizard; deployment and reachability are not verified."
             }
@@ -72,7 +68,11 @@ object SmartManagerPlanner {
         } + Candidate(
             PRIVATE_PSIPHON, "Private Psiphon",
             Status.UNVERIFIED,
-            if (facts?.psiphonInstalled == true) "psiphond detected, but client activation and tunnel transfer are unverified." else "Blocked until pinned psiphond provisioning, client bootstrap and real tunnel transfer are validated."
+            when {
+                facts?.psiphonInstalled == true -> "psiphond unit detected; client activation and tunnel transfer are unverified."
+                facts?.psiphonDataRetained == true -> "Private Psiphon keys remain after uninstall; a reviewed purge is required before reinstall."
+                else -> "Blocked until pinned psiphond provisioning, client bootstrap and real tunnel transfer are validated."
+            }
         )
         return Inspection(server.id, server.checkedAt, candidates, listOf(
             "DNS gateway multiplexing is NOT certified; DNSTT, SOAR and Cotten require separate listeners or verified isolation.",
