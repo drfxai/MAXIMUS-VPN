@@ -98,7 +98,9 @@ def capture(name, verified_label):
             "bytes": len(png), "verified_label": verified_label}
 
 def main():
-    adb("shell", "pm", "clear", PACKAGE)
+    # Fresh Android emulators have no previous app data; pm clear can be denied by
+    # emulator image policy and must not block a real screenshot run.
+    adb("shell", "pm", "clear", PACKAGE, check=False)
     adb("shell", "pm", "grant", PACKAGE, "android.permission.POST_NOTIFICATIONS", check=False)
     adb("shell", "wm", "size", "1080x2400")
     adb("shell", "wm", "density", "420")
