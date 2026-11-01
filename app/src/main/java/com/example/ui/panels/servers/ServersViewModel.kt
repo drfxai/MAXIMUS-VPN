@@ -217,6 +217,13 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     operations.transition(requireNotNull(operation).id, SmartOperation.Status.VERIFYING)
                 }
+                // The install result's facts predate the remote mutation. Never persist
+                // stale "not installed" inventory, and do not claim success on a marker alone.
+                val verifiedServer = withContext(Dispatchers.IO) { manager.check(outcome.server) }
+                check(verifiedServer.facts?.psiphonInstalled == true &&
+                    verifiedServer.facts?.active(PrivatePsiphonServerScripts.UNIT) == true) {
+                    "The installed Psiphon systemd unit is not currently verified as active."
+                }
                 _state.update { st -> st.copy(psiphonInstall = st.psiphonInstall?.copy(
                     stage = "Encrypting private entry in Android Keystore", serverInstalled = true)) }
                 val secureId = withContext(Dispatchers.IO) {
@@ -227,7 +234,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                     ?: error("The private client profile could not be saved; review the remote service before retrying.")
                 val installed = com.example.panels.servers.InstalledTool(
                     PrivatePsiphonServerScripts.TOOL_ID, port = port, profileId = profileId)
-                save(outcome.server.withTool(installed))
+                save(verifiedServer.withTool(installed))
                 withContext(Dispatchers.IO) {
                     managedNodes.configured(serverId, PrivatePsiphonServerScripts.TOOL_ID, profileId)
                     operations.transition(requireNotNull(operation).id, SmartOperation.Status.COMPLETED)
