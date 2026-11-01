@@ -107,7 +107,7 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
 
         if (server != null) {
             BoxWithConstraints {
-                val wide = maxWidth >= 600.dp
+                val wide = maxWidth >= 330.dp
                 if (wide) {
                     Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                         PsDeployment(server, facts, fresh, readiness, vm,
@@ -123,7 +123,7 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
             }
 
             BoxWithConstraints {
-                val wide = maxWidth >= 600.dp
+                val wide = maxWidth >= 330.dp
                 if (wide) {
                     Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                         PsImport(entry, { entry = it }, node != null, {
