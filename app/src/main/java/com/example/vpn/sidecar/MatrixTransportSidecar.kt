@@ -18,9 +18,21 @@ object MatrixTransportSidecar : SidecarEngine {
     override fun problem(profile: VlessProfile): String? =
         if (mode(profile) !in MODES) "Unknown Matrix Transport carrier." else null
 
+    /**
+     * This binary requires a private provisioned identity file. Merely bundling the binary
+     * is not sufficient; never synthesize or ship placeholder credentials in a public APK.
+     */
+    fun configurationProblem(workDir: File): String? {
+        val identity = File(workDir, "identity.toml")
+        return if (!identity.isFile || identity.length() == 0L)
+            "Matrix Transport identity.toml is not provisioned for this installation"
+        else null
+    }
+
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
         problem(profile)?.let { error(it) }
         require(context.upstreamSocks == null) { "Matrix Transport must be the outer carrier." }
+        configurationProblem(context.workDir)?.let { error(it) }
         val identity = File(context.workDir, "identity.toml")
         val command = mutableListOf(context.executable.absolutePath,
             "--bind", "127.0.0.1:${context.socksPort}", "--config", identity.absolutePath,
