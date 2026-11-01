@@ -29,9 +29,22 @@ object PrivatePsiphonServerScripts {
     fun validIpv4(address: String): Boolean {
         if (address.length !in 7..15) return false
         val octets = address.split('.')
-        return octets.size == 4 && octets.all { s ->
-            s.isNotBlank() && s.length <= 3 && s.all(Char::isDigit) &&
-                (s.length == 1 || s[0] != '0') && (s.toIntOrNull() ?: -1) in 0..255
+        if (octets.size != 4 || !octets.all { s ->
+                s.isNotBlank() && s.length <= 3 && s.all { it in '0'..'9' } &&
+                    (s.length == 1 || s[0] != '0') && (s.toIntOrNull() ?: -1) in 0..255
+            }) return false
+        val (a, b, c, _) = octets.map(String::toInt)
+        // Public endpoints may be behind cloud NAT and need not belong to an interface.
+        return when {
+            a == 0 || a == 10 || a == 127 || a >= 224 -> false
+            a == 100 && b in 64..127 -> false
+            a == 169 && b == 254 -> false
+            a == 172 && b in 16..31 -> false
+            a == 192 && (b == 168 || (b == 0 && c == 0) || (b == 0 && c == 2) ||
+                (b == 88 && c == 99)) -> false
+            a == 198 && (b in 18..19 || (b == 51 && c == 100)) -> false
+            a == 203 && b == 0 && c == 113 -> false
+            else -> true
         }
     }
 
@@ -50,14 +63,27 @@ object PrivatePsiphonServerScripts {
             fi
             [ -f '${r.stagedBinary}' ] || { echo 'Staged psiphond file missing' >&2; exit 1; }
             expected='${r.sha256}'
-            actual=§(sha256sum '${r.stagedBinary}' | awk '{print §1}')
-            [ "§actual" = "§expected" ] || { echo 'Pinned executable SHA-256 mismatch' >&2; exit 1; }
-            # Check again while holding the Maximus cooperative installer lock.
-            if ss -Hlnt | awk '{print §4}' | grep -Eq '[:.]${r.port}§'; then
-              echo 'Chosen TCP port has a listener; no install started' >&2; exit 1
+            listeners=§(ss -Hlnt) || { echo 'TCP socket inventory failed; no changes started' >&2; exit 78; }
+            if printf '%s\n' "§listeners" | awk '{print §4}' | grep -Eq '[:.]${r.port}§'; then
+              echo 'Chosen TCP port has a listener; no install started' >&2; exit 78
             fi
             mkdir -m 700 '$INSTALL_DIR'
+            # Only the freshly created Maximus directory may be removed by this trap.
+            cleanup_install() {
+              code=§?
+              trap - 0
+              if [ "§code" -ne 0 ]; then
+                systemctl disable --now '$UNIT.service' >/dev/null 2>&1 || :
+                rm -f '/etc/systemd/system/$UNIT.service'
+                systemctl daemon-reload >/dev/null 2>&1 || :
+                rm -rf -- '$INSTALL_DIR'
+              fi
+              exit "§code"
+            }
+            trap cleanup_install 0
             mv '${r.stagedBinary}' '$INSTALL_DIR/psiphond'
+            actual=§(sha256sum '$INSTALL_DIR/psiphond' | awk '{print §1}')
+            [ "§actual" = "§expected" ] || { echo 'Pinned executable SHA-256 mismatch' >&2; exit 1; }
             chmod 500 '$INSTALL_DIR/psiphond'
             cd '$INSTALL_DIR'
             './psiphond' -ipaddress '${r.publicIp}' -protocol 'OSSH:${r.port}' generate >/dev/null
@@ -90,21 +116,38 @@ object PrivatePsiphonServerScripts {
             systemctl daemon-reload
             systemctl enable --now '$UNIT.service' >/dev/null
             systemctl is-active --quiet '$UNIT.service' || { echo 'psiphond did not stay running' >&2; exit 1; }
+            trap - 0
             echo '##RESULT PSIPHON_UNIT_ACTIVE=1'
         """.trimIndent().replace('§', '$')
         return ToolScript(script, listOf("Verify staged executable", "Inspect listener", "Generate private server keys",
             "Register systemd service", "Verify psiphond process"))
     }
 
-    /** No broad glob, firewall deletion, external package changes or unrelated directories. */
-    fun uninstall(): ToolScript = ToolScript("""
-        set -eu
-        if [ "§(id -u)" -ne 0 ]; then exit 1; fi
-        [ -f '/etc/systemd/system/$UNIT.service' ] || { echo 'Not a Maximus-owned unit' >&2; exit 1; }
-        systemctl disable --now '$UNIT.service'
-        rm -f '/etc/systemd/system/$UNIT.service'
-        systemctl daemon-reload
-        # Important: retain server entry and keys until user explicitly approves secure data removal.
-        echo '##RESULT PRIVATE_PSIPHON_DISABLED=1'
-    """.trimIndent().replace('§', '$'), listOf("Stop managed service", "Disable automatic restart", "Keep private keys for review"))
+    /**
+     * Default removal stops the service but keeps private keys. Explicit purge can also
+     * clean up a previously interrupted installation that has no systemd unit.
+     */
+    fun uninstall(purge: Boolean = false): ToolScript {
+        val removal = if (purge) """
+            [ ! -L "§dir" ] || { echo 'Unsafe Psiphon path' >&2; exit 1; }
+            if [ -d "§dir" ]; then rm -rf -- "§dir"; fi
+            echo '##RESULT PRIVATE_PSIPHON_PURGED=1'
+        """.trimIndent() else "echo '##RESULT PRIVATE_PSIPHON_DISABLED=1'"
+        return ToolScript("""
+            set -eu
+            if [ "§(id -u)" -ne 0 ]; then echo 'Root SSH is required' >&2; exit 1; fi
+            unit='/etc/systemd/system/$UNIT.service'
+            dir='$INSTALL_DIR'
+            if [ ! -f "§unit" ] && [ ! -d "§dir" ]; then
+              echo 'No Maximus Psiphon unit or files were found' >&2; exit 78
+            fi
+            if [ -f "§unit" ]; then
+              systemctl disable --now '$UNIT.service'
+              rm -f "§unit"
+              systemctl daemon-reload
+            fi
+            ${removal}
+        """.trimIndent().replace('§', '$'),
+            listOf("Stop managed service", if (purge) "Purge Maximus-owned data" else "Preserve private keys"))
+    }
 }
