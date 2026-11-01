@@ -175,8 +175,11 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
                 MxInfoRow("Open ports", if (facts?.socketInspectionAvailable == true)
                     "TCP ${facts.tcpPorts.size} / UDP ${facts.udpPorts.size}" else "Not inspected", Mx.Cyan)
                 MxInfoRow("Firewall", facts?.firewall ?: "Not inspected", Mx.Cyan)
-                MxInfoRow("psiphond", if (facts?.psiphonInstalled == true)
-                    "Detected • unverified" else "Not detected", Mx.Orange)
+                MxInfoRow("psiphond", when {
+                    facts?.psiphonInstalled == true -> "Service detected • unverified"
+                    facts?.psiphonDataRetained == true -> "Service absent • private keys retained"
+                    else -> "Not detected"
+                }, Mx.Orange)
                 MxInfoRow("Upstream SHA-256 review", "Required before install", Mx.Orange)
                 MxInfoRow("Android-to-VPS test", if (verified) "Verified" else "Pending",
                     if (verified) Mx.Green else Mx.Orange)
