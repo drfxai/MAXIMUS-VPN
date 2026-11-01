@@ -49,9 +49,10 @@ class PrivatePsiphonProvisioner(
             if (port in facts.tcpPorts || port in facts.udpPorts)
                 throw InstallPreflightException("Selected port is occupied; no files were uploaded.")
             // Upload through pinned SSH; never print the executable or credentials in progress logs.
-            shell.upload(executable, staged)
+            // The upload itself can fail halfway: the same finally cleanup covers that case.
             var installed = false
             try {
+                shell.upload(executable, staged)
                 val confirmed = shell.runTool(PrivatePsiphonServerScripts.install(spec), progress, 5 * 60_000L)
                 installed = confirmed["PSIPHON_UNIT_ACTIVE"] == "1"
                 check(installed) { "The managed systemd service did not confirm readiness." }
@@ -80,7 +81,7 @@ class PrivatePsiphonProvisioner(
                 // Deleting the staging file is safe even if the script already moved it to /opt.
                 // It is limited to the randomized path created by this app.
                 runCatching {
-                    shell.run("rm -f '$staged'", 20_000)
+                    shell.run("rm -f '$staged' '$staged.part'", 20_000)
                 }
             }
         }
