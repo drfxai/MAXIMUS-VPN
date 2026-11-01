@@ -32,7 +32,7 @@ object SmartPortPlanner {
                 now: Long = System.currentTimeMillis()): Result {
         val conflicts = mutableListOf<String>()
         if (facts == null || !facts.socketInspectionAvailable || inspectedAt <= 0 ||
-            now < inspectedAt || now - inspectedAt > 60_000L) {
+            now < inspectedAt || now - inspectedAt > INSPECTION_TTL_MS) {
             conflicts += "Fresh TCP/UDP socket inventory over pinned SSH is required."
             return Result(requested, conflicts, inspectedAt)
         }
