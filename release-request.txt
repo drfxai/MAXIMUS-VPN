@@ -1,7 +1,7 @@
-V1.0.4 Android versionCode 39
-Owner-approved source integration of MAXIMUS Smart Manager PR #148 plus V1.0.4 version bump.
-Include six-section Smart Manager planning, pinned SSH host facts, guarded installer journal, cooperative lock, managed-node evidence, per-network Smart Connect eligibility, read-only monitoring and standalone private Psiphon client-entry import and test.
-Experimental Psiphon server provisioning and DNS Gateway must remain disabled pending reviewed pinned artifacts and real Android-to-VPS integration.
-Free-config multi-ASN verification PR #20 is NOT included due to merge conflicts and absence of real enrolled Iranian probe evidence.
-Require signed Android release, Android unit tests, release lint, verified native build, APK signature/expected certificate match, emulator install smoke, artifacts and checksums before publication.
-Do not change user live VPS, Cloudflare zones, or other production infrastructure as part of this release.
+MAXIMUS VPN V1.0.4 REFRESH — Android versionCode 40
+This is an explicitly requested update of the existing V1.0.4 Android release, retaining versionName 1.0.4 for the user but increasing versionCode from 39 to 40 to permit normal in-place upgrades.
+Source baseline: current main with PR #148 (Smart Manager safe infrastructure), PR #149 (V1.0.4), PR #150 (premium AMOLED Smart Manager UI and Panels > Install > Psiphon Server immediately under Hysteria2), plus subsequent capture tooling. Replace the previous published V1.0.4 APK assets only after successful signed release QA.
+The GitHub workflow rebuilds ARM64 and Universal APKs from current source, runs Android tests and release lint, checks permanent signing certificate fingerprint, packaging, SHA-256 checksums, Android 15 emulator smoke, and generates build provenance. Only after those checks pass should the existing V1.0.4 assets and tag be refreshed and the update-info feed updated.
+Do NOT advertise private Psiphon server auto-install or experimental DNS Gateway as verified on live VPS. Do NOT modify any live VPS, Cloudflare DNS, or user credentials.
+PR #20 remains excluded due to merge conflict and unverified carrier probes.
+Release integrity: this refresh deliberately updates the mutable V1.0.4 tag and checksums, replacing build 39 artifacts. The original release's historical binaries should be treated as superseded; avoid presenting both builds as identical.
