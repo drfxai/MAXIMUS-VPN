@@ -68,8 +68,8 @@ internal fun PremiumSmartManagerScreen(
 
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
         .background(Mx.Black).padding(8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        MxHero("MAXIMUS  /  SMART MANAGER", "Autonomous Infrastructure",
-            "Intelligent VPS control • deployment • Cloudflare")
+        MxHero("MAXIMUS  /  SMART MANAGER", "Smart Manager",
+            "Autonomous infrastructure cockpit • VPS, DNS and deployments")
 
         if (state.servers.isEmpty()) {
             MxCard("CONNECT YOUR FIRST VPS", "Verified SSH access is required", Mx.Gold) {
@@ -80,7 +80,7 @@ internal fun PremiumSmartManagerScreen(
 
         // Reference: selected VPS, managed nodes, readiness and deployment health.
         BoxWithConstraints {
-            val columns = if (maxWidth > 580.dp) 4 else 2
+            val columns = if (maxWidth >= 330.dp) 4 else 2
             val labels = listOf(
                 Triple("VPS", server?.displayName.orEmpty(), Mx.Gold),
                 Triple("Nodes", nodes.size.toString(), Mx.Cyan),
@@ -113,7 +113,7 @@ internal fun PremiumSmartManagerScreen(
         // The reference's CPU/RAM/Disk/Ports strip, with honest measurements rather than
         // fabricated time-series charts. Load average is explicitly marked as LOAD.
         BoxWithConstraints {
-            val metricColumns = if (maxWidth >= 600.dp) 4 else 2
+            val metricColumns = if (maxWidth >= 330.dp) 4 else 2
             val ram = facts?.ramMb?.takeIf { it > 0L }
             val disk = facts?.diskMb?.takeIf { it > 0L }
             val stats = listOf(
@@ -144,7 +144,7 @@ internal fun PremiumSmartManagerScreen(
 
         // Matching reference: icon tabs with a blue selected surface.
         BoxWithConstraints {
-            val columns = if (maxWidth >= 680.dp) 6 else 3
+            val columns = if (maxWidth >= 330.dp) 6 else 3
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 tabs.indices.chunked(columns).forEach { group ->
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -173,7 +173,7 @@ internal fun PremiumSmartManagerScreen(
         if (page == 0 || page == 3) {
             // The approved artwork puts selection and Cloudflare side by side on wide screens.
             BoxWithConstraints {
-                val wide = maxWidth >= 660.dp
+                val wide = maxWidth >= 330.dp
                 if (wide) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         MxInstallSelector(candidates, chosen, { chosen = it },
@@ -189,7 +189,7 @@ internal fun PremiumSmartManagerScreen(
                 }
             }
             BoxWithConstraints {
-                if (maxWidth >= 660.dp) {
+                if (maxWidth >= 330.dp) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         MxChecks(server, inspection, vm, Modifier.weight(1f))
                         MxCard("Automation Flow", "Inspect → select → DNS → review → install → verify",
