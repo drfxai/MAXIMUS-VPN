@@ -42,7 +42,10 @@ data class ServerFacts(
     val hiddifyVersion: String = "",
     val socketInspectionAvailable: Boolean = false,
     val dockerAvailable: Boolean = false,
+    /** An installed unit is distinct from retained keys left by an explicit uninstall. */
     val psiphonInstalled: Boolean = false,
+    val psiphonDataRetained: Boolean = false,
+    val tunnelHyInstalled: Boolean = false,
     val interfaceIpv4: Set<String> = emptySet(),
     val interfaceIpv6: Set<String> = emptySet()
 ) {
@@ -89,8 +92,8 @@ data class ServerFacts(
             if command -v ss >/dev/null 2>&1 &&
                ss -Hlnt >/dev/null 2>&1 && ss -Hlnu >/dev/null 2>&1; then
               echo SOCKETS=1
-              echo "TCP=§(ss -Hlnt 2>/dev/null | awk '{print §4}' | grep -vE '^(127[.]|[[]::1[]]|::1)' | sed 's/.*://' | sort -un | tr '\n' ',')"
-              echo "UDP=§(ss -Hlnu 2>/dev/null | awk '{print §4}' | grep -vE '^(127[.]|[[]::1[]]|::1)' | sed 's/.*://' | sort -un | tr '\n' ',')"
+              echo "TCP=§(ss -Hlnt 2>/dev/null | awk '{print §4}' | sed 's/.*://' | sort -un | tr '\n' ',')"
+              echo "UDP=§(ss -Hlnu 2>/dev/null | awk '{print §4}' | sed 's/.*://' | sort -un | tr '\n' ',')"
             else
               echo SOCKETS=0
             fi
@@ -98,6 +101,7 @@ data class ServerFacts(
             echo "IPV6=§(ip -o -6 addr show scope global 2>/dev/null | awk '{split(§4,a,"/");print a[1]}' | paste -sd, -)"
             if command -v docker >/dev/null 2>&1; then echo DOCKER=1; else echo DOCKER=0; fi
             if [ -f /etc/systemd/system/psiphond.service ] || [ -f /etc/systemd/system/maximus-psiphon.service ]; then echo PSIPHON_INSTALLED=1; else echo PSIPHON_INSTALLED=0; fi
+            if [ -d /opt/maximus-private-psiphon ]; then echo PSIPHON_DATA_RETAINED=1; else echo PSIPHON_DATA_RETAINED=0; fi
             echo "CC=§(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)"
             if command -v ufw >/dev/null 2>&1; then
               if §SUDO ufw status 2>/dev/null | grep -q 'Status: active'; then echo FIREWALL=ufw-active; else echo FIREWALL=ufw-inactive; fi
@@ -114,6 +118,7 @@ data class ServerFacts(
             done
             if [ -x /usr/local/x-ui/x-ui ] || [ -f /etc/systemd/system/x-ui.service ]; then echo XUI=1; else echo XUI=0; fi
             if [ -f /etc/systemd/system/maximus-tunnel.service ]; then echo MXTUNNEL=1; else echo MXTUNNEL=0; fi
+            if [ -f /etc/systemd/system/maximus-tunnel-hy.service ]; then echo MXTUNNEL_HY=1; else echo MXTUNNEL_HY=0; fi
             if [ -d /opt/hiddify-manager ]; then
               echo HIDDIFY=1
               echo "HIDDIFY_VERSION=§(head -n1 /opt/hiddify-manager/VERSION 2>/dev/null | tr -cd '0-9A-Za-z.-')"
@@ -167,6 +172,8 @@ data class ServerFacts(
                 socketInspectionAvailable = v["SOCKETS"] == "1",
                 dockerAvailable = v["DOCKER"] == "1",
                 psiphonInstalled = v["PSIPHON_INSTALLED"] == "1",
+                psiphonDataRetained = v["PSIPHON_DATA_RETAINED"] == "1",
+                tunnelHyInstalled = v["MXTUNNEL_HY"] == "1",
                 interfaceIpv4 = v["IPV4"].orEmpty().split(',').filter { it.isNotBlank() }.toSet(),
                 interfaceIpv6 = v["IPV6"].orEmpty().split(',').filter { it.isNotBlank() }.toSet()
             )

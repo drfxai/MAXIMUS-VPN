@@ -22,6 +22,8 @@ class PrivatePsiphonProvisioner(
         reviewedSha256: String,
         progress: ActionProgress
     ): Result {
+        // Deliberately stricter than generic ServerFacts.blocker(): this dormant
+        // provisioner does not yet safely translate every command to passwordless sudo.
         require(server.username == "root") { "Private Psiphon installation currently requires root SSH." }
         require(server.canSignIn) { "The VPS SSH identity and authentication must be confirmed." }
         require(executable.size in 1_000_000..RemoteShell.MAX_TRANSFER) { "Unexpected psiphond binary size." }
@@ -39,7 +41,8 @@ class PrivatePsiphonProvisioner(
             }
             val facts = ServerFacts.parse(inspected.output)
             facts.blocker()?.let { error(it) }
-            check(facts.root && facts.socketInspectionAvailable && !facts.psiphonInstalled) {
+            check(facts.root && facts.socketInspectionAvailable &&
+                !facts.psiphonInstalled && !facts.psiphonDataRetained) {
                 "A fresh root-level inventory is required; an existing Psiphon service cannot be overwritten."
             }
             check(port !in facts.tcpPorts && port !in facts.udpPorts) {
@@ -47,9 +50,11 @@ class PrivatePsiphonProvisioner(
             }
             // Upload through pinned SSH; never print the executable or credentials in progress logs.
             shell.upload(executable, staged)
+            var installed = false
             try {
                 val confirmed = shell.runTool(PrivatePsiphonServerScripts.install(spec), progress, 5 * 60_000L)
-                check(confirmed["PSIPHON_UNIT_ACTIVE"] == "1") { "The managed systemd service did not confirm readiness." }
+                installed = confirmed["PSIPHON_UNIT_ACTIVE"] == "1"
+                check(installed) { "The managed systemd service did not confirm readiness." }
                 // Raw bootstrap stays inside this method until encrypted on Android by PrivatePsiphonStore.
                 val entry = shell.download("${PrivatePsiphonServerScripts.INSTALL_DIR}/server-entry.dat", 262_144)
                     .toString(Charsets.UTF_8).trim()
@@ -60,6 +65,17 @@ class PrivatePsiphonProvisioner(
                 }
                 val newTool = InstalledTool(PrivatePsiphonServerScripts.TOOL_ID, port = port)
                 return Result(server.withTool(newTool), entry, port)
+            } catch (e: Exception) {
+                // install() rolls back failures before its success marker. Once running,
+                // a broken or mismatched bootstrap must not leave an orphan service.
+                if (installed) {
+                    val rolledBack = runCatching {
+                        shell.runTool(PrivatePsiphonServerScripts.uninstall(purge = true), progress, 60_000L)
+                    }.isSuccess
+                    if (!rolledBack) throw IllegalStateException(
+                        "Psiphon bootstrap verification failed and remote rollback is unconfirmed; inspect the VPS before retrying.", e)
+                }
+                throw e
             } finally {
                 // Deleting the staging file is safe even if the script already moved it to /opt.
                 // It is limited to the randomized path created by this app.

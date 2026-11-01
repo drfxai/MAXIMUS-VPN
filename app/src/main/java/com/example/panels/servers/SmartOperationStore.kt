@@ -22,25 +22,35 @@ data class SmartOperation(
     val status: Status,
     val startedAt: Long,
     val updatedAt: Long,
-    val preflightAt: Long,
-    val note: String = ""
+    val preflightAt: Long
 ) {
     enum class Status { RUNNING, VERIFYING, COMPLETED, FAILED, UNCERTAIN, RECONCILED }
 
     val actionable: Boolean get() = status == Status.UNCERTAIN || status == Status.FAILED
 }
 
-class SmartOperationStore(context: Context) {
-    private val secure = SecureStorage(context.applicationContext)
+/** Minimal persistence port so the state machine is testable without Android Keystore. */
+interface OperationJournalPersistence {
+    fun load(): String
+    fun save(raw: String)
+}
 
-    @Synchronized
-    fun all(): List<SmartOperation> = decode(secure.getAndDecrypt(KEY, "[]"))
+private class EncryptedOperationJournal(context: Context) : OperationJournalPersistence {
+    private val secure = SecureStorage(context.applicationContext)
+    override fun load(): String = secure.getAndDecrypt("smart_manager_operation_journal_v1", "[]")
+    override fun save(raw: String) = secure.encryptAndSave("smart_manager_operation_journal_v1", raw)
+}
+
+class SmartOperationStore(private val persistence: OperationJournalPersistence) {
+    constructor(context: Context) : this(EncryptedOperationJournal(context))
+
+    fun all(): List<SmartOperation> = synchronized(JOURNAL_LOCK) { decode(persistence.load()) }
 
     /** Start only after the existing installation wizard has obtained user approval. */
-    @Synchronized
-    fun begin(serverId: String, toolId: String, inspectedAt: Long, now: Long = System.currentTimeMillis()): SmartOperation {
+    fun begin(serverId: String, toolId: String, inspectedAt: Long, now: Long = System.currentTimeMillis()): SmartOperation =
+        synchronized(JOURNAL_LOCK) {
         require(serverId.isNotBlank() && toolId.isNotBlank()) { "Missing operation identity" }
-        require(inspectedAt > 0 && now >= inspectedAt && now - inspectedAt <= 60_000L) {
+        require(inspectedAt > 0 && now >= inspectedAt && now - inspectedAt <= INSPECTION_TTL_MS) {
             "A fresh server inspection is required before a mutation"
         }
         val list = all()
@@ -50,11 +60,11 @@ class SmartOperationStore(context: Context) {
         val item = SmartOperation(UUID.randomUUID().toString(), serverId, toolId,
             SmartOperation.Status.RUNNING, now, now, inspectedAt)
         persist((list + item).takeLast(MAX_ENTRIES))
-        return item
+        item
     }
 
-    @Synchronized
-    fun transition(id: String, status: SmartOperation.Status, now: Long = System.currentTimeMillis()): SmartOperation {
+    fun transition(id: String, status: SmartOperation.Status, now: Long = System.currentTimeMillis()): SmartOperation =
+        synchronized(JOURNAL_LOCK) {
         val list = all()
         val current = requireNotNull(list.firstOrNull { it.id == id }) { "Unknown operation" }
         val permitted = when (current.status) {
@@ -66,15 +76,15 @@ class SmartOperationStore(context: Context) {
         check(status in permitted) { "Invalid operation transition: ${current.status} -> $status" }
         val changed = current.copy(status = status, updatedAt = now)
         persist(list.map { if (it.id == id) changed else it })
-        return changed
+        changed
     }
 
     /**
      * Called during initialization after process recreation. No remote commands are executed.
      * A previously interrupted operation becomes UNCERTAIN until an operator reconciles it.
      */
-    @Synchronized
-    fun markInterrupted(now: Long = System.currentTimeMillis()): List<SmartOperation> {
+    fun markInterrupted(now: Long = System.currentTimeMillis()): List<SmartOperation> =
+        synchronized(JOURNAL_LOCK) {
         val list = all()
         val changed = list.map {
             if (it.status in setOf(SmartOperation.Status.RUNNING, SmartOperation.Status.VERIFYING))
@@ -82,11 +92,11 @@ class SmartOperationStore(context: Context) {
             else it
         }
         if (changed != list) persist(changed)
-        return changed.filter { it.status == SmartOperation.Status.UNCERTAIN }
+        changed.filter { it.status == SmartOperation.Status.UNCERTAIN }
     }
 
     private fun persist(list: List<SmartOperation>) {
-        secure.encryptAndSave(KEY, JSONArray().apply {
+        persistence.save(JSONArray().apply {
             list.forEach { op -> put(JSONObject()
                 .put("id", op.id).put("serverId", op.serverId).put("toolId", op.toolId)
                 .put("status", op.status.name).put("startedAt", op.startedAt)
@@ -95,7 +105,7 @@ class SmartOperationStore(context: Context) {
     }
 
     companion object {
-        private const val KEY = "smart_manager_operation_journal_v1"
+        private val JOURNAL_LOCK = Any()
         private const val MAX_ENTRIES = 100
 
         /** Unknown or corrupted data may never be promoted to an installed/verified state. */

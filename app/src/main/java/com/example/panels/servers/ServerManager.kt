@@ -44,10 +44,18 @@ interface ActionProgress {
  * Runs a [ToolScript], streaming its steps and log lines to [progress], and returns its results.
  * A non-zero exit becomes an error with the script's last two log lines.
  */
+/** A refusal known to precede any installer mutation, unlike a generic SSH/network error. */
+class InstallPreflightException(message: String) : IllegalStateException(message)
+
 internal fun RemoteShell.runTool(script: ToolScript, progress: ActionProgress, timeoutMs: Long = 15 * 60_000L): Map<String, String> {
     val reader = ScriptProgress(onStep = { progress.step(it) }, onLog = { progress.log(it) })
     val result = run(InstallerShellLock.wrap(script.text), timeoutMs) { reader.line(it) }
     if (result.exitCode != 0) {
+        val lockRejected = result.exitCode in setOf(InstallerShellLock.UNAVAILABLE_EXIT, InstallerShellLock.BUSY_EXIT) &&
+            listOf("Maximus installer lock unavailable", "Another Maximus installer is active",
+                "Unsafe Maximus installer lock", "Maximus installer lock directory belongs")
+                .any { result.output.contains(it) }
+        if (lockRejected) throw InstallPreflightException("Installer lock unavailable/busy; no tool mutation started.")
         val tail = result.output.lineSequence().map { it.trim() }
             .filter { it.isNotEmpty() && !it.startsWith("##") }.toList().takeLast(2).joinToString(" · ")
         error(ServerLogSanitizer.redact(tail.ifBlank { "The server reported an error (exit ${result.exitCode})" }).take(2000))
@@ -81,7 +89,34 @@ class ServerManager(
 
     private fun factsOrCheck(server: ManagedServer): ServerFacts = server.facts ?: check(server).facts!!
 
+    /** Local, nonmutating admission checks before committing a durable operation. */
+    fun preflightInstall(server: ManagedServer, toolId: String, options: InstallOptions) {
+        val tool = ServerToolCatalog.byId(toolId) ?: throw InstallPreflightException("Unknown tool $toolId")
+        if (tool.comingLater) throw InstallPreflightException("${tool.title} is not available yet")
+        val conflict = tool.conflicts.firstOrNull { server.tool(it) != null }
+        if (conflict != null) throw InstallPreflightException("This server already runs $conflict; tools cannot overwrite shared listeners.")
+        if (!tool.fitsOn(server.location)) throw InstallPreflightException("This tool does not support the server location.")
+        val facts = server.facts ?: throw InstallPreflightException("Fresh SSH facts are required before installation.")
+        if (tool.aptOnly && !facts.usesApt) throw InstallPreflightException("${tool.title} requires apt.")
+        if (toolId !in setOf(ServerToolCatalog.XUI, ServerToolCatalog.HIDDIFY, ServerToolCatalog.KEY_LOGIN)) {
+            if (!facts.socketInspectionAvailable)
+                throw InstallPreflightException("Listener inventory unavailable; no installation started.")
+            facts.blocker()?.let { throw InstallPreflightException(it) }
+        }
+        if (toolId in setOf(ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT)) {
+            DnsDelegation.problem(options.baseDomain, options.tunnelLabel)?.let { throw InstallPreflightException(it) }
+            if (toolId == ServerToolCatalog.DNSTT)
+                DnsDelegation.backupProblem(options.baseDomain, options.backupBases)?.let { throw InstallPreflightException(it) }
+            val plan = SmartPortPlanner.propose(facts, server.checkedAt,
+                SmartPortPlanner.knownPublicBindings(toolId))
+            if (!plan.eligible) throw InstallPreflightException(plan.conflicts.joinToString("; "))
+        }
+    }
+
     fun install(server: ManagedServer, toolId: String, options: InstallOptions, progress: ActionProgress): InstallOutcome {
+        // The Wizard calls preflightInstall before recording RUNNING. Direct callers
+        // must still be allowed to obtain fresh facts over SSH inside this method.
+        // Never require a cached inspection for the low-level manager itself.
         val tool = requireNotNull(ServerToolCatalog.byId(toolId)) { "Unknown tool $toolId" }
         require(!tool.comingLater) { "${tool.title} is not available yet" }
         val conflict = tool.conflicts.firstOrNull { server.tool(it) != null }

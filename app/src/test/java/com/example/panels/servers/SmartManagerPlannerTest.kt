@@ -63,6 +63,15 @@ class SmartManagerPlannerTest {
             plan, setOf(SmartManagerPlanner.PRIVATE_PSIPHON)).isEmpty())
     }
 
+    @Test fun inventoryReportsRetainedPsiphonKeysSeparatelyFromUnit() {
+        val facts = ServerFacts.parse("---MX-FACTS---\nPSIPHON_INSTALLED=0\nPSIPHON_DATA_RETAINED=1\n")
+        assertFalse(facts.psiphonInstalled)
+        assertTrue(facts.psiphonDataRetained)
+        val c = SmartManagerPlanner.inspect(host(facts = facts), now)
+            .candidate(SmartManagerPlanner.PRIVATE_PSIPHON)
+        assertTrue(c?.reason.orEmpty().contains("purge"))
+    }
+
     @Test fun existingExternalHiddifyBlocksXuiAndDoesNotReportOwnership() {
         val facts = requireNotNull(host().facts).copy(hiddifyInstalled = true)
         val plan = SmartManagerPlanner.inspect(host(facts = facts), now)
