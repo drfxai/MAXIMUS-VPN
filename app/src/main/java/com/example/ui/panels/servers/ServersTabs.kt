@@ -204,6 +204,20 @@ private fun TunnelRow(tunnels: Int, onClick: () -> Unit) {
 
 // ------------------------------------------------------------------ Install Center
 
+/** One deterministic catalog order shared by the UI and its unit regression test. */
+internal const val PSIPHON_CATALOG_ROW = "private-psiphon"
+internal val installDisplayGroups = listOf(ToolGroup.TUNNELS, ToolGroup.PROTOCOLS,
+    ToolGroup.PANELS, ToolGroup.SECURITY, ToolGroup.SPEED)
+
+internal fun installCatalogIds(tools: List<ServerTool>): List<String> =
+    installDisplayGroups.flatMap { group ->
+        tools.filter { it.group == group }.flatMap { tool ->
+            if (tool.id == ServerToolCatalog.HYSTERIA2)
+                listOf(tool.id, PSIPHON_CATALOG_ROW)
+            else listOf(tool.id)
+        }
+    }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun InstallCenterTab(
@@ -230,9 +244,7 @@ internal fun InstallCenterTab(
             GroupCard { Rows(advice.take(3), dividerStart = 62.dp) { a -> AdviceRow(a) { onAdvice(a) } } }
         }
         // Surface working tunnels before optional panels; Psiphon sits directly below Hysteria2.
-        val displayOrder = listOf(ToolGroup.TUNNELS, ToolGroup.PROTOCOLS,
-            ToolGroup.PANELS, ToolGroup.SECURITY, ToolGroup.SPEED)
-        for (group in displayOrder) {
+        for (group in installDisplayGroups) {
             val inGroup = tools.filter { it.group == group }
             if (inGroup.isEmpty()) continue
             SectionLabel(group.title)
@@ -240,7 +252,8 @@ internal fun InstallCenterTab(
                 inGroup.forEachIndexed { index, tool ->
                     if (index > 0) RowDivider(62.dp)
                     ToolRow(tool, installedOn[tool.id] ?: 0) { onOpen(tool.id) }
-                    if (tool.id == ServerToolCatalog.HYSTERIA2) {
+                    if (installCatalogIds(tools).contains(PSIPHON_CATALOG_ROW) &&
+                        tool.id == ServerToolCatalog.HYSTERIA2) {
                         // Private Psiphon belongs in the Install catalog, not the global tabs.
                         RowDivider(62.dp)
                         ListRow(
