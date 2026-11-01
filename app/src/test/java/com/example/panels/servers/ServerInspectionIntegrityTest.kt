@@ -25,7 +25,7 @@ class ServerInspectionIntegrityTest {
 
     @Test fun rejectsNonzeroExitEvenWhenFieldsAreParsable() {
         val error = assertThrows(IllegalStateException::class.java) {
-            manager(1, "---MX-FACTS---\nUID=0\n")
+            manager(1, "---MX-FACTS---\nUID=0\nSOCKETS=1\nARCH=x86_64\n").check(server)
         }
         assertTrue(error.message.orEmpty().contains("did not complete"))
     }
@@ -42,7 +42,7 @@ class ServerInspectionIntegrityTest {
             override fun log(line: String) {}
         }
         assertThrows(InstallPreflightException::class.java) {
-            manager(1, "---MX-FACTS---\\nUID=0\\n")
+            manager(1, "---MX-FACTS---\nUID=0\n")
                 .install(server, ServerToolCatalog.DNSTT,
                     InstallOptions(baseDomain = "example.com", tunnelLabel = "t"), noProgress)
         }
