@@ -6,7 +6,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import com.example.panels.servers.ServerToolCatalog
@@ -47,14 +46,14 @@ class PsiphonCatalogPlacementTest {
             }
         }
 
-        // Offscreen items can have clipped boundsInRoot in Robolectric. Check the
-        // unmerged semantics hierarchy (the Compose source order) instead.
-        val hierarchy = composeRule.onRoot(useUnmergedTree = true).printToString()
-        val hysteria = hierarchy.indexOf("Hysteria2")
-        val psiphon = hierarchy.indexOf("Psiphon Server")
-        val xui = hierarchy.indexOf("3X-UI")
-        assertTrue("Hysteria2 missing from Install catalog", hysteria >= 0)
-        assertTrue("Psiphon Server must follow Hysteria2", psiphon > hysteria)
+        // Assert the actual data-driven catalog order instead of clipped offscreen
+        // boundsInRoot coordinates (which are viewport-dependent under Robolectric).
+        val order = installCatalogIds(chosen)
+        val hysteria = order.indexOf(ServerToolCatalog.HYSTERIA2)
+        val psiphon = order.indexOf(PSIPHON_CATALOG_ROW)
+        val xui = order.indexOf(ServerToolCatalog.XUI)
+        assertTrue("Hysteria2 missing from catalog", hysteria >= 0)
+        assertTrue("Psiphon Server must immediately follow Hysteria2", psiphon == hysteria + 1)
         assertTrue("Psiphon Server must precede 3X-UI", xui > psiphon)
         composeRule.onNodeWithText("Psiphon Server").performScrollTo().assertExists().performClick()
         composeRule.runOnIdle { assertTrue("Psiphon detail did not open", opened) }
