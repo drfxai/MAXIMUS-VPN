@@ -13,7 +13,7 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-PACKAGE = "com.drfxai.maximusvpn"
+PACKAGE = "com.drfxai.maximusvpn.debug"  # applicationIdSuffix in :app:assembleDebug
 OUT = Path("docs/media/screenshots")
 OUT.mkdir(parents=True, exist_ok=True)
 
