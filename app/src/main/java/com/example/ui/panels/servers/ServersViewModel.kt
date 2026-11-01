@@ -23,7 +23,6 @@ import com.example.panels.servers.SmartOperation
 import com.example.panels.servers.SmartOperationStore
 import com.example.panels.servers.SmartBundlePlanner
 import com.example.panels.servers.SmartManagerPlanner
-import com.example.panels.servers.DnsDelegation
 import com.example.panels.servers.SmartNodeStore
 import com.example.panels.servers.ManagedNodeRecord
 import com.example.panels.servers.PrivatePsiphonServerScripts
