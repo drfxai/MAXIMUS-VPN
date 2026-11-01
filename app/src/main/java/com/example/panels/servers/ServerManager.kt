@@ -115,6 +115,8 @@ class ServerManager(
 
     fun install(server: ManagedServer, toolId: String, options: InstallOptions, progress: ActionProgress): InstallOutcome {
         preflightInstall(server, toolId, options)
+        // Preflight verifies this ID; retain the descriptor for the install result and apt gate.
+        val tool = requireNotNull(ServerToolCatalog.byId(toolId))
         return when (toolId) {
             ServerToolCatalog.XUI -> {
                 check(server.tool(ServerToolCatalog.HIDDIFY) == null) { "This server runs Hiddify, which needs the server to itself." }
