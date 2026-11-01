@@ -23,6 +23,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.panels.servers.PrivatePsiphonServerScripts
+import com.example.panels.servers.INSPECTION_TTL_MS
+import kotlinx.coroutines.delay
 import com.example.panels.servers.ServerFacts
 import com.example.ui.panels.servers.ServersState
 import com.example.ui.panels.servers.ServersViewModel
@@ -40,8 +42,15 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
     var showSafety by remember { mutableStateOf(false) }
     val server = state.servers.firstOrNull { it.id == selected } ?: state.servers.firstOrNull()
     val facts = server?.facts
+    var inspectionNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(5_000L)
+            inspectionNow = System.currentTimeMillis()
+        }
+    }
     val fresh = server != null && facts != null &&
-        System.currentTimeMillis() - server.checkedAt in 0..60_000L
+        inspectionNow - server.checkedAt in 0..INSPECTION_TTL_MS
     val node = server?.let { vm.managedNodesFor(it.id).firstOrNull {
         n -> n.serviceId == PrivatePsiphonServerScripts.TOOL_ID
     } }
