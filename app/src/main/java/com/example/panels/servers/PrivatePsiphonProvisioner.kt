@@ -41,7 +41,8 @@ class PrivatePsiphonProvisioner(
             }
             val facts = ServerFacts.parse(inspected.output)
             facts.blocker()?.let { error(it) }
-            check(facts.root && facts.socketInspectionAvailable && !facts.psiphonInstalled) {
+            check(facts.root && facts.socketInspectionAvailable &&
+                !facts.psiphonInstalled && !facts.psiphonDataRetained) {
                 "A fresh root-level inventory is required; an existing Psiphon service cannot be overwritten."
             }
             check(port !in facts.tcpPorts && port !in facts.udpPorts) {
