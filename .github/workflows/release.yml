@@ -1,9 +1,8 @@
 name: Signed Android release
 
+# Temporarily manual-only while the reviewed Psiphon server provisioner is wired and tested.
+# Prevent accidental clobber of the already published V1.0.4 release assets.
 on:
-  push:
-    branches: [main]
-    paths: [release-version.txt, release-request.txt]
   workflow_dispatch:
     inputs:
       tag:
