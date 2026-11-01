@@ -291,12 +291,12 @@ internal fun PremiumSmartManagerScreen(
         val blockers = inspection?.let { SmartManagerPlanner.bundleBlockers(it, chosen) }.orEmpty()
         val isSingle = chosenCandidates.size == 1
         val batchPlan = inspection?.takeIf { chosenCandidates.size > 1 }?.let {
-            SmartBundlePlanner.review(it, selectedIds, batchDomain, batchLabel)
+            SmartBundlePlanner.review(it, chosen, batchDomain, batchLabel)
         }
         val canSingle = isSingle && blockers.isEmpty() &&
             chosenCandidates.single().id != SmartManagerPlanner.PRIVATE_PSIPHON
-        val canBatch = batchPlan?.eligible == true && server != null &&
-            state.bundle?.running != true
+        val canBatch = batchPlan?.eligible == true && blockers.isEmpty() &&
+            server != null && state.bundle?.running != true
         AlertDialog(
             onDismissRequest = { showPlan = false },
             title = { Text("Smart Installation Review") },
