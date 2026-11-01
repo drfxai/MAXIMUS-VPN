@@ -92,7 +92,7 @@ class SmartOperationStore(private val persistence: OperationJournalPersistence) 
             else it
         }
         if (changed != list) persist(changed)
-        return changed.filter { it.status == SmartOperation.Status.UNCERTAIN }
+        changed.filter { it.status == SmartOperation.Status.UNCERTAIN }
     }
 
     private fun persist(list: List<SmartOperation>) {
