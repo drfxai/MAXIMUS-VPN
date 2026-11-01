@@ -103,6 +103,14 @@ object DiagnosticReportBuilder {
                     .put("sample", g.sample ?: JSONObject.NULL))
             }
         })
+        // Small HTTPS proof and full bidirectional proof are separate, including the probe route.
+        root.put("bulkTraffic", c.trafficEvidence?.takeIf { it.appliesTo(c) }?.let { e ->
+            JSONObject().put("path", e.path.name)
+                .put("bidirectional", e.bidirectional)
+                .put("stalled", e.bulkStalled)
+                .put("detail", e.describe())
+                .put("verifiedThroughTun", e.bidirectional && e.path == com.example.vpn.verify.ProbePath.TUN)
+        } ?: JSONObject.NULL)
         root.put("tests", JSONArray().apply {
             i.tests.takeLast(MAX_TESTS).forEach { t ->
                 put(JSONObject()
@@ -147,6 +155,11 @@ object DiagnosticReportBuilder {
         sb.appendLine()
         sb.appendLine("Connection: ${c.statusLabel}" + (c.failureStage?.let { " · stage $it" } ?: ""))
         c.verifiedAt?.let { sb.appendLine("Traffic last verified: ${time(it)}") }
+        c.trafficEvidence?.takeIf { it.appliesTo(c) }?.let { e ->
+            sb.appendLine("Bulk upload/download: ${if (e.bidirectional) "PASS" else if (e.bulkStalled) "STALLED" else "PARTIAL"} · path ${e.path.name}")
+            if (e.path != com.example.vpn.verify.ProbePath.TUN)
+                sb.appendLine("Android TUN bulk proof: NOT VERIFIED by this local engine-port test")
+        }
         sb.appendLine("Session ${c.sessionId ?: "-"} · attempt ${c.attemptId ?: "-"} · profile ${i.profileRef ?: "-"}")
         sb.appendLine("Network: ${i.networkProfile ?: "not measured"}")
         if (i.engines.isNotEmpty()) {
