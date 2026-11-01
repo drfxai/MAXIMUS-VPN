@@ -1755,8 +1755,13 @@ class RayVpnService : VpnService() {
         if (!process.awaitReady(launch.readyTimeoutMs)) {
             process.stop()
             sidecar = null
-            com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "did not start")
-            error("The ${engine.id} engine did not start")
+            val hint = process.startupFailure ?: "No readiness signal; inspect redacted engine logs"
+            com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "startup failed: ${hint}")
+            com.example.vpn.diagnostics.events.EventLog.event("engine.startup.failure",
+                com.example.vpn.diagnostics.events.Severity.ERROR,
+                attributes = mapOf("engine.name" to engine.id, "reason" to hint),
+                stage = com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED, result = "FAIL")
+            error("The ${engine.id} engine did not start: ${hint}")
         }
         com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
         XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
