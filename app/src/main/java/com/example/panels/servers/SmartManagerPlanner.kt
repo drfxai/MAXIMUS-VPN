@@ -47,6 +47,7 @@ object SmartManagerPlanner {
             val udp = bindings.filter { it.protocol == SmartPortPlanner.Protocol.UDP }.map { it.port }.toSet()
             val portPlan = SmartPortPlanner.propose(facts, server.checkedAt, bindings, now)
             val condition = when {
+                facts == null -> Status.NEEDS_INSPECTION to "No server facts are available."
                 // Local history or old SSH results are not fresh evidence of installation.
                 !fresh -> Status.NEEDS_INSPECTION to "Refresh authenticated SSH inspection before planning."
                 existing -> Status.INSTALLED to "Previously recorded on this server; verify ownership and health."
