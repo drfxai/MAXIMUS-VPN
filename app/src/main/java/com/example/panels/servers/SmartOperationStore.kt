@@ -22,8 +22,7 @@ data class SmartOperation(
     val status: Status,
     val startedAt: Long,
     val updatedAt: Long,
-    val preflightAt: Long,
-    val note: String = ""
+    val preflightAt: Long
 ) {
     enum class Status { RUNNING, VERIFYING, COMPLETED, FAILED, UNCERTAIN, RECONCILED }
 
@@ -40,7 +39,7 @@ class SmartOperationStore(context: Context) {
     @Synchronized
     fun begin(serverId: String, toolId: String, inspectedAt: Long, now: Long = System.currentTimeMillis()): SmartOperation {
         require(serverId.isNotBlank() && toolId.isNotBlank()) { "Missing operation identity" }
-        require(inspectedAt > 0 && now >= inspectedAt && now - inspectedAt <= 60_000L) {
+        require(inspectedAt > 0 && now >= inspectedAt && now - inspectedAt <= INSPECTION_TTL_MS) {
             "A fresh server inspection is required before a mutation"
         }
         val list = all()
