@@ -66,13 +66,18 @@ internal fun TunnelTabHost(
 
 /** The Install tab: the tool catalog plus suggestions for the user's servers. */
 @Composable
-internal fun InstallTabHost(vm: ServersViewModel, @Suppress("UNUSED_PARAMETER") state: ServersState) {
+internal fun InstallTabHost(
+    vm: ServersViewModel,
+    @Suppress("UNUSED_PARAMETER") state: ServersState,
+    onPsiphonServer: () -> Unit = {}
+) {
     InstallCenterTab(
         tools = ServerToolCatalog.all,
         installedOn = vm.installedCounts(),
         advice = vm.advice(),
         onOpen = { if (it == ServerToolCatalog.MAXIMUS_TUNNEL) vm.tunnel.openSetup() else vm.openWizard(it) },
-        onAdvice = { if (it.toolId == ServerToolCatalog.MAXIMUS_TUNNEL) vm.tunnel.openSetup() else vm.openWizard(it.toolId, it.serverId) }
+        onAdvice = { if (it.toolId == ServerToolCatalog.MAXIMUS_TUNNEL) vm.tunnel.openSetup() else vm.openWizard(it.toolId, it.serverId) },
+        onPsiphonServer = onPsiphonServer
     )
 }
 
