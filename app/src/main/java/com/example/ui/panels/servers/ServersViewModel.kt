@@ -26,6 +26,8 @@ import com.example.panels.servers.SmartManagerPlanner
 import com.example.panels.servers.SmartNodeStore
 import com.example.panels.servers.ManagedNodeRecord
 import com.example.panels.servers.PrivatePsiphonServerScripts
+import com.example.panels.servers.PrivatePsiphonProvisioner
+import com.example.panels.servers.PrivatePsiphonArtifact
 import com.example.vpn.sidecar.PrivatePsiphonStore
 import com.example.vpn.sidecar.PrivatePsiphonEntry
 import com.example.vpn.smart.NetworkKey
@@ -88,7 +90,18 @@ data class ServersState(
     val tests: Map<String, Pair<Boolean, String>> = emptyMap(),
     /** Servers whose "Hiddify found" card was closed with Not now (this session only). */
     val foundDismissed: Set<String> = emptySet(),
-    val bundle: SmartBatchUi? = null
+    val bundle: SmartBatchUi? = null,
+    val psiphonInstall: PsiphonServerInstallUi? = null
+)
+
+/** Server-side service and Android client are distinct from verified VPN tunnel traffic. */
+data class PsiphonServerInstallUi(
+    val serverId: String,
+    val stage: String,
+    val running: Boolean = true,
+    val serverInstalled: Boolean = false,
+    val entryRegistered: Boolean = false,
+    val error: String = ""
 )
 
 /** The user-approved bundle is sequential, not atomic and not VPN-traffic-verified. */
@@ -125,6 +138,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     val events: SharedFlow<ServersEvent> = _events
     private var job: Job? = null
     private var bundleJob: Job? = null
+    private var psiphonJob: Job? = null
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -145,6 +159,102 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (exists) managedNodes.result(server.id, toolId, profileId, traffic,
                 networkKey = NetworkKey.current(getApplication()))
+        }
+    }
+
+    /**
+     * Runs only after the user explicitly approves the selected VPS/public IPv4/port.
+     * The upstream server program is pinned by commit, size and SHA-256. No privileged
+     * SSH command is issued until the complete artifact is downloaded and verified.
+     */
+    fun installPrivatePsiphon(serverId: String, publicIp: String, port: Int) {
+        if (psiphonJob?.isActive == true || bundleJob?.isActive == true ||
+            _state.value.busy.isNotBlank() || _state.value.route is ServersRoute.Wizard) return
+        val server = server(serverId) ?: return emit(ServersEvent.Message("Select a saved VPS."))
+        if (!PrivatePsiphonServerScripts.validIpv4(publicIp) ||
+            port !in 1024..65535 || port == 22 || port == 53) {
+            emit(ServersEvent.Message("Use a public IPv4 and a dedicated TCP port from 1024 to 65535."))
+            return
+        }
+        _state.update { st -> st.copy(psiphonInstall = PsiphonServerInstallUi(serverId, "Inspecting pinned SSH identity")) }
+        psiphonJob = viewModelScope.launch {
+            var operation: SmartOperation? = null
+            try {
+                val inspected = withContext(Dispatchers.IO) { manager.check(server) }
+                val facts = requireNotNull(inspected.facts)
+                check(server.username == "root" && PrivatePsiphonArtifact.supported(facts)) {
+                    "Private Psiphon requires root SSH, Linux amd64, systemd and a working port inventory."
+                }
+                check(!facts.psiphonInstalled && !facts.psiphonDataRetained &&
+                    port !in facts.tcpPorts && port !in facts.udpPorts) {
+                    "Psiphon files already exist or the selected port is occupied; use VPS management to inspect."
+                }
+                check(withContext(Dispatchers.IO) {
+                    managedNodes.all().none {
+                        it.serverId == serverId && it.serviceId == PrivatePsiphonServerScripts.TOOL_ID
+                    }
+                }) { "A private Psiphon node already exists for this VPS; test it before creating another." }
+                _state.update { st -> st.copy(psiphonInstall = st.psiphonInstall?.copy(
+                    stage = "Downloading verified official psiphond (37.8 MB)")) }
+                val binary = withContext(Dispatchers.IO) { PrivatePsiphonArtifact.download(http) }
+                _state.update { st -> st.copy(psiphonInstall = st.psiphonInstall?.copy(
+                    stage = "Installing isolated psiphond service over pinned SSH")) }
+                // A download can exceed the inspection TTL: recheck immediately before journal.
+                val rechecked = withContext(Dispatchers.IO) { manager.check(inspected) }
+                val currentFacts = requireNotNull(rechecked.facts)
+                check(PrivatePsiphonArtifact.supported(currentFacts)) { "The VPS no longer meets Psiphon requirements." }
+                operation = withContext(Dispatchers.IO) {
+                    operations.begin(serverId, PrivatePsiphonServerScripts.TOOL_ID, rechecked.checkedAt)
+                }
+                val quietProgress = object : ActionProgress {
+                    override fun step(index: Int) = Unit
+                    override fun log(line: String) = Unit // private entry and tokens never appear in UI/logs
+                }
+                val outcome = withContext(Dispatchers.IO) {
+                    PrivatePsiphonProvisioner().installWithPinnedBinary(
+                        rechecked, publicIp, port, binary, PrivatePsiphonArtifact.SHA256, quietProgress)
+                }
+                withContext(Dispatchers.IO) {
+                    operations.transition(requireNotNull(operation).id, SmartOperation.Status.VERIFYING)
+                }
+                _state.update { st -> st.copy(psiphonInstall = st.psiphonInstall?.copy(
+                    stage = "Encrypting private entry in Android Keystore", serverInstalled = true)) }
+                val secureId = withContext(Dispatchers.IO) {
+                    PrivatePsiphonStore(getApplication()).save(outcome.serverEntry)
+                }
+                val profile = PsiphonSidecar.privateProfile(secureId, server.displayName, server.host)
+                val profileId = storeProfile(null, profile)
+                    ?: error("The private client profile could not be saved; review the remote service before retrying.")
+                val installed = com.example.panels.servers.InstalledTool(
+                    PrivatePsiphonServerScripts.TOOL_ID, port = port, profileId = profileId)
+                save(outcome.server.withTool(installed))
+                withContext(Dispatchers.IO) {
+                    managedNodes.configured(serverId, PrivatePsiphonServerScripts.TOOL_ID, profileId)
+                    operations.transition(requireNotNull(operation).id, SmartOperation.Status.COMPLETED)
+                }
+                operation = null
+                _state.update { st -> st.copy(
+                    psiphonInstall = st.psiphonInstall?.copy(stage = "Server started; client traffic unverified",
+                        running = false, serverInstalled = true, entryRegistered = true),
+                    tests = st.tests - ("$"+"{serverId}/$"+"{PrivatePsiphonServerScripts.TOOL_ID}")
+                ) }
+                emit(ServersEvent.Message("Private Psiphon installed and encrypted client node registered. Now run a real phone traffic test."))
+                emit(ServersEvent.Success)
+            } catch (e: Exception) {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    operation?.let {
+                        // Only explicit no-mutation SSH rejections are known failures.
+                        val status = if (e is InstallPreflightException) SmartOperation.Status.FAILED
+                            else SmartOperation.Status.UNCERTAIN
+                        runCatching { operations.transition(it.id, status) }
+                    }
+                }
+                _state.update { st -> st.copy(psiphonInstall = st.psiphonInstall?.copy(
+                    stage = "Install stopped", running = false,
+                    error = com.example.panels.servers.ServerLogSanitizer.redact(
+                        e.message ?: "Server outcome requires inspection before retrying."))) }
+                if (e is kotlinx.coroutines.CancellationException) throw e
+            }
         }
     }
 
