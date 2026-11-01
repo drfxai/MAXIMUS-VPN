@@ -7,8 +7,13 @@ import org.junit.Test
 import java.io.File
 
 class MatrixTransportTest {
-    @Test fun everyCarrierUsesPrivateLoopbackAndAuthenticatedRegistration() {
-        val context = SidecarContext(File("/private/work"), File("/private/bin"), 19000, "u", "p", OperationalMode.DAILY)
+    @Test fun everyCarrierUsesPrivateLoopbackAndProvisionedIdentity() {
+        val work = java.nio.file.Files.createTempDirectory("matrix-transport-test").toFile()
+        val identity = File(work, "identity.toml")
+        assertNotNull(MatrixTransportSidecar.configurationProblem(work))
+        identity.writeText("test-identity-placeholder")
+        assertNull(MatrixTransportSidecar.configurationProblem(work))
+        val context = SidecarContext(work, File("/private/bin"), 19000, "u", "p", OperationalMode.DAILY)
         for (mode in MatrixTransportSidecar.MODES) {
             val p = MatrixTransportSidecar.profile(mode)
             assertNull(MatrixTransportSidecar.problem(p))
@@ -17,6 +22,20 @@ class MatrixTransportTest {
             assertTrue("external" in launch.command)
             assertFalse("--no-data-check" in launch.command)
             assertEquals(mode == "h2", "--h2" in launch.command)
+        }
+        work.deleteRecursively()
+    }
+
+    @Test fun matrixTransportDoesNotStartWithoutPrivateConfiguration() {
+        val work = java.nio.file.Files.createTempDirectory("matrix-missing-config").toFile()
+        try {
+            val context = SidecarContext(work, File("/private/bin"), 19000, "u", "p", OperationalMode.DAILY)
+            val result = runCatching { MatrixTransportSidecar.prepare(
+                MatrixTransportSidecar.profile(), AppSettings(), context) }
+            assertTrue(result.isFailure)
+            assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("identity.toml"))
+        } finally {
+            work.deleteRecursively()
         }
     }
 

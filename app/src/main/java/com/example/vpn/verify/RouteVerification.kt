@@ -48,7 +48,7 @@ enum class RouteVerification(val title: String) {
             ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED -> LOCAL_PROXY_READY
             ConnectionStatus.CONNECTED -> when {
                 state.revived -> REVIVED_AND_VERIFIED
-                state.trafficEvidence?.takeIf { it.appliesTo(state) }?.bidirectional == true -> BIDIRECTIONAL_VERIFIED
+                state.trafficEvidence?.takeIf { it.appliesTo(state) && it.path == ProbePath.TUN }?.bidirectional == true -> BIDIRECTIONAL_VERIFIED
                 else -> TUNNEL_TRAFFIC_VERIFIED
             }
             ConnectionStatus.DEGRADED -> DEGRADED

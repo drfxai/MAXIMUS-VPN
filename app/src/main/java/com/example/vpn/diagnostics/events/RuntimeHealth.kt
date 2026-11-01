@@ -186,11 +186,15 @@ object RuntimeHealth {
     }
 
     /** A native engine (Xray, a sidecar) stopped without being asked to. */
-    fun engineTerminated(engine: String, exitCode: Int?, expected: Boolean) {
+    fun engineTerminated(engine: String, exitCode: Int?, expected: Boolean, startup: Boolean = false) {
         EventLog.event("engine.terminated", if (expected) Severity.INFO else Severity.ERROR, buildMap {
             put("engine.name", engine)
             exitCode?.let { put("exit.code", it.toString()) }
             put("expected", expected.toString())
-        }, result = if (expected) null else "FAIL", stage = if (expected) null else com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED)
+            put("phase", if (startup) "STARTUP" else "RUNTIME")
+        }, result = if (expected) null else "FAIL",
+            // An engine that previously served traffic did not *fail to start*.
+            stage = if (expected) null else if (startup) com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED
+                else com.example.vpn.diagnostics.FailureStage.UNKNOWN)
     }
 }
