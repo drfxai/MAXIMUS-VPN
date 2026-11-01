@@ -36,6 +36,8 @@ import com.example.ui.panels.servers.ServersState
 import com.example.ui.panels.servers.ServersViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import com.example.panels.servers.INSPECTION_TTL_MS
 import kotlinx.coroutines.withContext
 
 /**
@@ -55,8 +57,16 @@ internal fun PremiumSmartManagerScreen(
     var showPlan by remember { mutableStateOf(false) }
     val server = state.servers.firstOrNull { it.id == selectedServer } ?: state.servers.firstOrNull()
     val facts = server?.facts
-    val inspection = server?.let { SmartManagerPlanner.inspect(it) }
-    val fresh = server != null && facts != null && System.currentTimeMillis() - server.checkedAt in 0..60_000L
+    var inspectionNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(5_000L)
+            inspectionNow = System.currentTimeMillis()
+        }
+    }
+    val inspection = server?.let { SmartManagerPlanner.inspect(it, inspectionNow) }
+    val fresh = server != null && facts != null &&
+        inspectionNow - server.checkedAt in 0..INSPECTION_TTL_MS
     val candidates = inspection?.candidates.orEmpty()
     val readiness = if (candidates.isEmpty()) null else
         (candidates.count { it.status == SmartManagerPlanner.Status.READY_FOR_WIZARD ||
