@@ -1,11 +1,11 @@
-MAXIMUS VPN V1.0.5 — Android versionCode 42
+MAXIMUS VPN V1.0.4 (versionCode 43) — PSIPHON SERVER AUTO-INSTALL PENDING
 
-Release scope: merged, tested changes only. Incorporate diagnostics #154, Smart Manager and private Psiphon server lifecycle hardening #155, SSH inventory freshness #156, and (only after merged and CI-verified) guarded guided batch installation #157.
+The V1.0.5 release build was cancelled before publication and no V1.0.5 release tag exists. Remove the unpublished version label without altering or clobbering existing V1.0.4 download assets.
 
-Smart Manager: two-tool compatible batch selection is 3X-UI plus one DNS tunnel on an approved VPS. One explicit confirmation starts a SEQUENTIAL stop-on-error process with fresh pinned SSH verification and per-tool durable operation journal. It is NOT atomic: already successful installs are retained after later failure and a partial result is reported. No DNS or Cloudflare token is mutated automatically; DNS delegation and end-to-end phone traffic still require user action and tests. Unsupported/port-conflicting combinations are blocked.
+Release workflow is temporarily manual-only. No APK publication may occur until the reviewed fixed-SHA256 upstream psiphond binary, authenticated SSH install, private entry encryption, safe rollback and end-to-end Android 15 to VPS tests are integrated and CI is successful.
 
-Psiphon private server remains import-and-phone-test only. Private remote auto-install is NOT enabled without reviewed binary provenance, approved root-to-unprivileged service hardening and real Android-to-VPS transfer verification. No private credentials are bundled.
+The app's versionName remains 1.0.4 as requested, while versionCode increases to 43 (above the unreleased 42) so Android in-place upgrades are not blocked for testers with build 42.
 
-Require unit tests, release lint, pinned native engine builds, APK package/signature and permanent certificate checks, SHA256SUMS, Android 15 emulator launch and build provenance. Do not modify any live VPS, private keys or Cloudflare DNS from CI.
+Until the Psiphon auto-install implementation is reviewed, do not claim the feature is active or overwrite existing signed V1.0.4 assets. Keep current real client Psiphon import and traffic verification intact.
 
-Do not publish a release until the release workflow's entire verification chain succeeds. The release workflow itself creates and uploads the V1.0.5 APKs, signature checksums and update metadata on success.
+Preserve APK signature, native runtime verification, SHA-256 and Android 15 emulator launch checks in the existing release workflow. Never store server private credentials in APK or GitHub logs.
