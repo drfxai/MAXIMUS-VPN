@@ -18,6 +18,7 @@ import com.example.panels.servers.ManagedServer
 import com.example.panels.servers.ServerFacts
 import com.example.panels.servers.ServerLocation
 import com.example.panels.servers.ServerManager
+import com.example.panels.servers.InstallPreflightException
 import com.example.panels.servers.SmartOperation
 import com.example.panels.servers.SmartOperationStore
 import com.example.panels.servers.SmartNodeStore
@@ -1037,6 +1038,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 val facts = requireNotNull(inspected.facts)
                 val blockers = InstallChecks.forTool(w.tool, inspected, facts).filter { it.blocking && !it.ok }
                 check(blockers.isEmpty()) { blockers.joinToString("; ") { it.detail } }
+                withContext(Dispatchers.IO) { manager.preflightInstall(inspected, w.tool.id, options) }
                 operation = withContext(Dispatchers.IO) {
                     operations.begin(s.id, w.tool.id, inspected.checkedAt)
                 }
@@ -1066,7 +1068,11 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 // We cannot infer whether remote side effects happened from a thrown exception.
                 // Block further installs until a human re-inspects and reconciles this operation.
                 withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                    operation?.let { runCatching { operations.transition(it.id, SmartOperation.Status.UNCERTAIN) } }
+                    operation?.let {
+                        val outcome = if (e is InstallPreflightException) SmartOperation.Status.FAILED
+                            else SmartOperation.Status.UNCERTAIN
+                        runCatching { operations.transition(it.id, outcome) }
+                    }
                 }
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _state.update { st -> st.copy(wizard = st.wizard?.copy(stage = WizardStage.FAILED,
