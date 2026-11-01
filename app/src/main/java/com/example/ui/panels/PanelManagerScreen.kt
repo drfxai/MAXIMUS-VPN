@@ -189,6 +189,8 @@ fun PanelManagerScreen(
     var reviveAsClone by remember { mutableStateOf(true) }
     var cleanIpSortOption by remember { mutableIntStateOf(0) } // 0: Quality, 1: Latency, 2: Jitter
     var showSmartDomains by remember { mutableStateOf(false) }
+    // Psiphon is an Install catalog detail, not a seventh top-level Panels tab.
+    var showPsiphonInInstall by remember { mutableStateOf(false) }
 
     // Forms
     var cfToken by remember { mutableStateOf("") }
@@ -299,7 +301,7 @@ fun PanelManagerScreen(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val tabs = listOf("Servers", "Install", "Cloudflare", "Clean IP", "Tunnel", "Smart Manager", "Psiphon Server")
+            val tabs = listOf("Servers", "Install", "Cloudflare", "Clean IP", "Tunnel", "Smart Manager")
             tabs.forEachIndexed { index, title ->
                 val isSelected = (selectedPanelId != null && index == 0) || (selectedPanelId == null && selectedTab == index)
                 Surface(
@@ -309,6 +311,7 @@ fun PanelManagerScreen(
                         .clickable {
                             selectedPanelId = null
                             selectedTab = index
+                            if (index != 1) showPsiphonInInstall = false
                         },
                     shape = RoundedCornerShape(12.dp),
                     color = if (isSelected) PanelColors.PrimaryBlue else MaterialTheme.colorScheme.surface,
@@ -391,7 +394,16 @@ fun PanelManagerScreen(
 
                 // TAB 1: INSTALL CENTER
                 if (selectedTab == 1) {
-                    InstallTabHost(serversVm, serversState)
+                    if (showPsiphonInInstall) {
+                        BackHandler { showPsiphonInInstall = false }
+                        OutlinedButton(onClick = { showPsiphonInInstall = false }) {
+                            Text("‹  Back to Panels / Install")
+                        }
+                        PrivatePsiphonServerScreen(serversVm, serversState)
+                    } else {
+                        InstallTabHost(serversVm, serversState,
+                            onPsiphonServer = { showPsiphonInInstall = true })
+                    }
                 }
 
                 // TAB 2: CLOUDFLARE
@@ -632,10 +644,6 @@ fun PanelManagerScreen(
                 }
 
                 // TAB 5: SMART MANAGER (read-only admission, existing approved workflows)
-                if (selectedTab == 6) {
-                    PrivatePsiphonServerScreen(serversVm, serversState)
-                }
-
                 if (selectedTab == 5) {
                     SmartManagerScreen(
                         vm = serversVm, state = serversState,
