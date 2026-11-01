@@ -1,0 +1,47 @@
+name: Psiphond pinned binary smoke
+on:
+  pull_request:
+    paths:
+      - 'app/src/main/java/com/example/panels/servers/PrivatePsiphon*'
+      - '.github/workflows/psiphond-pinned-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  psiphond-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Fetch audited official linux-amd64 psiphond at immutable commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fLsS --retry 3 --connect-timeout 15 --max-time 150 \
+            'https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-binaries/e02a99daa375567d2df20740bb3d4673eaec11fe/psiphond/psiphond' \
+            -o psiphond
+          echo '915f638c20177ead91e2ded02d6e0abb9ad82795c1d36dac40be163a0ba29afb  psiphond' | sha256sum --check
+          test "$(stat -c %s psiphond)" = 37799528
+          test "$(git hash-object psiphond)" = a5d9b83d8291676f6e219683710a02b8d33b7038
+          file psiphond | grep -q 'ELF 64-bit.*x86-64'
+      - name: Generate and locally start an ephemeral OSSH-only server
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod 500 psiphond
+          mkdir -m 700 generated
+          cp psiphond generated/
+          cd generated
+          ./psiphond -ipaddress 127.0.0.1 -protocol OSSH:19999 generate > /dev/null
+          test -s server-entry.dat
+          test -s psiphond.config
+          test -s psiphond-traffic-rules.config
+          test -s psiphond-osl.config
+          test -s psiphond-tactics.config
+          # No private entry or generated keys are logged or uploaded as artifacts.
+          set +e
+          timeout 8s ./psiphond run > /tmp/psiphond-offline-status.log 2>&1
+          rc=$?
+          set -e
+          test "$rc" = 124
+          grep -q '"tunnelProtocol":"OSSH"' /tmp/psiphond-offline-status.log
+          rm -rf generated /tmp/psiphond-offline-status.log

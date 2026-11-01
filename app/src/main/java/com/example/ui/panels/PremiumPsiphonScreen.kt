@@ -23,6 +23,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.panels.servers.PrivatePsiphonServerScripts
+import com.example.panels.servers.PrivatePsiphonArtifact
 import com.example.panels.servers.INSPECTION_TTL_MS
 import kotlinx.coroutines.delay
 import com.example.panels.servers.ServerFacts
@@ -31,17 +32,23 @@ import com.example.ui.panels.servers.ServersViewModel
 
 /**
  * Reference-matched Psiphon deployment cockpit.
- * Managed psiphond binary install remains intentionally disabled until there is an
- * independently reviewed signed/pinned upstream artifact and Android-to-VPS e2e proof.
- * The approved server-entry import and real phone traffic test remain functional.
+ * A reviewed fixed-SHA256 upstream amd64 psiphond binary can be installed on an explicitly
+ * approved VPS. Installation and client registration do NOT prove real tunnel traffic.
  */
 @Composable
 internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var entry by remember { mutableStateOf("") }
     var showSafety by remember { mutableStateOf(false) }
+    var installIp by rememberSaveable { mutableStateOf("") }
+    var installPort by rememberSaveable { mutableStateOf("9999") }
     val server = state.servers.firstOrNull { it.id == selected } ?: state.servers.firstOrNull()
     val facts = server?.facts
+    LaunchedEffect(server?.id) {
+        installIp = server?.host?.takeIf { PrivatePsiphonServerScripts.validIpv4(it) }.orEmpty()
+        installPort = "9999"
+    }
+    val installing = state.psiphonInstall?.takeIf { it.serverId == server?.id }
     var inspectionNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -131,6 +138,23 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
                 }
             }
 
+            installing?.let { progress ->
+                MxCard("Private Psiphon deployment", "Actual SSH operation • never marks tunnel verified", Mx.Cyan) {
+                    MxInfoRow("Operation", progress.stage,
+                        if (progress.error.isBlank()) Mx.Cyan else Mx.Orange)
+                    MxInfoRow("Managed server", if (progress.serverInstalled) "Started" else "Not confirmed",
+                        if (progress.serverInstalled) Mx.Green else Mx.Orange)
+                    MxInfoRow("Client entry", if (progress.entryRegistered) "Encrypted and registered" else "Pending",
+                        if (progress.entryRegistered) Mx.Green else Mx.Orange)
+                    if (progress.running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    if (progress.error.isNotBlank()) Text(progress.error +
+                        " Inspect VPS facts and the operation journal before retrying.",
+                        color = Mx.Orange, fontSize = 11.sp)
+                    if (progress.entryRegistered) MxAction("Verify phone-to-VPS tunnel", {
+                        vm.testPrivatePsiphon(progress.serverId)
+                    }, Modifier.fillMaxWidth(), strong = true)
+                }
+            }
             BoxWithConstraints {
                 val wide = maxWidth >= 330.dp
                 if (wide) {
@@ -180,7 +204,7 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
                     facts?.psiphonDataRetained == true -> "Service absent • private keys retained"
                     else -> "Not detected"
                 }, Mx.Orange)
-                MxInfoRow("Upstream SHA-256 review", "Required before install", Mx.Orange)
+                MxInfoRow("Upstream SHA-256 review", "Pinned official AMD64 binary", Mx.Green)
                 MxInfoRow("Android-to-VPS test", if (verified) "Verified" else "Pending",
                     if (verified) Mx.Green else Mx.Orange)
                 MxAction("Run Compatibility Check", { vm.refresh(server.id) }, Modifier.fillMaxWidth())
@@ -193,31 +217,52 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
                     MxAction("Test tunnel", { vm.testPrivatePsiphon(server.id) },
                         Modifier.weight(1.2f), enabled = node != null)
                 }
-                Text("Start / Restart / Backup / Uninstall will be enabled only after a verified MAXIMUS-owned psiphond installer is integrated.",
+                Text("Installation uses a pinned official AMD64 binary and an isolated systemd user. Use VPS management to inspect services; node traffic still requires a real phone test.",
                     color = Mx.Muted, fontSize = 10.sp)
             }
         }
         if (state.busy.isNotBlank()) Text(state.busy, color = Mx.Cyan, fontSize = 11.sp)
         if (state.error.isNotBlank()) Text(state.error, color = Mx.Red, fontSize = 11.sp)
-        Text("A verified psiphond SHA-256 and a successful Android-to-VPS test are required before automatic server provisioning.",
+        Text("Server installation and encrypted bootstrap registration are not evidence of VPN traffic. Test real traffic after setup.",
             color = Mx.Muted, fontSize = 10.sp, modifier = Modifier.padding(5.dp))
     }
 
     if (showSafety) {
+        val port = installPort.toIntOrNull()
+        val allowed = server?.canSignIn == true && server.username == "root" &&
+            fresh && facts?.let(PrivatePsiphonArtifact::supported) == true &&
+            facts?.psiphonInstalled == false && facts.psiphonDataRetained == false &&
+            PrivatePsiphonServerScripts.validIpv4(installIp) &&
+            port != null && port in 1024..65535 && port !in setOf(22, 53) &&
+            port !in facts.tcpPorts && port !in facts.udpPorts &&
+            node == null && installing?.running != true
         AlertDialog(
             onDismissRequest = { showSafety = false },
-            title = { Text("Private Psiphon installation gate") },
+            title = { Text("Approve private Psiphon VPS installation") },
             text = {
-                Text("One-click remote installation cannot safely start until a reviewed psiphond binary, pinned SHA-256, rollback and real Android-to-VPS proof are available. Use the secure server-entry import for an existing private VPS or run the compatibility check.")
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Official psiphond for Linux AMD64. Fixed upstream commit, exact 37.8 MB size, verified SHA-256. No unsigned installer, no custom shell commands.")
+                    Text("VPS: ${server?.displayName ?: "Not selected"} • root SSH required")
+                    OutlinedTextField(value = installIp, onValueChange = { installIp = it.take(15) },
+                        label = { Text("Public IPv4 advertised to clients") },
+                        placeholder = { Text("Example: 8.8.8.8") }, singleLine = true)
+                    OutlinedTextField(value = installPort, onValueChange = {
+                        installPort = it.filter(Char::isDigit).take(5)
+                    }, label = { Text("Dedicated TCP OSSH port") }, singleLine = true)
+                    Text("Creates a dedicated systemd service and private keys on this VPS. Failed installs are rolled back where possible; interrupted outcomes require manual inspection. The public IP must be reachable from clients; cloud NAT setups may need provider-side port forwarding.")
+                    Text("After installation, the private server entry is encrypted on this phone. Tunnel connectivity remains UNVERIFIED until you run the phone test.")
+                    if (!allowed) Text("Unavailable: inspect the VPS, select an unused port/public IPv4, ensure Linux AMD64/root SSH, and resolve existing Psiphon files or node registration.",
+                        color = Mx.Orange)
+                }
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(enabled = allowed, onClick = {
+                    vm.installPrivatePsiphon(requireNotNull(server).id, installIp, requireNotNull(port))
                     showSafety = false
-                    server?.let { vm.refresh(it.id) }
-                }) { Text("Run compatibility check") }
+                }) { Text("Approve & install on VPS") }
             },
             dismissButton = {
-                TextButton(onClick = { showSafety = false }) { Text("Close") }
+                TextButton(onClick = { showSafety = false }) { Text("Cancel") }
             }
         )
     }
@@ -250,7 +295,7 @@ private fun PsDeployment(
         MxInfoRow("System", facts?.osName ?: "Unknown")
         MxInfoRow("Port conflict prevention", if (fresh && facts?.socketInspectionAvailable == true)
             "Inspected" else "Run scan", if (fresh && facts?.socketInspectionAvailable == true) Mx.Green else Mx.Orange)
-        MxInfoRow("psiphond installer", "Needs pinned build", Mx.Orange)
+        MxInfoRow("psiphond installer", "Official binary • SHA-256 pinned • AMD64 only", Mx.Green)
         MxAction("Install on Selected Server", onInstallation, Modifier.fillMaxWidth(), strong = true)
         MxAction("Run Compatibility Check", { vm.refresh(server.id) }, Modifier.fillMaxWidth())
     }

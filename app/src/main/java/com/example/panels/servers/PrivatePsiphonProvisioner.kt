@@ -5,9 +5,9 @@ import java.security.MessageDigest
 import java.util.UUID
 
 /**
- * Low-level, explicitly invoked Psiphon provisioning, intended for a later user-approved wizard.
- * Does not select/download a release: trust establishment (a reviewed pinned artifact manifest)
- * must be completed by the caller. No background tasks or automatic installs are initiated.
+ * User-confirmed private Psiphon server installation. The caller downloads the fixed
+ * PsiphonArtifact manifest, validates SHA-256, records operation intent, then invokes this
+ * backend. No unattended SSH installs or background mutations are performed.
  */
 class PrivatePsiphonProvisioner(
     private val connect: (ManagedServer) -> RemoteShell = { SshShell.open(it) }
@@ -36,22 +36,23 @@ class PrivatePsiphonProvisioner(
         val spec = PrivatePsiphonServerScripts.Request(publicIp, port, staged, reviewedSha256)
         connect(server).use { shell ->
             val inspected = shell.run(ServerFacts.SCRIPT, 60_000)
-            check(inspected.exitCode == 0 && inspected.output.contains(ServerFacts.BEGIN)) {
-                "SSH inventory could not be authenticated."
+            if (inspected.exitCode != 0 ||
+                inspected.output.lineSequence().none { it.trim() == ServerFacts.BEGIN }) {
+                throw InstallPreflightException("Fresh authenticated SSH inventory is required.")
             }
             val facts = ServerFacts.parse(inspected.output)
-            facts.blocker()?.let { error(it) }
-            check(facts.root && facts.socketInspectionAvailable &&
-                !facts.psiphonInstalled && !facts.psiphonDataRetained) {
-                "A fresh root-level inventory is required; an existing Psiphon service cannot be overwritten."
-            }
-            check(port !in facts.tcpPorts && port !in facts.udpPorts) {
-                "The requested port is already occupied; no data was uploaded."
-            }
+            facts.blocker()?.let { throw InstallPreflightException(it) }
+            if (!PrivatePsiphonArtifact.supported(facts))
+                throw InstallPreflightException("Private Psiphon install currently supports root SSH on amd64 Linux/systemd with working socket inventory only.")
+            if (facts.psiphonInstalled || facts.psiphonDataRetained)
+                throw InstallPreflightException("Existing Psiphon service or retained keys must be inspected/purged explicitly before reinstall.")
+            if (port in facts.tcpPorts || port in facts.udpPorts)
+                throw InstallPreflightException("Selected port is occupied; no files were uploaded.")
             // Upload through pinned SSH; never print the executable or credentials in progress logs.
-            shell.upload(executable, staged)
+            // The upload itself can fail halfway: the same finally cleanup covers that case.
             var installed = false
             try {
+                shell.upload(executable, staged)
                 val confirmed = shell.runTool(PrivatePsiphonServerScripts.install(spec), progress, 5 * 60_000L)
                 installed = confirmed["PSIPHON_UNIT_ACTIVE"] == "1"
                 check(installed) { "The managed systemd service did not confirm readiness." }
@@ -80,7 +81,7 @@ class PrivatePsiphonProvisioner(
                 // Deleting the staging file is safe even if the script already moved it to /opt.
                 // It is limited to the randomized path created by this app.
                 runCatching {
-                    shell.run("rm -f '$staged'", 20_000)
+                    shell.run("rm -f '$staged' '$staged.part'", 20_000)
                 }
             }
         }
