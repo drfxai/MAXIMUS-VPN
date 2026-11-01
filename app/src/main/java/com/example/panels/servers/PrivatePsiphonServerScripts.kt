@@ -4,13 +4,14 @@ package com.example.panels.servers
  * Offline script generator for a private Psiphon server. It does not fetch or trust an executable:
  * a caller must first verify an independently pinned psiphond binary's SHA-256.
  *
- * This script is intentionally NOT reachable from the UI until an artifact trust manifest and
- * an Android end-to-end Psiphon test are integrated. The user must explicitly approve each VPS.
+ * The caller must pin and verify a reviewed upstream artifact before approving a remote
+ * install. Service activation alone does not prove end-to-end Android tunnel traffic.
  */
 object PrivatePsiphonServerScripts {
     const val TOOL_ID = "private-psiphon"
     const val UNIT = "maximus-psiphon"
     const val INSTALL_DIR = "/opt/maximus-private-psiphon"
+    private const val SYSTEM_USER = "maximus-psiphon"
 
     data class Request(
         val publicIp: String,
@@ -55,7 +56,7 @@ object PrivatePsiphonServerScripts {
             set -eu
             umask 077
             if [ "§(id -u)" -ne 0 ]; then echo 'Private Psiphon install requires root SSH' >&2; exit 1; fi
-            for exe in sha256sum ss systemctl; do
+            for exe in sha256sum ss systemctl id useradd chown; do
               command -v "§exe" >/dev/null 2>&1 || { echo "Missing mandatory §exe" >&2; exit 1; }
             done
             if [ -e '$INSTALL_DIR' ] || [ -e /etc/systemd/system/$UNIT.service ]; then
@@ -81,6 +82,11 @@ object PrivatePsiphonServerScripts {
               exit "§code"
             }
             trap cleanup_install 0
+            # A dedicated locked account owns only this MAXIMUS installation. The server
+            # uses an unprivileged port and needs no ambient Linux capabilities.
+            if ! id -u '$SYSTEM_USER' >/dev/null 2>&1; then
+              useradd --system --user-group --no-create-home --home-dir '$INSTALL_DIR' --shell /usr/sbin/nologin '$SYSTEM_USER'
+            fi
             mv '${r.stagedBinary}' '$INSTALL_DIR/psiphond'
             actual=§(sha256sum '$INSTALL_DIR/psiphond' | awk '{print §1}')
             [ "§actual" = "§expected" ] || { echo 'Pinned executable SHA-256 mismatch' >&2; exit 1; }
@@ -91,6 +97,8 @@ object PrivatePsiphonServerScripts {
               echo 'Psiphon did not generate the required server config' >&2; exit 1
             }
             chmod 600 ./*.config server-entry.dat
+            chown -R '$SYSTEM_USER:$SYSTEM_USER' '$INSTALL_DIR'
+            chmod 700 '$INSTALL_DIR'
             # No remote shell output includes the private server entry; retrieved through the
             # authenticated SSH download interface and encrypted in Android Keystore.
             cat > '/etc/systemd/system/$UNIT.service' <<'MXUNIT'
@@ -100,7 +108,8 @@ object PrivatePsiphonServerScripts {
             Wants=network-online.target
             [Service]
             Type=simple
-            User=root
+            User=$SYSTEM_USER
+            Group=$SYSTEM_USER
             WorkingDirectory=$INSTALL_DIR
             ExecStart=$INSTALL_DIR/psiphond run
             Restart=on-failure
@@ -109,12 +118,20 @@ object PrivatePsiphonServerScripts {
             ProtectSystem=strict
             ReadWritePaths=$INSTALL_DIR
             PrivateTmp=true
+            ProtectHome=true
+            ProtectKernelTunables=true
+            ProtectKernelModules=true
+            CapabilityBoundingSet=
+            AmbientCapabilities=
+            LockPersonality=true
+            RestrictSUIDSGID=true
             [Install]
             WantedBy=multi-user.target
             MXUNIT
             chmod 644 '/etc/systemd/system/$UNIT.service'
             systemctl daemon-reload
             systemctl enable --now '$UNIT.service' >/dev/null
+            sleep 2
             systemctl is-active --quiet '$UNIT.service' || { echo 'psiphond did not stay running' >&2; exit 1; }
             trap - 0
             echo '##RESULT PSIPHON_UNIT_ACTIVE=1'
