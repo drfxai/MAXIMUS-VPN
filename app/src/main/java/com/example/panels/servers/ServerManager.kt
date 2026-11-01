@@ -77,10 +77,21 @@ class ServerManager(
 
     fun discoverHostKey(host: String, port: Int): String = provisioner.discoverSshHostKey(host, port)
 
+    /** Inventory may be stamped fresh only after a successful authenticated SSH command.
+     * A failed command or missing framing marker is not an inspection, even if some fields parse.
+     * Do not include remote output in the error: output could contain sensitive data.
+     */
+    private fun readVerifiedFacts(shell: RemoteShell): ServerFacts {
+        val out = shell.run(ServerFacts.SCRIPT, 60_000L)
+        check(out.exitCode == 0 && out.output.lineSequence().any { it.trim() == ServerFacts.BEGIN }) {
+            "Server inspection did not complete; no fresh SSH facts were accepted."
+        }
+        return ServerFacts.parse(out.output)
+    }
+
     /** Signs in once (proving the password or key and the pinned host key) and reads the server. */
     fun check(server: ManagedServer): ManagedServer = connect(server).use { shell ->
-        val out = shell.run(ServerFacts.SCRIPT, 60_000L)
-        val facts = ServerFacts.parse(out.output)
+        val facts = readVerifiedFacts(shell)
         server.copy(facts = facts, checkedAt = System.currentTimeMillis())
     }
 
@@ -129,7 +140,7 @@ class ServerManager(
             ServerToolCatalog.HIDDIFY -> if (server.tool(toolId) == null) hiddify.install(server, progress) else updateHiddify(server, progress)
             ServerToolCatalog.KEY_LOGIN -> addKeyLogin(server, progress)
             else -> connect(server).use { shell ->
-                val facts = ServerFacts.parse(shell.run(ServerFacts.SCRIPT, 60_000L).output)
+                val facts = readVerifiedFacts(shell)
                 check(facts.socketInspectionAvailable) { "Cannot inventory TCP/UDP listeners (ss unavailable); no installation was started." }
                 facts.blocker()?.let { error(it) }
                 val arch = facts.goArch!!
@@ -231,7 +242,7 @@ class ServerManager(
                         if (tool.aptOnly && !facts.usesApt) error("${tool.title} needs Debian or Ubuntu (apt)")
                         val r = runScript(shell, script, progress)
                         val installed = InstalledTool(toolId, settings = r)
-                        val refreshed = ServerFacts.parse(shell.run(ServerFacts.SCRIPT, 60_000L).output)
+                        val refreshed = readVerifiedFacts(shell)
                         val updated = server.withTool(installed).copy(facts = refreshed, checkedAt = System.currentTimeMillis())
                         InstallOutcome(updated, installed, summary = "${tool.title} is on")
                     }
@@ -316,9 +327,7 @@ class ServerManager(
 
     private fun postInstallCheck(shell: RemoteShell, server: ManagedServer): ManagedServer {
         val fresh = runCatching {
-            val result = shell.run(ServerFacts.SCRIPT, 60_000L)
-            check(result.exitCode == 0 && result.output.contains(ServerFacts.BEGIN)) { "Could not refresh service state" }
-            ServerFacts.parse(result.output)
+            readVerifiedFacts(shell)
         }.getOrNull()
         return server.copy(facts = fresh, checkedAt = if (fresh == null) 0L else System.currentTimeMillis())
     }
