@@ -22,8 +22,8 @@ android {
     minSdk = 24
     targetSdk = 36
     // Keep this monotonic so installs from the pre-public builds can upgrade.
-    versionCode = 41
-    versionName = "1.0.4"
+    versionCode = 42
+    versionName = "1.0.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
