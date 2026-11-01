@@ -19,14 +19,23 @@ class PrivatePsiphonProvisionerTest {
         override fun step(index: Int) = Unit
         override fun log(line: String) = Unit
     }
-    private class SimulatedShell(private val occupied: Boolean = false) : RemoteShell {
+    private class SimulatedShell(
+        private val occupied: Boolean = false,
+        private val brokenBootstrap: Boolean = false
+    ) : RemoteShell {
         var uploaded = false
         var installStarted = false
+        var rolledBack = false
         override fun run(script: String, timeoutMs: Long, onLine: (String) -> Unit): ShellResult {
             if (script == ServerFacts.SCRIPT) return ShellResult(0,
                 "---MX-FACTS---\nUID=0\nSYSTEMD=1\nARCH=x86_64\nSOCKETS=1\n" +
                     if (occupied) "TCP=8888\n" else "TCP=22\n")
             if (script.contains("MAXIMUS_INSTALLER_LOCK_V1")) {
+                if (script.contains("PRIVATE_PSIPHON_PURGED=1")) {
+                    rolledBack = true
+                    onLine("##RESULT PRIVATE_PSIPHON_PURGED=1")
+                    return ShellResult(0, "##RESULT PRIVATE_PSIPHON_PURGED=1\n")
+                }
                 installStarted = true
                 onLine("##RESULT PSIPHON_UNIT_ACTIVE=1")
                 return ShellResult(0, "##RESULT PSIPHON_UNIT_ACTIVE=1\n")
@@ -38,7 +47,7 @@ class PrivatePsiphonProvisionerTest {
             uploaded = true
         }
         override fun download(remotePath: String, maxBytes: Int) =
-            PrivatePsiphonFixtures.entry("8.8.8.8", 8888).toByteArray()
+            PrivatePsiphonFixtures.entry(if (brokenBootstrap) "9.9.9.9" else "8.8.8.8", 8888).toByteArray()
         override fun close() = Unit
     }
 
@@ -51,6 +60,31 @@ class PrivatePsiphonProvisionerTest {
         assertEquals(8888, result.port)
         assertEquals(PrivatePsiphonFixtures.entry("8.8.8.8", 8888), result.serverEntry)
         assertEquals(PrivatePsiphonServerScripts.TOOL_ID, result.server.tools.last().id)
+    }
+
+    @Test fun postStartBootstrapMismatchTriggersCompensatingPurge() {
+        val remote = SimulatedShell(brokenBootstrap = true)
+        assertThrows(IllegalStateException::class.java) {
+            PrivatePsiphonProvisioner { remote }.installWithPinnedBinary(
+                server, "8.8.8.8", 8888, binary, digest, progress)
+        }
+        assertTrue(remote.installStarted)
+        assertTrue("Failed bootstrap must not leave an orphan Psiphon service", remote.rolledBack)
+    }
+
+    @Test fun retainedPrivateKeysBlockUpload() {
+        val shell = object : RemoteShell by SimulatedShell() {
+            override fun run(script: String, timeoutMs: Long, onLine: (String) -> Unit): ShellResult {
+                if (script == ServerFacts.SCRIPT) return ShellResult(0,
+                    "---MX-FACTS---\nUID=0\nSYSTEMD=1\nARCH=x86_64\nSOCKETS=1\n" +
+                        "TCP=22\nPSIPHON_DATA_RETAINED=1\n")
+                return ShellResult(0, "")
+            }
+        }
+        assertThrows(IllegalStateException::class.java) {
+            PrivatePsiphonProvisioner { shell }.installWithPinnedBinary(
+                server, "8.8.8.8", 8888, binary, digest, progress)
+        }
     }
 
     @Test fun alteredOrUnpinnedBinaryNeverOpensSsh() {
