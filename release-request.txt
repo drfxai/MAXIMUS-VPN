@@ -1,8 +1,11 @@
-MAXIMUS VPN V1.0.4 REFRESH — Android versionCode 41
-Owner-approved reference-accurate UI delivery for Android 15.
-Include MAXIMUS Smart Manager premium AMOLED / navy / cyan / gold design; globe-inspired gold hero, four KPI tiles, authenticated SSH CPU-load / RAM / disk / ports metric cards, six management tabs, selectable multi-engine plan and preflight, Cloudflare scoped Zone Read + DNS Edit token flow with verification, encrypted token storage, zone chooser, and intelligent review.
-Include Panels -> Install -> Hysteria2 -> Psiphon Server matching premium Psiphon design, real SSH facts, readiness checklist, encrypted private server-entry import, client traffic verification and management links.
-Safety: batch multi-install is not certified and must not run without safe rollback and compatible independent engines. Psiphon private server auto-install is not permitted until reviewed SHA-256 and Android-to-VPS testing are integrated. Do not fake online or readiness metrics.
-Keep the versionName 1.0.4 while increasing versionCode from 40 to 41, enabling in-place upgrade and distinguishing the refreshed APK.
-Require unit tests, release lint, native pinned engine build, exact release signing certificate and APK signature, SHA-256 checksums, Android 15 emulator launch and provenance. Refresh the existing V1.0.4 release assets/tag only after all checks pass.
-Do not mutate any live user VPS, Cloudflare DNS or private keys as part of this release. Leave unverified PR #20 excluded.
+MAXIMUS VPN V1.0.5 — Android versionCode 42
+
+Release scope: merged, tested changes only. Incorporate diagnostics #154, Smart Manager and private Psiphon server lifecycle hardening #155, SSH inventory freshness #156, and (only after merged and CI-verified) guarded guided batch installation #157.
+
+Smart Manager: two-tool compatible batch selection is 3X-UI plus one DNS tunnel on an approved VPS. One explicit confirmation starts a SEQUENTIAL stop-on-error process with fresh pinned SSH verification and per-tool durable operation journal. It is NOT atomic: already successful installs are retained after later failure and a partial result is reported. No DNS or Cloudflare token is mutated automatically; DNS delegation and end-to-end phone traffic still require user action and tests. Unsupported/port-conflicting combinations are blocked.
+
+Psiphon private server remains import-and-phone-test only. Private remote auto-install is NOT enabled without reviewed binary provenance, approved root-to-unprivileged service hardening and real Android-to-VPS transfer verification. No private credentials are bundled.
+
+Require unit tests, release lint, pinned native engine builds, APK package/signature and permanent certificate checks, SHA256SUMS, Android 15 emulator launch and build provenance. Do not modify any live VPS, private keys or Cloudflare DNS from CI.
+
+Do not publish a release until the release workflow's entire verification chain succeeds. The release workflow itself creates and uploads the V1.0.5 APKs, signature checksums and update metadata on success.
