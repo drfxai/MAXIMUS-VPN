@@ -85,6 +85,12 @@ object TransportCapabilityEngine {
         if (transport == Transport.UDP && usesHttp3(p) && c.quic == false) return Decision(Admission.SKIP, "QUIC is blocked on this network")
         if (transport == Transport.UDP && c.udpImpaired) return Decision(Admission.DEPRIORITIZE, "UDP failed repeatedly here; TCP first")
         if (family == Family.IPV4 && c.ipv4Impaired) return Decision(Admission.DEPRIORITIZE, "IPv4 paths fail here while IPv6 works")
+        // A failed general TLS/DNS probe is not proof that this particular server is unreachable.
+        // Prefer alternatives, but keep the candidate for recovery rather than hard-skipping it.
+        if (transport == Transport.TCP_TLS && c.tls == false)
+            return Decision(Admission.DEPRIORITIZE, "TLS probe failed on this network")
+        if (family == Family.UNKNOWN && c.dns == false)
+            return Decision(Admission.DEPRIORITIZE, "DNS probe failed; hostname resolution may be impaired")
         if (transport != Transport.UDP && c.tcp == false) return Decision(Admission.DEPRIORITIZE, "TCP looked blocked when measured")
         return Decision(Admission.ALLOW, "allowed")
     }
