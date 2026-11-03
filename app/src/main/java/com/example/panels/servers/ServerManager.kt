@@ -152,7 +152,7 @@ class ServerManager(
                     ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> {
                         DnsDelegation.problem(options.baseDomain, options.tunnelLabel)?.let { error(it) }
                         check(server.tool(toolId) == null) { "A safe in-place upgrade is not available yet; no changes were made." }
-                        check(53 !in facts.udpPorts && (toolId != ServerToolCatalog.COTTEN || 53 !in facts.tcpPorts)) {
+                        check(53 !in (facts.publicUdpPorts ?: facts.udpPorts) && (toolId != ServerToolCatalog.COTTEN || 53 !in (facts.publicTcpPorts ?: facts.tcpPorts))) {
                             "Port 53 is occupied by another service. Stop or move it before installing a DNS tunnel."
                         }
                         val domain = DnsDelegation.tunnelDomain(options.baseDomain, options.tunnelLabel)
@@ -183,7 +183,7 @@ class ServerManager(
                     ServerToolCatalog.DNSTT -> {
                         // A public UDP/53 listener belongs to another service. DNSTT's redirect
                         // would otherwise steal its incoming packets; never overwrite that traffic.
-                        check(53 !in facts.udpPorts) {
+                        check(53 !in (facts.publicUdpPorts ?: facts.udpPorts)) {
                             "UDP 53 is occupied by an existing DNS service. Move or stop it before installing DNSTT."
                         }
                         DnsDelegation.problem(options.baseDomain, options.tunnelLabel)?.let { error(it) }

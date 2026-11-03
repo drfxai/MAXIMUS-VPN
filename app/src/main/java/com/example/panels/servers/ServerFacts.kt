@@ -24,6 +24,9 @@ data class ServerFacts(
     val packageManager: String = "",
     val tcpPorts: Set<Int> = emptySet(),
     val udpPorts: Set<Int> = emptySet(),
+    /** Public and wildcard listeners only. null means a legacy inspection without interface data. */
+    val publicTcpPorts: Set<Int>? = null,
+    val publicUdpPorts: Set<Int>? = null,
     val congestionControl: String = "",
     val firewall: String = "",
     val fail2ban: Boolean = false,
@@ -94,6 +97,23 @@ data class ServerFacts(
               echo SOCKETS=1
               echo "TCP=§(ss -Hlnt 2>/dev/null | awk '{print §4}' | sed 's/.*://' | sort -un | tr '\n' ',')"
               echo "UDP=§(ss -Hlnu 2>/dev/null | awk '{print §4}' | sed 's/.*://' | sort -un | tr '\n' ',')"
+              # systemd-resolved's local 127.0.0.53 DNS listener does not occupy
+              # public UDP 53. Retain wildcard/IPv6/mapped public listeners.
+              public_ports() {
+                ss "§1" 2>/dev/null | awk '{
+                  ep=§4
+                  host=ep
+                  sub(/:[^:]*§/, "", host)
+                  if (host ~ /^127[.]/ || host=="localhost" || host=="[::1]" ||
+                      host=="::1" || index(host, "[::ffff:127.") == 1 ||
+                      index(host, "::ffff:127.") == 1) next
+                  n=split(ep, parts, ":")
+                  port=parts[n]
+                  if (port ~ /^[0-9]+§/ && port>=1 && port<=65535) print port
+                }' | sort -un | tr '\n' ','
+              }
+              echo "TCP_PUBLIC=§(public_ports -Hlnt)"
+              echo "UDP_PUBLIC=§(public_ports -Hlnu)"
             else
               echo SOCKETS=0
             fi
@@ -156,6 +176,8 @@ data class ServerFacts(
                 packageManager = v["PKG"].orEmpty(),
                 tcpPorts = ports("TCP"),
                 udpPorts = ports("UDP"),
+                publicTcpPorts = if (v.containsKey("TCP_PUBLIC")) ports("TCP_PUBLIC") else null,
+                publicUdpPorts = if (v.containsKey("UDP_PUBLIC")) ports("UDP_PUBLIC") else null,
                 congestionControl = v["CC"].orEmpty(),
                 firewall = v["FIREWALL"].orEmpty(),
                 fail2ban = v["F2B"] == "1",

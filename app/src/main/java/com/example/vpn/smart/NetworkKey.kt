@@ -14,13 +14,15 @@ object NetworkKey {
     @Suppress("DEPRECATION")
     fun current(context: Context): String {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return "other"
-        val caps = cm.allNetworks.mapNotNull { cm.getNetworkCapabilities(it) }.filter {
-            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-        }
+        val physical = NetworkCapabilityDetector.physical(cm) ?: return "other"
+        val caps = cm.getNetworkCapabilities(physical) ?: return "other"
+        // Exactly the same physical link the capability detector just measured:
+        // do not classify a validated cellular session as Wi-Fi merely because
+        // a disconnected Wi-Fi interface remains listed in allNetworks.
         return when {
-            caps.any { it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) } -> "wifi"
-            caps.any { it.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) } -> "ethernet"
-            caps.any { it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) } -> {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> {
                 val operator = runCatching {
                     (context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager)?.networkOperator
                 }.getOrNull().orEmpty()

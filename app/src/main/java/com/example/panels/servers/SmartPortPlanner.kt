@@ -36,8 +36,11 @@ object SmartPortPlanner {
             conflicts += "Fresh TCP/UDP socket inventory over pinned SSH is required."
             return Result(requested, conflicts, inspectedAt)
         }
-        val tcp = facts.tcpPorts
-        val udp = facts.udpPorts
+        // A local-only system resolver (127.0.0.53:53) is not a public
+        // DNS listener. Older snapshots without per-interface data remain
+        // conservatively blocked by the aggregated port inventory.
+        val tcp = facts.publicTcpPorts ?: facts.tcpPorts
+        val udp = facts.publicUdpPorts ?: facts.udpPorts
         for (b in requested) {
             // The current ServerFacts inventory is aggregated across all interfaces. Treat any
             // listening socket as a conflict, rather than guessing that another IP can share it.

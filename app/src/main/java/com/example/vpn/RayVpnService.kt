@@ -810,7 +810,7 @@ class RayVpnService : VpnService() {
             } catch (e: Exception) {
                 XrayLogManager.e("VPN", "Profile validation error: ${e.message}", e)
                 val release = com.example.vpn.safety.FailClosedPolicy.mayReleaseBlock(
-                    failure, startedByUser, settingsRepository.getSettings().operationalMode)
+                    failure, startedByUser, settingsRepository.getSettings().operationalMode, settingsRepository.getSettings().killSwitchEnabled)
                 if (release) supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.INVALID_PROFILE_BY_USER)
                 disconnectResources()
                 updateState(fresh(
@@ -1279,7 +1279,7 @@ class RayVpnService : VpnService() {
                 // Same rule as an unusable profile: a user's DAILY connect releases the block; an automatic
                 // connect or GOD MODE keeps traffic blocked until the user disconnects.
                 val release = com.example.vpn.safety.FailClosedPolicy.mayReleaseBlock(
-                    com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE, startedByUser, settingsRepository.getSettings().operationalMode)
+                    com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE, startedByUser, settingsRepository.getSettings().operationalMode, settingsRepository.getSettings().killSwitchEnabled)
                 if (release) supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.INVALID_PROFILE_BY_USER)
                 disconnectResources()
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.NO_VERIFIED_EGRESS_AFTER_RECOVERY)

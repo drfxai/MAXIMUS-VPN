@@ -62,10 +62,22 @@ object NetworkCapabilityDetector {
 
     @Suppress("DEPRECATION")
     /** The phone's own network (not a VPN), or null. */
-    fun physical(cm: ConnectivityManager): Network? = cm.allNetworks.firstOrNull { n ->
-        cm.getNetworkCapabilities(n)?.let {
-            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+    fun physical(cm: ConnectivityManager): Network? {
+        fun usable(network: Network): Boolean = cm.getNetworkCapabilities(network)?.let {
+            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
         } == true
+        // Match the physical active network when Android exposes it. If Always-on
+        // VPN owns activeNetwork, prefer validated underlying links over the
+        // arbitrary order of allNetworks (which could be a disconnected mobile SIM).
+        cm.activeNetwork?.takeIf(::usable)?.let { return it }
+        return cm.allNetworks.filter(::usable).sortedWith(compareByDescending<Network> {
+            cm.getNetworkCapabilities(it)?.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        }.thenByDescending {
+            cm.getNetworkCapabilities(it)?.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED) == true
+        }).firstOrNull()
     }
 
     /** Measures now; returns null when there is no physical network. Runs off the main thread. */
@@ -76,6 +88,8 @@ object NetworkCapabilityDetector {
         val caps = cm.getNetworkCapabilities(network)
         val link = cm.getLinkProperties(network)
         val addresses = link?.linkAddresses.orEmpty().map { it.address }
+        val hasV4 = addresses.any { it is Inet4Address }
+        val hasV6 = addresses.any { it is Inet6Address && !it.isLinkLocalAddress && !it.isSiteLocalAddress }
         val transport = when {
             caps == null -> "other"
             caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
@@ -89,7 +103,13 @@ object NetworkCapabilityDetector {
         coroutineScope {
             val dns = async { dnsProbe(network) }
             val tcp = async { probe { tcpConnect(network, InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)), 443) } }
+            // The general TLS/HTTP2 probe may use the physical resolver; Cloudflare
+            // availability below never relies on DNS and is measured per address family.
             val tls = async { tlsProbe(network, "www.cloudflare.com") }
+            val cfV4 = if (hasV4) async {
+                literalTls(network, InetAddress.getByAddress(INTERNATIONAL.first().first),
+                    INTERNATIONAL.first().second)
+            } else null
             val udp = async { probe { udpDns(network) } }
             val quic = QUIC_TARGETS.map { ip -> async { quicAnswered(network, ip) } }
             val intl = INTERNATIONAL.map { (ip, name) -> async { literalTls(network, InetAddress.getByAddress(ip), name) } }
@@ -97,9 +117,11 @@ object NetworkCapabilityDetector {
             val domestic = async { domesticProbe(network) }
             val doh = async { probe { dohProbe(network) } }
             val dot = async { literalTls(network, InetAddress.getByAddress(INTERNATIONAL.first().first), INTERNATIONAL.first().second, 853) }
-            val hasV6 = addresses.any { it is Inet6Address && !it.isLinkLocalAddress && !it.isSiteLocalAddress }
-            val v6 = if (hasV6) async { literalTls(network, InetAddress.getByAddress(INTERNATIONAL_V6.first), INTERNATIONAL_V6.second) } else null
+            val v6 = if (hasV6) async { literalTls(network,
+                InetAddress.getByAddress(INTERNATIONAL_V6.first), INTERNATIONAL_V6.second) } else null
             val tlsResult = tls.await()
+            val cf4Tls = verifiedCloudflareTls(cfV4?.await())
+            val cf6Tls = verifiedCloudflareTls(v6?.await())
             val dnsResult = dns.await()
             val intlResults = intl.map { it.await() }
             val measuredIntl = intlResults.filter { it != TlsOutcome.NOT_RUN }
@@ -109,14 +131,16 @@ object NetworkCapabilityDetector {
             NetworkCapabilityProfile(
                 transport = transport,
                 networkIdentity = measuredIdentity,
-                ipv4Available = addresses.any { it is Inet4Address },
-                ipv6Available = addresses.any { it is Inet6Address && !it.isLinkLocalAddress && !it.isSiteLocalAddress },
+                ipv4Available = hasV4,
+                ipv6Available = hasV6,
                 udpAvailable = udpResult,
                 tcpAvailable = tcp.await(),
                 tlsAvailable = tlsResult?.first,
                 http2Available = tlsResult?.second,
                 quicAvailable = quicStatus.available,
-                cloudflareReachable = tlsResult?.first,
+                cloudflareReachable = cloudflareFamilyReachability(cf4Tls, cf6Tls, hasV4, hasV6),
+                cloudflareIpv4Tls = cf4Tls,
+                cloudflareIpv6Tls = cf6Tls,
                 echCapable = null,
                 uploadConstrained = null,
                 dnsWorking = dnsResult?.let { it == DnsOutcome.ANSWER },
@@ -135,9 +159,26 @@ object NetworkCapabilityDetector {
                 recursiveDnsEgress = null,
                 sniPairs = sni.pairs,
                 sniCut = sni.cut,
-                ipv6TlsOk = v6?.await()?.let { if (it == TlsOutcome.NOT_RUN) null else it == TlsOutcome.COMPLETED }
+                ipv6TlsOk = cf6Tls
             ).takeIf { NetworkIdentity.current(context) == measuredIdentity }?.also { last = it }
         }
+    }
+
+    /** Do not record a positive result from a certificate/name mismatch or silent socket. */
+    internal fun verifiedCloudflareTls(outcome: TlsOutcome?): Boolean? = when (outcome) {
+        TlsOutcome.COMPLETED -> true
+        TlsOutcome.INTERFERED, TlsOutcome.SERVER_ANSWERED -> false
+        TlsOutcome.NOT_RUN, null -> null
+    }
+
+    /** Both protocol families are independent. A failure of one never overrides a working other. */
+    internal fun cloudflareFamilyReachability(
+        v4: Boolean?, v6: Boolean?, hasV4: Boolean, hasV6: Boolean
+    ): Boolean? {
+        if (!hasV4 && !hasV6) return null
+        if ((hasV4 && v4 == true) || (hasV6 && v6 == true)) return true
+        if ((!hasV4 || v4 == false) && (!hasV6 || v6 == false)) return false
+        return null
     }
 
     internal enum class DnsOutcome { ANSWER, TAMPERED, FAILED }
