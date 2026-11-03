@@ -87,7 +87,22 @@ object SmartManagerPlanner {
      * Check a proposed bundle conservatively. The current implementation deliberately refuses
      * automatic multi-engine execution; only independently approved existing wizards may run.
      */
-    fun bundleBlockers(inspection: Inspection, requested: Set<String>): List<String> = buildList {
+    fun bundleBlockers(
+        inspection: Inspection,
+        requested: Set<String>,
+        now: Long = System.currentTimeMillis()
+    ): List<String> = buildList {
+        // A previously approved wizard is not permission to reuse an expired SSH snapshot.
+        if (inspection.checkedAt <= 0L || now < inspection.checkedAt ||
+            now - inspection.checkedAt > INSPECTION_TTL_MS)
+            add("Server inspection expired; refresh authenticated SSH inventory before installing.")
+        val bindings = requested.flatMap { SmartPortPlanner.knownPublicBindings(it) }
+        bindings.forEachIndexed { index, first ->
+            bindings.drop(index + 1).forEach { second ->
+                if (first.serviceId != second.serviceId && SmartPortPlanner.overlaps(first, second))
+                    add("${first.serviceId} and ${second.serviceId} both require ${first.protocol}:${first.port}.")
+            }
+        }
         if (requested.isEmpty()) add("Select at least one engine.")
         requested.forEach { id ->
             val candidate = inspection.candidate(id)
