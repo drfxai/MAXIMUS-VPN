@@ -58,7 +58,7 @@ object HiddifyScripts {
         result VERSION "§(§SUDO cat $DIR/VERSION 2>/dev/null | head -n1 | tr -cd '0-9A-Za-z.-')"
         for u in §($UNITS); do result "SVC_§u" "§(systemctl is-active "§u" 2>/dev/null || true)"; done
         """,
-        listOf("Read Hiddify")
+        listOf("Read Hiddify"), mutating = false
     )
 
     /** Read the same durable panel_links array used by pinned Hiddify's print_panel_links.
@@ -112,7 +112,7 @@ object HiddifyScripts {
         result ADMIN_URL "§url"
         """,
         listOf("Retrieve Hiddify admin link"),
-        mapOf("READ_ADMIN" to READ_ADMIN)
+        mapOf("READ_ADMIN" to READ_ADMIN), mutating = false
     )
 
     val INSTALL_STEPS = listOf("Check the server", "Download the official installer", "Install Hiddify", "Verify the panel")
@@ -208,7 +208,7 @@ object HiddifyScripts {
             §SUDO systemctl show hiddify-panel -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus 2>&1 || true
             §SUDO journalctl §args -n $lines --no-pager -o short-iso 2>&1 | tail -n $lines | $REDACT
             """,
-            listOf("Read logs")
+            listOf("Read logs"), mutating = false
         )
     }
 

@@ -101,7 +101,13 @@ class DnsPanelFieldRegressionTest {
         assertTrue(out.server.facts!!.active("hiddify-panel"))
     }
 
-    private fun rootScript(script: String) = script.replace("if [ \"$(id -u)\" -ne 0 ]; then", "if false; then")
+    private fun rootScript(script: String, dir: File) = script
+        .replace("if [ \"$(id -u)\" -ne 0 ]; then", "if false; then")
+        .replace("/run/maximus-manager", File(dir, "manager-run").absolutePath)
+        .replace("/var/lib/maximus-manager/operations", File(dir, "manager-operations").absolutePath)
+        // Fixture runs are unprivileged; production root ownership remains unchanged.
+        .replace("install -d -m 0755 -o root -g root", "mkdir -p")
+        .replace("install -d -m 0700 -o root -g root", "mkdir -p")
 
     private fun run(script: String, dir: File, shims: Map<String, String>): Pair<Int, String> {
         val bin = File(dir, "bin").apply { mkdirs() }
@@ -111,7 +117,7 @@ class DnsPanelFieldRegressionTest {
             environment()["PATH"] = bin.absolutePath + ":" + System.getenv("PATH")
             environment()["FIXTURE"] = dir.absolutePath
         }.start()
-        p.outputStream.use { it.write(rootScript(script).toByteArray()) }
+        p.outputStream.use { it.write(rootScript(script, dir).toByteArray()) }
         val finished = p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
         if (!finished) p.destroyForcibly()
         assertTrue("shell fixture exceeded deadline", finished)
