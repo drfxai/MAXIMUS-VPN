@@ -54,6 +54,7 @@ jobs:
         with:
           name: reports
           path: |
+            app/build/galaxy-previews/**
             app/build/reports/tests/**
             app/build/reports/lint-results-release.*
           if-no-files-found: ignore

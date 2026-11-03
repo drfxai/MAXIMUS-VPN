@@ -1757,10 +1757,12 @@ class RayVpnService : VpnService() {
             socksPass = com.example.vpn.sidecar.Sidecars.randomToken(),
             mode = settings.operationalMode
         )
-        val launch = engine.prepare(profile, settings, context)
+        val managed = engine.id in setOf(com.example.vpn.sidecar.AetherSidecar.ID, com.example.vpn.sidecar.ServerlessSidecar.ID)
+        val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context) else null
+        val launch = started?.launch ?: engine.prepare(profile, settings, context)
         if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
         showForegroundNotification("Starting the ${engine.id} engine...")
-        val process = com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
+        val process = started?.running ?: com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
             ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort))
         sidecar = process
         if (!process.awaitReady(launch.readyTimeoutMs)) {

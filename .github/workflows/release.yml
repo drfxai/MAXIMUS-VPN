@@ -156,6 +156,7 @@ jobs:
           sha256sum MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk > SHA256SUMS
           cp build/transport-offer/MatrixTransport-source.tar.gz MatrixTransport-source.tar.gz
           sha256sum MatrixTransport-source.tar.gz >> SHA256SUMS
+          sha256sum build/transport-offer/Aether-source.tar.gz build/transport-offer/Serverless-source.tar.gz >> SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Check the permanent signing certificate
         # Users compare this fingerprint (SECURITY.md); a release signed with any other key stops here.
@@ -207,6 +208,8 @@ jobs:
             MAXIMUSVPN-${{ env.APP_VERSION }}-universal.apk
             SHA256SUMS
             build/transport-offer/MatrixTransport-source.tar.gz
+            build/transport-offer/Aether-source.tar.gz
+            build/transport-offer/Serverless-source.tar.gz
           retention-days: 30
           if-no-files-found: error
       - name: Publish release
@@ -226,7 +229,7 @@ jobs:
           fi
           # The hidden maximus-build line is what the in-app update check reads.
           notes=$(printf 'Build %s\n\n<!-- maximus-build: %s -->' "$MAXIMUS_RELEASE_BUILD" "$MAXIMUS_RELEASE_BUILD")
-          gh release upload "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS build/transport-offer/MatrixTransport-source.tar.gz --clobber
+          gh release upload "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS build/transport-offer/MatrixTransport-source.tar.gz build/transport-offer/Aether-source.tar.gz build/transport-offer/Serverless-source.tar.gz --clobber
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" -F force=true
           else
@@ -234,7 +237,7 @@ jobs:
           fi
           gh release edit "$RELEASE_TAG" --title "Android version $RELEASE_TAG" --notes "$notes" --draft=false --prerelease=false --latest
           actual="$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$actual" = "MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,MatrixTransport-source.tar.gz,SHA256SUMS" || { echo "Unexpected assets: $actual"; exit 1; }
+          test "$actual" = "Aether-source.tar.gz,MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,MatrixTransport-source.tar.gz,SHA256SUMS,Serverless-source.tar.gz" || { echo "Unexpected assets: $actual"; exit 1; }
           echo 'Published APKs, checksums and the native transport corresponding-source archive.'
       - name: Publish update information for the in-app update pop-up
         # update.json on the update-info branch is what the app reads through jsDelivr/Statically when
