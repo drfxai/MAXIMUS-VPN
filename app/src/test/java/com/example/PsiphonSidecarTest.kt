@@ -18,6 +18,14 @@ import java.io.FileNotFoundException
 import java.nio.file.Files
 
 class PsiphonSidecarTest {
+    @Test fun publicSettingsValidateDecodedTransferUrlsAtLaunch() {
+        val valid = JSONObject(settings)
+        assertNull(PsiphonSidecar.validateNetworkSettings(valid.toString()))
+        val url = valid.getJSONArray("RemoteServerListURLs").getJSONObject(0)
+        url.put("URL", java.util.Base64.getEncoder().encodeToString("http://example.invalid/list".toByteArray()))
+        assertTrue(PsiphonSidecar.validateNetworkSettings(valid.toString())!!.contains("HTTPS"))
+        assertTrue(PsiphonSidecar { valid.toString() }.problem(PsiphonSidecar.profile())!!.contains("HTTPS"))
+    }
     // Placeholders only: real network settings come from Psiphon Inc. through a CI secret.
     private val settings = JSONObject()
         .put("PropagationChannelId", "TEST-CHANNEL")
