@@ -76,6 +76,10 @@ object ServerJson {
         .put("load1", f.load1).put("root", f.root).put("sudo", f.sudo).put("systemd", f.systemd)
         .put("packageManager", f.packageManager)
         .put("tcpPorts", JSONArray(f.tcpPorts.sorted())).put("udpPorts", JSONArray(f.udpPorts.sorted()))
+        .apply {
+            f.publicTcpPorts?.let { put("publicTcpPorts", JSONArray(it.sorted())) }
+            f.publicUdpPorts?.let { put("publicUdpPorts", JSONArray(it.sorted())) }
+        }
         .put("congestionControl", f.congestionControl).put("firewall", f.firewall).put("fail2ban", f.fail2ban)
         .put("autoUpdates", f.autoUpdates).put("sshdDropIns", f.sshdDropIns)
         .apply { f.sshPasswordLogin?.let { put("sshPasswordLogin", it) } }
@@ -97,6 +101,8 @@ object ServerJson {
             load1 = o.optDouble("load1", 0.0), root = o.optBoolean("root"), sudo = o.optBoolean("sudo"),
             systemd = o.optBoolean("systemd"), packageManager = o.optString("packageManager"),
             tcpPorts = ints("tcpPorts"), udpPorts = ints("udpPorts"),
+            publicTcpPorts = if (o.has("publicTcpPorts")) ints("publicTcpPorts") else null,
+            publicUdpPorts = if (o.has("publicUdpPorts")) ints("publicUdpPorts") else null,
             congestionControl = o.optString("congestionControl"), firewall = o.optString("firewall"),
             fail2ban = o.optBoolean("fail2ban"), autoUpdates = o.optBoolean("autoUpdates"),
             sshPasswordLogin = if (o.has("sshPasswordLogin")) o.optBoolean("sshPasswordLogin") else null,
