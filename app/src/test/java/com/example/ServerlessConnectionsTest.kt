@@ -22,6 +22,10 @@ class ServerlessConnectionsTest {
             assertFalse(result.toString().contains("geosite:"))
             assertFalse(result.toString().contains("geoip:"))
             assertFalse(result.toString().contains("localhost"))
+            System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.let { directory ->
+                File(directory).mkdirs()
+                File(directory, "$variant.json").writeText(result.toString())
+            }
         }
     }
     @Test fun ipFamilyRemovesConflictingHappyEyeballs() {

@@ -212,5 +212,6 @@ dependencies {
 
 // Native integration fixtures are real test outputs, including when Gradle restores test results.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+  System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.takeIf { it.isNotBlank() }?.let { outputs.dir(it) }
   System.getenv("MAXIMUS_SINGBOX_FIXTURES")?.takeIf { it.isNotBlank() }?.let { outputs.dir(it) }
 }

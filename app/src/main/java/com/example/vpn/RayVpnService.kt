@@ -363,7 +363,7 @@ class RayVpnService : VpnService() {
             connectJob?.cancel()
             connectJob = serviceScope.launch {
                 val profile = settingsRepository.getSettings().selectedProfileId
-                    ?.let { serverRepository.getProfileById(it) }
+                    ?.let { com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, it) ?: serverRepository.getProfileById(it) }
                     ?: serverRepository.getAllProfilesOnce().firstOrNull()
                 if (profile != null) {
                     connect(profile)
@@ -406,11 +406,12 @@ class RayVpnService : VpnService() {
                 com.example.vpn.sidecar.EngineHandoff.clear()
                 connectJob = serviceScope.launch {
                     val profile = if (!profileId.isNullOrBlank()) {
-                        serverRepository.getProfileById(profileId)
+                        com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, profileId)
+                            ?: serverRepository.getProfileById(profileId)
                     } else null
 
                     val targetProfile = profile
-                        ?: settingsRepository.getSettings().selectedProfileId?.let { serverRepository.getProfileById(it) }
+                        ?: settingsRepository.getSettings().selectedProfileId?.let { com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, it) ?: serverRepository.getProfileById(it) }
                         ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
                     if (targetProfile != null) {

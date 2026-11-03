@@ -70,7 +70,7 @@ fun ConnectionsContent(ui: ConnectionsViewModel.UiState, state: ConnectionState,
     val heading = if (!detail) "Connections" else if (direct) "Direct Serverless" else "Aether / WARP"
     GalaxyBackdrop(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)
-            .padding(top = 12.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            .padding(top = 12.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(if (detail) 12.dp else 10.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 if (detail) IconButton(onClick = { onDetail(false) }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to connections", tint = c.textPrimary)
@@ -95,7 +95,7 @@ fun ConnectionsContent(ui: ConnectionsViewModel.UiState, state: ConnectionState,
             Text(heading, color = c.textPrimary, fontSize = 27.sp, fontWeight = FontWeight.Bold)
             if (!detail) {
                 GalaxyTabs(listOf("Aether", "Direct"), if (direct) 1 else 0, enabled) { i -> onOptions { it.copy(direct = i == 1) } }
-                GalaxyPlanet(animate = !ui.working)
+                GalaxyPlanet(Modifier.height(140.dp), animate = !ui.working)
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(when { ui.working -> "Checking your connection"; connected -> "Connected"; owns && state.isBusy -> "Establishing connection";
                         occupied -> state.statusLabel; else -> "Ready to connect" }, color = c.textPrimary, fontSize = 25.sp, fontWeight = FontWeight.Bold)
@@ -182,10 +182,9 @@ fun ConnectionsContent(ui: ConnectionsViewModel.UiState, state: ConnectionState,
                     Text(if (occupied) "Disconnect" else if (detail && direct) "Connect directly" else "Connect",
                         fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
                 }
-                if (!detail) TextButton({ options = true }, Modifier.align(Alignment.CenterHorizontally)) { Text("Connection settings") }
+                if (!detail) TextButton({ onDetail(true) }, Modifier.align(Alignment.CenterHorizontally)) { Text("Connection settings") }
             }
             if (occupied && !owns) Text("Another connection is active. Disconnect before changing methods.", color = c.statusWarning, fontSize = 13.sp)
-            if (!detail) TextButton({ onDetail(true) }, Modifier.align(Alignment.CenterHorizontally)) { Text("${if (direct) "Direct" else "Aether"} details") }
         }
     }
     if (options) AlertDialog(onDismissRequest = { options = false }, title = { Text("Connection settings") },

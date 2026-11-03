@@ -31,9 +31,17 @@ class ConnectionsViewModel(application: Application) : AndroidViewModel(applicat
     val ui = _ui.asStateFlow()
     private var operation: Job? = null
     private var lastNetwork: String? = null
+    private val networkEpoch = java.util.concurrent.atomic.AtomicLong()
+    private val connectivity = app.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+    private val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: android.net.Network) { invalidateChecks() }
+        override fun onLost(network: android.net.Network) { invalidateChecks() }
+    }
+    private fun invalidateChecks() { networkEpoch.incrementAndGet(); _ui.update { it.copy(result = null) } }
     private var fallbackAttempt: String? = null
     init {
         refreshIdentity()
+        connectivity.registerDefaultNetworkCallback(networkCallback)
         viewModelScope.launch {
             VpnController.connectionState.collect { state ->
                 val network = com.example.vpn.smart.NetworkKey.current(app)
@@ -82,6 +90,7 @@ class ConnectionsViewModel(application: Application) : AndroidViewModel(applicat
     }
     fun testAccess() = task {
         val profile = profile()
+        val testedEpoch = networkEpoch.get()
         val result = runInterruptible(Dispatchers.IO) {
             val engine = Sidecars.forProfile(profile) ?: error("No engine")
             val executable = Sidecars.executable(engine) ?: error("Engine unavailable")
@@ -94,7 +103,8 @@ class ConnectionsViewModel(application: Application) : AndroidViewModel(applicat
                 started.check
             } finally { try { started?.running?.stop() } finally { dir.deleteRecursively() } }
         }
-        _ui.update { it.copy(result = result, message = "DNS, TLS and real data passed through this method.") }
+        if (networkEpoch.get() == testedEpoch) _ui.update { it.copy(result = result, message = "DNS, TLS and real data passed through this method.") }
+        else _ui.update { it.copy(result = null, message = "Network changed during the test. Run access checks again.") }
     }
     fun renewIdentity() = task {
         runInterruptible(Dispatchers.IO) {
@@ -135,6 +145,11 @@ class ConnectionsViewModel(application: Application) : AndroidViewModel(applicat
             } finally { process?.let { if (isRunning(it)) EngineProcessStop.stop(it) }; staging.deleteRecursively() }
         }
         _ui.update { it.copy(message = "New WARP identity registered and saved.") }
+    }
+    override fun onCleared() {
+        operation?.cancel()
+        runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
+        super.onCleared()
     }
     private fun isRunning(process: Process) = try { process.exitValue(); false } catch (_: IllegalThreadStateException) { true }
 }

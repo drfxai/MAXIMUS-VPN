@@ -23,10 +23,28 @@ export RUSTUP_TOOLCHAIN=1.99.0
 export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-z,max-page-size=16384"
 rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
 rustup target add "$target"
+# boring-sys 5.3 names ErrLib from rustfmt-formatted bindgen output.
+rustup component add rustfmt --toolchain "$RUSTUP_TOOLCHAIN"
 if ! cargo ndk --version | grep -q '3.5.4'; then cargo install cargo-ndk --version 3.5.4 --locked; fi
+ndk="${ANDROID_NDK_HOME:-${ANDROID_HOME}/ndk/26.3.11579264}"
+export ANDROID_NDK_HOME="$ndk" ANDROID_NDK_ROOT="$ndk"
+bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+sysroot="$ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+case "$ABI" in
+ arm64-v8a) prefix=aarch64-linux-android; include_arch=aarch64-linux-android ;;
+ armeabi-v7a) prefix=armv7a-linux-androideabi; include_arch=arm-linux-androideabi ;;
+ x86_64) prefix=x86_64-linux-android; include_arch=x86_64-linux-android ;;
+esac
+export CLANG_PATH="$bin/clang"
+libclang=$(find /usr/lib/llvm-* -name libclang.so -print -quit)
+export LIBCLANG_PATH="$(dirname "$libclang")"
 under="${target//-/_}"
+export "BINDGEN_EXTRA_CLANG_ARGS_${under}=--target=${prefix}24 --sysroot=$sysroot -I$sysroot/usr/include -I$sysroot/usr/include/$include_arch"
 export "BORING_BSSL_RUST_CPPLIB_${under}=static:-bundle=c++"
-(cd "$source_dir/aether" && cargo ndk -t "$ABI" --platform 24 build --locked --release --bin aether)
+if ! (cd "$source_dir/aether" && cargo ndk -t "$ABI" --platform 24 build --locked --release --bin aether); then
+  find "$source_dir/aether/target/$target/release/build" -path '*/out/bindings.rs' -exec head -c 1800 {} \;
+  exit 1
+fi
 mkdir -p "$OUT" "$TASK_ROOT/build/transport-offer"
 install -m 0755 "$source_dir/aether/target/$target/release/aether" "$OUT/libaether.so"
 cp "$TASK_ROOT/scripts/connections/harden-aether.py" "$source_dir/MAXIMUS_PATCH.py"
