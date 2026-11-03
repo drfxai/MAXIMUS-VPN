@@ -5,10 +5,12 @@ Keep versionName 1.0.4; versionCode 44 upgrades build 43 without removing user d
 
 Phase 1: verified libXray v26.10.31; official hash-pinned sing-box 1.14.4 for all
 three release ABIs; per-profile and Settings core selection; lossless TLS import/export;
-Psiphon launch validation; WireGuard/AmneziaWG MTU 1280 default.
+Psiphon launch validation; WireGuard/AmneziaWG MTU 1280 default; explicit
+authenticated loopback Proxy mode for native engines without a device-wide VPN.
 Phase 2: existing DNS listener fixes and reviewed batch installation; cross-session
 flock guard and credential-free bounded remote operation journal; reviewed complete
-DNS tool removal with key purge; private Psiphon mutations use the same lock.
+DNS tool removal with key purge; private Psiphon mutations use the same lock;
+encrypted subscription core/country presets applied to existing and refreshed nodes.
 Phase 3: measured alternate-core candidates on the same endpoints; physical-network
 handoff and IP-change rebuild; correct Matrix Transport H2/H3 classification.
 

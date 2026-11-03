@@ -1,10 +1,10 @@
 # Third party notices
 
-The Android application bundles the official XTLS/libXray release `v26.9.9` and Xray-core. The project is distributed under the MIT License and Mozilla Public License 2.0, reproduced below.
+The Android application bundles the official XTLS/libXray release `v26.10.31` and Xray-core. The project is distributed under the MIT License and Mozilla Public License 2.0, reproduced below.
 
 - libXray source: https://github.com/XTLS/libXray
 - Xray-core source: https://github.com/XTLS/Xray-core
-- Pinned Android artifact: `libxray-android.zip` from the libXray `v26.9.9` release. CI verifies SHA-256 `4998a8b56e4a78a164b5359d5690036f83da3b575465cea57ddf29c0149c345f` before extracting the AAR.
+- Pinned Android artifact: `libxray-android.zip` from the libXray `v26.10.31` release. CI verifies SHA-256 `fb99f04acf379cc2957c1e1d0ce2b3c0005d3f49974a44c09a11242a0562c1ca` before extracting the AAR.
 - The AAR is downloaded during CI and is not stored in this repository.
 - Mihomo (MetaCubeX) `v1.19.32`, GNU General Public License v3.0. It runs as a separate program
   (`libmihomo.so`, an executable), started by the app and reached only over a local SOCKS port; it is

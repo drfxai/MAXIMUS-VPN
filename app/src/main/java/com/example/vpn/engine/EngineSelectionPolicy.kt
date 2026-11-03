@@ -16,7 +16,8 @@ object EngineSelectionPolicy {
 
     /** Profiles forwarded by TunnelManager, which currently understands IPv4 packets only. */
     fun usesKotlinPacketTunnel(profile: VlessProfile): Boolean =
-        requiresKotlinTunnel(profile) || profile.protocolType in setOf(ProtocolType.HTTP, ProtocolType.SOCKS5)
+        profile.profileType != com.example.data.model.ProfileType.XRAY_JSON &&
+            (requiresKotlinTunnel(profile) || profile.protocolType in setOf(ProtocolType.HTTP, ProtocolType.SOCKS5))
 
     fun requiresKotlinTunnel(profile: VlessProfile): Boolean =
         profile.protocolType == ProtocolType.VLESS &&

@@ -335,6 +335,9 @@ class RayVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action != ACTION_DISCONNECT) {
+            stopService(Intent(this, com.example.vpn.share.LocalProxyService::class.java))
+        }
         val action = intent?.action
         if (action == ACTION_CONNECT && !_vpnState.value.isTunnelUp &&
             (!_vpnState.value.isBusy || _vpnState.value.status == ConnectionStatus.PREPARING)) {
@@ -1213,6 +1216,7 @@ class RayVpnService : VpnService() {
                 val reviveDeadline = System.currentTimeMillis() + CONFIG_REVIVE_MS
                 val attemptJob = coroutineContext[Job]
                 val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                    .filter { com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) }
                 val report = com.example.vpn.Abandonable.run {
                     runCatching {
                         com.example.RayApplication.instance.configRevival.run(

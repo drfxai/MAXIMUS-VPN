@@ -187,9 +187,16 @@ private fun XrayConfigEditor(
             error?.let { ErrorBanner(it) }
 
             EditSection("Server") {
-                EditDropdown("Core", draft.engineType.name,
-                    com.example.data.model.EngineType.entries.map { it.name }) {
-                    draft = draft.copy(engineType = com.example.data.model.EngineType.valueOf(it), canonicalFingerprint = "")
+                if (draft.profileType == com.example.data.model.ProfileType.VLESS && draft.protocolType in setOf(
+                    com.example.data.model.ProtocolType.VLESS, com.example.data.model.ProtocolType.VMESS,
+                    com.example.data.model.ProtocolType.TROJAN, com.example.data.model.ProtocolType.SHADOWSOCKS)) {
+                    EditDropdown("Core", draft.engineType.name, listOf("AUTO", "XRAY", "SING_BOX")) {
+                        val core = com.example.data.model.EngineType.valueOf(it)
+                        var changed = com.example.vpn.engine.ProfileExtras.with(
+                            draft.copy(engineType = core, canonicalFingerprint = ""), "engine", null)
+                        changed = com.example.vpn.engine.ProfileExtras.with(changed, "subscriptionPresetCore", null)
+                        draft = com.example.vpn.engine.ProfileExtras.with(changed, "coreLocked", core != com.example.data.model.EngineType.AUTO)
+                    }
                 }
                 EditField("Remarks", draft.name) { draft = draft.copy(name = it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

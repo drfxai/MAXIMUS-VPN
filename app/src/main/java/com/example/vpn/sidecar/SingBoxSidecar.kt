@@ -31,6 +31,7 @@ object SingBoxSidecar : SidecarEngine {
         p.fingerprint.equals("unsafe", true) -> "The unsafe fingerprint is not supported by this sing-box adapter."
         p.headerType.isNotBlank() && !p.headerType.equals("none", true) -> "TCP header settings require Xray."
         ProfileExtras.read(p).let { it.has(ProfileExtras.MLDSA65_VERIFY) || it.has("engine") && it.optString("engine") != id } -> "Engine-specific settings require their original engine."
+        ProfileExtras.read(p).keys().asSequence().any { it !in setOf("engine", "alterId", "coreLocked", "subscriptionPresetCore", "subscriptionAutoExcluded") } -> "Unrecognized protocol extras require the original engine."
         p.security.equals("reality", true) && (p.publicKey.isBlank() || p.sni.isBlank()) -> "REALITY requires a public key and SNI."
         p.flow.isNotBlank() && (p.protocolType != ProtocolType.VLESS || p.flow != "xtls-rprx-vision") -> "Unsupported flow."
         p.protocolType == ProtocolType.VLESS && !p.encryption.let { it.isBlank() || it == "none" } -> "VLESS encryption requires Xray."

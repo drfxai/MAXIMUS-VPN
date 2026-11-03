@@ -96,7 +96,9 @@ fun SubscriptionsScreen(
         onSync = { viewModel.syncSubscription(it) },
         onSyncAll = { viewModel.syncAll() },
         onDelete = { viewModel.deleteSubscription(it) },
-        onDismissMessages = { viewModel.clearMessages() }
+        onDismissMessages = { viewModel.clearMessages() },
+        onPreset = { sub, preset -> viewModel.savePreset(sub, preset) },
+        presetOf = { viewModel.preset(it) }
     )
 
     if (uiState.showAddDialog) {
@@ -123,10 +125,18 @@ internal fun SubscriptionsContent(
     onSyncAll: () -> Unit,
     onDelete: (SubscriptionInfo) -> Unit,
     onDismissMessages: () -> Unit,
-    initialHubExpanded: Boolean = false
+    initialHubExpanded: Boolean = false,
+    onPreset: (SubscriptionInfo, com.example.vpn.subscription.SubscriptionPreset) -> Unit = { _, _ -> },
+    presetOf: (SubscriptionInfo) -> com.example.vpn.subscription.SubscriptionPreset = { com.example.vpn.subscription.SubscriptionPreset() }
 ) {
     var hubExpanded by remember { mutableStateOf(initialHubExpanded) }
     var pendingDelete by remember { mutableStateOf<SubscriptionInfo?>(null) }
+    var pendingPreset by remember { mutableStateOf<SubscriptionInfo?>(null) }
+    pendingPreset?.let { sub ->
+        SubscriptionPresetDialog(sub, presetOf(sub), onDismiss = { pendingPreset = null }) {
+            onPreset(sub, it); pendingPreset = null
+        }
+    }
 
     Scaffold(
         modifier = modifier.testTag("subscriptions_screen"),
@@ -206,7 +216,8 @@ internal fun SubscriptionsContent(
                         isSyncing = uiState.isSyncing && uiState.syncingSubscriptionId == sub.id,
                         syncEnabled = !uiState.isSyncing,
                         onSync = { onSync(sub) },
-                        onDelete = { pendingDelete = sub }
+                        onDelete = { pendingDelete = sub },
+                        onPreset = { pendingPreset = sub }
                     )
                 }
             }
@@ -382,7 +393,8 @@ private fun SubscriptionCard(
     isSyncing: Boolean,
     syncEnabled: Boolean,
     onSync: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onPreset: () -> Unit = {}
 ) {
     val failing = subscription.lastError != null
     SurfaceCard(
@@ -473,6 +485,7 @@ private fun SubscriptionCard(
             IconButton(onClick = onDelete, modifier = Modifier.testTag("delete_subscription_${subscription.id}")) {
                 Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
             }
+            TextButton(onClick = onPreset, enabled = syncEnabled) { Text("Preset") }
         }
     }
 }
@@ -669,6 +682,32 @@ private fun timeAgo(millis: Long, now: Long = System.currentTimeMillis()): Strin
         minutes < 60 * 24 -> "${minutes / 60}h"
         else -> "${minutes / (60 * 24)}d"
     }
+}
+
+@Composable
+private fun SubscriptionPresetDialog(
+    subscription: SubscriptionInfo,
+    initial: com.example.vpn.subscription.SubscriptionPreset,
+    onDismiss: () -> Unit,
+    onApply: (com.example.vpn.subscription.SubscriptionPreset) -> Unit
+) {
+    var core by remember(subscription.id) { mutableStateOf(initial.core) }
+    var countries by remember(subscription.id) { mutableStateOf(initial.excludedCountries.sorted().joinToString(",")) }
+    val codes = countries.split(',', ' ', ';').map { it.trim().uppercase() }.filter { it.isNotEmpty() }.toSet()
+    val valid = codes.all { it.matches(Regex("[A-Z]{2}")) } && codes.size <= 250
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Subscription preset") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Applies to current nodes and future updates. Custom TLS, routes and explicit per-node core choices are preserved.")
+            for ((choice, label) in listOf(null to "Keep imported core", com.example.data.model.EngineType.XRAY to "Xray default",
+                com.example.data.model.EngineType.SING_BOX to "Prefer sing-box when compatible")) {
+                TextButton(onClick = { core = choice }) { Text((if (core == choice) "✓ " else "") + label) }
+            }
+            OutlinedTextField(value = countries, onValueChange = { if (it.length <= 1000) countries = it },
+                label = { Text("Exclude countries from Auto-select") }, placeholder = { Text("US, DE, RU") }, isError = !valid)
+            Text("Country codes only. Unknown locations stay eligible; excluded servers remain available for manual connection.", fontSize = 12.sp)
+        }
+    }, confirmButton = { TextButton(onClick = { onApply(com.example.vpn.subscription.SubscriptionPreset(core, codes)) }, enabled = valid) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable

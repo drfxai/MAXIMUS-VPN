@@ -46,7 +46,7 @@ object RecoveryEngineCatalog {
             !Sidecars.isEngineProfile(it) && com.example.vpn.sidecar.SingBoxSidecar.conversionProblem(it) == null
         }.take(12).map { com.example.vpn.sidecar.SingBoxSidecar.select(it) }
         return (saved.filter { Sidecars.isEngineProfile(it) } + alternateCore + webTunnel + defaults)
-            .filter { !it.allowInsecure && available(it) }
+            .filter { com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) && !it.allowInsecure && available(it) }
             .distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
     }
     /** Public bootstrap data, not connectivity evidence. Bound reading and require HTTPS bridge URLs. */

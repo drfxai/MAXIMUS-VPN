@@ -52,6 +52,10 @@ class SingBoxIntegrationTest {
         val p = SingBoxSidecar.select(node())
         assertTrue(SingBoxSidecar.handles(p))
         assertFalse(SingBoxSidecar.handles(p.copy(profileType = ProfileType.XRAY_JSON)))
+        // Sidecar SOCKS forwarding uses native Xray even when the original link was plain VLESS.
+        val forwarding = p.copy(profileType = ProfileType.XRAY_JSON, security = "none")
+        assertEquals(com.example.vpn.engine.EngineSelectionPolicy.Runtime.XRAY,
+            com.example.vpn.engine.EngineSelectionPolicy.select(forwarding))
     }
 
     @Test fun realityAndWebsocketSettingsSurviveAdapter() {

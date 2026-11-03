@@ -220,6 +220,7 @@ object ProfileExtras {
                 else -> profile.engineType
             }
         )
+        if (params["core"]?.lowercase() in setOf("sing-box", "singbox", "xray")) p = with(p, "coreLocked", true)
         val transport = p.transport.lowercase()
         if (transport == "xhttp" || transport == "splithttp") {
             params["mode"]?.takeIf { it.isNotBlank() }?.let { p = with(p, XHTTP_MODE, it) }

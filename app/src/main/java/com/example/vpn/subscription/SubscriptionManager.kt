@@ -294,6 +294,29 @@ class SubscriptionManager(
         // Public configs are hostile input: from the free list only what is safe and runnable here is kept.
         if (FreeConfigList.isList(subscription.url)) result.copy(validProfiles = FreeConfigList.prepare(result.validProfiles))
         else result
+    }.let { result ->
+        val preset = runCatching { SubscriptionPresetStore(com.example.RayApplication.instance).get(subscription.id) }
+            .getOrDefault(SubscriptionPreset())
+        result.copy(validProfiles = result.validProfiles.map { preset.apply(it) })
+    }
+
+    fun preset(subscription: SubscriptionInfo): SubscriptionPreset =
+        SubscriptionPresetStore(com.example.RayApplication.instance).get(subscription.id)
+
+    suspend fun savePreset(subscription: SubscriptionInfo, preset: SubscriptionPreset): Int = withContext(Dispatchers.IO) {
+        val all = serverRepository.getAllProfilesOnce()
+        val selected = all.filter { it.subscriptionUrl == subscription.url || it.sourceSubscription == subscription.url }
+        val others = (all.map { it.id }.toSet() - selected.map { it.id }.toSet())
+        val occupied = all.filter { it.id in others }.map { it.effectiveFingerprint }.toMutableSet()
+        val replacements = selected.map { original ->
+            val changed = preset.apply(original)
+            // Preserve an unrelated node rather than replacing it on a unique fingerprint collision.
+            val collides = selected.any { it.id != original.id && it.effectiveFingerprint == changed.effectiveFingerprint }
+            if (!collides && occupied.add(changed.effectiveFingerprint)) changed else original
+        }
+        serverRepository.replaceAtomically(selected.map { it.id }, replacements)
+        SubscriptionPresetStore(com.example.RayApplication.instance).save(subscription.id, preset)
+        replacements.size
     }
 
     /**
