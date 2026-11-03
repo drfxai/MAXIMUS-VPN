@@ -66,6 +66,22 @@ class SmartManagerPlannerTest {
             plan, setOf(ServerToolCatalog.DNSTT)).isEmpty())
     }
 
+    @Test fun bundleRejectsExpiredInspectionAtExecutionTime() {
+        val plan = SmartManagerPlanner.inspect(host(), now)
+        assertTrue(SmartManagerPlanner.bundleBlockers(
+            plan, setOf(ServerToolCatalog.DNSTT), now).isEmpty())
+        assertTrue(SmartManagerPlanner.bundleBlockers(
+            plan, setOf(ServerToolCatalog.DNSTT), now + INSPECTION_TTL_MS)
+            .any { it.contains("expired") })
+    }
+
+    @Test fun bundleDetectsOverlappingTcpAndUdpRequirements() {
+        val plan = SmartManagerPlanner.inspect(host(), now)
+        val blockers = SmartManagerPlanner.bundleBlockers(
+            plan, setOf(ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT), now)
+        assertTrue(blockers.any { it.contains("UDP:53") })
+    }
+
     @Test fun privatePsiphonIsNeverAdvertisedAsAvailableWithoutRealTunnelTests() {
         val plan = SmartManagerPlanner.inspect(host(), now)
         assertEquals(SmartManagerPlanner.Status.UNVERIFIED,
