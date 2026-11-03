@@ -160,11 +160,44 @@ object ToolScripts {
      * Joins the prelude and [body]. Multi-line [inserts] replace `@@NAME@@` lines after the body is
      * de-indented, so heredoc terminators stay at the start of their lines.
      */
-    internal fun script(body: String, steps: List<String>, inserts: Map<String, String> = emptyMap()): ToolScript {
+    internal fun script(body: String, steps: List<String>, inserts: Map<String, String> = emptyMap(), mutating: Boolean = true): ToolScript {
         var text = PRELUDE + "\n" + body.trimIndent()
         inserts.forEach { (name, value) -> text = text.replace("@@$name@@", value) }
-        return ToolScript(text.replace('§', '$'), steps)
+        val result = ToolScript(text.replace('§', '$'), steps)
+        return if (mutating) guarded(result) else result
     }
+
+    internal fun guarded(script: ToolScript): ToolScript {
+        // The outer shell owns the lock and result journal; an installer's EXIT trap
+        // stays inside the child shell and cannot accidentally remove either guard.
+        val guarded = MUTATION_GUARD + "\n(\n" + script.text + "\n)\n" + """
+            mutation_rc=§?
+            if [ "§mutation_rc" -eq 0 ]; then mutation_state=COMPLETED; else mutation_state=FAILED; fi
+            printf '%s %s\n' "§mutation_state" "§mutation_rc" | §SUDO tee "§mutation_record" >/dev/null || exit 74
+            exit "§mutation_rc"
+        """.trimIndent()
+        return ToolScript(guarded.replace('§', '$'), script.steps)
+    }
+
+    /** Kernel-released lock shared across phone sessions; journal contains no keys or command lines. */
+    private val MUTATION_GUARD = """
+        SUDO=""
+        if [ "§(id -u)" -ne 0 ]; then
+          command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null || exit 20
+          SUDO="sudo -n"
+        fi
+        command -v flock >/dev/null 2>&1 || { echo 'Install util-linux (flock) before managing this server' >&2; exit 21; }
+        §SUDO install -d -m 0755 -o root -g root /run/maximus-manager || exit 74
+        §SUDO touch /run/maximus-manager/mutation.lock || exit 74
+        §SUDO chmod 0644 /run/maximus-manager/mutation.lock || exit 74
+        exec 9</run/maximus-manager/mutation.lock
+        flock -n -E 75 9 || { echo 'Another MAXIMUS server operation is running; refresh after it finishes' >&2; exit 75; }
+        §SUDO install -d -m 0700 -o root -g root /var/lib/maximus-manager/operations || exit 74
+        mutation_record="/var/lib/maximus-manager/operations/§(date +%s)-§§.status"
+        printf 'RUNNING\n' | §SUDO tee "§mutation_record" >/dev/null || exit 74
+        # Keep at most 100 credential-free operation records, under the same lock.
+        §SUDO sh -c 'ls -1t /var/lib/maximus-manager/operations/*.status 2>/dev/null | tail -n +101 | xargs -r rm -f' || exit 74
+    """.trimIndent()
 
     /** The unit file text for a Maximus service; its lines are kept literal (no `$` allowed). */
     internal fun unit(description: String, exec: List<String>, extra: List<String> = emptyList(), after: String = "network-online.target"): String {
@@ -599,7 +632,7 @@ object ToolScripts {
     val UNINSTALL_STEPS = listOf("Stop and remove")
 
     /** Removes what the install of [toolId] added. [port] closes the tool's firewall port. */
-    fun uninstall(toolId: String, port: Int? = null): ToolScript {
+    fun uninstall(toolId: String, port: Int? = null, purgeData: Boolean = false): ToolScript {
         port?.let { port(it, "tool") }
         val body = when (toolId) {
             ServerToolCatalog.DNSTT -> """
@@ -684,7 +717,13 @@ object ToolScripts {
                 "§SUDO grep -Fq 'ExecStart=/usr/local/bin/maximus-cotten-server' /etc/systemd/system/maximus-cotten.service || { echo 'Cotten ownership not verified; no removal' >&2; exit 40; }"
             else -> ""
         }
-        return script("step 1\n" + identityGuard + "\n" + body.trimIndent() +
+        val purge = if (purgeData) when (toolId) {
+            ServerToolCatalog.DNSTT -> "§SUDO rm -rf -- $DNSTT_DIR"
+            ServerToolCatalog.SOAR -> "§SUDO rm -rf -- /etc/maximus/soar"
+            ServerToolCatalog.COTTEN -> "§SUDO rm -rf -- /etc/maximus/cotten"
+            else -> ""
+        } else ""
+        return script("step 1\n" + identityGuard + "\n" + body.trimIndent() + "\n" + purge +
             "\nresult REMOVED $toolId", UNINSTALL_STEPS)
     }
 
@@ -705,7 +744,7 @@ object ToolScripts {
         return script(
             "step 1\n§SUDO systemctl show ${units.joinToString(" ")} -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus 2>&1 || true\n" +
                 "§SUDO journalctl ${units.joinToString(" ") { "-u $it" }} -n $lines --no-pager -o short-iso 2>&1 | tail -n $lines",
-            listOf("Read logs")
+            listOf("Read logs"), mutating = false
         )
     }
 }

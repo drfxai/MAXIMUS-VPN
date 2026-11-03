@@ -55,7 +55,7 @@ object CanonicalFingerprint {
     }
 
     fun computeFromProfile(profile: VlessProfile): String {
-        return compute(
+        val base = compute(
             protocol = profile.protocolType,
             server = profile.address,
             port = profile.port,
@@ -69,6 +69,14 @@ object CanonicalFingerprint {
             shortId = profile.shortId,
             alpn = profile.alpn
         )
+        // DPI variants and security policies must survive subscription deduplication.
+        val advanced = listOf(profile.fingerprint, profile.cipherSuites, profile.finalMask,
+            profile.pinnedPeerCertSha256, profile.verifyPeerCertByName, profile.echConfigList,
+            profile.echSockopt, profile.extraSettings,
+            profile.engineType.takeIf { it != EngineType.XRAY }?.name.orEmpty(),
+            if (profile.allowInsecure) "pinned" else "")
+        return if (advanced.all { it.isEmpty() }) base else
+            sha256Hex(base + advanced.joinToString("") { "${it.length}:$it" })
     }
 
     /** Stable lookup key that does not persist subscription credentials in plaintext. */

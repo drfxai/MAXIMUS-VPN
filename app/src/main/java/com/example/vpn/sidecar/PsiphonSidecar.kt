@@ -56,7 +56,7 @@ class PsiphonSidecar(
             return validatePrivateSettings(config)
         }
         val settings = networkSettings() ?: return MISSING_SETTINGS
-        incompleteReason(settings)?.let { return it }
+        validateNetworkSettings(settings.toString())?.let { return it }
         if (!validRegion(region(profile))) return "The Psiphon region must be a two-letter country code, or empty for any region."
         return null
     }
@@ -226,7 +226,11 @@ class PsiphonSidecar(
                 for (i in 0 until urls.length()) {
                     val item = urls.opt(i)
                     if (item is JSONObject && item.optBoolean("SkipVerify")) return "Psiphon list TLS verification cannot be disabled."
-                    val value = if (item is JSONObject) item.optString("URL") else item?.toString().orEmpty()
+                    val encoded = if (item is JSONObject) item.optString("URL") else item?.toString().orEmpty()
+                    // Psiphon's TransferURL encodes its URL as base64. Validate the
+                    // decoded destination without changing what the engine receives.
+                    val value = if (encoded.startsWith("https://")) encoded else
+                        runCatching { String(java.util.Base64.getDecoder().decode(encoded), Charsets.UTF_8) }.getOrDefault("")
                     val uri = runCatching { java.net.URI(value) }.getOrNull()
                     if (uri?.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null)
                         return "Psiphon server lists must use HTTPS without URL credentials."

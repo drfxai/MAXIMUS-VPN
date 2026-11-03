@@ -134,12 +134,14 @@ jobs:
         env:
           # The build number the in-app update pop-up compares; published with the release below.
           MAXIMUS_RELEASE_BUILD: ${{ github.run_number }}
+          MAXIMUS_SINGBOX_FIXTURES: ${{ github.workspace }}/app/build/singbox-fixtures
           KEYSTORE_PATH: ${{ runner.temp }}/release.jks
           STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           test -n "$STORE_PASSWORD" && test -n "$KEY_PASSWORD" && test -s "$KEYSTORE_PATH"
           bash gradlew --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
+          python3 tools/singbox-validation/check.py --fixtures app/build/singbox-fixtures
           cp app/build/outputs/apk/release/app-release.apk MAXIMUSVPN-${APP_VERSION}-universal.apk
           bash gradlew --no-daemon -PtargetAbi=arm64-v8a :app:assembleRelease
           cp app/build/outputs/apk/release/app-release.apk MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk

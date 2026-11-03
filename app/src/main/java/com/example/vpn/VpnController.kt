@@ -32,6 +32,7 @@ object VpnController {
      * Initiates VPN connection with a specific VLESS profile.
      */
     fun startVpn(context: Context, profile: VlessProfile, smart: Boolean = false, force: Boolean = false, exact: Boolean = false) {
+        context.stopService(Intent(context, com.example.vpn.share.LocalProxyService::class.java))
         val intent = Intent(context, RayVpnService::class.java).apply {
             action = RayVpnService.ACTION_CONNECT
             putExtra(RayVpnService.EXTRA_PROFILE_ID, profile.id)

@@ -111,6 +111,7 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val settingsClipboard = LocalClipboardManager.current
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val localProxy by com.example.vpn.share.LocalProxyService.state.collectAsStateWithLifecycle()
 
     var showConfigPreview by remember { mutableStateOf(false) }
     var previewJson by remember { mutableStateOf("") }
@@ -342,6 +343,24 @@ fun SettingsScreen(
 
         // SECTION: CORE PROXY ENGINE SELECTION
         SectionHeader("PROXY CORE ENGINE")
+        Text("Local proxy mode", color = AppTheme.colors.primary, fontWeight = FontWeight.Bold)
+        Text("Uses the selected server for apps configured with SOCKS5. Device-wide VPN and Kill Switch are inactive in this mode.",
+            fontSize = 12.sp, color = AppTheme.colors.textSecondary)
+        localProxy.error?.let { Text(it, color = AppTheme.colors.statusWarning, fontSize = 12.sp) }
+        if (localProxy.running) {
+            androidx.compose.foundation.text.selection.SelectionContainer {
+                Text("SOCKS5 127.0.0.1:${localProxy.port}\nUsername: ${localProxy.user}\nPassword: ${localProxy.password}",
+                    fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = AppTheme.colors.primary)
+            }
+        }
+        Button(onClick = {
+            val intent = android.content.Intent(context, com.example.vpn.share.LocalProxyService::class.java)
+            if (localProxy.running || localProxy.starting) context.stopService(intent)
+            else androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }, enabled = localProxy.running || localProxy.starting || settings.selectedProfileId != null) {
+            Text(if (localProxy.starting) "Cancel proxy startup" else if (localProxy.running) "Stop local proxy" else "Start selected server as local proxy")
+        }
+        Spacer(modifier = Modifier.height(12.dp))
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
@@ -349,6 +368,13 @@ fun SettingsScreen(
             shape = RoundedCornerShape(16.dp)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
+                RoutingOptionItem(
+                    title = "sing-box 1.14.4",
+                    subtitle = "VLESS, VMess, Trojan and Shadowsocks; incompatible custom settings stay on Xray",
+                    isSelected = settings.preferredEngine == EngineType.SING_BOX,
+                    onSelect = { viewModel.setPreferredEngine(EngineType.SING_BOX) }
+                )
+                Spacer(modifier = Modifier.height(6.dp))
                 RoutingOptionItem(
                     title = "Auto (Protocol Smart Select)",
                     subtitle = "Automatically selects the best engine (Xray for VLESS/XTLS Reality, Mihomo for YAML & proxy groups)",

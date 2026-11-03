@@ -153,4 +153,19 @@ class SubscriptionViewModel(
     fun clearMessages() {
         _uiState.value = _uiState.value.copy(statusMessage = null, errorMessage = null)
     }
+
+    fun preset(subscription: SubscriptionInfo) = subscriptionManager.preset(subscription)
+
+    fun savePreset(subscription: SubscriptionInfo, preset: com.example.vpn.subscription.SubscriptionPreset) {
+        if (_uiState.value.isSyncing) return
+        _uiState.value = _uiState.value.copy(isSyncing = true, errorMessage = null, statusMessage = null)
+        viewModelScope.launch {
+            try {
+                val count = subscriptionManager.savePreset(subscription, preset)
+                _uiState.value = _uiState.value.copy(statusMessage = "Preset applied to $count nodes and future updates; custom per-node settings preserved.")
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { _uiState.value = _uiState.value.copy(errorMessage = "Could not apply subscription preset.") }
+            finally { _uiState.value = _uiState.value.copy(isSyncing = false) }
+        }
+    }
 }

@@ -2,6 +2,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.Base64
 
+
 // import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 plugins {
@@ -22,7 +23,7 @@ android {
     minSdk = 24
     targetSdk = 36
     // Keep this monotonic so installs from the pre-public builds can upgrade.
-    versionCode = 43
+    versionCode = 44
     versionName = "1.0.4"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -207,4 +208,9 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
+}
+
+// Native integration fixtures are real test outputs, including when Gradle restores test results.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+  System.getenv("MAXIMUS_SINGBOX_FIXTURES")?.takeIf { it.isNotBlank() }?.let { outputs.dir(it) }
 }

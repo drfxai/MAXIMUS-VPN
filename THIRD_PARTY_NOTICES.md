@@ -1,10 +1,10 @@
 # Third party notices
 
-The Android application bundles the official XTLS/libXray release `v26.9.9` and Xray-core. The project is distributed under the MIT License and Mozilla Public License 2.0, reproduced below.
+The Android application bundles the official XTLS/libXray release `v26.10.31` and Xray-core. The project is distributed under the MIT License and Mozilla Public License 2.0, reproduced below.
 
 - libXray source: https://github.com/XTLS/libXray
 - Xray-core source: https://github.com/XTLS/Xray-core
-- Pinned Android artifact: `libxray-android.zip` from the libXray `v26.9.9` release. CI verifies SHA-256 `4998a8b56e4a78a164b5359d5690036f83da3b575465cea57ddf29c0149c345f` before extracting the AAR.
+- Pinned Android artifact: `libxray-android.zip` from the libXray `v26.10.31` release. CI verifies SHA-256 `fb99f04acf379cc2957c1e1d0ce2b3c0005d3f49974a44c09a11242a0562c1ca` before extracting the AAR.
 - The AAR is downloaded during CI and is not stored in this repository.
 - Mihomo (MetaCubeX) `v1.19.32`, GNU General Public License v3.0. It runs as a separate program
   (`libmihomo.so`, an executable), started by the app and reached only over a local SOCKS port; it is
@@ -582,3 +582,18 @@ The MAXIMUS integration is original code; no Hashem Pro panel code or licensing 
 ## ByeDPI
 
 The separate native fake-SNI helper is built from hufrea/byedpi at ba532298de7b28cfe854aea83d061369d13ca290 (MIT). MAXIMUS restricts its outgoing TCP destination to the selected endpoint. The complete license is included in assets/licenses/byedpi-MIT.txt.
+
+
+## sing-box 1.14.4
+
+The APK distributes the unmodified official Android sing-box executable as a separate
+program, reached through an authenticated loopback SOCKS connection. It is not linked
+into the application. Copyright SagerNet and contributors; GPL-3.0-or-later.
+
+- Exact upstream source: https://github.com/SagerNet/sing-box/tree/c005f35300ce76427dc285481ec5695f5b179cd2
+- Corresponding source download: https://github.com/SagerNet/sing-box/archive/c005f35300ce76427dc285481ec5695f5b179cd2.tar.gz
+- Official executables: https://github.com/SagerNet/sing-box/releases/tag/v1.14.4
+- License in the APK: assets/licenses/sing-box-GPL-3.0.txt
+- Asset SHA-256 verification: scripts/engines/singbox.sh. No local modifications.
+
+The application's license does not restrict recipients' rights in this separate program.

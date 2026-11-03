@@ -263,6 +263,8 @@ class RayVpnService : VpnService() {
     @Volatile private var activeRecovery: com.example.vpn.connectivity.DerivedRecoveryCandidate? = null
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var handoffJob: Job? = null
+    private val handoffPolicy = com.example.vpn.connectivity.NetworkHandoffPolicy()
     private var settingsObserverJob: Job? = null
     private var lastObservedMode: com.example.data.model.OperationalMode? = null
 
@@ -333,6 +335,9 @@ class RayVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action != ACTION_DISCONNECT) {
+            stopService(Intent(this, com.example.vpn.share.LocalProxyService::class.java))
+        }
         val action = intent?.action
         if (action == ACTION_CONNECT && !_vpnState.value.isTunnelUp &&
             (!_vpnState.value.isBusy || _vpnState.value.status == ConnectionStatus.PREPARING)) {
@@ -694,7 +699,12 @@ class RayVpnService : VpnService() {
         reuseSidecar: VlessProfile? = null
     ): Unit = withContext(Dispatchers.IO) {
         // The saved profile the connection belongs to; a same-server switch below can change it.
-        var requestedProfile = userProfile
+        var requestedProfile = if (settingsRepository.getSettings().preferredEngine == EngineType.SING_BOX &&
+            !com.example.vpn.sidecar.Sidecars.isEngineProfile(userProfile) &&
+            com.example.vpn.sidecar.SingBoxSidecar.conversionProblem(userProfile) == null &&
+            com.example.vpn.sidecar.Sidecars.isBundled(com.example.vpn.sidecar.SingBoxSidecar)) {
+            com.example.vpn.sidecar.SingBoxSidecar.select(userProfile)
+        } else userProfile
         // Engines receive [profile]; a hostname endpoint is replaced by its resolved IP below.
         var profile = requestedProfile
         // Correlation: a session runs from the user's Connect to Disconnect; every attempt (failover,
@@ -1206,6 +1216,7 @@ class RayVpnService : VpnService() {
                 val reviveDeadline = System.currentTimeMillis() + CONFIG_REVIVE_MS
                 val attemptJob = coroutineContext[Job]
                 val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                    .filter { com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) }
                 val report = com.example.vpn.Abandonable.run {
                     runCatching {
                         com.example.RayApplication.instance.configRevival.run(
@@ -2382,34 +2393,24 @@ class RayVpnService : VpnService() {
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
             .build()
 
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                XrayLogManager.appendLog("Underlying network available.", "NETWORK")
-                // Results measured on the previous network no longer hold: a verified tunnel is re-checked.
-                mutateState { com.example.data.model.ConnectionVerification.onNetworkChanged(it) }
-                com.example.vpn.connectivity.ConnectivityBrain.refreshSession()
-                if (_vpnState.value.status == ConnectionStatus.RECONNECTING) {
-                    activeProfile?.let { prof ->
-                        val ticket = lifecycle.current()
-                        connectJob?.cancel()
-                        connectJob = serviceScope.launch {
-                            XrayLogManager.appendLog("Network restored. Auto-reconnecting to ${prof.name}...", "VPN")
-                            connect(prof, ticket = ticket)
-                        }
-                    }
-                }
+                scheduleNetworkHandoff()
             }
 
             override fun onLost(network: Network) {
-                XrayLogManager.appendLog("Underlying network connection lost.", "NETWORK")
-                mutateState { com.example.data.model.ConnectionVerification.onNetworkChanged(it) }
-                val settings = settingsRepository.getSettings()
-                if (_vpnState.value.isTunnelUp && _vpnState.value.status != ConnectionStatus.RECONNECTING && settings.autoReconnect) {
-                    XrayLogManager.appendLog("Auto-reconnect is enabled. Waiting for network recovery...", "VPN")
-                    updateState(_vpnState.value.copy(status = ConnectionStatus.RECONNECTING))
-                }
+                scheduleNetworkHandoff()
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                scheduleNetworkHandoff()
+            }
+
+            override fun onLinkPropertiesChanged(network: Network, properties: android.net.LinkProperties) {
+                scheduleNetworkHandoff()
             }
         }
 
@@ -2417,6 +2418,47 @@ class RayVpnService : VpnService() {
             connectivityManager?.registerNetworkCallback(request, networkCallback!!)
         } catch (e: Exception) {
             XrayLogManager.w("NETWORK", "Failed to register network callback: ${e.message}")
+        }
+    }
+
+    /** Debounce callback bursts, ignore VPN interfaces and rebuild sockets tied to a retired physical link. */
+    @Synchronized private fun scheduleNetworkHandoff() {
+        val ticket = lifecycle.current()
+        handoffJob?.cancel()
+        handoffJob = serviceScope.launch {
+            delay(500)
+            if (!lifecycle.isCurrent(ticket)) return@launch
+            val cm = connectivityManager ?: return@launch
+            val directDefault = cm.activeNetwork
+            val next = cm.allNetworks.mapNotNull { network ->
+                cm.getNetworkCapabilities(network)?.takeIf {
+                    it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                        !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                }?.let { network to it }
+            }.sortedWith(compareByDescending<Pair<Network, NetworkCapabilities>> {
+                it.second.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            }.thenByDescending { it.first == directDefault }
+                .thenByDescending { it.second.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) })
+                .firstOrNull()?.first
+            val signature = next?.let { n -> n.toString() + ":" + cm.getLinkProperties(n)?.linkAddresses.orEmpty().map { it.toString() }.sorted().joinToString(",") }
+            if (!handoffPolicy.observe(signature)) return@launch
+            mutateState { com.example.data.model.ConnectionVerification.onNetworkChanged(it) }
+            com.example.vpn.connectivity.ConnectivityBrain.refreshSession()
+            runCatching { setUnderlyingNetworks(next?.let { arrayOf(it) } ?: emptyArray()) }
+            val current = _vpnState.value
+            if (!current.isTunnelUp && current.status != ConnectionStatus.RECONNECTING) return@launch
+            if (!settingsRepository.getSettings().autoReconnect) return@launch
+            updateState(current.copy(status = ConnectionStatus.RECONNECTING))
+            // Keep the current capture interface in place while no physical network exists.
+            if (next == null) return@launch
+            val profile = activeProfile ?: return@launch
+            connectJob?.cancel()
+            connectJob = serviceScope.launch {
+                if (lifecycle.isCurrent(ticket)) {
+                    XrayLogManager.i("NETWORK", "Physical network changed; rebuilding the tunnel and rechecking traffic.")
+                    connect(profile, ticket = ticket)
+                }
+            }
         }
     }
 

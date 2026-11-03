@@ -281,6 +281,7 @@ class ServerRace(
             penaltyMs: (VlessProfile) -> Long = { 0L }
         ): List<VlessProfile> {
             val eligible = profiles.filter {
+                com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) &&
                 it.id !in exclude && it.id != first?.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") &&
                     RuntimeCapabilities.unsupportedReason(it) == null
             }.distinctBy { it.effectiveFingerprint }

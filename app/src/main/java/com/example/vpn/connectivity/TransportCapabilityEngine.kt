@@ -60,6 +60,8 @@ object TransportCapabilityEngine {
         // MASQUE runs over HTTP/3 over UDP/443, even though its import profile
         // is MIXED rather than HYSTERIA2. Never misclassify it as plain TCP.
         com.example.vpn.sidecar.MasqueSidecar.handles(p) -> Transport.UDP
+        com.example.vpn.sidecar.MatrixTransportSidecar.handles(p) ->
+            if (com.example.vpn.sidecar.MatrixTransportSidecar.mode(p) == "h2") Transport.TCP_TLS else Transport.UDP
         p.protocolType == ProtocolType.HYSTERIA2 || p.protocolType == ProtocolType.WIREGUARD || p.protocolType == ProtocolType.TUIC -> Transport.UDP
         p.transport.lowercase() == "quic" || usesHttp3(p) -> Transport.UDP
         p.security.equals("tls", true) || p.security.equals("reality", true) -> Transport.TCP_TLS

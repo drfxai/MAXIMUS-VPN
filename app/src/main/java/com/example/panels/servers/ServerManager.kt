@@ -302,13 +302,13 @@ class ServerManager(
         return check(server.copy(passwordLoginOff = nowOff, password = if (nowOff) "" else server.password))
     }
 
-    fun uninstall(server: ManagedServer, toolId: String, progress: ActionProgress): ManagedServer {
+    fun uninstall(server: ManagedServer, toolId: String, progress: ActionProgress, purgeData: Boolean = false): ManagedServer {
         val tool = server.tool(toolId)
         if (toolId == ServerToolCatalog.HIDDIFY) {
             return hiddify.uninstall(server, progress).let { s -> runCatching { check(s) }.getOrDefault(s) }
         }
         if (toolId != ServerToolCatalog.KEY_LOGIN) {
-            connect(server).use { runScript(it, ToolScripts.uninstall(toolId, tool?.port?.takeIf { p -> p != 53 }), progress) }
+            connect(server).use { runScript(it, ToolScripts.uninstall(toolId, tool?.port?.takeIf { p -> p != 53 }, purgeData), progress) }
         }
         return server.withoutTool(toolId).let { s -> runCatching { check(s) }.getOrDefault(s) }
     }

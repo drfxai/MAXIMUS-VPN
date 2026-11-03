@@ -41,7 +41,11 @@ jobs:
       - name: Fetch verified native Xray runtime
         run: bash scripts/fetch-libxray-android.sh
       - name: Unit tests
+        env:
+          MAXIMUS_SINGBOX_FIXTURES: ${{ github.workspace }}/app/build/singbox-fixtures
         run: bash gradlew --no-daemon :app:testDebugUnitTest
+      - name: Real sing-box traffic and certificate rejection
+        run: python3 tools/singbox-validation/check.py --fixtures app/build/singbox-fixtures
       - name: Lint
         run: bash gradlew --no-daemon :app:lintRelease
       - name: Keep the test and lint reports

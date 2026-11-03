@@ -100,6 +100,7 @@ data class VlessProfile(
 
     val engineBadge: String
         get() = when (engineType) {
+            EngineType.SING_BOX -> "SING-BOX"
             EngineType.MIHOMO -> "MIHOMO"
             EngineType.XRAY -> "XRAY"
             EngineType.AUTO -> if (profileType == ProfileType.MIHOMO_YAML || protocolType == ProtocolType.TUIC) "MIHOMO" else "XRAY"

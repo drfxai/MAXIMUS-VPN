@@ -37,6 +37,7 @@ object SmartConnect {
 
         // Only nodes the core can actually run.
         val supportedProfiles = profiles.filter {
+            com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) &&
             com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null &&
                 ManagedNodeEligibility.allowed(it, managedRecords, networkKey = networkKey)
         }

@@ -36,7 +36,7 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
 
     companion object {
         val instance: XrayEngine by lazy { XrayEngineImpl() }
-        const val ENGINE_VERSION = "Xray-core via XTLS/libXray v26.9.9"
+        const val ENGINE_VERSION = "Xray-core via XTLS/libXray v26.10.31"
     }
 
     override val engineType: EngineType = EngineType.XRAY

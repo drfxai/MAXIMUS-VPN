@@ -11,6 +11,7 @@ object Sidecars {
     val ENGINES: List<SidecarEngine> by lazy {
         listOf(
             ByedpiSidecar,
+            SingBoxSidecar,
             MihomoSidecar,
             PsiphonSidecar(
                 configProvider = {

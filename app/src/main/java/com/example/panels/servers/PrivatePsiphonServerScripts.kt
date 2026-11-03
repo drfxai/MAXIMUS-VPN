@@ -136,8 +136,8 @@ object PrivatePsiphonServerScripts {
             trap - 0
             echo '##RESULT PSIPHON_UNIT_ACTIVE=1'
         """.trimIndent().replace('§', '$')
-        return ToolScript(script, listOf("Verify staged executable", "Inspect listener", "Generate private server keys",
-            "Register systemd service", "Verify psiphond process"))
+        return ToolScripts.guarded(ToolScript(script, listOf("Verify staged executable", "Inspect listener", "Generate private server keys",
+            "Register systemd service", "Verify psiphond process")))
     }
 
     /**
@@ -150,7 +150,7 @@ object PrivatePsiphonServerScripts {
             if [ -d "§dir" ]; then rm -rf -- "§dir"; fi
             echo '##RESULT PRIVATE_PSIPHON_PURGED=1'
         """.trimIndent() else "echo '##RESULT PRIVATE_PSIPHON_DISABLED=1'"
-        return ToolScript("""
+        return ToolScripts.guarded(ToolScript("""
             set -eu
             if [ "§(id -u)" -ne 0 ]; then echo 'Root SSH is required' >&2; exit 1; fi
             unit='/etc/systemd/system/$UNIT.service'
@@ -165,6 +165,6 @@ object PrivatePsiphonServerScripts {
             fi
             ${removal}
         """.trimIndent().replace('§', '$'),
-            listOf("Stop managed service", if (purge) "Purge Maximus-owned data" else "Preserve private keys"))
+            listOf("Stop managed service", if (purge) "Purge Maximus-owned data" else "Preserve private keys")))
     }
 }
