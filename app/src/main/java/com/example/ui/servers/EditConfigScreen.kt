@@ -187,6 +187,10 @@ private fun XrayConfigEditor(
             error?.let { ErrorBanner(it) }
 
             EditSection("Server") {
+                EditDropdown("Core", draft.engineType.name,
+                    com.example.data.model.EngineType.entries.map { it.name }) {
+                    draft = draft.copy(engineType = com.example.data.model.EngineType.valueOf(it), canonicalFingerprint = "")
+                }
                 EditField("Remarks", draft.name) { draft = draft.copy(name = it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     EditField("Address", draft.address, Modifier.weight(1f)) { draft = draft.copy(address = it) }

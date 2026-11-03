@@ -126,7 +126,7 @@ object WireGuardConf {
 
         val extras = JSONObject().put(ProfileExtras.WG_ADDRESS, address.split(',').map { it.trim() }.filter { it.isNotEmpty() }.joinToString(","))
         if (reserved.isNotBlank()) extras.put(ProfileExtras.WG_RESERVED, reserved)
-        mtu?.let { extras.put(ProfileExtras.WG_MTU, it) }
+        extras.put(ProfileExtras.WG_MTU, mtu?.takeIf { it > 0 } ?: 1280)
         if (preSharedKey.isNotBlank()) extras.put(ProfileExtras.WG_PRESHARED_KEY, preSharedKey)
         keepAlive?.takeIf { it > 0 }?.let { extras.put(ProfileExtras.WG_KEEPALIVE, it) }
 
@@ -160,7 +160,7 @@ object WireGuardConf {
         addresses.firstOrNull { !it.contains(':') }?.let { proxy["ip"] = it.substringBefore('/') }
         addresses.firstOrNull { it.contains(':') }?.let { proxy["ipv6"] = it.substringBefore('/') }
         if (preSharedKey.isNotBlank()) proxy["pre-shared-key"] = preSharedKey
-        mtu?.let { proxy["mtu"] = it }
+        proxy["mtu"] = mtu?.takeIf { it > 0 } ?: 1280
         keepAlive?.takeIf { it > 0 }?.let { proxy["persistent-keepalive"] = it }
         reserved.split(',').mapNotNull { it.trim().toIntOrNull() }.takeIf { it.size == 3 }?.let { proxy["reserved"] = it }
         // Numbers stay numbers; I1–I5 are packet descriptions and stay text.

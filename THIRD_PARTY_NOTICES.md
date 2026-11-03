@@ -582,3 +582,18 @@ The MAXIMUS integration is original code; no Hashem Pro panel code or licensing 
 ## ByeDPI
 
 The separate native fake-SNI helper is built from hufrea/byedpi at ba532298de7b28cfe854aea83d061369d13ca290 (MIT). MAXIMUS restricts its outgoing TCP destination to the selected endpoint. The complete license is included in assets/licenses/byedpi-MIT.txt.
+
+
+## sing-box 1.14.4
+
+The APK distributes the unmodified official Android sing-box executable as a separate
+program, reached through an authenticated loopback SOCKS connection. It is not linked
+into the application. Copyright SagerNet and contributors; GPL-3.0-or-later.
+
+- Exact upstream source: https://github.com/SagerNet/sing-box/tree/c005f35300ce76427dc285481ec5695f5b179cd2
+- Corresponding source download: https://github.com/SagerNet/sing-box/archive/c005f35300ce76427dc285481ec5695f5b179cd2.tar.gz
+- Official executables: https://github.com/SagerNet/sing-box/releases/tag/v1.14.4
+- License in the APK: assets/licenses/sing-box-GPL-3.0.txt
+- Asset SHA-256 verification: scripts/engines/singbox.sh. No local modifications.
+
+The application's license does not restrict recipients' rights in this separate program.

@@ -267,6 +267,9 @@ object VlessParser {
      */
     fun toUri(profile: VlessProfile): String {
         val queryParams = mutableListOf<String>()
+        if (profile.cipherSuites.isNotBlank()) queryParams.add("cipherSuites=${encodeUrl(profile.cipherSuites)}")
+        if (profile.finalMask.isNotBlank()) queryParams.add("finalmask=${encodeUrl(profile.finalMask)}")
+        if (profile.engineType == com.example.data.model.EngineType.SING_BOX) queryParams.add("core=sing-box")
 
         if (profile.transport.isNotBlank()) {
             queryParams.add("type=${encodeUrl(profile.transport)}")

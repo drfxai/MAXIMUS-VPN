@@ -350,6 +350,13 @@ fun SettingsScreen(
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 RoutingOptionItem(
+                    title = "sing-box 1.14.4",
+                    subtitle = "VLESS, VMess, Trojan and Shadowsocks; incompatible custom settings stay on Xray",
+                    isSelected = settings.preferredEngine == EngineType.SING_BOX,
+                    onSelect = { viewModel.setPreferredEngine(EngineType.SING_BOX) }
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                RoutingOptionItem(
                     title = "Auto (Protocol Smart Select)",
                     subtitle = "Automatically selects the best engine (Xray for VLESS/XTLS Reality, Mihomo for YAML & proxy groups)",
                     isSelected = settings.preferredEngine == EngineType.AUTO,

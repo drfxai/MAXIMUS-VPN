@@ -56,7 +56,7 @@ class PsiphonSidecar(
             return validatePrivateSettings(config)
         }
         val settings = networkSettings() ?: return MISSING_SETTINGS
-        incompleteReason(settings)?.let { return it }
+        validateNetworkSettings(settings.toString())?.let { return it }
         if (!validRegion(region(profile))) return "The Psiphon region must be a two-letter country code, or empty for any region."
         return null
     }

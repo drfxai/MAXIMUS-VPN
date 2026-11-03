@@ -23,7 +23,7 @@ object EngineRegistry {
         val runtime: EngineSelectionPolicy.Runtime?
     )
 
-    val XRAY = EngineDescriptor("xray", "Xray-core (libXray)", "libXray v26.9.9", "MPL-2.0 (Xray-core), MIT (libXray)",
+    val XRAY = EngineDescriptor("xray", "Xray-core (libXray)", "libXray v26.10.31", "MPL-2.0 (Xray-core), MIT (libXray)",
         bundled = true, runtime = EngineSelectionPolicy.Runtime.XRAY)
     val KOTLIN_TUNNEL = EngineDescriptor("kotlin-tunnel", "Kotlin packet tunnel", "in app", "Proprietary (this app)",
         bundled = true, runtime = EngineSelectionPolicy.Runtime.KOTLIN_TUNNEL)
@@ -60,7 +60,10 @@ object EngineRegistry {
     val MATRIX_TRANSPORT = EngineDescriptor("matrix-transport", "Matrix Transport (Aether-derived, separate program)",
         "1.6.0 / secure-v1", "AGPL-3.0-only", bundled = true, runtime = null)
 
-    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, BYEDPI, MIHOMO, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL, COTTEN_DNS, SOAR, SLIPSTREAM, MASQUE, MATRIX_TRANSPORT)
+    val SING_BOX = EngineDescriptor("sing-box", "sing-box (separate program)",
+        com.example.vpn.sidecar.SingBoxSidecar.VERSION, "GPL-3.0-or-later", bundled = true, runtime = null)
+
+    val ENGINES = listOf(XRAY, KOTLIN_TUNNEL, BYEDPI, MIHOMO, SING_BOX, AMNEZIAWG, WARP, PSIPHON, TOR, NAIVE, DNS_TUNNEL, COTTEN_DNS, SOAR, SLIPSTREAM, MASQUE, MATRIX_TRANSPORT)
 
     fun descriptorFor(runtime: EngineSelectionPolicy.Runtime): EngineDescriptor =
         ENGINES.first { it.runtime == runtime }

@@ -682,7 +682,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun uninstall(id: String, toolId: String) = serverAction(id, "Removing ${toolTitle(toolId)}…") { s ->
-        val updated = withContext(Dispatchers.IO) { manager.uninstall(s, toolId, quiet) }
+        val updated = withContext(Dispatchers.IO) { manager.uninstall(s, toolId, quiet, purgeData = true) }
         val tool = s.tool(toolId)
         tool?.profileId?.let { pid -> runCatching { RayApplication.instance.serverRepository.delete(pid) } }
         if (toolId == ServerToolCatalog.XUI) {

@@ -171,6 +171,7 @@ enum class ProfileType(val displayName: String, val badge: String) {
 enum class EngineType(val displayName: String) {
     XRAY("Xray-core"),
     MIHOMO("Mihomo/Meta"),
+    SING_BOX("sing-box"),
     AUTO("Auto Detect")
 }
 

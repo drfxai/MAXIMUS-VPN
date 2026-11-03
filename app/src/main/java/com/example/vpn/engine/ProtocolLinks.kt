@@ -211,7 +211,15 @@ object ProfileExtras {
 
     /** Adds the XHTTP `mode` and `extra` and the REALITY `pqv` of a share link's query to [profile]. */
     fun fromQuery(profile: VlessProfile, params: Map<String, String>): VlessProfile {
-        var p = profile
+        var p = profile.copy(
+            cipherSuites = params["cipherSuites"] ?: params["ciphers"] ?: profile.cipherSuites,
+            finalMask = params["finalmask"] ?: params["finalMask"] ?: profile.finalMask,
+            engineType = when (params["core"]?.lowercase()) {
+                "sing-box", "singbox" -> com.example.data.model.EngineType.SING_BOX
+                "xray" -> com.example.data.model.EngineType.XRAY
+                else -> profile.engineType
+            }
+        )
         val transport = p.transport.lowercase()
         if (transport == "xhttp" || transport == "splithttp") {
             params["mode"]?.takeIf { it.isNotBlank() }?.let { p = with(p, XHTTP_MODE, it) }

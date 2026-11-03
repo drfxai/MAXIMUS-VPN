@@ -1,15 +1,17 @@
-MAXIMUS VPN V1.0.4 REFRESH — versionCode 43 — VERIFIED PSIPHON AUTO-INSTALL
+MAXIMUS VPN V1.0.4 — versionCode 44 — multi-core and three-phase integration
 
-Release approval: publish V1.0.4 only after PR #160 (private Psiphon auto-install) is merged on main with all CI checks green.
+User-requested signed refresh of V1.0.4 after the three-phase integration passes CI.
+Keep versionName 1.0.4; versionCode 44 upgrades build 43 without removing user data.
 
-Included:
-- Smart Manager reviewed two-tool sequential batch from PR #157
-- Hardened diagnostics and SSH inventory from PRs #154, #155, #156
-- Private Psiphon server approved installation from PR #160, using immutable upstream Linux AMD64 psiphond binary with fixed SHA-256 and 37,799,528-byte length.
-- Only when a user explicitly selects a VPS, port and public IPv4 and confirms: pinned SSH preflight, port-inventory check, isolated Linux service user, validated private bootstrap, encrypted Android Keystore node registration and independent phone-tunnel verification.
-- Fail-closed on unsupported ARM64, unverified binary, unknown SSH outcomes and existing Psiphon keys. No live VPS is contacted by the release workflow.
+Phase 1: verified libXray v26.10.31; official hash-pinned sing-box 1.14.4 for all
+three release ABIs; per-profile and Settings core selection; lossless TLS import/export;
+Psiphon launch validation; WireGuard/AmneziaWG MTU 1280 default.
+Phase 2: existing DNS listener fixes and reviewed batch installation; cross-session
+flock guard and credential-free bounded remote operation journal; reviewed complete
+DNS tool removal with key purge; private Psiphon mutations use the same lock.
+Phase 3: measured alternate-core candidates on the same endpoints; physical-network
+handoff and IP-change rebuild; correct Matrix Transport H2/H3 classification.
 
-Compatibility: Keep versionName 1.0.4 and monotonic versionCode 43 for upgrade compatibility. Replace the already-published V1.0.4 APK assets only AFTER all signed-release gates pass.
-
-Gates: testDebugUnitTest, lintRelease, native pinned engines, signed APK manifest, SHA256SUMS, exact permanent signing certificate, Android 15 emulator install+launch, provenance and update metadata.
-No unverified physical phone-to-VPS traffic claims: user must run the in-app tunnel test on the actual target VPS after installation.
+Release gates: unit tests, lint, pinned engine packaging, permanent signing
+certificate, Android 15 install/launch, checksums and provenance.
+Actual carrier and user-VPS egress still require tests on their own networks.
