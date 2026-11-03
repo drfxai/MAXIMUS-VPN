@@ -18,6 +18,13 @@ import com.example.data.model.OperationalMode
 object FailClosedPolicy {
     enum class Failure { UNRESOLVABLE_SERVER, INVALID_PROFILE }
 
-    fun mayReleaseBlock(failure: Failure, startedByUser: Boolean, mode: OperationalMode): Boolean =
-        failure == Failure.INVALID_PROFILE && startedByUser && mode == OperationalMode.DAILY
+    fun mayReleaseBlock(
+        failure: Failure,
+        startedByUser: Boolean,
+        mode: OperationalMode,
+        /** Explicit user Kill Switch overrides DAILY's invalid-profile convenience exception. */
+        killSwitchEnabled: Boolean = false
+    ): Boolean =
+        !killSwitchEnabled && failure == Failure.INVALID_PROFILE &&
+            startedByUser && mode == OperationalMode.DAILY
 }
