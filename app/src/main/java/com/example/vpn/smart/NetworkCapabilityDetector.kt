@@ -62,10 +62,22 @@ object NetworkCapabilityDetector {
 
     @Suppress("DEPRECATION")
     /** The phone's own network (not a VPN), or null. */
-    fun physical(cm: ConnectivityManager): Network? = cm.allNetworks.firstOrNull { n ->
-        cm.getNetworkCapabilities(n)?.let {
-            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+    fun physical(cm: ConnectivityManager): Network? {
+        fun usable(network: Network): Boolean = cm.getNetworkCapabilities(network)?.let {
+            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
         } == true
+        // Match the physical active network when Android exposes it. If Always-on
+        // VPN owns activeNetwork, prefer validated underlying links over the
+        // arbitrary order of allNetworks (which could be a disconnected mobile SIM).
+        cm.activeNetwork?.takeIf(::usable)?.let { return it }
+        return cm.allNetworks.filter(::usable).sortedWith(compareByDescending<Network> {
+            cm.getNetworkCapabilities(it)?.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        }.thenByDescending {
+            cm.getNetworkCapabilities(it)?.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED) == true
+        }).firstOrNull()
     }
 
     /** Measures now; returns null when there is no physical network. Runs off the main thread. */
