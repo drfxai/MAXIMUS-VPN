@@ -40,7 +40,7 @@ class LocalProxyService : Service() {
         if (intent?.action == "stop") { stopSelf(); return START_NOT_STICKY }
         if (job != null) return START_NOT_STICKY
         if (Build.VERSION.SDK_INT >= 26) getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(NotificationChannel(CHANNEL, "Local SOCKS proxy", NotificationManager.IMPORTANCE_LOW))
+            ?.createNotificationChannel(NotificationChannel(CHANNEL, "Local SOCKS proxy", NotificationManager.IMPORTANCE_LOW))
         val stop = PendingIntent.getService(this, 0, Intent(this, LocalProxyService::class.java).setAction("stop"),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         startForeground(NOTIFICATION, NotificationCompat.Builder(this, CHANNEL)
@@ -51,7 +51,7 @@ class LocalProxyService : Service() {
         job = scope.launch {
             try {
                 check(!VpnController.connectionState.value.let { it.isTunnelUp || it.isBusy }) { "Disconnect the VPN before starting proxy mode." }
-                val cm = getSystemService(android.net.ConnectivityManager::class.java)
+                val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: error("Network service unavailable.")
                 check(cm.allNetworks.none { cm.getNetworkCapabilities(it)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true }) {
                     "Disconnect the active VPN before starting proxy mode."
                 }
@@ -86,8 +86,8 @@ class LocalProxyService : Service() {
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { mutable.value = State(error = "Proxy could not start or stopped. Check the selected engine and its settings.") }
             finally {
-                gateway?.close(); gateway = null
-                engine?.stop(); engine = null
+                runCatching { gateway?.close() }; gateway = null
+                runCatching { engine?.stop() }; engine = null
                 work?.deleteRecursively(); work = null
                 if (mutable.value.error == null) mutable.value = State()
                 stopSelf()
@@ -98,8 +98,8 @@ class LocalProxyService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
-        gateway?.close()
-        engine?.stop()
+        runCatching { gateway?.close() }
+        runCatching { engine?.stop() }
         if (mutable.value.error == null) mutable.value = State()
         super.onDestroy()
     }
