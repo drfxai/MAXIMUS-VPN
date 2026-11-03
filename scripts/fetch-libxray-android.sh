@@ -4,8 +4,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIB_DIR="$REPO_ROOT/app/libs"
 DEST="$LIB_DIR/libXray.aar"
-VERSION="v26.9.9"
-SHA256="4998a8b56e4a78a164b5359d5690036f83da3b575465cea57ddf29c0149c345f"
+VERSION="v26.10.31"
+SHA256="fb99f04acf379cc2957c1e1d0ce2b3c0005d3f49974a44c09a11242a0562c1ca"
 
 STAMP="$DEST.verified"
 
