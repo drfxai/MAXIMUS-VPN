@@ -63,7 +63,7 @@ class SmartManagerPlannerTest {
         assertTrue(SmartManagerPlanner.bundleBlockers(
             plan, setOf(ServerToolCatalog.HIDDIFY, ServerToolCatalog.XUI)).isNotEmpty())
         assertTrue(SmartManagerPlanner.bundleBlockers(
-            plan, setOf(ServerToolCatalog.DNSTT)).isEmpty())
+            plan, setOf(ServerToolCatalog.DNSTT), now).isEmpty())
     }
 
     @Test fun bundleRejectsExpiredInspectionAtExecutionTime() {
