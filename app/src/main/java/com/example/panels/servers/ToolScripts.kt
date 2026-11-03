@@ -214,6 +214,7 @@ object ToolScripts {
             """
             DIR=$DNSTT_DIR
             FRESH=1
+            MUTATED=0
             if §SUDO test -f /etc/systemd/system/maximus-dnstt.service; then FRESH=0; fi
             if [ "§FRESH" = 1 ] && §SUDO test -e "§DIR"; then
               echo 'Previous DNSTT data found. Use Clean up before reinstalling; existing keys were not changed.' >&2; exit 22
@@ -225,7 +226,7 @@ object ToolScripts {
               §SUDO rm -rf "§DIR"
               §SUDO systemctl daemon-reload >/dev/null 2>&1 || true
             }
-            trap 'rc=§?; if [ §rc -ne 0 ] && [ "§FRESH" = 1 ]; then echo "Install failed, undoing its changes" >&2; rollback; fi' EXIT
+            trap 'rc=§?; if [ §rc -ne 0 ] && [ "§FRESH" = 1 ] && [ "§MUTATED" = 1 ]; then echo "Install failed, undoing its changes" >&2; rollback; fi' EXIT
 
             step 1
             @@DNS_PREFLIGHT@@
@@ -239,6 +240,15 @@ object ToolScripts {
             have systemctl || { echo 'systemd is required' >&2; exit 21; }
             ensure_user
             have iptables || pkg_install iptables
+            # Never overwrite foreign executables when a fresh Maximus install is requested.
+            if [ "§FRESH" = 1 ]; then
+              for path in /usr/local/bin/maximus-dnstt-server /usr/local/bin/maximus-socks /usr/local/lib/maximus/dnstt-redirect; do
+                if §SUDO test -e "§path" || §SUDO test -L "§path"; then
+                  echo 'Existing DNS engine file requires manual review; no changes made' >&2; exit 22
+                fi
+              done
+            fi
+            MUTATED=1
             §SUDO mkdir -p "§DIR" /usr/local/lib/maximus
             §SUDO chown root:maximus "§DIR"; §SUDO chmod 750 "§DIR"
             write_file /usr/local/lib/maximus/dnstt-redirect 0755 <<'HELPER'
@@ -250,13 +260,13 @@ object ToolScripts {
             command -v "§t" >/dev/null 2>&1 || exit 23
             case "§port" in ''|*[!0-9]*) exit 23;; esac
             if [ "§action" = add ]; then
-              "§t" -t nat -C PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" 2>/dev/null \
-                || "§t" -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" || exit 23
+              "§t" -t nat -C PREROUTING -p udp --dport 53 -m comment --comment maximus-dnstt -j REDIRECT --to-ports "§port" 2>/dev/null \
+                || "§t" -t nat -A PREROUTING -p udp --dport 53 -m comment --comment maximus-dnstt -j REDIRECT --to-ports "§port" || exit 23
             elif [ "§action" = del ]; then
               for t in iptables ip6tables; do
                 command -v "§t" >/dev/null 2>&1 || continue
-                while "§t" -t nat -C PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" 2>/dev/null; do
-                  "§t" -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§port" || exit 23
+                while "§t" -t nat -C PREROUTING -p udp --dport 53 -m comment --comment maximus-dnstt -j REDIRECT --to-ports "§port" 2>/dev/null; do
+                  "§t" -t nat -D PREROUTING -p udp --dport 53 -m comment --comment maximus-dnstt -j REDIRECT --to-ports "§port" || exit 23
                 done
               done
             else exit 23; fi
@@ -602,34 +612,34 @@ object ToolScripts {
                 if [ "§old_port" -gt 0 ] && [ "§old_port" -le 65535 ]; then
                   for t in iptables ip6tables; do
                     command -v "§t" >/dev/null 2>&1 || continue
-                    while §SUDO "§t" -t nat -C PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§old_port" 2>/dev/null; do
-                      §SUDO "§t" -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-ports "§old_port" || exit 40
+                    while §SUDO "§t" -t nat -C PREROUTING -p udp --dport 53 -m comment --comment maximus-dnstt -j REDIRECT --to-ports "§old_port" 2>/dev/null; do
+                      §SUDO "§t" -t nat -D PREROUTING -p udp --dport 53 -m comment --comment maximus-dnstt -j REDIRECT --to-ports "§old_port" || exit 40
                     done
                   done
                 fi
                 §SUDO rm -f /etc/systemd/system/maximus-dnstt.service /etc/systemd/system/maximus-socks.service \
                   /usr/local/bin/maximus-dnstt-server /usr/local/bin/maximus-socks /usr/local/lib/maximus/dnstt-redirect
-                §SUDO rm -rf $DNSTT_DIR
+                echo 'DNSTT private keys retained under $DNSTT_DIR for explicit reviewed purge'
                 §SUDO systemctl daemon-reload
-                fw_close 53 udp
+                # Preserve pre-existing firewall allowances; no owner tag was recorded.
                 ${port?.let { "fw_close $it udp" } ?: ":"}
             """
             ServerToolCatalog.SOAR -> """
                 §SUDO systemctl disable --now maximus-soar >/dev/null 2>&1 || true
                 if §SUDO systemctl is-active --quiet maximus-soar; then echo 'Service still active; removal stopped' >&2; exit 40; fi
                 §SUDO rm -f /etc/systemd/system/maximus-soar.service /usr/local/bin/maximus-soar-server
-                §SUDO rm -rf /etc/maximus/soar
+                echo 'SOAR private keys retained for explicit reviewed purge'
                 §SUDO systemctl daemon-reload
-                fw_close 53 udp
+                # Preserve pre-existing firewall allowances; no owner tag was recorded.
             """
             ServerToolCatalog.COTTEN -> """
                 §SUDO systemctl disable --now maximus-cotten >/dev/null 2>&1 || true
                 if §SUDO systemctl is-active --quiet maximus-cotten; then echo 'Service still active; removal stopped' >&2; exit 40; fi
                 §SUDO rm -f /etc/systemd/system/maximus-cotten.service /usr/local/bin/maximus-cotten-server
-                §SUDO rm -rf /etc/maximus/cotten
+                echo 'Cotten private configuration and keys retained for explicit reviewed purge'
                 §SUDO systemctl daemon-reload
-                fw_close 53 udp
-                fw_close 53 tcp
+                # Preserve pre-existing firewall allowances; no owner tag was recorded.
+                # TCP 53 firewall ownership is unknown; leave rules unchanged.
             """
             ServerToolCatalog.HYSTERIA2 -> """
                 §SUDO systemctl disable --now maximus-hysteria >/dev/null 2>&1 || true
@@ -663,7 +673,19 @@ object ToolScripts {
             """
             else -> throw IllegalArgumentException("Nothing to remove for $toolId")
         }
-        return script("step 1\n" + body.trimIndent() + "\nresult REMOVED $toolId", UNINSTALL_STEPS)
+        // Refuse to delete service units and executables if the unit is not
+        // the Maximus-owned installer we deployed, even when local records say so.
+        val identityGuard = when (toolId) {
+            ServerToolCatalog.DNSTT ->
+                "§SUDO grep -Fq 'ExecStart=/usr/local/bin/maximus-dnstt-server' /etc/systemd/system/maximus-dnstt.service || { echo 'DNSTT ownership not verified; no removal' >&2; exit 40; }"
+            ServerToolCatalog.SOAR ->
+                "§SUDO grep -Fq 'ExecStart=/usr/local/bin/maximus-soar-server' /etc/systemd/system/maximus-soar.service || { echo 'SOAR ownership not verified; no removal' >&2; exit 40; }"
+            ServerToolCatalog.COTTEN ->
+                "§SUDO grep -Fq 'ExecStart=/usr/local/bin/maximus-cotten-server' /etc/systemd/system/maximus-cotten.service || { echo 'Cotten ownership not verified; no removal' >&2; exit 40; }"
+            else -> ""
+        }
+        return script("step 1\n" + identityGuard + "\n" + body.trimIndent() +
+            "\nresult REMOVED $toolId", UNINSTALL_STEPS)
     }
 
     /** Changes only the allowlisted systemd units belonging to this tool. */
