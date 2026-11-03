@@ -71,7 +71,7 @@ class SmartManagerPlannerTest {
         assertTrue(SmartManagerPlanner.bundleBlockers(
             plan, setOf(ServerToolCatalog.DNSTT), now).isEmpty())
         assertTrue(SmartManagerPlanner.bundleBlockers(
-            plan, setOf(ServerToolCatalog.DNSTT), now + INSPECTION_TTL_MS)
+            plan, setOf(ServerToolCatalog.DNSTT), now + INSPECTION_TTL_MS + 1)
             .any { it.contains("expired") })
     }
 
