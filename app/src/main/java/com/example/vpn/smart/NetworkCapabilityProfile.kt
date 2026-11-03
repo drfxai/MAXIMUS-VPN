@@ -54,7 +54,11 @@ data class NetworkCapabilityProfile(
     /** International TLS over IPv6 (only measured when the network has IPv6). */
     val ipv6TlsOk: Boolean? = null,
     /** Local salted network identity, used only to reject measurements from a different link. */
-    val networkIdentity: String? = null
+    val networkIdentity: String? = null,
+    /** Verified TLS handshake to Cloudflare over a literal IPv4 destination on the physical link. */
+    val cloudflareIpv4Tls: Boolean? = null,
+    /** Verified TLS handshake to Cloudflare over a literal IPv6 destination; null if no IPv6. */
+    val cloudflareIpv6Tls: Boolean? = null
 ) {
     /** True when at least one international reference completed TLS; false only when all were tried and failed. */
     val internationalReachable: Boolean? get() = when {
@@ -81,7 +85,9 @@ data class NetworkCapabilityProfile(
     fun observations(): List<String> = listOf(
         "IPv4" to ipv4Available, "IPv6" to ipv6Available, "UDP (direct DNS abroad)" to udpAvailable, "TCP" to tcpAvailable,
         "TLS" to tlsAvailable, "HTTP/2" to http2Available, "QUIC" to quicAvailable,
-        "Cloudflare reachable" to cloudflareReachable, "ECH" to echCapable, "DNS" to dnsWorking,
+        "Cloudflare reachable" to cloudflareReachable,
+        "Cloudflare IPv4 TLS" to cloudflareIpv4Tls, "Cloudflare IPv6 TLS" to cloudflareIpv6Tls,
+        "ECH" to echCapable, "DNS" to dnsWorking,
         "Upload constrained" to uploadConstrained, "Metered" to meteredNetwork,
         "DNS answers tampered" to dnsManipulated, "Encrypted DNS (DoH) reachable" to dohReachable,
         "International TLS" to internationalReachable, "Domestic sites reachable" to domesticReachable,
@@ -107,6 +113,8 @@ data class NetworkCapabilityProfile(
         opt("http2Available", http2Available)
         opt("quicAvailable", quicAvailable)
         opt("cloudflareReachable", cloudflareReachable)
+        opt("cloudflareIpv4Tls", cloudflareIpv4Tls)
+        opt("cloudflareIpv6Tls", cloudflareIpv6Tls)
         opt("echCapable", echCapable)
         opt("uploadConstrained", uploadConstrained)
         opt("dnsWorking", dnsWorking)
@@ -139,7 +147,9 @@ data class NetworkCapabilityProfile(
                 ipv4Available = b("ipv4Available"), ipv6Available = b("ipv6Available"),
                 udpAvailable = b("udpAvailable"), tcpAvailable = b("tcpAvailable"), tlsAvailable = b("tlsAvailable"),
                 http2Available = b("http2Available"), quicAvailable = b("quicAvailable"),
-                cloudflareReachable = b("cloudflareReachable"), echCapable = b("echCapable"),
+                cloudflareReachable = b("cloudflareReachable"),
+                cloudflareIpv4Tls = b("cloudflareIpv4Tls"),
+                cloudflareIpv6Tls = b("cloudflareIpv6Tls"), echCapable = b("echCapable"),
                 uploadConstrained = b("uploadConstrained"), dnsWorking = b("dnsWorking"),
                 meteredNetwork = b("meteredNetwork"),
                 carrierCode = if (o.isNull("carrierCode")) null else o.optString("carrierCode").ifBlank { null },
