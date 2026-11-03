@@ -63,7 +63,23 @@ class SmartManagerPlannerTest {
         assertTrue(SmartManagerPlanner.bundleBlockers(
             plan, setOf(ServerToolCatalog.HIDDIFY, ServerToolCatalog.XUI)).isNotEmpty())
         assertTrue(SmartManagerPlanner.bundleBlockers(
-            plan, setOf(ServerToolCatalog.DNSTT)).isEmpty())
+            plan, setOf(ServerToolCatalog.DNSTT), now).isEmpty())
+    }
+
+    @Test fun bundleRejectsExpiredInspectionAtExecutionTime() {
+        val plan = SmartManagerPlanner.inspect(host(), now)
+        assertTrue(SmartManagerPlanner.bundleBlockers(
+            plan, setOf(ServerToolCatalog.DNSTT), now).isEmpty())
+        assertTrue(SmartManagerPlanner.bundleBlockers(
+            plan, setOf(ServerToolCatalog.DNSTT), now + INSPECTION_TTL_MS + 1)
+            .any { it.contains("expired") })
+    }
+
+    @Test fun bundleDetectsOverlappingTcpAndUdpRequirements() {
+        val plan = SmartManagerPlanner.inspect(host(), now)
+        val blockers = SmartManagerPlanner.bundleBlockers(
+            plan, setOf(ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT), now)
+        assertTrue(blockers.any { it.contains("UDP:53") })
     }
 
     @Test fun privatePsiphonIsNeverAdvertisedAsAvailableWithoutRealTunnelTests() {
