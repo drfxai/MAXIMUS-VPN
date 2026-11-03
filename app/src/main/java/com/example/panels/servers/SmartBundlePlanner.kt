@@ -19,9 +19,10 @@ object SmartBundlePlanner {
         inspection: SmartManagerPlanner.Inspection,
         selected: Set<String>,
         domain: String,
-        tunnelLabel: String
+        tunnelLabel: String,
+        now: Long = System.currentTimeMillis()
     ): Plan {
-        val blockers = SmartManagerPlanner.bundleBlockers(inspection, selected).toMutableList()
+        val blockers = SmartManagerPlanner.bundleBlockers(inspection, selected, now).toMutableList()
         val dns = selected.intersect(dnsEngines)
         if (selected.size != 2 || ServerToolCatalog.XUI !in selected || dns.size != 1) {
             blockers += "A reviewed batch supports exactly 3X-UI and one DNS tunnel. Use the individual wizard for other tools."
