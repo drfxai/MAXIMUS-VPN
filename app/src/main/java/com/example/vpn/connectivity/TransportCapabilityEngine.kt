@@ -57,6 +57,9 @@ object TransportCapabilityEngine {
     }
 
     fun transportOf(p: VlessProfile): Transport = when {
+        // MASQUE runs over HTTP/3 over UDP/443, even though its import profile
+        // is MIXED rather than HYSTERIA2. Never misclassify it as plain TCP.
+        com.example.vpn.sidecar.MasqueSidecar.handles(p) -> Transport.UDP
         p.protocolType == ProtocolType.HYSTERIA2 || p.protocolType == ProtocolType.WIREGUARD || p.protocolType == ProtocolType.TUIC -> Transport.UDP
         p.transport.lowercase() == "quic" || usesHttp3(p) -> Transport.UDP
         p.security.equals("tls", true) || p.security.equals("reality", true) -> Transport.TCP_TLS
@@ -82,7 +85,14 @@ object TransportCapabilityEngine {
         if (family == Family.IPV6 && c.ipv6 == false) return Decision(Admission.SKIP, "IPv6 is not available on this network")
         if (family == Family.IPV4 && c.ipv4 == false) return Decision(Admission.SKIP, "IPv4 is not available on this network")
         if (transport == Transport.UDP && c.udp == false) return Decision(Admission.SKIP, "UDP is blocked on this network")
-        if (transport == Transport.UDP && usesHttp3(p) && c.quic == false) return Decision(Admission.SKIP, "QUIC is blocked on this network")
+        // A failed QUIC probe is relevant to MASQUE even when its profile
+        // has no ALPN=h3 field. Never send repeated UDP/443 retries on a
+        // network where QUIC was actually measured unavailable.
+        if (transport == Transport.UDP &&
+            (usesHttp3(p) || com.example.vpn.sidecar.MasqueSidecar.handles(p)) &&
+            c.quic == false) return Decision(Admission.SKIP, "QUIC is blocked on this network")
+        if (com.example.vpn.sidecar.MasqueSidecar.handles(p) && c.cloudflare == false)
+            return Decision(Admission.DEPRIORITIZE, "Cloudflare TLS probes failed; prefer other verified routes")
         if (transport == Transport.UDP && c.udpImpaired) return Decision(Admission.DEPRIORITIZE, "UDP failed repeatedly here; TCP first")
         if (family == Family.IPV4 && c.ipv4Impaired) return Decision(Admission.DEPRIORITIZE, "IPv4 paths fail here while IPv6 works")
         // A failed general TLS/DNS probe is not proof that this particular server is unreachable.
