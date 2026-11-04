@@ -33,6 +33,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import com.example.data.model.VlessProfile
 import androidx.compose.ui.Modifier
@@ -123,7 +126,9 @@ fun MainApp(
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    val showBottomBar = bottomNavItems.any { it.route == currentRoute }
+    var studioVisible by remember { mutableStateOf(false) }
+    val showBottomBar = bottomNavItems.any { it.route == currentRoute } &&
+        !(studioVisible && currentRoute == Screen.Panels.route)
 
     val app = RayApplication.instance
     val top10ViewModel: Top10ViewModel = viewModel {
@@ -354,7 +359,10 @@ fun MainApp(
                 PanelManagerScreen(
                     viewModel = panelManagerViewModel,
                     onNavigateBack = { navController.popBackStack() },
-                    onOpenSettings = { navController.navigate(Screen.Settings.route) }
+                    onOpenSettings = { navController.navigate(Screen.Settings.route) },
+                    onStudioVisibility = { studioVisible = it },
+                    onOpenHome = { navController.popBackStack(Screen.Home.route, false) },
+                    onOpenNodes = { navController.navigate(Screen.Servers.route) }
                 )
             }
             composable(Screen.Settings.route) {

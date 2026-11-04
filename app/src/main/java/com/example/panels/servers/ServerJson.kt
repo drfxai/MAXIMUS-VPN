@@ -73,6 +73,7 @@ object ServerJson {
         .put("osName", f.osName).put("osId", f.osId).put("osVersion", f.osVersion).put("arch", f.arch)
         .put("kernel", f.kernel).put("cpus", f.cpus).put("ramMb", f.ramMb).put("ramAvailableMb", f.ramAvailableMb)
         .put("swapMb", f.swapMb).put("diskMb", f.diskMb).put("diskFreeMb", f.diskFreeMb).put("uptimeSec", f.uptimeSec)
+        .apply { f.cpuUsedPercent?.let { put("cpuUsedPercent", it) } }
         .put("load1", f.load1).put("root", f.root).put("sudo", f.sudo).put("systemd", f.systemd)
         .put("packageManager", f.packageManager)
         .put("tcpPorts", JSONArray(f.tcpPorts.sorted())).put("udpPorts", JSONArray(f.udpPorts.sorted()))
@@ -98,6 +99,7 @@ object ServerJson {
             arch = o.optString("arch"), kernel = o.optString("kernel"), cpus = o.optInt("cpus"),
             ramMb = o.optLong("ramMb"), ramAvailableMb = o.optLong("ramAvailableMb"), swapMb = o.optLong("swapMb"),
             diskMb = o.optLong("diskMb"), diskFreeMb = o.optLong("diskFreeMb"), uptimeSec = o.optLong("uptimeSec"),
+            cpuUsedPercent = o.optInt("cpuUsedPercent", -1).takeIf { it in 0..100 },
             load1 = o.optDouble("load1", 0.0), root = o.optBoolean("root"), sudo = o.optBoolean("sudo"),
             systemd = o.optBoolean("systemd"), packageManager = o.optString("packageManager"),
             tcpPorts = ints("tcpPorts"), udpPorts = ints("udpPorts"),
