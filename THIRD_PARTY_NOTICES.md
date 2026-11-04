@@ -597,3 +597,8 @@ into the application. Copyright SagerNet and contributors; GPL-3.0-or-later.
 - Asset SHA-256 verification: scripts/engines/singbox.sh. No local modifications.
 
 The application's license does not restrict recipients' rights in this separate program.
+
+## Galaxy Connections runtimes
+
+* Aether 2.4.0, CluvexStudio/Aether revision `9ebdcc945af12ea532b32119884f846bdb9c4bfc`, AGPL-3.0-only. Modified for authenticated account HTTPS, mandatory MASQUE gateway SPKI pins and per-session SOCKS5 authentication. Complete corresponding source with locked vendored dependencies is distributed as `Aether-source.tar.gz` beside each APK. Build and patch: scripts/engines/aether.sh and scripts/connections/harden-aether.py.
+* Direct Serverless uses the separate patterniha/Xray-core executable, revision `f9903959b9ae47538f5c7100f6416fb9fbcd2317`, MPL-2.0, distributed with `Serverless-source.tar.gz`. Its profiles originate in patterniha/Serverless-for-Iran revision `df113f5b0fafc5bbe552e903f43249110510bc34` (GPL-3.0), with the original license in assets/serverless/LICENSE.txt. The app adapts loopback authentication, DNS and geo-file dependent classifications; fragmentation and OOB instructions are retained.

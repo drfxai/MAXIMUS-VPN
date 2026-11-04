@@ -1,7 +1,6 @@
 name: Signed Android release
 
-# Publish V1.0.4 build 43 only when the release manifest is explicitly updated
-# on main, after reviewed Psiphon auto-install has been merged and tested.
+# Refresh V1.0.4 only after the reviewed release manifest reaches main.
 on:
   push:
     branches: [main]
@@ -14,12 +13,51 @@ on:
 
 permissions:
   contents: write
+  actions: read
   # Build provenance for the APKs (gh attestation verify).
   id-token: write
   attestations: write
 
 jobs:
+  native:
+    name: Release engines (${{ matrix.abi }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          cache: false
+      - name: Native transport build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake ninja-build pkg-config
+          sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkmanager_bin=$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager -print -quit)
+          test -n "$sdkmanager_bin"
+          "$sdkmanager_bin" 'ndk;26.3.11579264' 'cmake;3.22.1'
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          libclang=$(find /usr/lib/llvm-* -name libclang.so -print -quit)
+          test -n "$libclang"
+          echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
+      - name: Build the engine programs from pinned, checksum-verified sources
+        # Every ABI is linked with the NDK's C toolchain (so DNS uses Android's resolver); the runner image has it.
+        run: bash scripts/build-engines.sh "${{ matrix.abi }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-engines-${{ matrix.abi }}
+          path: |
+            app/src/main/jniLibs/**
+            build/transport-offer/*-source.tar.gz
+          retention-days: 7
+          if-no-files-found: error
   release:
+    needs: native
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
@@ -115,21 +153,11 @@ jobs:
             echo "OFFICIAL_MIRRORS=$OFFICIAL_MIRRORS" >> "$GITHUB_ENV"
             echo "Official subscription mirrors: $(printf '%s' "$OFFICIAL_MIRRORS" | tr ',' '\n' | grep -c .)"
           fi
-      - name: Native transport build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang libclang-dev cmake ninja-build pkg-config
-          sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          sdkmanager_bin=$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager -print -quit)
-          test -n "$sdkmanager_bin"
-          "$sdkmanager_bin" 'ndk;26.3.11579264' 'cmake;3.22.1'
-          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
-          libclang=$(find /usr/lib/llvm-* -name libclang.so -print -quit)
-          test -n "$libclang"
-          echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
-      - name: Build the engine programs from pinned, checksum-verified sources
-        # Every ABI is linked with the NDK's C toolchain (so DNS uses Android's resolver); the runner image has it.
-        run: bash scripts/build-engines.sh arm64-v8a armeabi-v7a x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-engines-*
+          merge-multiple: true
+          path: .
       - name: Build, test and stage standalone APKs
         env:
           # The build number the in-app update pop-up compares; published with the release below.
@@ -156,6 +184,9 @@ jobs:
           sha256sum MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk > SHA256SUMS
           cp build/transport-offer/MatrixTransport-source.tar.gz MatrixTransport-source.tar.gz
           sha256sum MatrixTransport-source.tar.gz >> SHA256SUMS
+          cp build/transport-offer/Aether-source.tar.gz Aether-source.tar.gz
+          cp build/transport-offer/Serverless-source.tar.gz Serverless-source.tar.gz
+          sha256sum Aether-source.tar.gz Serverless-source.tar.gz >> SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Check the permanent signing certificate
         # Users compare this fingerprint (SECURITY.md); a release signed with any other key stops here.
@@ -207,8 +238,24 @@ jobs:
             MAXIMUSVPN-${{ env.APP_VERSION }}-universal.apk
             SHA256SUMS
             build/transport-offer/MatrixTransport-source.tar.gz
+            build/transport-offer/Aether-source.tar.gz
+            build/transport-offer/Serverless-source.tar.gz
           retention-days: 30
           if-no-files-found: error
+      - name: Wait for earlier release publications
+        if: ${{ !startsWith(inputs.tag, 'dry-run') }}
+        timeout-minutes: 65
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Builds can overlap, but a slower older run must not replace the new APKs.
+          while true; do
+            active=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?per_page=100" |
+              jq -r --argjson number "$GITHUB_RUN_NUMBER" '.workflow_runs[] | select(.run_number < $number and .status != "completed") | .id')
+            if [ -z "$active" ]; then break; fi
+            echo "Waiting for earlier release runs: $active"
+            sleep 30
+          done
       - name: Publish release
         # A test build (tag starting with "dry-run") checks everything above and publishes nothing.
         if: ${{ !startsWith(inputs.tag, 'dry-run') }}
@@ -226,7 +273,7 @@ jobs:
           fi
           # The hidden maximus-build line is what the in-app update check reads.
           notes=$(printf 'Build %s\n\n<!-- maximus-build: %s -->' "$MAXIMUS_RELEASE_BUILD" "$MAXIMUS_RELEASE_BUILD")
-          gh release upload "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS build/transport-offer/MatrixTransport-source.tar.gz --clobber
+          gh release upload "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS build/transport-offer/MatrixTransport-source.tar.gz build/transport-offer/Aether-source.tar.gz build/transport-offer/Serverless-source.tar.gz --clobber
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" -F force=true
           else
@@ -234,7 +281,7 @@ jobs:
           fi
           gh release edit "$RELEASE_TAG" --title "Android version $RELEASE_TAG" --notes "$notes" --draft=false --prerelease=false --latest
           actual="$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$actual" = "MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,MatrixTransport-source.tar.gz,SHA256SUMS" || { echo "Unexpected assets: $actual"; exit 1; }
+          test "$actual" = "Aether-source.tar.gz,MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,MatrixTransport-source.tar.gz,SHA256SUMS,Serverless-source.tar.gz" || { echo "Unexpected assets: $actual"; exit 1; }
           echo 'Published APKs, checksums and the native transport corresponding-source archive.'
       - name: Publish update information for the in-app update pop-up
         # update.json on the update-info branch is what the app reads through jsDelivr/Statically when

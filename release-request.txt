@@ -19,3 +19,5 @@ certificate, Android 15 install/launch, checksums and provenance.
 Actual carrier and user-VPS egress still require tests on their own networks.
 
 V1.0.4 build 45: Smart Manager Network Studio dashboard.
+
+V1.0.4 build 46: Galaxy Dark / Light, authenticated Aether WARP and Direct Serverless.
