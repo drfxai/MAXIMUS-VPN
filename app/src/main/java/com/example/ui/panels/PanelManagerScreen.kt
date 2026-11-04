@@ -168,10 +168,7 @@ data class CleanIpDisplay(
 fun PanelManagerScreen(
     viewModel: PanelManagerViewModel,
     onNavigateBack: () -> Unit,
-    onOpenSettings: (() -> Unit)? = null,
-    onStudioVisibility: (Boolean) -> Unit = {},
-    onOpenHome: () -> Unit = onNavigateBack,
-    onOpenNodes: () -> Unit = onNavigateBack
+    onOpenSettings: (() -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedProfiles by viewModel.savedProfiles.collectAsStateWithLifecycle()
@@ -194,7 +191,6 @@ fun PanelManagerScreen(
     var showSmartDomains by remember { mutableStateOf(false) }
     // Psiphon is an Install catalog detail, not a seventh top-level Panels tab.
     var showPsiphonInInstall by remember { mutableStateOf(false) }
-    var studioPsiphonServer by remember { mutableStateOf<String?>(null) }
 
     // Forms
     var cfToken by remember { mutableStateOf("") }
@@ -236,36 +232,6 @@ fun PanelManagerScreen(
     if (showSmartDomains) {
         BackHandler { showSmartDomains = false }
         SmartDomainsScreen(onBack = { showSmartDomains = false })
-        return
-    }
-
-    if (selectedTab == 5 && selectedPanelId == null) {
-        DisposableEffect(Unit) {
-            onStudioVisibility(true)
-            onDispose { onStudioVisibility(false) }
-        }
-        BackHandler { if (studioPsiphonServer != null) studioPsiphonServer = null else selectedTab = 0 }
-        Column(Modifier.fillMaxSize().background(StudioInk)) {
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                val psiphonServer = studioPsiphonServer
-                if (psiphonServer == null) {
-                    PremiumSmartManagerScreen(
-                        vm = serversVm, state = serversState,
-                        onOpenCloudflare = { selectedTab = 2 },
-                        onOpenSmartDomains = { showSmartDomains = true },
-                        onOpenPsiphon = { studioPsiphonServer = it },
-                        onBack = { selectedTab = 0 }
-                    )
-                } else {
-                    TextButton(onClick = { studioPsiphonServer = null }) {
-                        Text("Back to Smart Manager", color = StudioGold)
-                    }
-                    PremiumPsiphonScreen(serversVm, serversState, psiphonServer)
-                }
-            }
-            StudioNavigation(onOpenHome, { studioPsiphonServer = null; selectedTab = 0 },
-                onOpenNodes, { onOpenSettings?.invoke() })
-        }
         return
     }
 
@@ -679,7 +645,14 @@ fun PanelManagerScreen(
                     TunnelTabHost(serversVm, serversState, tunnelState, onServers = { selectedTab = 0 })
                 }
 
-
+                // TAB 5: SMART MANAGER (read-only admission, existing approved workflows)
+                if (selectedTab == 5) {
+                    PremiumSmartManagerScreen(
+                        vm = serversVm, state = serversState,
+                        onOpenCloudflare = { selectedTab = 2 },
+                        onOpenSmartDomains = { showSmartDomains = true }
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(16.dp))
         }

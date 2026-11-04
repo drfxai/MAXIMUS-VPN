@@ -33,9 +33,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import com.example.data.model.VlessProfile
 import androidx.compose.ui.Modifier
@@ -85,13 +82,12 @@ import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.outlined.Science
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector, val unselectedIcon: ImageVector) {
-    data object Home : Screen("home", "Home", Icons.Filled.Shield, Icons.Outlined.Shield)
-    data object Connections : Screen("connections", "Connect", Icons.Filled.Hub, Icons.Outlined.Hub)
+    data object Home : Screen("home", "Tunnel", Icons.Filled.Shield, Icons.Outlined.Shield)
     data object Top10 : Screen("top10", "Top 10", Icons.Filled.EmojiEvents, Icons.Outlined.EmojiEvents)
     data object Servers : Screen("servers", "Nodes", Icons.Filled.Dns, Icons.Outlined.Dns)
     data object Benchmark : Screen("benchmark", "Benchmark", Icons.Filled.Speed, Icons.Outlined.Speed)
     data object AiAgent : Screen("ai_agent", "AI Agent", Icons.Default.AutoAwesome, Icons.Default.AutoAwesome)
-    data object Panels : Screen("panels", "Manager", Icons.Filled.Cloud, Icons.Outlined.Cloud)
+    data object Panels : Screen("panels", "Panels", Icons.Filled.Cloud, Icons.Outlined.Cloud)
     data object Protocols : Screen("protocols", "Protocols", Icons.Filled.Hub, Icons.Outlined.Hub)
     data object FreeConfigs : Screen("free_configs", "Free Configs", Icons.Filled.Hub, Icons.Outlined.Hub)
     data object Vip : Screen("vip", "VIP", Icons.Filled.WorkspacePremium, Icons.Outlined.WorkspacePremium)
@@ -112,8 +108,15 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector,
     data object AiSettings : Screen("ai_settings", "AI", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome)
 }
 
-val bottomNavItems = listOf(Screen.Home, Screen.Connections, Screen.Panels, Screen.Settings)
-
+val bottomNavItems = listOf(
+    Screen.Home,
+    Screen.Servers,
+    Screen.Top10,
+    Screen.AiAgent,
+    Screen.Lab,
+    Screen.Panels,
+    Screen.Settings
+)
 
 @Composable
 fun MainApp(
@@ -126,9 +129,7 @@ fun MainApp(
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    var studioVisible by remember { mutableStateOf(false) }
-    val showBottomBar = bottomNavItems.any { it.route == currentRoute } &&
-        !(studioVisible && currentRoute == Screen.Panels.route)
+    val showBottomBar = bottomNavItems.any { it.route == currentRoute }
 
     val app = RayApplication.instance
     val top10ViewModel: Top10ViewModel = viewModel {
@@ -207,10 +208,6 @@ fun MainApp(
             startDestination = Screen.Home.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Connections.route) {
-                com.example.ui.connections.ConnectionsScreen(vpnViewModel, settingsViewModel, onRequestVpnPermission,
-                    onNavigate = { navController.navigate(it) })
-            }
             composable(Screen.Home.route) {
                 HomeScreen(
                     vpnViewModel = vpnViewModel,
@@ -359,10 +356,7 @@ fun MainApp(
                 PanelManagerScreen(
                     viewModel = panelManagerViewModel,
                     onNavigateBack = { navController.popBackStack() },
-                    onOpenSettings = { navController.navigate(Screen.Settings.route) },
-                    onStudioVisibility = { studioVisible = it },
-                    onOpenHome = { navController.popBackStack(Screen.Home.route, false) },
-                    onOpenNodes = { navController.navigate(Screen.Servers.route) }
+                    onOpenSettings = { navController.navigate(Screen.Settings.route) }
                 )
             }
             composable(Screen.Settings.route) {

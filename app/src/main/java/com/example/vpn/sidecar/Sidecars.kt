@@ -10,8 +10,6 @@ object Sidecars {
     /** Registered engines, strongest first. Each engine file adds itself here. */
     val ENGINES: List<SidecarEngine> by lazy {
         listOf(
-            AetherSidecar,
-            ServerlessSidecar,
             ByedpiSidecar,
             SingBoxSidecar,
             MihomoSidecar,

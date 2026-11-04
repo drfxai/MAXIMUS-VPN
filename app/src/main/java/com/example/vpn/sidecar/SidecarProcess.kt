@@ -11,8 +11,7 @@ class SidecarProcess(
     private val name: String,
     private val process: Process,
     val socksPort: Int,
-    private val readyLine: Regex? = null,
-    private val logOutput: Boolean = true
+    private val readyLine: Regex? = null
 ) : RunningEngine {
     @Volatile private var sawReadyLine = readyLine == null
     @Volatile private var stopping = false
@@ -43,7 +42,7 @@ class SidecarProcess(
                             else -> "engine reported an error"
                         }
                     }
-                    if (logOutput && index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line).take(300))
+                    if (index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line).take(300))
                 }
             }
         } catch (_: Exception) {
@@ -94,9 +93,7 @@ class SidecarProcess(
         fun start(name: String, launch: SidecarLaunch, workDir: File, socksPort: Int): SidecarProcess {
             val builder = ProcessBuilder(launch.command).directory(workDir).redirectErrorStream(true)
             builder.environment().putAll(launch.environment)
-            val process = builder.start()
-            process.outputStream.close() // Never leave a non-interactive engine waiting for terminal input.
-            return SidecarProcess(name, process, socksPort, launch.readyLine, launch.logOutput)
+            return SidecarProcess(name, builder.start(), socksPort, launch.readyLine)
         }
 
         fun portOpen(port: Int): Boolean = try {

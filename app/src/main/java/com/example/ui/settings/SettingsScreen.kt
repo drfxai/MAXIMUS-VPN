@@ -269,7 +269,7 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = if (settings.darkTheme) "Galaxy Dark" else "Galaxy Light",
+                                text = if (settings.darkTheme) "Dark Theme Active" else "Light Theme Active",
                                 color = AppTheme.colors.textPrimary,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold
