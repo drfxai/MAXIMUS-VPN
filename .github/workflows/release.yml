@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
   # Build provenance for the APKs (gh attestation verify).
   id-token: write
   attestations: write
@@ -241,6 +242,20 @@ jobs:
             build/transport-offer/Serverless-source.tar.gz
           retention-days: 30
           if-no-files-found: error
+      - name: Wait for earlier release publications
+        if: ${{ !startsWith(inputs.tag, 'dry-run') }}
+        timeout-minutes: 65
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Builds can overlap, but a slower older run must not replace the new APKs.
+          while true; do
+            active=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?per_page=100" |
+              jq -r --argjson number "$GITHUB_RUN_NUMBER" '.workflow_runs[] | select(.run_number < $number and .status != "completed") | .id')
+            if [ -z "$active" ]; then break; fi
+            echo "Waiting for earlier release runs: $active"
+            sleep 30
+          done
       - name: Publish release
         # A test build (tag starting with "dry-run") checks everything above and publishes nothing.
         if: ${{ !startsWith(inputs.tag, 'dry-run') }}
