@@ -26,7 +26,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.panels.servers.ServerFacts
-import java.util.Locale
 
 internal val StudioInk = Color(0xFF080F18)
 internal val StudioPanel = Color(0xFF101C2A)
@@ -135,14 +134,14 @@ internal fun StudioHero(titles: List<String>, icons: List<ImageVector>) {
 
 @Composable
 internal fun StudioResources(facts: ServerFacts?) {
-    val load = facts?.takeIf { it.cpus > 0 }
+    val cpu = facts?.cpuUsedPercent
     val ram = facts?.takeIf { it.ramMb > 0 }?.ramUsedPercent
     val disk = facts?.takeIf { it.diskMb > 0 }?.diskUsedPercent
     Surface(color = StudioPanel, shape = RoundedCornerShape(9.dp), border = BorderStroke(1.dp, StudioLine)) {
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            val values = listOf(load?.let { String.format(Locale.US, "%.2f", it.load1) }, ram?.let { "$it%" }, disk?.let { "$it%" })
-            val fractions = listOf(load?.let { (it.load1 / it.cpus).toFloat() }, ram?.div(100f), disk?.div(100f))
-            listOf("CPU load", "RAM", "Disk").forEachIndexed { i, label ->
+            val values = listOf(cpu?.let { "$it%" }, ram?.let { "$it%" }, disk?.let { "$it%" })
+            val fractions = listOf(cpu?.div(100f), ram?.div(100f), disk?.div(100f))
+            listOf("CPU", "RAM", "Disk").forEachIndexed { i, label ->
                 if (i > 0) VerticalDivider(Modifier.height(28.dp), color = StudioLine)
                 Column(Modifier.weight(1f).padding(horizontal = 9.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -213,5 +212,29 @@ internal fun StudioActivity(message: String) {
         Icon(Icons.Default.Terminal, null, Modifier.size(17.dp), tint = StudioBlue)
         Text("Last operation", Modifier.padding(horizontal = 7.dp), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Text(message, color = StudioMuted, fontSize = 10.sp)
+    }
+}
+
+@Composable
+internal fun StudioNavigation(onHome: () -> Unit, onServers: () -> Unit, onNodes: () -> Unit, onSettings: () -> Unit) {
+    HorizontalDivider(color = StudioLine)
+    Row(Modifier.fillMaxWidth().background(StudioInk)) {
+        val labels = listOf("Home", "Panels", "Servers", "Nodes", "Settings")
+        val icons = listOf(Icons.Default.Home, Icons.Default.Layers, Icons.Default.Storage,
+            Icons.Default.Hub, Icons.Default.Settings)
+        val actions = listOf(onHome, {}, onServers, onNodes, onSettings)
+        labels.forEachIndexed { index, label ->
+            val selected = index == 1
+            val tint = if (selected) StudioGold else StudioMuted
+            Column(Modifier.weight(1f).heightIn(min = 55.dp)
+                .selectable(selected, role = Role.Tab, onClick = actions[index])
+                .padding(top = 7.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(icons[index], null, Modifier.size(19.dp), tint = tint)
+                Spacer(Modifier.height(3.dp))
+                Text(label, color = tint, fontSize = 10.sp, maxLines = 1)
+                Spacer(Modifier.height(5.dp))
+                if (selected) Box(Modifier.fillMaxWidth(.58f).height(2.dp).background(StudioGold))
+            }
+        }
     }
 }

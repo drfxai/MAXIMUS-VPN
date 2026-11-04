@@ -168,7 +168,10 @@ data class CleanIpDisplay(
 fun PanelManagerScreen(
     viewModel: PanelManagerViewModel,
     onNavigateBack: () -> Unit,
-    onOpenSettings: (() -> Unit)? = null
+    onOpenSettings: (() -> Unit)? = null,
+    onStudioVisibility: (Boolean) -> Unit = {},
+    onOpenHome: () -> Unit = onNavigateBack,
+    onOpenNodes: () -> Unit = onNavigateBack
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedProfiles by viewModel.savedProfiles.collectAsStateWithLifecycle()
@@ -237,21 +240,31 @@ fun PanelManagerScreen(
     }
 
     if (selectedTab == 5 && selectedPanelId == null) {
+        DisposableEffect(Unit) {
+            onStudioVisibility(true)
+            onDispose { onStudioVisibility(false) }
+        }
         BackHandler { if (studioPsiphonServer != null) studioPsiphonServer = null else selectedTab = 0 }
-        Column(Modifier.fillMaxSize().background(StudioInk).verticalScroll(rememberScrollState())) {
-            val psiphonServer = studioPsiphonServer
-            if (psiphonServer == null) {
-                PremiumSmartManagerScreen(
-                    vm = serversVm, state = serversState,
-                    onOpenCloudflare = { selectedTab = 2 },
-                    onOpenSmartDomains = { showSmartDomains = true },
-                    onOpenPsiphon = { studioPsiphonServer = it },
-                    onBack = { selectedTab = 0 }
-                )
-            } else {
-                TextButton(onClick = { studioPsiphonServer = null }) { Text("Back to Smart Manager", color = StudioGold) }
-                PremiumPsiphonScreen(serversVm, serversState, psiphonServer)
+        Column(Modifier.fillMaxSize().background(StudioInk)) {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                val psiphonServer = studioPsiphonServer
+                if (psiphonServer == null) {
+                    PremiumSmartManagerScreen(
+                        vm = serversVm, state = serversState,
+                        onOpenCloudflare = { selectedTab = 2 },
+                        onOpenSmartDomains = { showSmartDomains = true },
+                        onOpenPsiphon = { studioPsiphonServer = it },
+                        onBack = { selectedTab = 0 }
+                    )
+                } else {
+                    TextButton(onClick = { studioPsiphonServer = null }) {
+                        Text("Back to Smart Manager", color = StudioGold)
+                    }
+                    PremiumPsiphonScreen(serversVm, serversState, psiphonServer)
+                }
             }
+            StudioNavigation(onOpenHome, { studioPsiphonServer = null; selectedTab = 0 },
+                onOpenNodes, { onOpenSettings?.invoke() })
         }
         return
     }

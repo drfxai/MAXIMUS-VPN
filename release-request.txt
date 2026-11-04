@@ -17,3 +17,5 @@ handoff and IP-change rebuild; correct Matrix Transport H2/H3 classification.
 Release gates: unit tests, lint, pinned engine packaging, permanent signing
 certificate, Android 15 install/launch, checksums and provenance.
 Actual carrier and user-VPS egress still require tests on their own networks.
+
+V1.0.4 build 45: Smart Manager Network Studio dashboard.

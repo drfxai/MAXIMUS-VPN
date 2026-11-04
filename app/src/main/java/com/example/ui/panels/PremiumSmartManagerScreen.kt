@@ -77,7 +77,7 @@ internal fun PremiumSmartManagerScreen(
         facts.publicUdpPorts?.let { 53 !in it } else null
 
     Column(Modifier.fillMaxWidth().background(StudioInk).padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        verticalArrangement = Arrangement.spacedBy(7.dp)) {
         StudioHeading(onBack, onOpenCloudflare)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically) {
@@ -122,10 +122,10 @@ internal fun PremiumSmartManagerScreen(
                     val psiphon = index == 0
                     val installed = if (psiphon) facts?.psiphonInstalled == true else server.tool(id) != null
                     val unit = when (id) {
-                        ServerToolCatalog.SOAR -> "maximus-soar.service"
-                        ServerToolCatalog.COTTEN -> "maximus-cotten.service"
-                        ServerToolCatalog.DNSTT -> "maximus-dnstt.service"
-                        else -> "psiphond.service"
+                        ServerToolCatalog.SOAR -> "maximus-soar"
+                        ServerToolCatalog.COTTEN -> "maximus-cotten"
+                        ServerToolCatalog.DNSTT -> "maximus-dnstt"
+                        else -> "maximus-psiphon"
                     }
                     val running = facts?.active(unit) == true
                     val verified = fresh && running && nodes.any {
@@ -135,7 +135,7 @@ internal fun PremiumSmartManagerScreen(
                     val (status, tint, action) = when {
                         !fresh -> Triple("Inspect first", StudioMuted, "Inspect")
                         verified -> Triple("Traffic verified", Mx.Green, "Manage")
-                        running && installed -> Triple("Running, untested", Mx.Green, if (psiphon) "Manage" else "Test")
+                        running -> Triple("Running, untested", Mx.Green, if (psiphon) "Manage" else "Test")
                         installed -> Triple("Installed", StudioMuted, "Manage")
                         psiphon -> Triple("Not installed", StudioMuted, "Set up")
                         candidate?.status == SmartManagerPlanner.Status.BLOCKED -> Triple("Review required", StudioGold, "Review")
@@ -146,7 +146,7 @@ internal fun PremiumSmartManagerScreen(
                             !fresh -> vm.refresh(server.id)
                             psiphon -> onOpenPsiphon(server.id)
                             action == "Test" -> vm.test(server.id, id)
-                            installed -> vm.openDetail(server.id)
+                            (installed || running) -> vm.openDetail(server.id)
                             action == "Review" -> { chosen = setOf(id); showPlan = true }
                             else -> vm.openWizard(id, server.id)
                         }
@@ -159,62 +159,62 @@ internal fun PremiumSmartManagerScreen(
                 MxAction("VPS settings", { vm.openDetail(server.id) })
             }
             3 -> {
-            // The approved artwork puts selection and Cloudflare side by side on wide screens.
-            BoxWithConstraints {
-                val wide = maxWidth >= 330.dp
-                if (wide) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MxInstallSelector(candidates, chosen, { chosen = it },
-                            onInstall = { showPlan = true }, Modifier.weight(1f))
-                        MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains, Modifier.weight(1f))
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MxInstallSelector(candidates, chosen, { chosen = it },
-                            onInstall = { showPlan = true })
-                        MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains)
-                    }
-                }
-            }
-            state.bundle?.takeIf { it.serverId == server?.id }?.let { batch ->
-                MxCard("Batch installation", "Sequential VPS changes · never an atomic rollback", Mx.Cyan) {
-                    Text("Selected: ${batch.order.joinToString { id ->
-                        ServerToolCatalog.byId(id)?.title ?: id
-                    }}", color = Mx.White, fontSize = 12.sp)
-                    Text("Completed: ${batch.completed.size}/${batch.order.size}" +
-                        (if (batch.running) " · running ${ServerToolCatalog.byId(batch.active)?.title ?: batch.active}"
-                            else if (batch.finished) " · server-side setup complete" else " · stopped"),
-                        color = if (batch.error.isBlank()) Mx.Green else Mx.Orange,
-                        fontSize = 12.sp)
-                    if (batch.error.isNotBlank()) Text(
-                        "Stopped after ${batch.completed.size} completed installation(s): ${batch.error}. " +
-                            "Earlier tools were preserved; inspect the server and operation journal before retrying.",
-                        color = Mx.Orange, fontSize = 11.sp)
-                    if (batch.finished) Text(
-                        "DNS delegation and end-to-end phone tunnel verification are still required.",
-                        color = Mx.Muted, fontSize = 11.sp)
-                }
-            }
-            BoxWithConstraints {
-                if (maxWidth >= 330.dp) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MxChecks(server, inspection, vm, Modifier.weight(1f))
-                        MxCard("Automation Flow", "Inspect → select → DNS → review → install → verify",
-                            Mx.Cyan, Modifier.weight(1f)) {
-                            MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
-                                "Review", "Install", "Verify"))
+                // The approved artwork puts selection and Cloudflare side by side on wide screens.
+                BoxWithConstraints {
+                    val wide = maxWidth >= 330.dp
+                    if (wide) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MxInstallSelector(candidates, chosen, { chosen = it },
+                                onInstall = { showPlan = true }, Modifier.weight(1f))
+                            MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains, Modifier.weight(1f))
                         }
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MxChecks(server, inspection, vm)
-                        MxCard("Automation Flow", "Six-step guided deployment", Mx.Cyan) {
-                            MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
-                                "Review", "Install", "Verify"))
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            MxInstallSelector(candidates, chosen, { chosen = it },
+                                onInstall = { showPlan = true })
+                            MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains)
                         }
                     }
                 }
-            }
+                state.bundle?.takeIf { it.serverId == server?.id }?.let { batch ->
+                    MxCard("Batch installation", "Sequential VPS changes · never an atomic rollback", Mx.Cyan) {
+                        Text("Selected: ${batch.order.joinToString { id ->
+                            ServerToolCatalog.byId(id)?.title ?: id
+                        }}", color = Mx.White, fontSize = 12.sp)
+                        Text("Completed: ${batch.completed.size}/${batch.order.size}" +
+                            (if (batch.running) " · running ${ServerToolCatalog.byId(batch.active)?.title ?: batch.active}"
+                                else if (batch.finished) " · server-side setup complete" else " · stopped"),
+                            color = if (batch.error.isBlank()) Mx.Green else Mx.Orange,
+                            fontSize = 12.sp)
+                        if (batch.error.isNotBlank()) Text(
+                            "Stopped after ${batch.completed.size} completed installation(s): ${batch.error}. " +
+                                "Earlier tools were preserved; inspect the server and operation journal before retrying.",
+                            color = Mx.Orange, fontSize = 11.sp)
+                        if (batch.finished) Text(
+                            "DNS delegation and end-to-end phone tunnel verification are still required.",
+                            color = Mx.Muted, fontSize = 11.sp)
+                    }
+                }
+                BoxWithConstraints {
+                    if (maxWidth >= 330.dp) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MxChecks(server, inspection, vm, Modifier.weight(1f))
+                            MxCard("Automation Flow", "Inspect → select → DNS → review → install → verify",
+                                Mx.Cyan, Modifier.weight(1f)) {
+                                MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
+                                    "Review", "Install", "Verify"))
+                            }
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            MxChecks(server, inspection, vm)
+                            MxCard("Automation Flow", "Six-step guided deployment", Mx.Cyan) {
+                                MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
+                                    "Review", "Install", "Verify"))
+                            }
+                        }
+                    }
+                }
             }
             5 -> {
                 MxCard("Service logs", "Selected VPS · Read-only SSH", StudioBlue) {
@@ -222,6 +222,9 @@ internal fun PremiumSmartManagerScreen(
                         MxAction(ServerToolCatalog.byId(tool.id)?.title ?: tool.id, { logServerId = server.id; vm.logs(server.id, tool.id) })
                     }
                     if (server.tools.isEmpty()) Text("No managed services yet.", color = StudioMuted)
+                    vm.operationsFor(server.id).forEach { operation ->
+                        Text("${operation.toolId} · ${operation.status.name.lowercase()}", color = StudioMuted, fontSize = 11.sp)
+                    }
                     state.logs?.takeIf { logServerId == server.id && state.busy.isBlank() && state.error.isBlank() }?.let { (title, lines) ->
                         Text(title, color = Color.White, fontWeight = FontWeight.Bold)
                         lines.takeLast(80).forEach { Text(it, color = StudioMuted, fontSize = 11.sp) }
@@ -232,6 +235,7 @@ internal fun PremiumSmartManagerScreen(
         StudioReadiness(udp53) { page = 3; showPlan = chosen.isNotEmpty() }
         val seconds = ((inspectionNow - server.checkedAt) / 1000).coerceAtLeast(0)
         StudioActivity(when {
+            server.id in state.checking -> "Refreshing SSH inspection…"
             state.busy.isNotBlank() -> state.busy
             server.checkedAt > 0L -> "SSH inspection completed · ${if (seconds < 60) "${seconds}s" else "${seconds / 60}m"} ago"
             else -> "Awaiting first SSH inspection"
