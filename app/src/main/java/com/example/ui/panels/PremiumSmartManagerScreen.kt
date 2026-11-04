@@ -41,19 +41,16 @@ import kotlinx.coroutines.delay
 import com.example.panels.servers.INSPECTION_TTL_MS
 import kotlinx.coroutines.withContext
 
-/**
- * UI recreated from the two owner-approved MAXIMUS reference images.
- *
- * All amounts reflect cached authenticated SSH facts. No imaginary CPU history, fake
- * green install states, or unverified automatic multi-install is represented as live.
- */
+/** Network Studio layout backed by authenticated SSH inventory and existing deployment flows. */
 @Composable
 internal fun PremiumSmartManagerScreen(
     vm: ServersViewModel, state: ServersState,
-    onOpenCloudflare: () -> Unit, onOpenSmartDomains: () -> Unit
+    onOpenCloudflare: () -> Unit, onOpenSmartDomains: () -> Unit,
+    onOpenPsiphon: (String) -> Unit, onBack: () -> Unit
 ) {
     var page by rememberSaveable { mutableIntStateOf(0) }
     var selectedServer by rememberSaveable { mutableStateOf<String?>(null) }
+    var logServerId by remember { mutableStateOf<String?>(null) }
     var chosen by remember { mutableStateOf(setOf<String>()) }
     var showPlan by remember { mutableStateOf(false) }
     var batchDomain by rememberSaveable { mutableStateOf("") }
@@ -71,218 +68,186 @@ internal fun PremiumSmartManagerScreen(
     val fresh = server != null && facts != null &&
         inspectionNow - server.checkedAt in 0..INSPECTION_TTL_MS
     val candidates = inspection?.candidates.orEmpty()
-    val readiness = if (candidates.isEmpty()) null else
-        (candidates.count { it.status == SmartManagerPlanner.Status.READY_FOR_WIZARD ||
-            it.status == SmartManagerPlanner.Status.INSTALLED }.toFloat() / candidates.size)
-    val tabs = listOf("Overview", "Servers", "Cloudflare", "Deploy", "Nodes", "Monitor")
-    val icons = listOf(Icons.Default.Bolt, Icons.Default.Storage, Icons.Default.Cloud,
-        Icons.Default.Dashboard, Icons.Default.CheckCircle, Icons.Default.Security)
     val nodes = server?.let { vm.managedNodesFor(it.id) }.orEmpty()
+    val network = com.example.vpn.smart.NetworkKey.current(LocalContext.current)
+    val verifiedServices = nodes.filter {
+        fresh && it.networkKey == network &&
+            it.state == com.example.panels.servers.ManagedNodeRecord.State.AVAILABLE &&
+            inspectionNow - it.updatedAt in 0..INSPECTION_TTL_MS
+    }.map { it.serviceId }.toSet()
+    val engineIds = listOf(SmartManagerPlanner.PRIVATE_PSIPHON, ServerToolCatalog.SOAR,
+        ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT)
+    val titles = listOf("Psiphon", "SOAR", "CottenDNS", "DNSTT")
+    val icons = listOf(Icons.Default.Security, Icons.Default.Bolt, Icons.Default.Language, Icons.Default.Layers)
+    val udp53 = if (fresh && facts?.socketInspectionAvailable == true)
+        facts.publicUdpPorts?.let { 53 !in it } else null
 
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-        .background(Mx.Black).padding(8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        MxHero("MAXIMUS  /  SMART MANAGER", "Smart Manager",
-            "Autonomous infrastructure cockpit • VPS, DNS and deployments")
-
-        if (state.servers.isEmpty()) {
-            MxCard("CONNECT YOUR FIRST VPS", "Verified SSH access is required", Mx.Gold) {
-                MxAction("Add VPS", onClick = { vm.openAdd() }, strong = true)
+    Column(Modifier.fillMaxWidth().background(StudioInk).padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        StudioHeading(onBack, onOpenCloudflare)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically) {
+            state.servers.forEach { vps ->
+                StudioTab(vps.displayName, Icons.Default.Storage, vps.id == server?.id) {
+                    selectedServer = vps.id
+                    chosen = emptySet()
+                    logServerId = null
+                }
             }
+            IconButton(onClick = { vm.openAdd() }) {
+                Icon(Icons.Default.Add, "Add VPS", tint = StudioMuted)
+            }
+        }
+        HorizontalDivider(color = StudioLine)
+        StudioHero(titles, icons)
+        Text(server?.displayName ?: "Connect your first VPS", color = Color.White,
+            fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
+        Text(when {
+            fresh && server?.canSignIn == true -> "SSH authenticated · Inspection fresh"
+            facts != null -> "Inspection expired · Refresh over SSH"
+            else -> "Authenticated SSH inspection required"
+        }, color = StudioMuted, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+        if (server == null) {
+            MxAction("Add VPS", onClick = { vm.openAdd() }, strong = true)
             return@Column
         }
-
-        // Reference: selected VPS, managed nodes, readiness and deployment health.
-        BoxWithConstraints {
-            val columns = if (maxWidth >= 330.dp) 4 else 2
-            val labels = listOf(
-                Triple("VPS", server?.displayName.orEmpty(), Mx.Gold),
-                Triple("Nodes", nodes.size.toString(), Mx.Cyan),
-                Triple("Install readiness", if (fresh && readiness != null)
-                    "${(readiness * 100).toInt()}%" else "Scan first", if (fresh) Mx.Green else Mx.Orange),
-                Triple("Deploy health", if (!fresh) "Unverified" else
-                    if (facts?.blocker() == null) "Inspected" else "Blocked",
-                    if (fresh && facts?.blocker() == null) Mx.Green else Mx.Orange)
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                labels.chunked(columns).forEach { group ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        group.forEach { (label, value, tint) ->
-                            Surface(Modifier.weight(1f), color = Mx.Card,
-                                shape = RoundedCornerShape(11.dp),
-                                border = BorderStroke(1.dp, Mx.Line)) {
-                                Column(Modifier.padding(10.dp)) {
-                                    Text(label, color = Mx.Muted, fontSize = 10.sp, maxLines = 1)
-                                    Text(value, color = tint, fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold, maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis)
-                                }
+        StudioResources(facts.takeIf { fresh })
+        Surface(color = StudioPanel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, StudioLine)) {
+            Row(Modifier.fillMaxWidth()) {
+                listOf(0 to "Services", 1 to "Network", 3 to "Deploy", 5 to "Logs").forEachIndexed { i, (id, label) ->
+                    StudioTab(label, listOf(Icons.Default.Dashboard, Icons.Default.Hub,
+                        Icons.Default.Upload, Icons.Default.List)[i], page == id, Modifier.weight(1f)) { page = id }
+                }
+            }
+        }
+        when (page) {
+            0 -> {
+                StudioTableHeader()
+                engineIds.forEachIndexed { index, id ->
+                    val candidate = inspection?.candidate(id)
+                    val psiphon = index == 0
+                    val installed = if (psiphon) facts?.psiphonInstalled == true else server.tool(id) != null
+                    val unit = when (id) {
+                        ServerToolCatalog.SOAR -> "maximus-soar"
+                        ServerToolCatalog.COTTEN -> "maximus-cotten"
+                        ServerToolCatalog.DNSTT -> "maximus-dnstt"
+                        else -> "maximus-psiphon"
+                    }
+                    val running = facts?.active(unit) == true
+                    val verified = running && id in verifiedServices
+                    val (status, tint, action) = when {
+                        !fresh -> Triple("Inspect first", StudioMuted, "Inspect")
+                        verified -> Triple("Traffic verified", Mx.Green, "Manage")
+                        running -> Triple("Running, untested", Mx.Green, if (psiphon) "Manage" else "Test")
+                        installed -> Triple("Installed", StudioMuted, "Manage")
+                        psiphon -> Triple("Not installed", StudioMuted, "Set up")
+                        candidate?.status == SmartManagerPlanner.Status.BLOCKED -> Triple("Review required", StudioGold, "Review")
+                        else -> Triple("Not installed", StudioMuted, "Set up")
+                    }
+                    StudioServiceRow(titles[index], icons[index], status, tint, action) {
+                        when {
+                            !fresh -> vm.refresh(server.id)
+                            psiphon -> onOpenPsiphon(server.id)
+                            action == "Test" -> vm.test(server.id, id)
+                            (installed || running) -> vm.openDetail(server.id)
+                            action == "Review" -> { chosen = setOf(id); showPlan = true }
+                            else -> vm.openWizard(id, server.id)
+                        }
+                    }
+                }
+            }
+            1 -> {
+                MxChecks(server, inspection, vm)
+                MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains)
+                MxAction("VPS settings", { vm.openDetail(server.id) })
+            }
+            3 -> {
+                // The approved artwork puts selection and Cloudflare side by side on wide screens.
+                BoxWithConstraints {
+                    val wide = maxWidth >= 330.dp
+                    if (wide) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MxInstallSelector(candidates, chosen, { chosen = it },
+                                onInstall = { showPlan = true }, Modifier.weight(1f))
+                            MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains, Modifier.weight(1f))
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            MxInstallSelector(candidates, chosen, { chosen = it },
+                                onInstall = { showPlan = true })
+                            MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains)
+                        }
+                    }
+                }
+                state.bundle?.takeIf { it.serverId == server?.id }?.let { batch ->
+                    MxCard("Batch installation", "Sequential VPS changes · never an atomic rollback", Mx.Cyan) {
+                        Text("Selected: ${batch.order.joinToString { id ->
+                            ServerToolCatalog.byId(id)?.title ?: id
+                        }}", color = Mx.White, fontSize = 12.sp)
+                        Text("Completed: ${batch.completed.size}/${batch.order.size}" +
+                            (if (batch.running) " · running ${ServerToolCatalog.byId(batch.active)?.title ?: batch.active}"
+                                else if (batch.finished) " · server-side setup complete" else " · stopped"),
+                            color = if (batch.error.isBlank()) Mx.Green else Mx.Orange,
+                            fontSize = 12.sp)
+                        if (batch.error.isNotBlank()) Text(
+                            "Stopped after ${batch.completed.size} completed installation(s): ${batch.error}. " +
+                                "Earlier tools were preserved; inspect the server and operation journal before retrying.",
+                            color = Mx.Orange, fontSize = 11.sp)
+                        if (batch.finished) Text(
+                            "DNS delegation and end-to-end phone tunnel verification are still required.",
+                            color = Mx.Muted, fontSize = 11.sp)
+                    }
+                }
+                BoxWithConstraints {
+                    if (maxWidth >= 330.dp) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MxChecks(server, inspection, vm, Modifier.weight(1f))
+                            MxCard("Automation Flow", "Inspect → select → DNS → review → install → verify",
+                                Mx.Cyan, Modifier.weight(1f)) {
+                                MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
+                                    "Review", "Install", "Verify"))
+                            }
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            MxChecks(server, inspection, vm)
+                            MxCard("Automation Flow", "Six-step guided deployment", Mx.Cyan) {
+                                MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
+                                    "Review", "Install", "Verify"))
                             }
                         }
                     }
                 }
             }
-        }
-
-        // The reference's CPU/RAM/Disk/Ports strip, with honest measurements rather than
-        // fabricated time-series charts. Load average is explicitly marked as LOAD.
-        BoxWithConstraints {
-            val metricColumns = if (maxWidth >= 330.dp) 4 else 2
-            val ram = facts?.ramMb?.takeIf { it > 0L }
-            val disk = facts?.diskMb?.takeIf { it > 0L }
-            val stats = listOf(
-                Triple("CPU LOAD (1m)", if (facts == null || facts.cpus <= 0) "—" else
-                    "${"%.2f".format(java.util.Locale.US, facts.load1)} / ${facts.cpus}",
-                    if (facts == null || facts.cpus <= 0) null else
-                        (facts.load1.toFloat() / facts.cpus).coerceIn(0f, 1f)),
-                Triple("RAM FREE", ram?.let { "${facts?.ramAvailableMb} MB" } ?: "—",
-                    ram?.let { (facts!!.ramAvailableMb.toFloat() / it).coerceIn(0f, 1f) }),
-                Triple("DISK FREE", disk?.let { "${facts?.diskFreeMb?.div(1024)} GB" } ?: "—",
-                    disk?.let { (facts!!.diskFreeMb.toFloat() / it).coerceIn(0f, 1f) }),
-                Triple("PORTS TCP / UDP", if (facts?.socketInspectionAvailable == true)
-                    "${facts.tcpPorts.size} / ${facts.udpPorts.size}" else "Not scanned",
-                    null)
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                stats.chunked(metricColumns).forEachIndexed { row, group ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        group.forEachIndexed { index, s ->
-                            MxMetric(s.first, s.second, s.third,
-                                if (row * metricColumns + index == 2) Mx.Gold else Mx.Cyan,
-                                Modifier.weight(1f))
-                        }
+            5 -> {
+                MxCard("Service logs", "Selected VPS · Read-only SSH", StudioBlue) {
+                    server.tools.forEach { tool ->
+                        MxAction(ServerToolCatalog.byId(tool.id)?.title ?: tool.id, { logServerId = server.id; vm.logs(server.id, tool.id) })
+                    }
+                    if (server.tools.isEmpty()) Text("No managed services yet.", color = StudioMuted)
+                    vm.operationsFor(server.id).forEach { operation ->
+                        Text("${operation.toolId} · ${operation.status.name.lowercase()}", color = StudioMuted, fontSize = 11.sp)
+                    }
+                    state.logs?.takeIf { logServerId == server.id && state.busy.isBlank() && state.error.isBlank() }?.let { (title, lines) ->
+                        Text(title, color = Color.White, fontWeight = FontWeight.Bold)
+                        lines.takeLast(80).forEach { Text(it, color = StudioMuted, fontSize = 11.sp) }
                     }
                 }
             }
         }
-
-        // Matching reference: icon tabs with a blue selected surface.
-        BoxWithConstraints {
-            val columns = if (maxWidth >= 330.dp) 6 else 3
-            val compact = maxWidth < 600.dp
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                tabs.indices.chunked(columns).forEach { group ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        group.forEach { index ->
-                            val active = page == index
-                            Surface(Modifier.weight(1f).clickable { page = index },
-                                color = if (active) Mx.Blue else Mx.Card,
-                                border = BorderStroke(1.dp, if (active) Mx.Cyan else Mx.Line),
-                                shape = RoundedCornerShape(11.dp)) {
-                                Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = if (compact) 7.dp else 12.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Icon(icons[index], null, tint = if (active) Mx.White else Mx.Muted,
-                                        modifier = Modifier.size(if (compact) 13.dp else 17.dp))
-                                    Text(tabs[index], color = if (active) Mx.White else Mx.Muted,
-                                        fontSize = if (compact) 8.sp else 10.sp,
-                                        fontWeight = FontWeight.SemiBold, maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        StudioReadiness(udp53, verifiedServices.any { it in engineIds.drop(1) }) {
+            page = 3
+            showPlan = chosen.isNotEmpty()
         }
-
-        if (page == 0 || page == 3) {
-            // The approved artwork puts selection and Cloudflare side by side on wide screens.
-            BoxWithConstraints {
-                val wide = maxWidth >= 330.dp
-                if (wide) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MxInstallSelector(candidates, chosen, { chosen = it },
-                            onInstall = { showPlan = true }, Modifier.weight(1f))
-                        MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains, Modifier.weight(1f))
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MxInstallSelector(candidates, chosen, { chosen = it },
-                            onInstall = { showPlan = true })
-                        MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains)
-                    }
-                }
-            }
-            state.bundle?.takeIf { it.serverId == server?.id }?.let { batch ->
-                MxCard("Batch installation", "Sequential VPS changes · never an atomic rollback", Mx.Cyan) {
-                    Text("Selected: ${batch.order.joinToString { id ->
-                        ServerToolCatalog.byId(id)?.title ?: id
-                    }}", color = Mx.White, fontSize = 12.sp)
-                    Text("Completed: ${batch.completed.size}/${batch.order.size}" +
-                        (if (batch.running) " · running ${ServerToolCatalog.byId(batch.active)?.title ?: batch.active}"
-                            else if (batch.finished) " · server-side setup complete" else " · stopped"),
-                        color = if (batch.error.isBlank()) Mx.Green else Mx.Orange,
-                        fontSize = 12.sp)
-                    if (batch.error.isNotBlank()) Text(
-                        "Stopped after ${batch.completed.size} completed installation(s): ${batch.error}. " +
-                            "Earlier tools were preserved; inspect the server and operation journal before retrying.",
-                        color = Mx.Orange, fontSize = 11.sp)
-                    if (batch.finished) Text(
-                        "DNS delegation and end-to-end phone tunnel verification are still required.",
-                        color = Mx.Muted, fontSize = 11.sp)
-                }
-            }
-            BoxWithConstraints {
-                if (maxWidth >= 330.dp) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MxChecks(server, inspection, vm, Modifier.weight(1f))
-                        MxCard("Automation Flow", "Inspect → select → DNS → review → install → verify",
-                            Mx.Cyan, Modifier.weight(1f)) {
-                            MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
-                                "Review", "Install", "Verify"))
-                        }
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MxChecks(server, inspection, vm)
-                        MxCard("Automation Flow", "Six-step guided deployment", Mx.Cyan) {
-                            MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
-                                "Review", "Install", "Verify"))
-                        }
-                    }
-                }
-            }
-        } else if (page == 1 && server != null) {
-            MxCard("Server Control", "SSH authentication and live inspections", Mx.Gold) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    state.servers.forEach { vps ->
-                        MxAction(vps.displayName, { selectedServer = vps.id })
-                    }
-                }
-                MxInfoRow("Address", server.host, Mx.Cyan)
-                MxInfoRow("SSH host fingerprint", if (server.hostKeySha256.isBlank())
-                    "Missing" else "Pinned", if (server.hostKeySha256.isBlank()) Mx.Orange else Mx.Green)
-                MxInfoRow("System", facts?.osName ?: "Unknown")
-                MxInfoRow("Inspection", if (fresh) "Current" else "Scan required",
-                    if (fresh) Mx.Green else Mx.Orange)
-                MxAction("Inspect VPS", { vm.refresh(server.id) }, strong = true)
-                MxAction("Open VPS management", { vm.openDetail(server.id) })
-            }
-        } else if (page == 2) {
-            MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains)
-        } else if (page == 4) {
-            MxCard("Managed Nodes", "Client traffic is verified separately", Mx.Cyan) {
-                MxInfoRow("Managed node records", nodes.size.toString(), Mx.Cyan)
-                nodes.forEach { MxInfoRow(it.serviceId, it.state.name) }
-                if (nodes.isEmpty()) Text("No managed nodes on this VPS.", color = Mx.Muted, fontSize = 12.sp)
-                if (server != null) MxAction("Manage and test nodes", { vm.openDetail(server.id) })
-            }
-        } else if (page == 5) {
-            MxCard("Service Monitor", "Based on latest authenticated VPS scan", Mx.Cyan) {
-                MxInfoRow("SSH inventory", if (fresh) "Current" else "Stale / missing",
-                    if (fresh) Mx.Green else Mx.Orange)
-                facts?.services?.toSortedMap()?.forEach { (name, status) ->
-                    MxInfoRow(name, status, if (status == "active") Mx.Green else Mx.Orange)
-                }
-                if (facts?.services.isNullOrEmpty()) Text("Scan the VPS to view service state.",
-                    color = Mx.Muted, fontSize = 12.sp)
-                if (server != null) MxAction("Refresh monitor", { vm.refresh(server.id) }, strong = true)
-            }
-        }
+        val seconds = ((inspectionNow - server.checkedAt) / 1000).coerceAtLeast(0)
+        StudioActivity(when {
+            server.id in state.checking -> "Refreshing SSH inspection…"
+            state.busy.isNotBlank() -> state.busy
+            server.checkedAt > 0L -> "SSH inspection completed · ${if (seconds < 60) "${seconds}s" else "${seconds / 60}m"} ago"
+            else -> "Awaiting first SSH inspection"
+        })
         if (state.error.isNotBlank()) Text(state.error, color = Mx.Red, fontSize = 12.sp)
-        Text("MAXIMUS VPN  •  Verified facts only; no installation starts during inspection.",
-            color = Mx.Muted, fontSize = 10.sp, modifier = Modifier.padding(bottom = 5.dp))
+        Spacer(Modifier.height(8.dp))
     }
 
     if (showPlan) {

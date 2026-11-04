@@ -38,6 +38,7 @@ data class SubscriptionPreset(val core: EngineType? = null, val excludedCountrie
 
     companion object {
         const val AUTO_EXCLUDED = "subscriptionAutoExcluded"
-        fun autoSelectable(p: VlessProfile): Boolean = !ProfileExtras.read(p).optBoolean(AUTO_EXCLUDED)
+        fun autoSelectable(p: VlessProfile): Boolean =
+            !com.example.vpn.sidecar.ServerlessSidecar.handles(p) && !ProfileExtras.read(p).optBoolean(AUTO_EXCLUDED)
     }
 }

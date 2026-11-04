@@ -36,8 +36,8 @@ import com.example.ui.panels.servers.ServersViewModel
  * approved VPS. Installation and client registration do NOT prove real tunnel traffic.
  */
 @Composable
-internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState) {
-    var selected by rememberSaveable { mutableStateOf<String?>(null) }
+internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState, initialServerId: String? = null) {
+    var selected by rememberSaveable(initialServerId) { mutableStateOf(initialServerId) }
     var entry by remember { mutableStateOf("") }
     var showSafety by remember { mutableStateOf(false) }
     var installIp by rememberSaveable { mutableStateOf("") }
