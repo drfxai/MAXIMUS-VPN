@@ -191,6 +191,7 @@ fun PanelManagerScreen(
     var showSmartDomains by remember { mutableStateOf(false) }
     // Psiphon is an Install catalog detail, not a seventh top-level Panels tab.
     var showPsiphonInInstall by remember { mutableStateOf(false) }
+    var studioPsiphonServer by remember { mutableStateOf<String?>(null) }
 
     // Forms
     var cfToken by remember { mutableStateOf("") }
@@ -232,6 +233,26 @@ fun PanelManagerScreen(
     if (showSmartDomains) {
         BackHandler { showSmartDomains = false }
         SmartDomainsScreen(onBack = { showSmartDomains = false })
+        return
+    }
+
+    if (selectedTab == 5 && selectedPanelId == null) {
+        BackHandler { if (studioPsiphonServer != null) studioPsiphonServer = null else selectedTab = 0 }
+        Column(Modifier.fillMaxSize().background(StudioInk).verticalScroll(rememberScrollState())) {
+            val psiphonServer = studioPsiphonServer
+            if (psiphonServer == null) {
+                PremiumSmartManagerScreen(
+                    vm = serversVm, state = serversState,
+                    onOpenCloudflare = { selectedTab = 2 },
+                    onOpenSmartDomains = { showSmartDomains = true },
+                    onOpenPsiphon = { studioPsiphonServer = it },
+                    onBack = { selectedTab = 0 }
+                )
+            } else {
+                TextButton(onClick = { studioPsiphonServer = null }) { Text("Back to Smart Manager", color = StudioGold) }
+                PremiumPsiphonScreen(serversVm, serversState, psiphonServer)
+            }
+        }
         return
     }
 
@@ -645,14 +666,7 @@ fun PanelManagerScreen(
                     TunnelTabHost(serversVm, serversState, tunnelState, onServers = { selectedTab = 0 })
                 }
 
-                // TAB 5: SMART MANAGER (read-only admission, existing approved workflows)
-                if (selectedTab == 5) {
-                    PremiumSmartManagerScreen(
-                        vm = serversVm, state = serversState,
-                        onOpenCloudflare = { selectedTab = 2 },
-                        onOpenSmartDomains = { showSmartDomains = true }
-                    )
-                }
+
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
