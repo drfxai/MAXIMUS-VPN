@@ -15,7 +15,7 @@ if [[ ! -f "$source_dir/UPSTREAM_REVISION" ]]; then
  printf '%s\n' "$REV" > "$source_dir/UPSTREAM_REVISION"
 fi
 mkdir -p "$OUT" "$TASK_ROOT/build/transport-offer"
-(cd "$source_dir" && go build -mod=readonly -trimpath -buildmode=pie -ldflags='-s -w -buildid=' -o "$OUT/libserverless.so" ./main)
+(cd "$source_dir" && go build -mod=readonly -trimpath -buildmode=pie -ldflags='-s -w -buildid= -checklinkname=0' -o "$OUT/libserverless.so" ./main)
 # Include dependency sources for a reproducible corresponding-source offer.
 if [[ ! -d "$source_dir/vendor" ]]; then (cd "$source_dir" && go mod vendor); fi
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --exclude=.git -C "$source_dir" \

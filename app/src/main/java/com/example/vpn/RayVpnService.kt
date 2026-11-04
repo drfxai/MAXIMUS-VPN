@@ -1660,10 +1660,28 @@ class RayVpnService : VpnService() {
                     else com.example.vpn.diagnostics.FailureStage.of(e)
             ))
             disconnectResources()
+            if (fallbackFromDirect(requestedProfile)) return@withContext
             if (protectionRequested) showForegroundNotification("Traffic blocked: connection failed")
             if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
             if (!protectionRequested) stopSelf()
         }
+    }
+
+    @Volatile private var directFallbackAttempt: String? = null
+
+    /** Explicit session consent only; stays in the service when the Connections page is closed. */
+    private fun fallbackFromDirect(profile: VlessProfile): Boolean {
+        val state = _vpnState.value
+        val attempt = state.attemptId ?: return false
+        if (state.status !in setOf(ConnectionStatus.FAILED, ConnectionStatus.DEGRADED) ||
+            state.activeProfile?.id != profile.id || directFallbackAttempt == attempt ||
+            !com.example.vpn.sidecar.ServerlessSidecar.handles(profile) ||
+            !com.example.vpn.engine.ProfileExtras.read(profile).optBoolean("vpnFallback")) return false
+        val warp = com.example.vpn.connections.BuiltinConnections.resolve(this, "maximus-aether") ?: return false
+        directFallbackAttempt = attempt
+        showForegroundNotification("Direct access failed; switching to the enabled WARP fallback")
+        VpnController.startVpn(this, warp, exact = true)
+        return true
     }
 
     private fun isLiteralIp(address: String): Boolean {
@@ -1759,7 +1777,9 @@ class RayVpnService : VpnService() {
             mode = settings.operationalMode
         )
         val managed = engine.id in setOf(com.example.vpn.sidecar.AetherSidecar.ID, com.example.vpn.sidecar.ServerlessSidecar.ID)
-        val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context) else null
+        val connectionOwner = connectJob
+        val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
+            cancelled = { connectionOwner?.isActive == false }) else null
         val launch = started?.launch ?: engine.prepare(profile, settings, context)
         if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
         showForegroundNotification("Starting the ${engine.id} engine...")
@@ -2035,6 +2055,7 @@ class RayVpnService : VpnService() {
                     if (wasConnected && _vpnState.value.status == ConnectionStatus.DEGRADED) {
                         XrayLogManager.w("VPN", "Checks through the tunnel failed ${_vpnState.value.probeFailures} times in a row (${stage.name}): DEGRADED.")
                         showForegroundNotification("Connection degraded (${stage.name})")
+                        if (fallbackFromDirect(profile)) return@launch
                     }
                 }
                 // An unverified tunnel is checked again soon; a steadily working one less often (the failover

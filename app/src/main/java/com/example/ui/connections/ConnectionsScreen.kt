@@ -39,11 +39,10 @@ fun ConnectionsScreen(vpn: VpnViewModel, settings: SettingsViewModel, onPermissi
     val appSettings by settings.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var detail by rememberSaveable { mutableStateOf(false) }
-    val busy = ui.working || state.isBusy
     ConnectionsContent(ui, state, detail, appSettings.killSwitchEnabled, model.bundled(),
         onDetail = { detail = it }, onOptions = model::options,
         onConnect = {
-            if (!busy) {
+            if (!ui.working) {
                 detail = true
                 if (state.status != ConnectionStatus.DISCONNECTED) com.example.vpn.VpnController.stopVpn(context)
                 else vpn.startOrRequestPermission(context, model.profile(), exact = true) { onPermission() }
@@ -176,7 +175,7 @@ fun ConnectionsContent(ui: ConnectionsViewModel.UiState, state: ConnectionState,
                     Icon(Icons.Default.Science, null, Modifier.size(20.dp)); Text("  Test access")
                 }
                 Button(onConnect, Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("connection_action"),
-                    enabled = !state.isBusy && (bundled || occupied), shape = RoundedCornerShape(28.dp),
+                    enabled = state.status != ConnectionStatus.DISCONNECTING && (bundled || occupied), shape = RoundedCornerShape(28.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = c.primary, contentColor = c.onPrimary)) {
                     Icon(if (occupied) Icons.Default.Stop else Icons.Default.PlayArrow, null)
                     Text(if (occupied) "Disconnect" else if (detail && direct) "Connect directly" else "Connect",

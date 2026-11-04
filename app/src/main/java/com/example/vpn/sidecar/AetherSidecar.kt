@@ -37,7 +37,7 @@ object AetherSidecar : SidecarEngine {
         val command = mutableListOf(context.executable.absolutePath, "--bind", "127.0.0.1:${context.socksPort}",
             "--config", identity.absolutePath, "--masque-config", identity.absolutePath,
             "--wg-config", File(identityDir, "wireguard.toml").absolutePath,
-            "--scan", "balanced", "--quick-reconnect", "--tls-verify", "--startup-secs", "45", "--validate-secs", "12")
+            "--scan", "balanced", if (e.optBoolean("rescan")) "--no-quick-reconnect" else "--quick-reconnect", "--tls-verify", "--startup-secs", "45", "--validate-secs", "12")
         command += when (carrier) {
             "h3" -> listOf("--masque", "--h3")
             "wireguard" -> listOf("--wg")

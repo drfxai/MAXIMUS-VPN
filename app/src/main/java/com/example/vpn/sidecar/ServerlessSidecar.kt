@@ -19,11 +19,11 @@ object ServerlessSidecar : SidecarEngine {
         ProfileExtras.read(profile).optString("family", "auto") !in AetherSidecar.families -> "Unsupported IP family"
         else -> null
     }
-    fun profile(variant: String = "auto", family: String = "auto") : VlessProfile {
+    fun profile(variant: String = "auto", family: String = "auto", vpnFallback: Boolean = false) : VlessProfile {
         require(variant in variants && family in AetherSidecar.families)
         return VlessProfile(id = "maximus-serverless", name = "Direct Serverless", address = ID, port = 0, uuid = "",
             protocolType = ProtocolType.MIXED, extraSettings = JSONObject().put("engine", ID)
-                .put("variant", variant).put("family", family).toString())
+                .put("variant", variant).put("family", family).put("vpnFallback", vpnFallback).toString())
     }
     /** Preserve finalmask/OOB exactly; replace host-app inlet and geo-dependent classifications. */
     fun config(source: String, port: Int, user: String, password: String, family: String): JSONObject {

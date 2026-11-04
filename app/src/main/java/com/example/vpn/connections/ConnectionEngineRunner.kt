@@ -22,15 +22,18 @@ object ConnectionEngineRunner {
             else -> listOf(profile)
         }
     }
-    fun start(engine: SidecarEngine, profile: VlessProfile, settings: AppSettings, context: SidecarContext): Started {
+    fun start(engine: SidecarEngine, profile: VlessProfile, settings: AppSettings, context: SidecarContext, cancelled: () -> Boolean = { false }): Started {
         for (candidate in candidates(profile)) {
             if (Thread.currentThread().isInterrupted) throw InterruptedException()
+            if (cancelled()) throw kotlinx.coroutines.CancellationException("Connection cancelled")
             val launch = engine.prepare(candidate, settings, context)
+            if (cancelled()) throw kotlinx.coroutines.CancellationException("Connection cancelled")
             val running = EngineReaper.track(SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
             var success = false
             try {
                 if (!running.awaitReady(launch.readyTimeoutMs)) continue
                 val result = AccessProbe.check(Socks5.Endpoint("127.0.0.1", context.socksPort, context.socksUser, context.socksPass))
+                if (cancelled()) throw kotlinx.coroutines.CancellationException("Connection cancelled")
                 if (!result.traffic) continue
                 success = true
                 return Started(running, launch, candidate, result)

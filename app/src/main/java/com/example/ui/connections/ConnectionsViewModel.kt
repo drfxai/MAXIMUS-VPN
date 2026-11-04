@@ -38,7 +38,6 @@ class ConnectionsViewModel(application: Application) : AndroidViewModel(applicat
         override fun onLost(network: android.net.Network) { invalidateChecks() }
     }
     private fun invalidateChecks() { networkEpoch.incrementAndGet(); _ui.update { it.copy(result = null) } }
-    private var fallbackAttempt: String? = null
     init {
         refreshIdentity()
         connectivity.registerDefaultNetworkCallback(networkCallback)
@@ -46,12 +45,8 @@ class ConnectionsViewModel(application: Application) : AndroidViewModel(applicat
             VpnController.connectionState.collect { state ->
                 val network = com.example.vpn.smart.NetworkKey.current(app)
                 if (network != lastNetwork) { lastNetwork = network; _ui.update { it.copy(result = null) } }
-                if (state.status == ConnectionStatus.FAILED && state.activeProfile?.id == "maximus-serverless" &&
-                    _ui.value.options.vpnFallback && !state.attemptId.isNullOrBlank() && state.attemptId != fallbackAttempt) {
-                    fallbackAttempt = state.attemptId
-                    _ui.update { it.copy(message = "Direct access failed. Switching to Aether as enabled.") }
-                    VpnController.startVpn(app, AetherSidecar.profile(_ui.value.options.transport, _ui.value.options.family,
-                        _ui.value.options.fragment), exact = true)
+                if (state.activeProfile?.id == "maximus-aether" && state.status != ConnectionStatus.DISCONNECTED && _ui.value.options.direct) {
+                    _ui.update { it.copy(options = it.options.copy(direct = false), message = "Aether / WARP is now the active method.") }
                 }
                 if (state.status == ConnectionStatus.CONNECTED || state.status == ConnectionStatus.FAILED) refreshIdentity()
             }
@@ -66,7 +61,7 @@ class ConnectionsViewModel(application: Application) : AndroidViewModel(applicat
         _ui.update { it.copy(options = o, result = null, message = null) }
         refreshIdentity()
     }
-    fun profile(): VlessProfile = _ui.value.options.let { if (it.direct) ServerlessSidecar.profile(it.variant, it.family)
+    fun profile(): VlessProfile = _ui.value.options.let { if (it.direct) ServerlessSidecar.profile(it.variant, it.family, it.vpnFallback)
         else AetherSidecar.profile(it.transport, it.family, it.fragment) }
     fun bundled(): Boolean = Sidecars.forProfile(profile())?.let(Sidecars::isBundled) == true
     fun cancel() { operation?.cancel(); operation = null }
@@ -89,7 +84,8 @@ class ConnectionsViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
     fun testAccess() = task {
-        val profile = profile()
+        val original = profile()
+        val profile = original.copy(extraSettings = org.json.JSONObject(original.extraSettings).put("rescan", true).toString())
         val testedEpoch = networkEpoch.get()
         val result = runInterruptible(Dispatchers.IO) {
             val engine = Sidecars.forProfile(profile) ?: error("No engine")
