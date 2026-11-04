@@ -385,8 +385,21 @@ fun MainApp(
             composable(Screen.AiSettings.route) {
                 com.example.ui.ai.AiSettingsScreen(onNavigateBack = { navController.popBackStack() })
             }
+            composable("lab/aether") {
+                com.example.ui.lab.BuiltinConnectionScreen(false, vpnViewModel, onRequestVpnPermission) {
+                    navController.popBackStack()
+                }
+            }
+            composable("lab/direct") {
+                com.example.ui.lab.BuiltinConnectionScreen(true, vpnViewModel, onRequestVpnPermission) {
+                    navController.popBackStack()
+                }
+            }
             composable(Screen.Lab.route) {
-                com.example.ui.lab.NetworkLabScreen(onNavigateBack = { navController.popBackStack() })
+                com.example.ui.lab.NetworkLabScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onBuiltinConnection = { direct -> navController.navigate(if (direct) "lab/direct" else "lab/aether") }
+                )
             }
         }
     }

@@ -11,8 +11,8 @@ import java.io.File
  * offers a SOCKS5 port on 127.0.0.1. Xray still owns the TUN, the DNS handling and the kill switch;
  * its only proxy becomes that port, so everything the app enforces still applies.
  *
- * Running as a separate program is also what keeps GPL engines (Mihomo, Psiphon) from making the
- * app itself GPL: the two only talk over a socket.
+ * Separate executables retain their licenses and corresponding-source offers; socket separation
+ * does not by itself settle the distribution obligations.
  */
 interface SidecarEngine {
     /** Matches the EngineRegistry id. */
@@ -75,5 +75,7 @@ data class SidecarLaunch(
      * For engines whose port opens before they can carry anything (Psiphon opens it before it has a
      * tunnel): a line of their output that means they now can. Ready then needs both.
      */
-    val readyLine: Regex? = null
+    val readyLine: Regex? = null,
+    /** Suppress credential-bearing upstream logs; retain fixed failure categories only. */
+    val logOutput: Boolean = true
 )

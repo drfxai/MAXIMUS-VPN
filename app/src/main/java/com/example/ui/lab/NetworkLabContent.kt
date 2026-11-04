@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.CellTower
@@ -155,7 +156,8 @@ class NetworkLabActions(
     val onStopEndpoints: () -> Unit = {},
     val onSaveFronted: (String, String, String, String, Boolean, String, Int) -> Unit = { _, _, _, _, _, _, _ -> },
     val onWarpSplit: (Boolean) -> Unit = {},
-    val onPsiphonSettings: (String) -> Unit = {}
+    val onPsiphonSettings: (String) -> Unit = {},
+    val onBuiltinConnection: (Boolean) -> Unit = {}
 )
 
 @Composable
@@ -278,6 +280,14 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                 Box(Modifier.size(38.dp).clip(CircleShape).border(1.dp, c.stroke, CircleShape).clickable(onClick = actions.onRefreshNetwork),
                     contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Refresh, "Measure the network again", tint = c.text2, modifier = Modifier.size(18.dp)) }
             })
+        }
+        item { GroupLabel(c, "Built-in connections") }
+        item {
+            Panel(c) {
+                NavRow(c, Icons.Rounded.Shield, "Aether / WARP", "Cloudflare tunnel") { actions.onBuiltinConnection(false) }
+                Hairline(c)
+                NavRow(c, Icons.Rounded.Language, "Serverless Direct", "Direct access with DPI profiles") { actions.onBuiltinConnection(true) }
+            }
         }
         s.message?.let { m -> item { Notice(c, m, actions.onDismissMessage) } }
         item { GroupLabel(c, "Current network") }

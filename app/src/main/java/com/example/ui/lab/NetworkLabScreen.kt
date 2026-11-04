@@ -380,7 +380,8 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
 }
 
 @Composable
-fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel = viewModel()) {
+fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel = viewModel(),
+    onBuiltinConnection: (Boolean) -> Unit = {}) {
     val state by viewModel.state.collectAsState()
     val lab = RayApplication.instance.lab
     BackHandler(enabled = state.section != null || state.picking) {
@@ -389,7 +390,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
     LaunchedEffect(Unit) { viewModel.refreshNetwork() }
     NetworkLabContent(
         state = state,
-        actions = remember(viewModel) {
+        actions = remember(viewModel, onBuiltinConnection) {
             NetworkLabActions(
                 onOpen = viewModel::open, onPick = viewModel::pick, onRun = viewModel::run, onFullAnalysis = viewModel::fullAnalysis, onCancel = lab::cancel,
                 onAutomation = lab::setAutomation, onRefreshNetwork = { viewModel.refreshNetwork() }, onRetest = { viewModel.open(LabSection.LIVE); lab.retest(it) },
@@ -400,7 +401,8 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onRunShadowLink = viewModel::runShadowLink, onStopShadowLink = viewModel::stopShadowLink,
                 onScanEndpoints = viewModel::scanEndpoints, onStopEndpoints = viewModel::stopEndpoints,
                 onSaveFronted = viewModel::saveFronted, onWarpSplit = viewModel::setWarpSplit,
-                onChainOrder = viewModel::chainOrder, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings
+                onChainOrder = viewModel::chainOrder, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings,
+                onBuiltinConnection = onBuiltinConnection
             )
         },
         relativeTime = ::relative

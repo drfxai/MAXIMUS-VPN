@@ -363,7 +363,7 @@ class RayVpnService : VpnService() {
             connectJob?.cancel()
             connectJob = serviceScope.launch {
                 val profile = settingsRepository.getSettings().selectedProfileId
-                    ?.let { serverRepository.getProfileById(it) }
+                    ?.let { com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, it) ?: serverRepository.getProfileById(it) }
                     ?: serverRepository.getAllProfilesOnce().firstOrNull()
                 if (profile != null) {
                     connect(profile)
@@ -406,11 +406,12 @@ class RayVpnService : VpnService() {
                 com.example.vpn.sidecar.EngineHandoff.clear()
                 connectJob = serviceScope.launch {
                     val profile = if (!profileId.isNullOrBlank()) {
-                        serverRepository.getProfileById(profileId)
+                        com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, profileId)
+                            ?: serverRepository.getProfileById(profileId)
                     } else null
 
                     val targetProfile = profile
-                        ?: settingsRepository.getSettings().selectedProfileId?.let { serverRepository.getProfileById(it) }
+                        ?: settingsRepository.getSettings().selectedProfileId?.let { com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, it) ?: serverRepository.getProfileById(it) }
                         ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
                     if (targetProfile != null) {
@@ -1659,10 +1660,28 @@ class RayVpnService : VpnService() {
                     else com.example.vpn.diagnostics.FailureStage.of(e)
             ))
             disconnectResources()
+            if (fallbackFromDirect(requestedProfile)) return@withContext
             if (protectionRequested) showForegroundNotification("Traffic blocked: connection failed")
             if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
             if (!protectionRequested) stopSelf()
         }
+    }
+
+    @Volatile private var directFallbackAttempt: String? = null
+
+    /** Explicit session consent only; stays in the service when the Connections page is closed. */
+    private fun fallbackFromDirect(profile: VlessProfile): Boolean {
+        val state = _vpnState.value
+        val attempt = state.attemptId ?: return false
+        if (state.status !in setOf(ConnectionStatus.FAILED, ConnectionStatus.DEGRADED) ||
+            state.activeProfile?.id != profile.id || directFallbackAttempt == attempt ||
+            !com.example.vpn.sidecar.ServerlessSidecar.handles(profile) ||
+            !com.example.vpn.engine.ProfileExtras.read(profile).optBoolean("vpnFallback")) return false
+        val warp = com.example.vpn.connections.BuiltinConnections.resolve(this, "maximus-aether") ?: return false
+        directFallbackAttempt = attempt
+        showForegroundNotification("Direct access failed; switching to the enabled WARP fallback")
+        VpnController.startVpn(this, warp, exact = true)
+        return true
     }
 
     private fun isLiteralIp(address: String): Boolean {
@@ -1757,10 +1776,15 @@ class RayVpnService : VpnService() {
             socksPass = com.example.vpn.sidecar.Sidecars.randomToken(),
             mode = settings.operationalMode
         )
-        val launch = engine.prepare(profile, settings, context)
+        val managed = engine.id in setOf(com.example.vpn.sidecar.AetherSidecar.ID, com.example.vpn.sidecar.ServerlessSidecar.ID)
+        if (managed) showForegroundNotification("Testing the ${engine.id} connection...")
+        val connectionOwner = connectJob
+        val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
+            cancelled = { connectionOwner?.isActive == false }) else null
+        val launch = started?.launch ?: engine.prepare(profile, settings, context)
         if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
         showForegroundNotification("Starting the ${engine.id} engine...")
-        val process = com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
+        val process = started?.running ?: com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
             ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort))
         sidecar = process
         if (!process.awaitReady(launch.readyTimeoutMs)) {
@@ -1777,7 +1801,7 @@ class RayVpnService : VpnService() {
         com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
         XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
         watchSidecar(engine, process)
-        return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, context, launch)
+        return com.example.vpn.sidecar.SidecarChain.xrayProfile(started?.profile ?: profile, context, launch)
     }
 
     /**
@@ -2032,6 +2056,7 @@ class RayVpnService : VpnService() {
                     if (wasConnected && _vpnState.value.status == ConnectionStatus.DEGRADED) {
                         XrayLogManager.w("VPN", "Checks through the tunnel failed ${_vpnState.value.probeFailures} times in a row (${stage.name}): DEGRADED.")
                         showForegroundNotification("Connection degraded (${stage.name})")
+                        if (fallbackFromDirect(profile)) return@launch
                     }
                 }
                 // An unverified tunnel is checked again soon; a steadily working one less often (the failover
@@ -2056,7 +2081,12 @@ class RayVpnService : VpnService() {
         val engine = com.example.vpn.connectivity.MultiProbeHealthEngine(
             com.example.vpn.connectivity.ProbeBudget(
                 maxRetries = VERIFY_ATTEMPTS - 1, retryBackoffMs = VERIFY_RETRY_MS, maxBackoffMs = VERIFY_RETRY_MS,
-                perStepTimeoutMs = if (slowTunnel()) SLOW_VERIFY_STEP_MS else 11_000L,
+                perStepTimeoutMs = when {
+                    state.activeProfile?.id == com.example.vpn.connections.BuiltinConnections.AETHER ||
+                        state.activeProfile?.id == com.example.vpn.connections.BuiltinConnections.DIRECT -> 28_000L
+                    slowTunnel() -> SLOW_VERIFY_STEP_MS
+                    else -> 11_000L
+                },
                 perConfigTimeoutMs = if (slowTunnel()) SLOW_VERIFY_CONFIG_MS else 40_000L
             )
         )
@@ -2089,6 +2119,13 @@ class RayVpnService : VpnService() {
      */
     private suspend fun routeLatency(): Long {
         val endpoint = engineEndpoint ?: return com.example.vpn.diagnostics.LiveTunnelProbe.latency(this, probeStepMs())
+        val managed = _vpnState.value.activeProfile?.id in setOf(
+            com.example.vpn.connections.BuiltinConnections.AETHER, com.example.vpn.connections.BuiltinConnections.DIRECT
+        )
+        if (managed) return kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
+            val check = com.example.vpn.connections.AccessProbe.check(endpoint, checkDns = false)
+            check.latencyMs ?: throw java.io.IOException(check.failure ?: "HTTPS response was not verified")
+        }
         return withContext(Dispatchers.IO) {
             com.example.vpn.verify.TrafficCheck(com.example.vpn.verify.RouteDialers.engine(endpoint), stepTimeoutMs = probeStepMs()).smallRequest()
         }
