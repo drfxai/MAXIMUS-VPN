@@ -69,6 +69,12 @@ internal fun PremiumSmartManagerScreen(
         inspectionNow - server.checkedAt in 0..INSPECTION_TTL_MS
     val candidates = inspection?.candidates.orEmpty()
     val nodes = server?.let { vm.managedNodesFor(it.id) }.orEmpty()
+    val network = com.example.vpn.smart.NetworkKey.current(LocalContext.current)
+    val verifiedServices = nodes.filter {
+        fresh && it.networkKey == network &&
+            it.state == com.example.panels.servers.ManagedNodeRecord.State.AVAILABLE &&
+            inspectionNow - it.updatedAt in 0..INSPECTION_TTL_MS
+    }.map { it.serviceId }.toSet()
     val engineIds = listOf(SmartManagerPlanner.PRIVATE_PSIPHON, ServerToolCatalog.SOAR,
         ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT)
     val titles = listOf("Psiphon", "SOAR", "CottenDNS", "DNSTT")
@@ -128,10 +134,7 @@ internal fun PremiumSmartManagerScreen(
                         else -> "maximus-psiphon"
                     }
                     val running = facts?.active(unit) == true
-                    val verified = fresh && running && nodes.any {
-                        it.serviceId == id && it.state == com.example.panels.servers.ManagedNodeRecord.State.AVAILABLE &&
-                            inspectionNow - it.updatedAt in 0..INSPECTION_TTL_MS
-                    }
+                    val verified = running && id in verifiedServices
                     val (status, tint, action) = when {
                         !fresh -> Triple("Inspect first", StudioMuted, "Inspect")
                         verified -> Triple("Traffic verified", Mx.Green, "Manage")
@@ -232,7 +235,10 @@ internal fun PremiumSmartManagerScreen(
                 }
             }
         }
-        StudioReadiness(udp53) { page = 3; showPlan = chosen.isNotEmpty() }
+        StudioReadiness(udp53, verifiedServices.any { it in engineIds.drop(1) }) {
+            page = 3
+            showPlan = chosen.isNotEmpty()
+        }
         val seconds = ((inspectionNow - server.checkedAt) / 1000).coerceAtLeast(0)
         StudioActivity(when {
             server.id in state.checking -> "Refreshing SSH inspection…"

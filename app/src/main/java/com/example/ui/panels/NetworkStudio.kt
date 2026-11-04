@@ -1,5 +1,6 @@
 package com.example.ui.panels
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -191,12 +192,19 @@ internal fun StudioServiceRow(name: String, icon: ImageVector, status: String, t
 }
 
 @Composable
-internal fun StudioReadiness(udp53: Boolean?, onReview: () -> Unit) {
+internal fun StudioReadiness(udp53: Boolean?, dnsVerified: Boolean, onReview: () -> Unit) {
     Surface(color = StudioPanel, shape = RoundedCornerShape(9.dp), border = BorderStroke(1.dp, StudioLine)) {
         Row(Modifier.fillMaxWidth().padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Security, null, Modifier.size(18.dp), tint = StudioBlue)
-            Text(when (udp53) { true -> "UDP 53 available"; false -> "UDP 53 occupied"; null -> "UDP 53 needs inspection" },
-                Modifier.weight(1f).padding(horizontal = 6.dp), color = Color.White, fontSize = 11.sp)
+            Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
+                Text(if (dnsVerified) "DNS traffic verified" else "DNS verification pending",
+                    color = if (dnsVerified) Mx.Green else StudioMuted, fontSize = 10.sp)
+                Text(when (udp53) {
+                    true -> "UDP 53 available"
+                    false -> "UDP 53 occupied"
+                    null -> "UDP 53 needs inspection"
+                }, color = Color.White, fontSize = 11.sp)
+            }
             Button(onReview, shape = RoundedCornerShape(7.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = StudioGold, contentColor = StudioInk),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)) {
