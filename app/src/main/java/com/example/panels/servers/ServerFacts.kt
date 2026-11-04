@@ -50,8 +50,7 @@ data class ServerFacts(
     val psiphonDataRetained: Boolean = false,
     val tunnelHyInstalled: Boolean = false,
     val interfaceIpv4: Set<String> = emptySet(),
-    val interfaceIpv6: Set<String> = emptySet(),
-    val cpuUsedPercent: Int? = null
+    val interfaceIpv6: Set<String> = emptySet()
 ) {
     /** The Go architecture name of the programs this server needs, or null when none is built for it. */
     val goArch: String? get() = when (arch.lowercase()) {
@@ -118,18 +117,6 @@ data class ServerFacts(
             else
               echo SOCKETS=0
             fi
-            if [ -r /proc/stat ]; then
-              { head -n 1 /proc/stat; sleep 0.25; head -n 1 /proc/stat; } | awk '
-                §1 == "cpu" {
-                  total = 0
-                  for (i=2; i<=9 && i<=NF; i++) total += §i
-                  idle = §5 + §6
-                  if (NR == 2 && total > first_total && idle >= first_idle && idle-first_idle <= total-first_total)
-                    printf "CPU_USED_PERCENT=%.0f\n", 100*(1-(idle-first_idle)/(total-first_total))
-                  first_total = total
-                  first_idle = idle
-                }'
-            fi
             echo "IPV4=§(ip -o -4 addr show scope global 2>/dev/null | awk '{split(§4,a,"/");print a[1]}' | paste -sd, -)"
             echo "IPV6=§(ip -o -6 addr show scope global 2>/dev/null | awk '{split(§4,a,"/");print a[1]}' | paste -sd, -)"
             if command -v docker >/dev/null 2>&1; then echo DOCKER=1; else echo DOCKER=0; fi
@@ -176,7 +163,6 @@ data class ServerFacts(
                 arch = v["ARCH"].orEmpty(),
                 kernel = v["KERNEL"].orEmpty(),
                 cpus = v["CPUS"]?.toIntOrNull() ?: 0,
-                cpuUsedPercent = v["CPU_USED_PERCENT"]?.toIntOrNull()?.takeIf { it in 0..100 },
                 ramMb = long("RAM_KB") / 1024,
                 ramAvailableMb = long("RAM_AVAIL_KB") / 1024,
                 swapMb = long("SWAP_KB") / 1024,
