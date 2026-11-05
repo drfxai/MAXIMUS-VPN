@@ -9,6 +9,7 @@ import (
     "net/http"
     "net/http/httptest"
     "os"
+    "os/exec"
     "path/filepath"
     "strings"
     "testing"
@@ -18,6 +19,17 @@ import (
     "github.com/xtls/xray-core/features/dns"
     xproxy "golang.org/x/net/proxy"
 )
+
+// A separate process matches Android: Xray's system dialer uses process-global DNS.
+// Two instances in one process would overwrite each other's resolver.
+func TestBuiltinSidecarProcess(t *testing.T) {
+    config := os.Getenv("MAXIMUS_TEST_SOCKS_CONFIG")
+    if config == "" { t.Skip("child process only") }
+    server, err := core.StartInstance("json", []byte(config))
+    if err != nil { t.Fatal(err) }
+    defer server.Close()
+    _, _ = io.Copy(io.Discard, os.Stdin)
+}
 
 // Exercise the generated Android host configuration, not only the sidecar port.
 // A browser's DNS answer must be restored to its domain before the SOCKS hop.
@@ -42,9 +54,20 @@ func TestBuiltinHostDomainHandoff(t *testing.T) {
         "dns":{"hosts":{"maximus-app.invalid":"127.0.0.1"}},
         "outbounds":[{"protocol":"freedom","settings":{"domainStrategy":"UseIP"}}]
     }`, innerPort)
-    inner, err := core.StartInstance("json", []byte(innerJSON))
+    inner := exec.Command(os.Args[0], "-test.run=^TestBuiltinSidecarProcess$")
+    inner.Env = append(os.Environ(), "MAXIMUS_TEST_SOCKS_CONFIG="+innerJSON)
+    input, err := inner.StdinPipe()
     if err != nil { t.Fatal(err) }
-    defer inner.Close()
+    inner.Stdout, inner.Stderr = os.Stdout, os.Stderr
+    if err := inner.Start(); err != nil { t.Fatal(err) }
+    defer func() { _ = input.Close(); _ = inner.Process.Kill(); _ = inner.Wait() }()
+    deadline := time.Now().Add(5*time.Second)
+    for {
+        socket, dialErr := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", innerPort), 100*time.Millisecond)
+        if dialErr == nil { _ = socket.Close(); break }
+        if time.Now().After(deadline) { t.Fatalf("sidecar did not listen: %v", dialErr) }
+        time.Sleep(20*time.Millisecond)
+    }
 
     dir := filepath.Join(filepath.Dir(os.Getenv("MAXIMUS_SERVERLESS_FIXTURES")), "host-fixtures")
     files, err := filepath.Glob(filepath.Join(dir, "*.json"))
