@@ -13,23 +13,55 @@ data class AetherSettings(
     val apiHost: String = "",
     val fragmentSize: String = "",
     val fragmentDelay: String = "",
-    val ech: Boolean = false
+    val ech: Boolean = false,
+    val apiSni: String = "",
+    val fingerprint: String = "chrome",
+    val alias: String = "",
+    val exitNode: String = "",
+    val exitFinalMask: String = "",
+    val exitDialMode: String = "",
+    val tor: String = "off",
+    val psiphon: String = "off"
 ) {
-    fun problem(): String? = when {
+    fun problem(carrier: String? = null): String? = when {
         scan !in scans -> "Unsupported scan mode"
         noize !in noises -> "Unsupported obfuscation"
         endpoint.isNotBlank() && !socketAddress(endpoint) -> "Endpoint must be an IP and port, for example 162.159.192.1:2408 or [2606:4700::1]:443"
-        apiAddress.isNotBlank() && !ip(apiAddress) -> "API address must be an IPv4 or IPv6 literal"
+        apiAddress.isNotBlank() && apiAddress !in apiHosts && !ip(apiAddress) -> "API address must be an IP or a supported Cloudflare API name"
         apiHost.isNotBlank() && apiHost !in apiHosts -> "Choose a supported Cloudflare API host"
+        fingerprint !in AetherTlsProfiles.names -> "Unsupported TLS fingerprint"
+        apiSni.isNotBlank() && apiSni !in apiHosts -> "Choose a supported API TLS name"
+        apiSni.isNotBlank() && apiHost.isNotBlank() && apiSni != apiHost -> "Cloudflare requires API SNI and host to match"
+        tor !in relayModes || psiphon !in relayModes -> "Unsupported Tor or Psiphon mode"
+        carrier in listOf("wireguard", "wiw") && (tor == "reverse" || psiphon == "reverse") -> "Reverse carriers require MASQUE over HTTP/2"
+        tor == "reverse" && psiphon == "reverse" -> "Choose one reverse carrier"
+        (tor == "only" && psiphon != "off") || (psiphon == "only" && tor != "off") -> "A standalone carrier runs on its own"
+        exitFinalMask.length > 32768 || (exitFinalMask.isNotBlank() && runCatching { JSONObject(exitFinalMask) }.isFailure) -> "finalMask must be a JSON object"
+        exitDialMode.length > 512 || exitDialMode.any { it.isISOControl() } -> "Invalid dialMode"
+        alias.length > 120 -> "Alias is too long"
         !range(fragmentSize, 1..16384) -> "Fragment size must be 1–16384 bytes or an ascending range"
         !range(fragmentDelay, 0..1000) -> "Fragment delay must be 0–1000 ms or an ascending range"
         else -> null
+    }
+
+    val endpointAddress: String get() = if (endpoint.startsWith("[")) endpoint.substringAfter('[').substringBefore(']')
+        else endpoint.substringBeforeLast(':', endpoint)
+    val endpointPort: String get() = endpoint.substringAfterLast(':', "").takeIf { endpoint.contains(':') }.orEmpty()
+
+    fun withEndpoint(address: String = endpointAddress, port: String = endpointPort): AetherSettings {
+        val host = address.trim().removePrefix("[").removeSuffix("]")
+        val combined = if (host.isBlank() && port.isBlank()) "" else
+            (if (host.contains(':')) "[$host]" else host) + ":" + port.trim()
+        return copy(endpoint = combined)
     }
 
     fun write(json: JSONObject): JSONObject = json.put("scan", scan).put("noize", noize)
         .put("endpoint", endpoint.trim()).put("apiAddress", apiAddress.trim())
         .put("apiHost", apiHost).put("fragmentSize", fragmentSize.trim())
         .put("fragmentDelay", fragmentDelay.trim()).put("ech", ech)
+        .put("apiSni", apiSni).put("fingerprint", fingerprint).put("alias", alias.trim())
+        .put("exitNode", exitNode).put("exitFinalMask", exitFinalMask).put("exitDialMode", exitDialMode.trim())
+        .put("tor", tor).put("psiphon", psiphon)
 
     fun arguments(carrier: String, fragment: Boolean): List<String> {
         require(problem() == null) { problem().orEmpty() }
@@ -47,7 +79,11 @@ data class AetherSettings(
             if (apiAddress.isNotBlank()) addAll(listOf("--api-address", apiAddress.trim()))
             if (apiHost.isNotBlank()) {
                 // The account API's HTTP host and authenticated TLS name must agree.
-                addAll(listOf("--api-host", apiHost, "--api-sni", apiHost))
+                addAll(listOf("--api-host", apiHost))
+            }
+            if (apiSni.isNotBlank() || apiHost.isNotBlank()) {
+                addAll(listOf("--api-sni", apiSni.ifBlank { apiHost }))
+                if (apiHost.isBlank()) addAll(listOf("--api-host", apiSni))
             }
             if (fragment) {
                 add("--fragment")
@@ -55,17 +91,23 @@ data class AetherSettings(
                 if (fragmentDelay.isNotBlank()) addAll(listOf("--fragment-delay", fragmentDelay.trim()))
             }
             if (ech) addAll(listOf("--ech", "auto"))
+            addAll(AetherTlsProfiles.arguments(fingerprint))
         }
     }
 
     companion object {
+        val relayModes = listOf("off", "chain", "reverse", "only")
+        val keyKinds = listOf("all", "wg", "masque", "gool-classic", "mim", "gool")
         val scans = listOf("turbo", "balanced", "thorough", "verified", "ironclad")
         val noises = listOf("auto", "off", "light", "firewall", "balanced", "gfw", "aggressive")
         val apiHosts = listOf("", "api.devices.cloudflare.com", "api.cloudflareclient.com")
         fun read(json: JSONObject) = AetherSettings(
             json.optString("scan", "balanced"), json.optString("noize", "auto"),
             json.optString("endpoint"), json.optString("apiAddress"), json.optString("apiHost"),
-            json.optString("fragmentSize"), json.optString("fragmentDelay"), json.optBoolean("ech"))
+            json.optString("fragmentSize"), json.optString("fragmentDelay"), json.optBoolean("ech"),
+            json.optString("apiSni"), json.optString("fingerprint", "chrome"), json.optString("alias"),
+            json.optString("exitNode"), json.optString("exitFinalMask"), json.optString("exitDialMode"),
+            json.optString("tor", "off"), json.optString("psiphon", "off"))
 
         private fun range(value: String, bounds: IntRange): Boolean {
             if (value.isBlank()) return true

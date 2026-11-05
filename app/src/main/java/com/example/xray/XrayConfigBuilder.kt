@@ -105,7 +105,16 @@ object XrayConfigBuilder {
      */
     fun buildJson(profile: VlessProfile, settings: AppSettings): String {
         if (profile.profileType == ProfileType.XRAY_JSON && profile.rawConfig.isNotBlank()) {
-            return XrayConfigParser.sanitizeForExecution(profile.rawConfig, settings)
+            val sanitized = XrayConfigParser.sanitizeForExecution(profile.rawConfig, settings)
+            if (com.example.vpn.sidecar.AetherSidecar.handles(profile) ||
+                com.example.vpn.sidecar.ServerlessSidecar.handles(profile)) {
+                // Hand the restored domain to the sidecar, as the successful local probe does.
+                // App DNS must not depend on a second resolver reachable through this path.
+                val root = JSONObject(sanitized)
+                applyFakeDns(root, settings)
+                return root.toString(2)
+            }
+            return sanitized
         }
 
         val root = JSONObject()

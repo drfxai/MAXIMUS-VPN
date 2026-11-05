@@ -44,3 +44,15 @@ if [[ -n "${engine:-}" ]]; then
     adb shell rm -f "$remote"
   done
 fi
+
+if [[ -n "${engine:-}" ]]; then
+  python3 - "$engine/libaether.so" <<'PY'
+import json, subprocess, sys
+commands = json.load(open("app/build/aether-options.json"))
+for name, args in commands.items():
+    result = subprocess.run(["adb", "shell", "MAXIMUS_VALIDATE_OPTIONS=1", sys.argv[1], *args],
+                            check=True, capture_output=True, text=True)
+    assert "MAXIMUS_AETHER_OPTIONS_OK" in result.stdout, name
+    print("PASS Android Aether TLS profile", name)
+PY
+fi

@@ -1557,7 +1557,8 @@ class RayVpnService : VpnService() {
             }
             if (_vpnState.value.isConnected) {
                 showConnectedNotification()
-                XrayLogManager.i("VPN", "[DIAGNOSTICS] 10. Traffic verified through the tunnel (${check.first} ms). Final state: CONNECTED.")
+                val checkedPath = if (engineEndpoint != null) "engine local proxy" else "Android VPN interface"
+                XrayLogManager.i("VPN", "[DIAGNOSTICS] 10. Traffic verified through $checkedPath (${check.first} ms). Final state: CONNECTED.")
                 val connectMs = System.currentTimeMillis() - connectStartedAt
                 com.example.vpn.diagnostics.ConnectionMetrics.recordConnectTime(connectMs)
                 XrayLogManager.i("VPN", "Time from connect to verified traffic: $connectMs ms.")
@@ -1784,7 +1785,7 @@ class RayVpnService : VpnService() {
         val launch = started?.launch ?: engine.prepare(profile, settings, context)
         if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
         showForegroundNotification("Starting the ${engine.id} engine...")
-        val process = started?.running ?: com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
+        val process = started?.running ?: com.example.vpn.sidecar.EngineReaper.track(engine.startPrepared(profile, settings, launch, context)
             ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort))
         sidecar = process
         if (!process.awaitReady(launch.readyTimeoutMs)) {
@@ -1877,7 +1878,7 @@ class RayVpnService : VpnService() {
             start = com.example.vpn.sidecar.ChainRunner.HopStarter { engine, hopProfile, context ->
                 showForegroundNotification("Starting the ${engine.id} engine...")
                 val launch = engine.prepare(hopProfile, settings, context)
-                val process = com.example.vpn.sidecar.EngineReaper.track(engine.startInApp(launch, context)
+                val process = com.example.vpn.sidecar.EngineReaper.track(engine.startPrepared(hopProfile, settings, launch, context)
                     ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
                 try {
                     check(process.awaitReady(launch.readyTimeoutMs)) { "The ${engine.id} engine did not start" }

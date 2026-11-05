@@ -1,3 +1,4 @@
+import java.io.File
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.Base64
@@ -23,7 +24,7 @@ android {
     minSdk = 24
     targetSdk = 36
     // Keep this monotonic so installs from the pre-public builds can upgrade.
-    versionCode = 50
+    versionCode = 51
     versionName = "1.0.4"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -212,6 +213,10 @@ dependencies {
 
 // Native integration fixtures are real test outputs, including when Gradle restores test results.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
-  System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.takeIf { it.isNotBlank() }?.let { outputs.dir(it) }
+  System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.takeIf { it.isNotBlank() }?.let {
+    outputs.dir(it)
+    outputs.dir(File(it).parentFile.resolve("host-fixtures"))
+    outputs.file(File(it).parentFile.resolve("aether-options.json"))
+  }
   System.getenv("MAXIMUS_SINGBOX_FIXTURES")?.takeIf { it.isNotBlank() }?.let { outputs.dir(it) }
 }

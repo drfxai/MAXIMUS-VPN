@@ -71,7 +71,7 @@ class LocalProxyService : Service() {
                 val ctx = SidecarContext(directory, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9),
                     Sidecars.randomToken(), settings.operationalMode)
                 val launch = adapter.prepare(profile, settings, ctx)
-                val running = adapter.startInApp(launch, ctx) ?: SidecarProcess.start(adapter.id, launch, directory, ctx.socksPort)
+                val running = adapter.startPrepared(profile, settings, launch, ctx) ?: SidecarProcess.start(adapter.id, launch, directory, ctx.socksPort)
                 engine = running
                 check(runInterruptible { running.awaitReady(launch.readyTimeoutMs) }) { "Engine did not become ready." }
                 ensureActive()

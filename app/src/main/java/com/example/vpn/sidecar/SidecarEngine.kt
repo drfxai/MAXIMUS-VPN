@@ -33,6 +33,9 @@ interface SidecarEngine {
      * return the running engine; program engines return null and are started from [prepare]'s command.
      */
     fun startInApp(launch: SidecarLaunch, context: SidecarContext): RunningEngine? = null
+
+    fun startPrepared(profile: VlessProfile, settings: AppSettings, launch: SidecarLaunch, context: SidecarContext): RunningEngine? =
+        startInApp(launch, context)
 }
 
 /** A started engine, program or in-app. */

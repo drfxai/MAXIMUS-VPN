@@ -30,6 +30,26 @@ class AetherSettingsTest {
         assertFalse(settings.arguments("h3", false).contains("--fragment-size"))
     }
 
+    @Test fun everyFingerprintAndAdvancedExitSettingSurvivesPersistence() {
+        val commands = JSONObject()
+        for (name in com.example.vpn.sidecar.AetherTlsProfiles.names) {
+            val settings = AetherSettings(fingerprint = name, apiSni = "api.devices.cloudflare.com",
+                exitFinalMask = "{\"tcp\":[]}", exitDialMode = "oob.1", alias = "My WARP")
+            assertEquals(settings, AetherSettings.read(settings.write(JSONObject())))
+            val args = settings.arguments("h2", true)
+            assertTrue(args.contains("--tls-ciphers"))
+            assertTrue(args.contains("--tls-sigalgs"))
+            commands.put(name, org.json.JSONArray(listOf("--masque", "--h2") + args))
+        }
+        System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.let {
+            File(File(it).parentFile, "aether-options.json").writeText(commands.toString())
+        }
+        assertNotNull(AetherSettings(apiSni = "api.devices.cloudflare.com", apiHost = "api.cloudflareclient.com").problem())
+        assertNotNull(AetherSettings(tor = "reverse", psiphon = "reverse").problem())
+        assertNotNull(AetherSettings(exitFinalMask = "[]").problem())
+        assertNotNull(AetherSettings(tor = "reverse").problem("wireguard"))
+    }
+
     @Test fun invalidNativeValuesFailBeforeLaunchingOrRegistering() {
         for (bad in listOf("1.1.1.1", "1.1.1.1:0", "1.1.1.1:65536", "host.example:443",
             "2606:4700::1:443", "[2606:4700::1]bad:443", "1.1.1.1:443 --tls-verify", "1.1.1.1:+443")) {
