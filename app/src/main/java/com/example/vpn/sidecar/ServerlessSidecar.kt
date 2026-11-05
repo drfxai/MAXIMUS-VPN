@@ -39,12 +39,23 @@ object ServerlessSidecar : SidecarEngine {
         // Explicit domains/IP blocks remain; DNS is always DoH through the fragmented path.
         val dns = root.getJSONObject("dns")
         val upstream = dns.getJSONArray("servers").getJSONObject(1)
-        val alias = dns.getJSONObject("hosts").getString("cloudflare-dns.com")
-        dns.put("hosts", JSONObject().put("cloudflare-dns.com", alias))
+        // A domain alias still needs DNS. With the domestic resolver removed,
+        // resolving challenges.cloudflare.com recursively asked this very DoH
+        // path. Pin bootstrap IPs while retaining the authenticated TLS hostname.
+        fun bootstrap(v4: List<String>, v6: List<String>) = JSONArray(when (family) {
+            "ipv4" -> v4
+            "ipv6" -> v6
+            else -> v4 + v6
+        })
+        dns.put("hosts", JSONObject()
+            .put("cloudflare-dns.com", bootstrap(listOf("1.1.1.1", "1.0.0.1"),
+                listOf("2606:4700:4700::1111", "2606:4700:4700::1001")))
+            .put("dns.google", bootstrap(listOf("8.8.8.8", "8.8.4.4"),
+                listOf("2001:4860:4860::8888", "2001:4860:4860::8844"))))
         upstream.remove("finalQuery")
         upstream.put("timeoutMs", 4_000)
         dns.put("servers", JSONArray().put(upstream).put(JSONObject().put("tag", "no-filter-dns-ip")
-            .put("address", "https+one://1.1.1.1/dns-query").put("finalQuery", true).put("timeoutMs", 4_000)))
+            .put("address", "https+one://dns.google/dns-query").put("finalQuery", true).put("timeoutMs", 4_000)))
         dns.put("queryStrategy", when(family) { "ipv4" -> "UseIPv4"; "ipv6" -> "UseIPv6"; else -> "UseIP" })
         val rules = root.getJSONObject("routing").getJSONArray("rules")
         val kept = JSONArray()

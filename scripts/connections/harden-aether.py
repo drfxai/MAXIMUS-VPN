@@ -63,5 +63,9 @@ replace('socks.rs', '    sock.write_all(&[VER, 0x00]).await?;\n    Ok(())', r'''
     Ok(())''')
 # An auth challenge also proves that a listener is serving; it does not grant proxy access.
 replace('socks.rs', 'Some(reply == [VER, 0x00])', 'Some(reply == [VER, 0xff])')
+# The listener is bound before registration/scanning. Emit a fixed, secret-free
+# marker only once a tunnel's netstack is actually serving it, even at RUST_LOG=warn.
+replace('lib.rs', '    async fn serve(&self, stack: &netstack::StackHandle) -> std::convert::Infallible {', '''    async fn serve(&self, stack: &netstack::StackHandle) -> std::convert::Infallible {
+        eprintln!("MAXIMUS_AETHER_SOCKS_READY");''')
 (root / 'MAXIMUS_POLICY').write_text('WARP API: CA + hostname; MASQUE: mandatory upstream SPKI pins\n')
 print('Aether authenticated registration and gateway pin policy applied')

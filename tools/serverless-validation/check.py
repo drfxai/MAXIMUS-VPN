@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Validate production-generated direct configs and native authenticated data transfer, entirely on loopback."""
-import argparse, contextlib, http.server, importlib.util, json, os, pathlib, secrets, socket, subprocess, tempfile, threading, time
+import argparse, contextlib, http.server, importlib.util, json, os, pathlib, secrets, shutil, socket, subprocess, tempfile, threading, time
 parser=argparse.ArgumentParser()
 parser.add_argument('--fixtures', type=pathlib.Path, required=True)
 args=parser.parse_args()
@@ -16,6 +16,10 @@ with tempfile.TemporaryDirectory(prefix='direct-native-') as tmp:
     assert subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True).strip()==rev
     binary=root/'xray'
     env=dict(os.environ,GOTOOLCHAIN='go1.27.0',GOOS='linux',GOARCH='amd64',CGO_ENABLED='0')
+    validation=source/'maximusvalidation';validation.mkdir()
+    shutil.copyfile(repo/'tools/serverless-validation/bootstrap_test.go', validation/'bootstrap_test.go')
+    test_env=dict(env, MAXIMUS_SERVERLESS_FIXTURES=str(args.fixtures.resolve()))
+    subprocess.run(['go','test','-count=1','-timeout=90s','./maximusvalidation'],cwd=source,env=test_env,check=True)
     subprocess.run(['go','build','-mod=readonly','-trimpath','-ldflags=-checklinkname=0','-o',str(binary),'./main'],cwd=source,env=env,check=True)
     class Echo(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
