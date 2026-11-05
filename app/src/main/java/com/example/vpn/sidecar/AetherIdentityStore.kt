@@ -34,6 +34,10 @@ object AetherIdentityStore {
         required(kind).forEach { name ->
             check(File(staging, name).let { it.isFile && it.length() in 32..131072 }) { "Registration did not produce every requested identity" }
         }
+        // Registration caches, CA bundles and auxiliary proxy configs are disposable.
+        staging.listFiles()?.filter { it.name !in files }?.forEach {
+            check(it.deleteRecursively()) { "Cannot remove registration working files" }
+        }
         val generation = File(root, "generation-$token")
         check(!generation.exists() && staging.renameTo(generation)) { "Cannot stage the identity generation" }
         val pointer = File(root, "pending-pointer-$token")

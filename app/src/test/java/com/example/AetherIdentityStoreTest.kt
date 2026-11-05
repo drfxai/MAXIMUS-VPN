@@ -26,11 +26,13 @@ class AetherIdentityStoreTest {
             val staging = File(root, "pending").apply { mkdirs() }
             AetherIdentityStore.retainUnchanged(root, staging, "mim")
             for (name in AetherIdentityStore.required("mim")) File(staging, name).writeText("new-$name".repeat(8))
+            File(staging, "temporary-upstream.json").writeText("temporary")
             AetherIdentityStore.publish(root, staging, "mim", "complete")
             val active = AetherIdentityStore.current(root)
             assertNotEquals(root, active)
             assertEquals("old-wg".repeat(8), File(active, "wireguard.toml").readText())
             assertTrue(AetherIdentityStore.required("mim").all { File(active, it).isFile })
+            assertFalse(File(active, "temporary-upstream.json").exists())
         } finally { root.deleteRecursively() }
     }
 }

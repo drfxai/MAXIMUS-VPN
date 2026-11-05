@@ -215,6 +215,7 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
   System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.takeIf { it.isNotBlank() }?.let {
     outputs.dir(it)
     outputs.dir(java.io.File(it).parentFile.resolve("host-fixtures"))
+    outputs.file(java.io.File(it).parentFile.resolve("aether-options.json"))
   }
   System.getenv("MAXIMUS_SINGBOX_FIXTURES")?.takeIf { it.isNotBlank() }?.let { outputs.dir(it) }
 }

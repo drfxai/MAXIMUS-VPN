@@ -157,18 +157,18 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         val testedEpoch = networkEpoch.get()
         val result = identityRenewal.withLock {
             runInterruptible(Dispatchers.IO) {
-            val engine = Sidecars.forProfile(profile) ?: error("No engine")
-            val executable = Sidecars.executable(engine) ?: error("Engine unavailable")
-            val dir = File(app.noBackupFilesDir, "connection-tests/${Sidecars.randomToken(6)}").apply { mkdirs() }
-            var started: ConnectionEngineRunner.Started? = null
-            try {
-                val ctx = SidecarContext(dir, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9),
-                    Sidecars.randomToken(), app.settingsRepository.getSettings().operationalMode)
-                started = ConnectionEngineRunner.start(engine, profile, app.settingsRepository.getSettings(), ctx, checkDns = true,
-                    onProgress = { line -> _ui.update { it.copy(message = line, log = (it.log + line).takeLast(40)) } })
-                started.check
-            } finally { try { started?.running?.stop() } finally { dir.deleteRecursively() } }
-        }
+                val engine = Sidecars.forProfile(profile) ?: error("No engine")
+                val executable = Sidecars.executable(engine) ?: error("Engine unavailable")
+                val dir = File(app.noBackupFilesDir, "connection-tests/${Sidecars.randomToken(6)}").apply { mkdirs() }
+                var started: ConnectionEngineRunner.Started? = null
+                try {
+                    val ctx = SidecarContext(dir, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9),
+                        Sidecars.randomToken(), app.settingsRepository.getSettings().operationalMode)
+                    started = ConnectionEngineRunner.start(engine, profile, app.settingsRepository.getSettings(), ctx, checkDns = true,
+                        onProgress = { line -> _ui.update { it.copy(message = line, log = (it.log + line).takeLast(40)) } })
+                    started.check
+                } finally { try { started?.running?.stop() } finally { dir.deleteRecursively() } }
+            }
         }
         _ui.update {
             if (networkEpoch.get() == testedEpoch) it.copy(result = result, message = "HTTPS data passed through the local engine.")
@@ -179,59 +179,61 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         require(kind in AetherSettings.keyKinds)
         identityRenewal.withLock {
             runInterruptible(Dispatchers.IO) {
-            val engine = AetherSidecar
-            val executable = Sidecars.executable(engine) ?: error("Engine unavailable")
-            val identityDir = File(app.noBackupFilesDir, "identities/aether").apply { mkdirs() }
-            val token = Sidecars.randomToken(9)
-            val staging = File(identityDir, "pending-$token").apply { mkdirs() }
-            AetherIdentityStore.retainUnchanged(identityDir, staging, kind)
-            var process: Process? = null
-            var exit: BuiltinExitNode.Started? = null
-            try {
-                val settings = app.settingsRepository.getSettings()
-                val ctx = SidecarContext(staging, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9),
-                    Sidecars.randomToken(), settings.operationalMode)
-                val launch = engine.prepare(AetherSidecar.profile("h2", _ui.value.options.family,
-                    _ui.value.options.fragment, _ui.value.options.advanced), settings, ctx)
-                val args = launch.command.toMutableList()
-                for ((flag, name) in listOf("--config" to "base.toml", "--masque-config" to "identity.toml", "--wg-config" to "wireguard.toml")) {
-                    val at = args.indexOf(flag)
-                    require(at >= 0)
-                    args[at + 1] = File(staging, name).absolutePath
+                val engine = AetherSidecar
+                val executable = Sidecars.executable(engine) ?: error("Engine unavailable")
+                val identityDir = File(app.noBackupFilesDir, "identities/aether").apply { mkdirs() }
+                val token = Sidecars.randomToken(9)
+                val staging = File(identityDir, "pending-$token").apply { mkdirs() }
+                AetherIdentityStore.retainUnchanged(identityDir, staging, kind)
+                var process: Process? = null
+                var exit: BuiltinExitNode.Started? = null
+                try {
+                    val settings = app.settingsRepository.getSettings()
+                    val ctx = SidecarContext(staging, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9),
+                        Sidecars.randomToken(), settings.operationalMode)
+                    val launch = engine.prepare(AetherSidecar.profile("h2", _ui.value.options.family,
+                        _ui.value.options.fragment, _ui.value.options.advanced), settings, ctx)
+                    val args = launch.command.toMutableList()
+                    for ((flag, name) in listOf("--config" to "base.toml", "--masque-config" to "identity.toml", "--wg-config" to "wireguard.toml")) {
+                        val at = args.indexOf(flag)
+                        require(at >= 0)
+                        args[at + 1] = File(staging, name).absolutePath
+                    }
+                    args += listOf("--register", kind)
+                    exit = BuiltinExitNode.start(_ui.value.options.advanced, settings, ctx)
+                    process = ProcessBuilder(args).directory(staging).redirectErrorStream(true).apply {
+                        environment().putAll(launch.environment)
+                        exit?.let { environment()["AETHER_UPSTREAM"] = it.upstream }
+                    }.start()
+                    process.outputStream.close()
+                    val child = process
+                    val failure = java.util.concurrent.atomic.AtomicReference("WARP registration did not complete")
+                    val reader = Thread({
+                        runCatching { child.inputStream.bufferedReader().useLines { lines ->
+                            lines.forEach { line ->
+                                if (line.contains("error", true) || line.contains("failed", true))
+                                    failure.set(SidecarProcess.failureCategory(line))
+                            }
+                        } }
+                    }, "aether-identity").apply { isDaemon = true; start() }
+                    val deadline = android.os.SystemClock.elapsedRealtime() + 240_000
+                    while (isRunning(child) && android.os.SystemClock.elapsedRealtime() < deadline) Thread.sleep(100)
+                    if (isRunning(child)) throw RegistrationFailure("WARP registration timed out")
+                    reader.join(500)
+                    if (child.exitValue() != 0) throw RegistrationFailure(failure.get())
+                    if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                    check(VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
+                        "Connection started during identity renewal"
+                    }
+                    exit?.running?.stop()
+                    exit = null
+                    AetherIdentityStore.publish(identityDir, staging, kind, token)
+                    com.example.xray.XrayLogManager.i("BUILTIN", "aether/keys · $kind · PASS")
+                } finally {
+                    try { process?.let { if (isRunning(it)) EngineProcessStop.stop(it) } }
+                    finally { try { exit?.running?.stop() } finally { staging.deleteRecursively() } }
                 }
-                args += listOf("--register", kind)
-                exit = BuiltinExitNode.start(_ui.value.options.advanced, settings, ctx)
-                process = ProcessBuilder(args).directory(staging).redirectErrorStream(true).apply {
-                    environment().putAll(launch.environment)
-                    exit?.let { environment()["AETHER_UPSTREAM"] = it.upstream }
-                }.start()
-                process.outputStream.close()
-                val child = process
-                val failure = java.util.concurrent.atomic.AtomicReference("WARP registration did not complete")
-                val reader = Thread({
-                    runCatching { child.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { line ->
-                            if (line.contains("error", true) || line.contains("failed", true))
-                                failure.set(SidecarProcess.failureCategory(line))
-                        }
-                    } }
-                }, "aether-identity").apply { isDaemon = true; start() }
-                val deadline = android.os.SystemClock.elapsedRealtime() + 240_000
-                while (isRunning(child) && android.os.SystemClock.elapsedRealtime() < deadline) Thread.sleep(100)
-                if (isRunning(child)) throw RegistrationFailure("WARP registration timed out")
-                reader.join(500)
-                if (child.exitValue() != 0) throw RegistrationFailure(failure.get())
-                if (Thread.currentThread().isInterrupted) throw InterruptedException()
-                check(VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
-                    "Connection started during identity renewal"
-                }
-                AetherIdentityStore.publish(identityDir, staging, kind, token)
-                com.example.xray.XrayLogManager.i("BUILTIN", "aether/keys · $kind · PASS")
-            } finally {
-                try { process?.let { if (isRunning(it)) EngineProcessStop.stop(it) } }
-                finally { try { exit?.running?.stop() } finally { staging.deleteRecursively() } }
             }
-        }
         }
         _ui.update { it.copy(message = "Requested WARP identities registered and activated.") }
     }
