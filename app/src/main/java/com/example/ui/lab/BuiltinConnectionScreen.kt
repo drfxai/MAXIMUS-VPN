@@ -26,6 +26,7 @@ import com.example.ui.protocols.labColors
 import com.example.ui.viewmodel.VpnViewModel
 import com.example.vpn.VpnController
 import com.example.vpn.connections.BuiltinConnections
+import com.example.vpn.sidecar.AetherSettings
 import com.example.vpn.sidecar.AetherSidecar
 import com.example.vpn.sidecar.ServerlessSidecar
 
@@ -41,7 +42,7 @@ internal fun BuiltinConnectionScreen(
     val factory = remember(application, direct) {
         viewModelFactory { initializer { ConnectionsViewModel(application, direct) } }
     }
-    val model: ConnectionsViewModel = viewModel(factory = factory)
+    val model: ConnectionsViewModel = viewModel(key = if (direct) "serverless-direct" else "aether-warp", factory = factory)
     val ui by model.ui.collectAsStateWithLifecycle()
     val session by vpn.connectionState.collectAsStateWithLifecycle()
     LaunchedEffect(model) { model.refreshOptions() }
@@ -49,6 +50,7 @@ internal fun BuiltinConnectionScreen(
     val idle = session.status == ConnectionStatus.DISCONNECTED
     val fallback = direct && ui.options.vpnFallback && session.activeProfile?.id == BuiltinConnections.AETHER
     val own = fallback || session.activeProfile?.id == if (direct) BuiltinConnections.DIRECT else BuiltinConnections.AETHER
+    val valid = direct || ui.options.advanced.problem() == null
     val configurable = idle && !ui.working
     val bundled = model.bundled()
     val options = ui.options
@@ -105,11 +107,63 @@ internal fun BuiltinConnectionScreen(
                             LabText("WARP identity", c.text, 14.sp)
                             LabText(if (ui.identity) "Stored on this device" else "Created on first access check", c.text2, 12.sp)
                         }
-                        TextButton(model::renewIdentity, enabled = configurable && bundled) {
+                        TextButton(onClick = { model.renewIdentity() }, enabled = configurable && bundled && valid) {
                             Text(if (ui.identity) "Renew" else "Create")
                         }
                     }
                 }
+            }
+            if (direct) {
+                GroupLabel(c, "Encrypted DNS")
+                Panel(c) {
+                    OptionRow("Preferred resolver", options.resolver, ServerlessSidecar.resolvers, configurable) {
+                        model.options { o -> o.copy(resolver = it) }
+                    }
+                }
+                Footnote(c, "Both resolvers use authenticated HTTPS through the DPI profile. The other resolver remains available as fallback.")
+            } else {
+                GroupLabel(c, "Endpoint discovery")
+                Panel(c) {
+                    OptionRow("Scan mode", options.advanced.scan, AetherSettings.scans, configurable) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(scan = value)) }
+                    }
+                    OptionRow("Obfuscation", options.advanced.noize, AetherSettings.noises,
+                        configurable && options.transport in listOf("auto", "h3", "wireguard", "wiw")) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(noize = value)) }
+                    }
+                    SettingField("Endpoint · blank to scan", options.advanced.endpoint, configurable) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(endpoint = value)) }
+                    }
+                }
+                GroupLabel(c, "WARP registration and TLS")
+                Panel(c) {
+                    OptionRow("API host / SNI", options.advanced.apiHost, AetherSettings.apiHosts, configurable) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(apiHost = value)) }
+                    }
+                    SettingField("API IP · blank for automatic", options.advanced.apiAddress, configurable) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(apiAddress = value)) }
+                    }
+                    SettingField("Fragment bytes · default 8-16", options.advanced.fragmentSize, configurable && options.fragment) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(fragmentSize = value)) }
+                    }
+                    SettingField("Fragment delay ms · default 2-10", options.advanced.fragmentDelay, configurable && options.fragment) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(fragmentDelay = value)) }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LabText("Encrypted Client Hello", c.text, 14.sp, modifier = Modifier.weight(1f))
+                        Switch(checked = options.advanced.ech, enabled = configurable, onCheckedChange = { value ->
+                            model.options { it.copy(advanced = it.advanced.copy(ech = value)) }
+                        })
+                    }
+                    KeyValue(c, "WireGuard key", if (ui.wireguardIdentity) "Stored" else "Not created")
+                    KeyValue(c, "MASQUE key", if (ui.masqueIdentity) "Stored" else "Not created")
+                    var keyKind by remember { mutableStateOf("masque") }
+                    OptionRow("New keys for", keyKind, listOf("masque", "wg"), configurable) { keyKind = it }
+                    TextButton(onClick = { model.renewIdentity(keyKind) }, enabled = configurable && bundled && valid) {
+                        Text("Get new WARP keys")
+                    }
+                }
+                Footnote(c, "ECH requires a usable ECH key. TLS uses Chrome by default. API host and SNI stay matched; certificate verification remains enabled.")
             }
             GroupLabel(c, "Access checks")
             Panel(c) {
@@ -126,7 +180,7 @@ internal fun BuiltinConnectionScreen(
             }
             Footnote(c, "Access checks run through the local engine. Starting the VPN runs the connection check again.")
             SecondaryButton(c, if (ui.working) "Cancel" else "Run access checks", null,
-                Modifier.padding(horizontal = Gutter).fillMaxWidth(), enabled = ui.working || configurable && bundled) {
+                Modifier.padding(horizontal = Gutter).fillMaxWidth(), enabled = ui.working || configurable && bundled && valid) {
                 if (ui.working) model.cancel() else model.testAccess()
             }
         }
@@ -137,7 +191,7 @@ internal fun BuiltinConnectionScreen(
             else -> "Connect"
         }, null,
             Modifier.padding(horizontal = Gutter, vertical = 10.dp).fillMaxWidth(),
-            enabled = own && !idle || configurable && bundled && canConnect) {
+            enabled = own && !idle || configurable && bundled && valid && canConnect) {
             if (own && !idle) VpnController.stopVpn(context)
             else if ((model.ui.value.result?.traffic == true || direct && model.ui.value.options.vpnFallback) &&
                 VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
@@ -177,9 +231,27 @@ private fun optionLabel(option: String) = when (option) {
     "h2" -> "MASQUE H2"
     "h3" -> "MASQUE H3"
     "wireguard" -> "WireGuard"
-    "gool" -> "Gool"
+    "" -> "Automatic"
+    "masque" -> "MASQUE"
+    "wg" -> "WireGuard"
+    "gool" -> "WireGuard over MASQUE"
+    "wiw" -> "WARP-in-WARP"
+    "mim" -> "MASQUE-in-MASQUE"
+    "cloudflare" -> "Cloudflare"
+    "google" -> "Google"
     "ipv4" -> "IPv4"
     "ipv6" -> "IPv6"
     "oob" -> "OOB"
     else -> option
+}
+
+@Composable
+private fun SettingField(label: String, value: String, enabled: Boolean, onChange: (String) -> Unit) {
+    val c = labColors
+    OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) },
+        enabled = enabled, singleLine = true,
+        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = c.text, unfocusedTextColor = c.text,
+            focusedBorderColor = c.accent, unfocusedBorderColor = c.stroke,
+            focusedLabelColor = c.accent, unfocusedLabelColor = c.text2, cursorColor = c.accent),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp))
 }

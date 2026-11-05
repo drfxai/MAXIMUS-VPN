@@ -20,14 +20,18 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
     private val app = application as RayApplication
     private val prefs = app.getSharedPreferences("galaxy_connections", 0)
     data class Options(val transport: String = "auto", val family: String = "auto",
-        val variant: String = "auto", val fragment: Boolean = true, val vpnFallback: Boolean = false)
+        val variant: String = "auto", val fragment: Boolean = true, val vpnFallback: Boolean = false,
+        val advanced: AetherSettings = AetherSettings(), val resolver: String = "auto")
     data class UiState(val options: Options, val working: Boolean = false, val message: String? = null,
-        val result: AccessProbe.Result? = null, val identity: Boolean = false)
+        val result: AccessProbe.Result? = null, val identity: Boolean = false,
+        val wireguardIdentity: Boolean = false, val masqueIdentity: Boolean = false)
     private fun readOptions() = Options(
         prefs.getString("transport", "auto").orEmpty().takeIf { it in AetherSidecar.transports } ?: "auto",
-        prefs.getString("family", "auto").orEmpty().takeIf { it in AetherSidecar.families } ?: "auto",
+        prefs.getString(if (direct) "direct_family" else "aether_family", prefs.getString("family", "auto")).orEmpty().takeIf { it in AetherSidecar.families } ?: "auto",
         prefs.getString("variant", "auto").orEmpty().takeIf { it in ServerlessSidecar.variants } ?: "auto",
-        prefs.getBoolean("fragment", true), prefs.getBoolean("vpnFallback", false))
+        prefs.getBoolean("fragment", true), prefs.getBoolean("vpnFallback", false),
+        AetherSettings.read(org.json.JSONObject(prefs.getString("aether_advanced", "{}") ?: "{}")),
+        prefs.getString("direct_resolver", "auto").orEmpty().takeIf { it in ServerlessSidecar.resolvers } ?: "auto")
     private val _ui = MutableStateFlow(UiState(readOptions()))
     val ui = _ui.asStateFlow()
     private var operation: Job? = null
@@ -60,22 +64,26 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         refreshIdentity()
     }
     fun options(change: (Options) -> Options) {
-        if (_ui.value.working) return
+        if (_ui.value.working || VpnController.connectionState.value.status != ConnectionStatus.DISCONNECTED) return
         val o = change(readOptions())
-        require(o.transport in AetherSidecar.transports && o.family in AetherSidecar.families && o.variant in ServerlessSidecar.variants)
-        prefs.edit().putString("transport", o.transport).putString("family", o.family)
-            .putString("variant", o.variant).putBoolean("fragment", o.fragment).putBoolean("vpnFallback", o.vpnFallback).apply()
-        _ui.update { it.copy(options = o, result = null, message = null) }
+        require(o.transport in AetherSidecar.transports && o.family in AetherSidecar.families && o.variant in ServerlessSidecar.variants && o.resolver in ServerlessSidecar.resolvers)
+        prefs.edit().putString("transport", o.transport).putString(if (direct) "direct_family" else "aether_family", o.family)
+            .putString("aether_advanced", o.advanced.write(org.json.JSONObject()).toString())
+            .putString("direct_resolver", o.resolver).putString("variant", o.variant).putBoolean("fragment", o.fragment).putBoolean("vpnFallback", o.vpnFallback).apply()
+        _ui.update { it.copy(options = o, result = null, message = if (direct) null else o.advanced.problem()) }
         refreshIdentity()
     }
-    fun profile(): VlessProfile = _ui.value.options.let { if (direct) ServerlessSidecar.profile(it.variant, it.family, it.vpnFallback)
-        else AetherSidecar.profile(it.transport, it.family, it.fragment) }
-    fun bundled(): Boolean = Sidecars.forProfile(profile())?.let(Sidecars::isBundled) == true
+    fun profile(): VlessProfile = _ui.value.options.let { if (direct) ServerlessSidecar.profile(it.variant, it.family, it.vpnFallback, it.resolver)
+        else AetherSidecar.profile(it.transport, it.family, it.fragment, it.advanced) }
+    fun bundled(): Boolean = Sidecars.isBundled(if (direct) ServerlessSidecar else AetherSidecar)
     fun cancel() { operation?.cancel() }
     private fun refreshIdentity() {
-        val name = if (_ui.value.options.transport == "wireguard") "wireguard.toml" else "identity.toml"
-        val file = File(app.noBackupFilesDir, "identities/aether/$name")
-        _ui.update { it.copy(identity = file.isFile && file.length() > 0) }
+        val dir = File(app.noBackupFilesDir, "identities/aether")
+        fun present(name: String) = File(dir, name).let { it.isFile && it.length() > 0 }
+        val wg = present("wireguard.toml")
+        val masque = present("identity.toml")
+        _ui.update { it.copy(wireguardIdentity = wg, masqueIdentity = masque,
+            identity = if (it.options.transport in listOf("wireguard", "wiw")) wg else masque) }
     }
     private fun task(block: suspend () -> Unit) {
         if (_ui.value.working) return
@@ -96,6 +104,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         }
     }
     fun testAccess() = task {
+        if (!direct) _ui.value.options.advanced.problem()?.let { error(it) }
         val original = profile()
         val profile = original.copy(extraSettings = org.json.JSONObject(original.extraSettings).put("rescan", true).toString())
         val testedEpoch = networkEpoch.get()
@@ -116,7 +125,8 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
             else it.copy(result = null, message = "Network changed during the test. Run access checks again.")
         }
     }
-    fun renewIdentity() = task {
+    fun renewIdentity(kind: String = if (_ui.value.options.transport in listOf("wireguard", "wiw")) "wg" else "masque") = task {
+        require(kind in listOf("wg", "masque"))
         runInterruptible(Dispatchers.IO) {
             val engine = AetherSidecar
             val executable = Sidecars.executable(engine) ?: error("Engine unavailable")
@@ -128,12 +138,12 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                 val ctx = SidecarContext(staging, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9),
                     Sidecars.randomToken(), settings.operationalMode)
                 val launch = engine.prepare(AetherSidecar.profile(_ui.value.options.transport, _ui.value.options.family,
-                    _ui.value.options.fragment), settings, ctx)
+                    _ui.value.options.fragment, _ui.value.options.advanced), settings, ctx)
                 val args = launch.command.toMutableList()
                 for (flag in listOf("--config", "--masque-config", "--wg-config")) {
                     val at = args.indexOf(flag); require(at >= 0); args[at + 1] = File(staging, "identity.toml").absolutePath
                 }
-                args += listOf("--register", if (_ui.value.options.transport == "wireguard") "wg" else "masque")
+                args += listOf("--register", kind)
                 process = ProcessBuilder(args).directory(staging).redirectErrorStream(true).apply {
                     environment().putAll(launch.environment)
                 }.start()
@@ -146,7 +156,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                 check(!isRunning(child) && child.exitValue() == 0)
                 reader.join(500)
                 val fresh = File(staging, "identity.toml"); check(fresh.isFile && fresh.length() in 32..131072)
-                val name = if (_ui.value.options.transport == "wireguard") "wireguard.toml" else "identity.toml"
+                val name = if (kind == "wg") "wireguard.toml" else "identity.toml"
                 if (Thread.currentThread().isInterrupted) throw InterruptedException()
                 check(VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
                     "Connection started during identity renewal"
