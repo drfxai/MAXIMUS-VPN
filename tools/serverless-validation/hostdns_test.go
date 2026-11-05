@@ -11,7 +11,6 @@ import (
     "os"
     "os/exec"
     "path/filepath"
-    "strings"
     "testing"
     "time"
 
@@ -94,7 +93,8 @@ func TestBuiltinHostDomainHandoff(t *testing.T) {
             start := time.Now()
             client := outer.GetFeature(dns.ClientType()).(dns.Client)
             ips, _, err := client.LookupIP("maximus-app.invalid", dns.IPOption{IPv4Enable:true, FakeEnable:true})
-            if err != nil || len(ips) == 0 || !strings.HasPrefix(ips[0].String(), "198.18.") {
+            _, fakePool, _ := net.ParseCIDR("198.18.0.0/15")
+            if err != nil || len(ips) == 0 || !fakePool.Contains(ips[0]) {
                 t.Fatalf("application DNS did not use the host FakeDNS pool: %v %v", ips, err)
             }
             if time.Since(start) > time.Second { t.Fatal("app DNS waited for an external resolver") }
