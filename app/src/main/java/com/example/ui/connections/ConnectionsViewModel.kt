@@ -65,11 +65,24 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
     }
     fun options(change: (Options) -> Options) {
         if (_ui.value.working || VpnController.connectionState.value.status != ConnectionStatus.DISCONNECTED) return
-        val o = change(readOptions())
+        val o = change(_ui.value.options)
         require(o.transport in AetherSidecar.transports && o.family in AetherSidecar.families && o.variant in ServerlessSidecar.variants && o.resolver in ServerlessSidecar.resolvers)
-        prefs.edit().putString("transport", o.transport).putString(if (direct) "direct_family" else "aether_family", o.family)
-            .putString("aether_advanced", o.advanced.write(org.json.JSONObject()).toString())
-            .putString("direct_resolver", o.resolver).putString("variant", o.variant).putBoolean("fragment", o.fragment).putBoolean("vpnFallback", o.vpnFallback).apply()
+        prefs.edit().apply {
+            if (direct) {
+                putString("direct_family", o.family)
+                putString("direct_resolver", o.resolver)
+                putString("variant", o.variant)
+                putBoolean("vpnFallback", o.vpnFallback)
+            } else {
+                putString("aether_family", o.family)
+                putString("transport", o.transport)
+                putBoolean("fragment", o.fragment)
+                // Incomplete text belongs to this editor, never to a service or fallback launch.
+                if (o.advanced.problem() == null) {
+                    putString("aether_advanced", o.advanced.write(org.json.JSONObject()).toString())
+                }
+            }
+        }.apply()
         _ui.update { it.copy(options = o, result = null, message = if (direct) null else o.advanced.problem()) }
         refreshIdentity()
     }

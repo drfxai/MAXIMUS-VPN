@@ -90,7 +90,9 @@ data class AetherSettings(
                 else text.substringBeforeLast(':', "")
             if (text.startsWith("[") && !text.matches(Regex("\\[[0-9a-fA-F:]+\\]:[0-9]{1,5}"))) return false
             if (!text.startsWith("[") && host.contains(':')) return false
-            val port = text.substringAfterLast(':', "").toIntOrNull()
+            val portText = text.substringAfterLast(':', "")
+            if (portText.length !in 1..5 || !portText.all { it in '0'..'9' }) return false
+            val port = portText.toIntOrNull()
             return ip(host) && port != null && port in 1..65535
         }
     }

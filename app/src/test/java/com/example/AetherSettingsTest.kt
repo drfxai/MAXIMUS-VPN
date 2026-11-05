@@ -32,7 +32,7 @@ class AetherSettingsTest {
 
     @Test fun invalidNativeValuesFailBeforeLaunchingOrRegistering() {
         for (bad in listOf("1.1.1.1", "1.1.1.1:0", "1.1.1.1:65536", "host.example:443",
-            "2606:4700::1:443", "[2606:4700::1]bad:443", "1.1.1.1:443 --tls-verify")) {
+            "2606:4700::1:443", "[2606:4700::1]bad:443", "1.1.1.1:443 --tls-verify", "1.1.1.1:+443")) {
             assertNotNull(bad, AetherSettings(endpoint = bad).problem())
         }
         assertNull(AetherSettings(endpoint = "[2606:4700::1]:443").problem())
