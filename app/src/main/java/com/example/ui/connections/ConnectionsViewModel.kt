@@ -103,12 +103,21 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
     fun commandPreview(): String {
         val o = _ui.value.options
         if (direct) return "serverless run -c <private-config> · ${o.variant} · ${o.family} · DNS ${o.resolver}"
-        val carrier = when (o.transport) { "h2", "h3", "auto" -> "masque"; "wireguard" -> "wg"; "wiw" -> "gool"; else -> o.transport }
-        val command = mutableListOf("aether", "--protocol", carrier, "--scan", o.advanced.scan,
-            "--ip", when(o.family) { "ipv4" -> "v4"; "ipv6" -> "v6"; else -> "both" }, "--quick-reconnect", "--tls-verify")
-        if (o.transport in listOf("h2", "auto", "gool", "mim") || o.advanced.tor == "reverse" || o.advanced.psiphon == "reverse") command += "--h2"
-        if (o.transport == "wiw") command += "--gool-classic"
-        command += o.advanced.arguments(o.transport, o.fragment)
+        o.advanced.problem(o.transport)?.let { return "Complete the settings: $it" }
+        val reverse = o.advanced.tor == "reverse" || o.advanced.psiphon == "reverse"
+        val carrier = if (o.transport == "auto" || reverse && o.transport == "h3") "h2" else o.transport
+        val command = mutableListOf("aether", "--bind", "127.0.0.1:<local-port>", "--scan", o.advanced.scan,
+            "--quick-reconnect", "--tls-verify")
+        command += when (carrier) {
+            "h3" -> listOf("--masque", "--h3")
+            "wireguard" -> listOf("--wg")
+            "gool" -> listOf("--gool", "--h2")
+            "wiw" -> listOf("--gool", "--gool-classic")
+            "mim" -> listOf("--mim", "--h2")
+            else -> listOf("--masque", "--h2")
+        }
+        command += when (o.family) { "ipv4" -> "-4"; "ipv6" -> "-6"; else -> "--dual" }
+        command += o.advanced.arguments(carrier, o.fragment)
         if (o.advanced.tor != "off") command += when(o.advanced.tor) { "chain" -> "--tor"; "reverse" -> "--tor-reverse"; else -> "--tor-only" }
         if (o.advanced.psiphon != "off") command += when(o.advanced.psiphon) { "chain" -> "--psiphon"; "reverse" -> "--psiphon-reverse"; else -> "--psiphon-only" }
         if (BuiltinExitNode.needed(o.advanced)) command += listOf("--upstream", "<private-local-exit>")
