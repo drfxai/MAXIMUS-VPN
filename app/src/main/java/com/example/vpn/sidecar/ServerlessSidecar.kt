@@ -19,16 +19,17 @@ object ServerlessSidecar : SidecarEngine {
         ProfileExtras.read(profile).optString("variant", "auto") !in variants -> "Unsupported serverless profile"
         ProfileExtras.read(profile).optString("family", "auto") !in AetherSidecar.families -> "Unsupported IP family"
         ProfileExtras.read(profile).optString("resolver", "auto") !in resolvers -> "Unsupported encrypted DNS resolver"
-        else -> null
+        else -> AetherSettings.read(ProfileExtras.read(profile)).problem()
     }
-    fun profile(variant: String = "auto", family: String = "auto", vpnFallback: Boolean = false, resolver: String = "auto") : VlessProfile {
-        require(variant in variants && family in AetherSidecar.families && resolver in resolvers)
-        return VlessProfile(id = "maximus-serverless", name = "Direct Serverless", address = ID, port = 0, uuid = "",
-            protocolType = ProtocolType.MIXED, extraSettings = JSONObject().put("engine", ID)
+    fun profile(variant: String = "auto", family: String = "auto", vpnFallback: Boolean = false, resolver: String = "auto", advanced: AetherSettings = AetherSettings()) : VlessProfile {
+        require(variant in variants && family in AetherSidecar.families && resolver in resolvers && advanced.problem() == null)
+        return VlessProfile(id = "maximus-serverless", name = advanced.alias.ifBlank { "Direct Serverless" }, address = ID, port = 0, uuid = "",
+            protocolType = ProtocolType.MIXED, extraSettings = advanced.write(JSONObject()).put("engine", ID)
                 .put("variant", variant).put("family", family).put("vpnFallback", vpnFallback).put("resolver", resolver).toString())
     }
     /** Keep DPI masks, repairing fragB's empty TLS record; replace the inlet and geo classifications. */
-    fun config(source: String, port: Int, user: String, password: String, family: String, resolver: String = "auto"): JSONObject {
+    fun config(source: String, port: Int, user: String, password: String, family: String, resolver: String = "auto", advanced: AetherSettings = AetherSettings(),
+        exitOutbound: JSONObject? = null): JSONObject {
         require(port in 1..65535 && user.isNotBlank() && password.isNotBlank())
         require(family in AetherSidecar.families && resolver in resolvers)
         val root = JSONObject(source)
@@ -102,17 +103,42 @@ object ServerlessSidecar : SidecarEngine {
                 if (family != "auto") { sock.remove("happyEyeballs"); sock.put("domainStrategy", if (family == "ipv4") "ForceIPv4" else "ForceIPv6") }
             }
         }
+        if (exitOutbound != null) {
+            val exitTag = "serverless-exit"
+            exitOutbound.put("tag", exitTag)
+            for (i in 0 until out.length()) {
+                val outbound = out.getJSONObject(i)
+                if (outbound.optString("protocol") != "freedom") continue
+                val stream = outbound.optJSONObject("streamSettings") ?: JSONObject().also { outbound.put("streamSettings", it) }
+                val sock = stream.optJSONObject("sockopt") ?: JSONObject().also { stream.put("sockopt", it) }
+                sock.put("dialerProxy", exitTag)
+            }
+            out.put(exitOutbound)
+        } else if (advanced.exitFinalMask.isNotBlank() || advanced.exitDialMode.isNotBlank()) {
+            for (i in 0 until out.length()) {
+                val outbound = out.getJSONObject(i)
+                if (outbound.optString("protocol") != "freedom") continue
+                val stream = outbound.optJSONObject("streamSettings") ?: JSONObject().also { outbound.put("streamSettings", it) }
+                if (advanced.exitFinalMask.isNotBlank()) stream.put("finalmask", JSONObject(advanced.exitFinalMask))
+                if (advanced.exitDialMode.isNotBlank()) {
+                    val sock = stream.optJSONObject("sockopt") ?: JSONObject().also { stream.put("sockopt", it) }
+                    sock.put("dialMode", advanced.exitDialMode)
+                }
+            }
+        }
         return root
     }
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
         require(context.upstreamSocks == null) { "Direct mode cannot silently skip a requested hop" }
         problem(profile)?.let { error(it) }
         val e = ProfileExtras.read(profile)
+        val advanced = AetherSettings.read(e)
+        val exit = BuiltinExitNode.selected(advanced, settings)
         val variant = e.optString("variant", "auto").let { if (it == "auto") "fragA" else it }
         val source = Sidecars.openAsset?.invoke("serverless/Serverless-$variant.jsonc")?.bufferedReader()?.use { it.readText() }
             ?: error("Pinned serverless configuration is missing")
         val file = File(context.workDir, "serverless.json").apply {
-            parentFile?.mkdirs(); writeText(config(source, context.socksPort, context.socksUser, context.socksPass, e.optString("family", "auto"), e.optString("resolver", "auto")).toString())
+            parentFile?.mkdirs(); writeText(config(source, context.socksPort, context.socksUser, context.socksPass, e.optString("family", "auto"), e.optString("resolver", "auto"), advanced, exit).toString())
             setReadable(false, false); setReadable(true, true); setWritable(false, false); setWritable(true, true)
         }
         return SidecarLaunch(listOf(context.executable.absolutePath, "run", "-c", file.absolutePath),

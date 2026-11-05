@@ -135,7 +135,7 @@ object EngineProbe {
                 },
                 start = { engine, hop, ctx ->
                     val launch = engine.prepare(hop, settings, ctx)
-                    val process = EngineReaper.track(engine.startInApp(launch, ctx)
+                    val process = EngineReaper.track(engine.startPrepared(hop, settings, launch, ctx)
                         ?: SidecarProcess.start("lab-${engine.id}", launch, ctx.workDir, ctx.socksPort))
                     try {
                         if (!process.awaitReady(launch.readyTimeoutMs)) error("${engine.id} was not ready")
@@ -167,7 +167,7 @@ object EngineProbe {
         val launch = runCatching { engine.prepare(profile, AppSettings(), ctx) }.getOrElse {
             return Result(engine.id, ConnectionStage.NOT_TESTED, null, it.message ?: "could not prepare the engine", notTested = true)
         }
-        val running = runCatching { EngineReaper.track(engine.startInApp(launch, ctx) ?: SidecarProcess.start("lab-${engine.id}", launch, workDir, ctx.socksPort)) }.getOrElse {
+        val running = runCatching { EngineReaper.track(engine.startPrepared(profile, AppSettings(), launch, ctx) ?: SidecarProcess.start("lab-${engine.id}", launch, workDir, ctx.socksPort)) }.getOrElse {
             return Result(engine.id, ConnectionStage.NOT_TESTED, null, it.message ?: "the engine did not start", notTested = false)
         }
         var kept = false

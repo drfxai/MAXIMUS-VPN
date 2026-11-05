@@ -17,6 +17,7 @@ object BuiltinConnections {
         return if (id == AETHER) AetherSidecar.profile(
             p.getString("transport", "auto").takeIf { it in AetherSidecar.transports } ?: "auto",
             family, p.getBoolean("fragment", true), AetherSettings.read(org.json.JSONObject(p.getString("aether_advanced", "{}") ?: "{}")))
-        else ServerlessSidecar.profile(p.getString("variant", "auto").takeIf { it in ServerlessSidecar.variants } ?: "auto", family, p.getBoolean("vpnFallback", false), p.getString("direct_resolver", "auto").takeIf { it in ServerlessSidecar.resolvers } ?: "auto")
+        else ServerlessSidecar.profile(p.getString("variant", "auto").takeIf { it in ServerlessSidecar.variants } ?: "auto", family, p.getBoolean("vpnFallback", false), p.getString("direct_resolver", "auto").takeIf { it in ServerlessSidecar.resolvers } ?: "auto",
+            AetherSettings.read(org.json.JSONObject(p.getString("direct_advanced", "{}") ?: "{}")))
     }
 }

@@ -34,14 +34,7 @@ class SidecarProcess(
                     // Only fixed categories are retained: raw output may contain credentials.
                     if (line.contains("error", true) || line.contains("failed", true) ||
                         line.contains("no such file", true) || line.contains("unknown argument", true)) {
-                        failureHint = when {
-                            line.contains("no such file", true) || line.contains("not found", true) -> "required file missing"
-                            line.contains("unknown argument", true) || line.contains("unrecognized option", true) -> "unsupported command-line option"
-                            line.contains("permission denied", true) -> "file permission denied"
-                            line.contains("certificate", true) || line.contains("tls", true) -> "TLS or certificate error"
-                            line.contains("config", true) || line.contains("toml", true) -> "configuration rejected"
-                            else -> "engine reported an error"
-                        }
+                        failureHint = failureCategory(line)
                     }
                     if (logOutput && index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line).take(300))
                 }
@@ -89,6 +82,17 @@ class SidecarProcess(
     }
 
     companion object {
+        fun failureCategory(line: String): String = when {
+            line.contains("certificate", true) || line.contains("tls", true) -> "TLS or certificate verification failed"
+            line.contains("registration", true) || line.contains("enroll", true) -> "WARP registration failed"
+            line.contains("permission denied", true) -> "file permission denied"
+            line.contains("no such file", true) || line.contains("not found", true) -> "required file missing"
+            line.contains("unknown argument", true) || line.contains("unrecognized option", true) -> "unsupported command-line option"
+            line.contains("config", true) || line.contains("toml", true) -> "configuration rejected"
+            line.contains("timed out", true) || line.contains("timeout", true) -> "network operation timed out"
+            else -> "engine reported an error"
+        }
+
         private const val MAX_LOG_LINES = 2_000
 
         fun start(name: String, launch: SidecarLaunch, workDir: File, socksPort: Int): SidecarProcess {

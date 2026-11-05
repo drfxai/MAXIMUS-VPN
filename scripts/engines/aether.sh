@@ -42,7 +42,7 @@ export LIBCLANG_PATH="$(dirname "$libclang")"
 under="${target//-/_}"
 export "BINDGEN_EXTRA_CLANG_ARGS_${under}=--target=${prefix}24 --sysroot=$sysroot -I$sysroot/usr/include -I$sysroot/usr/include/$include_arch"
 export "BORING_BSSL_RUST_CPPLIB_${under}=static:-bundle=c++"
-if ! (cd "$source_dir/aether" && cargo ndk -t "$ABI" --platform 24 build --locked --release --bin aether); then
+if ! (cd "$source_dir/aether" && cargo ndk -t "$ABI" --platform 24 build --locked --release --features tor --bin aether); then
   find "$source_dir/aether/target/$target/release/build" -path '*/out/bindings.rs' -exec head -c 1800 {} \;
   exit 1
 fi

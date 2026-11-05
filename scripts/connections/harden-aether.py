@@ -63,9 +63,37 @@ replace('socks.rs', '    sock.write_all(&[VER, 0x00]).await?;\n    Ok(())', r'''
     Ok(())''')
 # An auth challenge also proves that a listener is serving; it does not grant proxy access.
 replace('socks.rs', 'Some(reply == [VER, 0x00])', 'Some(reply == [VER, 0xff])')
-# The listener is bound before registration/scanning. Emit a fixed, secret-free
-# marker only once a tunnel's netstack is actually serving it, even at RUST_LOG=warn.
-replace('lib.rs', '    async fn serve(&self, stack: &netstack::StackHandle) -> std::convert::Infallible {', '''    async fn serve(&self, stack: &netstack::StackHandle) -> std::convert::Infallible {
-        eprintln!("MAXIMUS_AETHER_SOCKS_READY");''')
+# A local-only options validation entry for Android packaging checks; it opens no listeners.
+replace('lib.rs', '    upstream::check_setting()?;', '''    upstream::check_setting()?;
+    if std::env::var("MAXIMUS_VALIDATE_OPTIONS").as_deref() == Ok("1") {
+        println!("MAXIMUS_AETHER_OPTIONS_OK");
+        return Ok(());
+    }''')
+# Mark the precise SOCKS listener only when it is being served.
+replace('socks.rs', '    let listen = listener.borrow().local_addr()?;', '''    let listen = listener.borrow().local_addr()?;
+    eprintln!("MAXIMUS_AETHER_SOCKS_READY:{}", listen.port());''')
+replace('socks.rs', '    log::info!("[+] {kind} listening on {listen}");', '''    log::info!("[+] {kind} listening on {listen}");
+    eprintln!("MAXIMUS_AETHER_SOCKS_READY:{}", listen.port());''')
+replace('psiphon.rs', '    let socks_relay = crate::socks::forward(socks_listener, "psiphon socks5", running.socks);',
+'''    eprintln!("MAXIMUS_AETHER_SOCKS_READY:{}", listen.port());
+    let socks_relay = crate::socks::forward(socks_listener, "psiphon socks5", running.socks);''')
+# The bundled relay clients authenticate to the tunnel listener as external app clients do.
+with (src / 'upstream.rs').open('a') as output:
+    output.write(r'''
+pub fn maximus_loopback_proxy(address: std::net::SocketAddr) -> String {
+    let user = std::env::var("MAXIMUS_SOCKS_USER").unwrap_or_default();
+    let pass = std::env::var("MAXIMUS_SOCKS_PASS").unwrap_or_default();
+    if user.is_empty() || pass.is_empty() { return format!("socks5://{address}"); }
+    format!("socks5://{}:{}@{}", percent_encode(&user), percent_encode(&pass), address)
+}
+''')
+replace('tor.rs', 'format!("socks5://{tunnel}").parse()', 'crate::upstream::maximus_loopback_proxy(tunnel).parse()')
+replace('psiphon.rs', 'Some(format!("socks5://{through}"))', 'Some(crate::upstream::maximus_loopback_proxy(through))')
+replace('lib.rs', 'let tunnel = upstream::Upstream::parse(&format!("socks5h://{through}"))?;',
+        'let tunnel = upstream::Upstream::parse(&upstream::maximus_loopback_proxy(through))?;')
+# carrier_upstream also connects to the authenticated Tor listener. Psiphon uses its own proxy.
+replace('lib.rs', '    let setting = format!("socks5://{socks}");', '''    let setting = if name == "tor" {
+        upstream::maximus_loopback_proxy(socks)
+    } else { format!("socks5://{socks}") };''')
 (root / 'MAXIMUS_POLICY').write_text('WARP API: CA + hostname; MASQUE: mandatory upstream SPKI pins\n')
 print('Aether authenticated registration and gateway pin policy applied')

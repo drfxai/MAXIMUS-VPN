@@ -17,7 +17,8 @@ with tempfile.TemporaryDirectory(prefix='direct-native-') as tmp:
     binary=root/'xray'
     env=dict(os.environ,GOTOOLCHAIN='go1.27.0',GOOS='linux',GOARCH='amd64',CGO_ENABLED='0')
     validation=source/'maximusvalidation';validation.mkdir()
-    shutil.copyfile(repo/'tools/serverless-validation/bootstrap_test.go', validation/'bootstrap_test.go')
+    for test in (repo/'tools/serverless-validation').glob('*_test.go'):
+        shutil.copyfile(test, validation/test.name)
     test_env=dict(env, MAXIMUS_SERVERLESS_FIXTURES=str(args.fixtures.resolve()))
     subprocess.run(['go','test','-count=1','-timeout=90s','./maximusvalidation'],cwd=source,env=test_env,check=True)
     subprocess.run(['go','build','-mod=readonly','-trimpath','-ldflags=-checklinkname=0','-o',str(binary),'./main'],cwd=source,env=env,check=True)

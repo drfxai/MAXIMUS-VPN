@@ -1,19 +1,19 @@
-MAXIMUS VPN V1.0.4 — versionCode 50 — PattNG-inspired Aether/WARP and Direct upgrade
+MAXIMUS VPN V1.0.4 — versionCode 51 — built-in TUN DNS fix and complete Aether controls
 
-Publish signed ARM64 and universal APKs including merged PR #174.
+Build the reviewed merged sources and publish signed ARM64 and universal APKs.
 
-Reviewed changes:
-- Independent Aether and Direct ViewModels and IP-family preferences.
-- Native-backed scan, obfuscation, literal endpoint, API host/address, ECH and fragment controls.
-- WARP-in-WARP and MASQUE-in-MASQUE transport selection.
-- Separate WireGuard/MASQUE key registration and stored-key status.
-- Direct encrypted DNS preference with authenticated fallback.
-- Incomplete editor values never replace valid persisted launch settings.
+Fix the DNS handoff between Android's TUN and Aether / Direct by restoring domains
+before forwarding them to the local authenticated SOCKS engine. Connect starts
+the verified service directly, with optional standalone access checks.
 
-Validation: Android unit tests and release lint passed; real Direct Serverless schema,
-authentication and bidirectional traffic passed; sing-box traffic/certificate rejection,
-transport recovery and native Aether/Direct builds for all three ABIs passed.
+Add all six WARP key requests, independent API address/SNI/host, five TLS client
+profiles, remarks, exit-node selection, finalMask and dialMode, Tor/Psiphon
+placement controls, endpoint scanning, command preview and sanitized operation
+logs. Activate complete identity generations atomically.
 
-Retain versionName 1.0.4 and the permanent release signing certificate.
-Publish APKs, corresponding native sources, checksums, provenance and in-app update metadata.
-CI does not establish connectivity on a physical device or filtered operator network.
+Build Aether with its native Tor feature. Verify relay authentication, the
+app-facing listener's readiness, native TLS options on Android, host FakeDNS to
+SOCKS domain restoration, existing direct traffic, unit tests and lint.
+
+Keep versionName 1.0.4, the permanent signing certificate and corresponding source
+offers. Physical operator-network acceptance requires device measurements.

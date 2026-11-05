@@ -241,6 +241,9 @@ class RayApplication : Application() {
         instance = this
         // Tor's own process only runs TorService; nothing of the app starts there.
         if (com.example.core.AppProcess.isTorProcess()) return
+        com.example.vpn.sidecar.BuiltinExitNode.loadProfile = { id ->
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { serverRepository.getProfileById(id) }
+        }
         com.example.vpn.sidecar.AetherSidecar.identityDirectory = { java.io.File(noBackupFilesDir, "identities/aether") }
         com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
         com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }

@@ -27,16 +27,16 @@ class AetherReadinessTest {
         }
         override fun waitFor(): Int { ended.await(); return 0 }
         override fun destroy() { writer.close(); ended.countDown() }
-        fun serving() { writer.write("MAXIMUS_AETHER_SOCKS_READY\n".toByteArray()); writer.flush() }
+        fun serving(port: Int) { writer.write("MAXIMUS_AETHER_SOCKS_READY:$port\n".toByteArray()); writer.flush() }
     }
 
     @Test fun boundPortDoesNotPassUntilTunnelStartsServing() {
         ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
             val child = PendingEngine()
-            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.READY_LINE, logOutput = false)
+            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.readyLine(listener.localPort), logOutput = false)
             try {
                 assertFalse("A bound socket is not a ready WARP tunnel", process.awaitReady(150))
-                child.serving()
+                child.serving(listener.localPort)
                 assertTrue("Serving marker and listener must both be ready", process.awaitReady(2000))
             } finally { process.stop() }
         }
@@ -45,9 +45,9 @@ class AetherReadinessTest {
     @Test fun servingMarkerCannotPassWithNoListener() {
         val port = ServerSocket(0).use { it.localPort }
         val child = PendingEngine()
-        val process = SidecarProcess("aether", child, port, AetherSidecar.READY_LINE, logOutput = false)
+        val process = SidecarProcess("aether", child, port, AetherSidecar.readyLine(port), logOutput = false)
         try {
-            child.serving()
+            child.serving(port)
             assertFalse(process.awaitReady(200))
         } finally { process.stop() }
     }
