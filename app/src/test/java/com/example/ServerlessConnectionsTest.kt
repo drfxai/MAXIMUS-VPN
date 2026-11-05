@@ -1,6 +1,5 @@
 package com.example
 
-import com.example.vpn.connections.AccessProbe
 import com.example.vpn.connections.ConnectionEngineRunner
 import com.example.vpn.sidecar.*
 import org.json.JSONObject
@@ -54,10 +53,6 @@ class ServerlessConnectionsTest {
         assertEquals(2, warp.size)
         assertTrue(warp.all(AetherSidecar::handles))
         assertEquals(1, ConnectionEngineRunner.candidates(ServerlessSidecar.profile("oob")).size)
-    }
-    @Test fun chunkedDnsResponsesAreDecodedWithoutGuessing() {
-        assertEquals("abcdef", AccessProbe.decodeChunks("3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n"))
-        assertThrows(IllegalArgumentException::class.java) { AccessProbe.decodeChunks("ffff\r\nshort") }
     }
     @Test fun invalidSelectionsAndPortsAreRefused() {
         assertThrows(IllegalArgumentException::class.java) { ServerlessSidecar.profile("unknown") }

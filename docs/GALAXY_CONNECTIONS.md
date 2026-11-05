@@ -1,6 +1,6 @@
 # Built-in connections in Maximus LAB
 
-LAB opens separate Aether / WARP and Serverless Direct pages using the app's light and dark themes. Access checks show independent results for authenticated DNS, the HTTPS certificate and an HTTPS response. Connect becomes available after HTTPS passes on the current network. The service checks access again when it starts the VPN.
+LAB opens separate Aether / WARP and Serverless Direct pages using the app's light and dark themes. Access checks show independent results for authenticated DNS, the HTTPS certificate and an HTTPS response. Connect becomes available after HTTPS passes on the current network. With explicit WARP fallback enabled, Direct can also start a session and delegate failed Direct attempts to the service fallback. The service checks access again when it starts the VPN.
 
 Aether Auto tries MASQUE H2 then H3. Explicit WireGuard and WireGuard-over-MASQUE are also available. Registration verifies TLS, and MASQUE verifies the upstream gateway SPKI. The identity lives in app-private, backup-excluded storage. Renewal stages a new identity and replaces the existing one only after successful registration.
 

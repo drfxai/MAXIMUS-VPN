@@ -94,6 +94,15 @@ class TrafficCheckTest {
         assertTrue(r.toString(), r is LegResult.Passed)
     }
 
+    @Test fun chunkedUtf8BodiesAreReadByByteLength() {
+        val text = "اتصال برقرار شد"
+        server.enqueue(MockResponse().setChunkedBody(text, 3))
+        server.start()
+        val response = check().exchange(target("/dns"), "GET", null, keepBody = true)
+        assertEquals(text, response.body?.toString("UTF-8"))
+        assertEquals(text.toByteArray(Charsets.UTF_8).size, response.bodyBytes)
+    }
+
     @Test fun aShortDownloadIsAFailureNotAPass() {
         server.enqueue(MockResponse().setBody(Buffer().write(ByteArray(1000))))
         server.start()
@@ -147,10 +156,12 @@ class TrafficCheckTest {
         server.enqueue(MockResponse().setBody(Buffer().write(ByteArray(4096))))
         server.start()
         val client = HandshakeCertificates.Builder().addTrustedCertificate(root.certificate).build()
+        var tlsVerified = false
         val check = TrafficCheck(direct, tls = true, downloads = listOf(TrafficCheck.Target("localhost", server.port, "/bytes", 4096)),
             stepTimeoutMs = 3_000, sslFactory = { client.sslSocketFactory() },
-            hostnameVerifier = okhttp3.internal.tls.OkHostnameVerifier)
+            hostnameVerifier = okhttp3.internal.tls.OkHostnameVerifier, onTlsVerified = { tlsVerified = true })
         val r = check.download()
+        assertTrue(!tlsVerified)
         assertTrue(r.toString(), r is LegResult.Failed && r.stage == FailureStage.CERTIFICATE_VALIDATION_FAILED)
     }
 
@@ -161,10 +172,12 @@ class TrafficCheckTest {
         server.enqueue(MockResponse().setBody(Buffer().write(ByteArray(4096))))
         server.start()
         val client = HandshakeCertificates.Builder().addTrustedCertificate(root.certificate).build()
+        var tlsVerified = false
         val check = TrafficCheck(direct, tls = true, downloads = listOf(TrafficCheck.Target("localhost", server.port, "/bytes", 4096)),
             stepTimeoutMs = 3_000, sslFactory = { client.sslSocketFactory() },
-            hostnameVerifier = okhttp3.internal.tls.OkHostnameVerifier)
+            hostnameVerifier = okhttp3.internal.tls.OkHostnameVerifier, onTlsVerified = { tlsVerified = true })
         assertTrue(check.download() is LegResult.Passed)
+        assertTrue(tlsVerified)
     }
 
     @Test fun anUntrustedCertificateIsRefused() {
