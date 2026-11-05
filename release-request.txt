@@ -1,16 +1,19 @@
-MAXIMUS VPN V1.0.4 — versionCode 49 — Aether / WARP and Direct connection fixes
+MAXIMUS VPN V1.0.4 — versionCode 50 — PattNG-inspired Aether/WARP and Direct upgrade
 
-Publish signed APKs from this commit after the release checks pass.
+Publish signed ARM64 and universal APKs including merged PR #174.
 
-Includes reviewed PR #173:
-- Wait for the Aether tunnel serving marker before access verification.
-- Try H2, H3 and WireGuard in automatic Aether mode.
-- Bootstrap Direct DNS from family-appropriate literal IPs, with independent Google DoH fallback.
-- Repair fragB's empty TLS Handshake record while preserving the following split offset.
+Reviewed changes:
+- Independent Aether and Direct ViewModels and IP-family preferences.
+- Native-backed scan, obfuscation, literal endpoint, API host/address, ECH and fragment controls.
+- WARP-in-WARP and MASQUE-in-MASQUE transport selection.
+- Separate WireGuard/MASQUE key registration and stored-key status.
+- Direct encrypted DNS preference with authenticated fallback.
+- Incomplete editor values never replace valid persisted launch settings.
 
-Validation before release: Android unit tests and lint, native Direct DNS/bootstrap/fallback,
-authenticated 64 KiB transfer for fragA/fragB/oob, and transport recovery passed.
+Validation: Android unit tests and release lint passed; real Direct Serverless schema,
+authentication and bidirectional traffic passed; sing-box traffic/certificate rejection,
+transport recovery and native Aether/Direct builds for all three ABIs passed.
 
 Retain versionName 1.0.4 and the permanent release signing certificate.
-Publish arm64-v8a and universal APKs, source offers, checksums, provenance and in-app update metadata.
-Physical-device/operator verification is not established by CI.
+Publish APKs, corresponding native sources, checksums, provenance and in-app update metadata.
+CI does not establish connectivity on a physical device or filtered operator network.
