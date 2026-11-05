@@ -52,6 +52,7 @@ object ConnectionEngineRunner {
                 stage = "engine process could not start"
                 val process = EngineReaper.track(SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
                 running = process
+                checkCancellation()
                 stage = "local proxy did not become ready"
                 val ready = process.awaitReady(launch.readyTimeoutMs)
                 checkCancellation()

@@ -28,3 +28,19 @@ if [[ -z "${2:-}" ]] && adb root >/dev/null 2>&1; then
   adb shell "$engine/libmihomo.so" -v | tee -a /tmp/maximus-engines.txt
   grep -q "Mihomo" /tmp/maximus-engines.txt
 fi
+
+# Exercise the two LAB executables on Android's linker, including their production config schema.
+if [[ -n "${engine:-}" ]]; then
+  adb shell "$engine/libaether.so" --version | tee /tmp/maximus-aether-version.txt
+  grep -qi 'aether' /tmp/maximus-aether-version.txt
+  adb shell "$engine/libserverless.so" version | tee /tmp/maximus-serverless-version.txt
+  grep -qi 'Xray' /tmp/maximus-serverless-version.txt
+  for variant in fragA fragB oob; do
+    fixture="app/build/serverless-fixtures/$variant.json"
+    test -s "$fixture"
+    remote="/data/local/tmp/maximus-$variant.json"
+    adb push "$fixture" "$remote"
+    adb shell "$engine/libserverless.so" run -test -c "$remote"
+    adb shell rm -f "$remote"
+  done
+fi

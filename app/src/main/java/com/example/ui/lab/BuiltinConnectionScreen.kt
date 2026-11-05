@@ -47,7 +47,8 @@ internal fun BuiltinConnectionScreen(
     LaunchedEffect(model) { model.refreshOptions() }
     val c = labColors
     val idle = session.status == ConnectionStatus.DISCONNECTED
-    val own = session.activeProfile?.id == if (direct) BuiltinConnections.DIRECT else BuiltinConnections.AETHER
+    val fallback = direct && ui.options.vpnFallback && session.activeProfile?.id == BuiltinConnections.AETHER
+    val own = fallback || session.activeProfile?.id == if (direct) BuiltinConnections.DIRECT else BuiltinConnections.AETHER
     val configurable = idle && !ui.working
     val bundled = model.bundled()
     val options = ui.options
@@ -61,12 +62,14 @@ internal fun BuiltinConnectionScreen(
                     LabText(when {
                         !bundled -> "Engine unavailable in this build"
                         ui.working -> "Running checks"
+                        fallback && !idle -> "WARP fallback · ${session.statusLabel}"
                         own && !idle -> session.statusLabel
                         !idle -> "Another connection is active"
                         ui.result?.traffic == true -> "Access check passed"
                         else -> "Ready to test"
                     }, c.text, 21.sp, FontWeight.Bold)
-                    LabText(if (direct) "Direct DPI profiles use your ISP's public exit IP."
+                    LabText(if (fallback && !idle) "Direct access failed. The enabled WARP fallback is active."
+                        else if (direct) "Direct DPI profiles use your ISP's public exit IP."
                         else "Cloudflare WARP tunnel with an identity stored on this device.", c.text2, 13.sp)
                     if (ui.working) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
@@ -127,11 +130,16 @@ internal fun BuiltinConnectionScreen(
                 if (ui.working) model.cancel() else model.testAccess()
             }
         }
-        PrimaryButton(c, if (own && !idle) "Stop connection" else "Connect", null,
+        val canConnect = ui.result?.traffic == true || direct && ui.options.vpnFallback
+        PrimaryButton(c, when {
+            own && !idle -> "Stop connection"
+            direct && ui.options.vpnFallback -> "Connect with WARP fallback"
+            else -> "Connect"
+        }, null,
             Modifier.padding(horizontal = Gutter, vertical = 10.dp).fillMaxWidth(),
-            enabled = own && !idle || configurable && bundled && ui.result?.traffic == true) {
+            enabled = own && !idle || configurable && bundled && canConnect) {
             if (own && !idle) VpnController.stopVpn(context)
-            else if (model.ui.value.result?.traffic == true &&
+            else if ((model.ui.value.result?.traffic == true || direct && model.ui.value.options.vpnFallback) &&
                 VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
                 vpn.startOrRequestPermission(context, model.profile(), exact = true) { onPermission() }
             }

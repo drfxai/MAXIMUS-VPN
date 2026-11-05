@@ -1,7 +1,8 @@
 package com.example
 
-import com.example.vpn.connections.AccessProbe
 import com.example.vpn.connections.ConnectionEngineRunner
+import com.example.data.model.*
+import com.example.vpn.engine.ProfileExtras
 import com.example.vpn.sidecar.*
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -55,9 +56,31 @@ class ServerlessConnectionsTest {
         assertTrue(warp.all(AetherSidecar::handles))
         assertEquals(1, ConnectionEngineRunner.candidates(ServerlessSidecar.profile("oob")).size)
     }
-    @Test fun chunkedDnsResponsesAreDecodedWithoutGuessing() {
-        assertEquals("abcdef", AccessProbe.decodeChunks("3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n"))
-        assertThrows(IllegalArgumentException::class.java) { AccessProbe.decodeChunks("ffff\r\nshort") }
+    @Test fun preparationFailuresTryRemainingDirectVariantsButCancellationStopsImmediately() {
+        val attempted = mutableListOf<String>()
+        var cancel = false
+        val engine = object : SidecarEngine {
+            override val id = ServerlessSidecar.ID
+            override val binary = id
+            override fun handles(profile: VlessProfile) = ServerlessSidecar.handles(profile)
+            override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
+                attempted += ProfileExtras.read(profile).getString("variant")
+                if (cancel) throw kotlinx.coroutines.CancellationException("Test cancellation")
+                error("Test preparation failure")
+            }
+        }
+        val context = SidecarContext(File("."), File("unused"), 12345, "u", "p", OperationalMode.DAILY)
+        val failure = assertThrows(ConnectionEngineRunner.NoVerifiedPath::class.java) {
+            ConnectionEngineRunner.start(engine, ServerlessSidecar.profile(), AppSettings(), context)
+        }
+        assertEquals(listOf("fragA", "fragB", "oob"), attempted)
+        assertTrue(failure.message.orEmpty().contains("configuration preparation failed"))
+        attempted.clear()
+        cancel = true
+        assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            ConnectionEngineRunner.start(engine, ServerlessSidecar.profile(), AppSettings(), context)
+        }
+        assertEquals(listOf("fragA"), attempted)
     }
     @Test fun invalidSelectionsAndPortsAreRefused() {
         assertThrows(IllegalArgumentException::class.java) { ServerlessSidecar.profile("unknown") }

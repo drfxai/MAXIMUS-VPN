@@ -36,6 +36,9 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
     private val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: android.net.Network) { invalidateChecks() }
         override fun onLost(network: android.net.Network) { invalidateChecks() }
+        override fun onLinkPropertiesChanged(network: android.net.Network, properties: android.net.LinkProperties) {
+            invalidateChecks()
+        }
     }
     private fun invalidateChecks() { networkEpoch.incrementAndGet(); _ui.update { it.copy(result = null) } }
     init {
@@ -43,6 +46,10 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         connectivity.registerDefaultNetworkCallback(networkCallback)
         viewModelScope.launch {
             VpnController.connectionState.collect { state ->
+                if (state.status != ConnectionStatus.DISCONNECTED) {
+                    operation?.cancel()
+                    invalidateChecks()
+                }
                 if (state.status == ConnectionStatus.CONNECTED || state.status == ConnectionStatus.FAILED) refreshIdentity()
             }
         }
@@ -140,6 +147,10 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                 reader.join(500)
                 val fresh = File(staging, "identity.toml"); check(fresh.isFile && fresh.length() in 32..131072)
                 val name = if (_ui.value.options.transport == "wireguard") "wireguard.toml" else "identity.toml"
+                if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                check(VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
+                    "Connection started during identity renewal"
+                }
                 val target = AtomicFile(File(identityDir, name))
                 val out = target.startWrite()
                 try { fresh.inputStream().use { it.copyTo(out) }; target.finishWrite(out) }

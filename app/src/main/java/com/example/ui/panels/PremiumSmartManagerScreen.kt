@@ -50,12 +50,12 @@ internal fun PremiumSmartManagerScreen(
 ) {
     var page by rememberSaveable { mutableIntStateOf(0) }
     var selectedServer by rememberSaveable { mutableStateOf<String?>(null) }
-    var logServerId by remember { mutableStateOf<String?>(null) }
-    var chosen by remember { mutableStateOf(setOf<String>()) }
-    var showPlan by remember { mutableStateOf(false) }
-    var batchDomain by rememberSaveable { mutableStateOf("") }
-    var batchLabel by rememberSaveable { mutableStateOf("t") }
     val server = state.servers.firstOrNull { it.id == selectedServer } ?: state.servers.firstOrNull()
+    var logServerId by remember(server?.id) { mutableStateOf<String?>(null) }
+    var chosen by remember(server?.id) { mutableStateOf(setOf<String>()) }
+    var showPlan by remember(server?.id) { mutableStateOf(false) }
+    var batchDomain by rememberSaveable(server?.id) { mutableStateOf("") }
+    var batchLabel by rememberSaveable(server?.id) { mutableStateOf("t") }
     val facts = server?.facts
     var inspectionNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -164,7 +164,7 @@ internal fun PremiumSmartManagerScreen(
             3 -> {
                 // The approved artwork puts selection and Cloudflare side by side on wide screens.
                 BoxWithConstraints {
-                    val wide = maxWidth >= 330.dp
+                    val wide = maxWidth >= 600.dp
                     if (wide) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             MxInstallSelector(candidates, chosen, { chosen = it },
@@ -199,7 +199,7 @@ internal fun PremiumSmartManagerScreen(
                     }
                 }
                 BoxWithConstraints {
-                    if (maxWidth >= 330.dp) {
+                    if (maxWidth >= 600.dp) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             MxChecks(server, inspection, vm, Modifier.weight(1f))
                             MxCard("Automation Flow", "Inspect → select → DNS → review → install → verify",
@@ -258,10 +258,11 @@ internal fun PremiumSmartManagerScreen(
         val batchPlan = inspection?.takeIf { chosenCandidates.size > 1 }?.let {
             SmartBundlePlanner.review(it, chosen, batchDomain, batchLabel)
         }
-        val canSingle = isSingle && blockers.isEmpty() &&
+        val canSingle = isSingle && blockers.isEmpty() && state.busy.isBlank() &&
+            state.bundle?.running != true &&
             chosenCandidates.single().id != SmartManagerPlanner.PRIVATE_PSIPHON
         val canBatch = batchPlan?.eligible == true && blockers.isEmpty() &&
-            server != null && state.bundle?.running != true
+            server != null && state.busy.isBlank() && state.bundle?.running != true
         AlertDialog(
             onDismissRequest = { showPlan = false },
             title = { Text("Smart Installation Review") },

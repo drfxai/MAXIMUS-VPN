@@ -45,7 +45,8 @@ class TrafficCheck(
     private val sslFactory: () -> SSLSocketFactory = { SSLSocketFactory.getDefault() as SSLSocketFactory },
     private val hostnameVerifier: HostnameVerifier = HttpsURLConnection.getDefaultHostnameVerifier(),
     private val clock: () -> Long = System::currentTimeMillis,
-    private val smallFallbacks: List<Target> = if (small == SMALL) SMALL_FALLBACKS else emptyList()
+    private val smallFallbacks: List<Target> = if (small == SMALL) SMALL_FALLBACKS else emptyList(),
+    private val onTlsVerified: () -> Unit = {}
 ) {
     data class Target(val host: String, val port: Int, val path: String, val expectBytes: Int = 0) {
         override fun toString(): String = host
@@ -223,6 +224,7 @@ class TrafficCheck(
                 initCause(java.security.cert.CertificateException("name mismatch"))
             }
         }
+        onTlsVerified()
         return s
     }
 

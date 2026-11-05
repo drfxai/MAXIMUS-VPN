@@ -162,6 +162,7 @@ jobs:
         env:
           # The build number the in-app update pop-up compares; published with the release below.
           MAXIMUS_RELEASE_BUILD: ${{ github.run_number }}
+          MAXIMUS_SERVERLESS_FIXTURES: ${{ github.workspace }}/app/build/serverless-fixtures
           MAXIMUS_SINGBOX_FIXTURES: ${{ github.workspace }}/app/build/singbox-fixtures
           KEYSTORE_PATH: ${{ runner.temp }}/release.jks
           STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
