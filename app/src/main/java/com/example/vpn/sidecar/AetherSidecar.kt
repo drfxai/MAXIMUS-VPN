@@ -8,6 +8,7 @@ import java.io.File
 /** Separately built Aether 2.4.0, authenticated registration and native SOCKS authentication. */
 object AetherSidecar : SidecarEngine {
     const val ID = "aether"
+    val READY_LINE = Regex("^MAXIMUS_AETHER_SOCKS_READY$")
     override val id = ID
     override val binary = ID
     @Volatile var identityDirectory: (() -> File)? = null
@@ -42,12 +43,12 @@ object AetherSidecar : SidecarEngine {
             "h3" -> listOf("--masque", "--h3")
             "wireguard" -> listOf("--wg")
             "gool" -> listOf("--gool", "--h2")
-            // Auto is resolved by the session runner: first H2, then H3 after a failed real check.
+            // Auto is resolved by the session runner: H2, H3, then WireGuard, each checked with HTTPS.
             else -> listOf("--masque", "--h2")
         }
         command += when (e.optString("family", "auto")) { "ipv4" -> "-4"; "ipv6" -> "-6"; else -> "--dual" }
         if (e.optBoolean("fragment", true)) command += "--fragment"
-        return SidecarLaunch(command, readyTimeoutMs = 90_000L, environment = mapOf(
+        return SidecarLaunch(command, readyTimeoutMs = 90_000L, readyLine = READY_LINE, environment = mapOf(
             "MAXIMUS_CA_BUNDLE" to ca.absolutePath, "MAXIMUS_SOCKS_USER" to context.socksUser,
             "MAXIMUS_SOCKS_PASS" to context.socksPass, "AETHER_TLS_VERIFY" to "1", "RUST_LOG" to "warn",
             "LD_LIBRARY_PATH" to context.executable.parentFile!!.absolutePath), logOutput = false)

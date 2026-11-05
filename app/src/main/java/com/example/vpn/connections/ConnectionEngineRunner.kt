@@ -17,7 +17,7 @@ object ConnectionEngineRunner {
     fun candidates(profile: VlessProfile): List<VlessProfile> {
         val e = ProfileExtras.read(profile)
         return when {
-            AetherSidecar.handles(profile) && e.optString("carrier", "auto") == "auto" -> listOf("h2", "h3").map {
+            AetherSidecar.handles(profile) && e.optString("carrier", "auto") == "auto" -> listOf("h2", "h3", "wireguard").map {
                 profile.copy(extraSettings = org.json.JSONObject(e.toString()).put("carrier", it).toString())
             }
             ServerlessSidecar.handles(profile) && e.optString("variant", "auto") == "auto" -> listOf("fragA", "fragB", "oob").map {

@@ -4,7 +4,8 @@ set -euo pipefail
 : "${ABI:?}" "${OUT:?}"
 TASK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 REV=9ebdcc945af12ea532b32119884f846bdb9c4bfc
-source_dir="$TASK_ROOT/build/aether-source"
+patch_hash=$(sha256sum "$TASK_ROOT/scripts/connections/harden-aether.py" | cut -c1-16)
+source_dir="$TASK_ROOT/build/aether-source-$patch_hash"
 if [[ ! -f "$source_dir/MAXIMUS_POLICY" ]]; then
   mkdir -p "$source_dir"
   git -C "$source_dir" init -q
