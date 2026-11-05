@@ -12,23 +12,25 @@ object ServerlessSidecar : SidecarEngine {
     const val CONFIG_REVISION = "df113f5b0fafc5bbe552e903f43249110510bc34"
     override val id = ID
     override val binary = ID
+    val resolvers = listOf("auto", "cloudflare", "google")
     val variants = listOf("auto", "fragA", "fragB", "oob")
     override fun handles(profile: VlessProfile) = ProfileExtras.read(profile).optString("engine") == ID
     override fun problem(profile: VlessProfile): String? = when {
         ProfileExtras.read(profile).optString("variant", "auto") !in variants -> "Unsupported serverless profile"
         ProfileExtras.read(profile).optString("family", "auto") !in AetherSidecar.families -> "Unsupported IP family"
+        ProfileExtras.read(profile).optString("resolver", "auto") !in resolvers -> "Unsupported encrypted DNS resolver"
         else -> null
     }
-    fun profile(variant: String = "auto", family: String = "auto", vpnFallback: Boolean = false) : VlessProfile {
-        require(variant in variants && family in AetherSidecar.families)
+    fun profile(variant: String = "auto", family: String = "auto", vpnFallback: Boolean = false, resolver: String = "auto") : VlessProfile {
+        require(variant in variants && family in AetherSidecar.families && resolver in resolvers)
         return VlessProfile(id = "maximus-serverless", name = "Direct Serverless", address = ID, port = 0, uuid = "",
             protocolType = ProtocolType.MIXED, extraSettings = JSONObject().put("engine", ID)
-                .put("variant", variant).put("family", family).put("vpnFallback", vpnFallback).toString())
+                .put("variant", variant).put("family", family).put("vpnFallback", vpnFallback).put("resolver", resolver).toString())
     }
     /** Keep DPI masks, repairing fragB's empty TLS record; replace the inlet and geo classifications. */
-    fun config(source: String, port: Int, user: String, password: String, family: String): JSONObject {
+    fun config(source: String, port: Int, user: String, password: String, family: String, resolver: String = "auto"): JSONObject {
         require(port in 1..65535 && user.isNotBlank() && password.isNotBlank())
-        require(family in AetherSidecar.families)
+        require(family in AetherSidecar.families && resolver in resolvers)
         val root = JSONObject(source)
         root.remove("__Credits__"); root.remove("remarks"); root.remove("version")
         val inbound = root.getJSONArray("inbounds").getJSONObject(0)
@@ -56,6 +58,13 @@ object ServerlessSidecar : SidecarEngine {
         upstream.put("timeoutMs", 4_000)
         dns.put("servers", JSONArray().put(upstream).put(JSONObject().put("tag", "no-filter-dns-ip")
             .put("address", "https+one://dns.google/dns-query").put("finalQuery", true).put("timeoutMs", 4_000)))
+        if (resolver == "google") {
+            val servers = dns.getJSONArray("servers")
+            val cloudflare = servers.getJSONObject(0).put("finalQuery", true)
+            val google = servers.getJSONObject(1)
+            google.remove("finalQuery")
+            dns.put("servers", JSONArray().put(google).put(cloudflare))
+        }
         dns.put("queryStrategy", when(family) { "ipv4" -> "UseIPv4"; "ipv6" -> "UseIPv6"; else -> "UseIP" })
         val rules = root.getJSONObject("routing").getJSONArray("rules")
         val kept = JSONArray()
@@ -103,7 +112,7 @@ object ServerlessSidecar : SidecarEngine {
         val source = Sidecars.openAsset?.invoke("serverless/Serverless-$variant.jsonc")?.bufferedReader()?.use { it.readText() }
             ?: error("Pinned serverless configuration is missing")
         val file = File(context.workDir, "serverless.json").apply {
-            parentFile?.mkdirs(); writeText(config(source, context.socksPort, context.socksUser, context.socksPass, e.optString("family", "auto")).toString())
+            parentFile?.mkdirs(); writeText(config(source, context.socksPort, context.socksUser, context.socksPass, e.optString("family", "auto"), e.optString("resolver", "auto")).toString())
             setReadable(false, false); setReadable(true, true); setWritable(false, false); setWritable(true, true)
         }
         return SidecarLaunch(listOf(context.executable.absolutePath, "run", "-c", file.absolutePath),
