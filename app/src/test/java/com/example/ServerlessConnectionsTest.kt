@@ -19,6 +19,12 @@ class ServerlessConnectionsTest {
             assertEquals("password", inbound.getJSONObject("settings").getString("auth"))
             assertEquals(12345, inbound.getInt("port"))
             val original = JSONObject(source).getJSONArray("outbounds")
+            if (variant == "fragB") {
+                val mask = original.getJSONObject(5).getJSONObject("streamSettings")
+                    .getJSONObject("finalmask").getJSONArray("tcp").getJSONObject(1)
+                assertEquals("[\"0\",\"105\",\"1\"]", mask.getJSONObject("settings").getJSONArray("lengths").toString())
+                mask.getJSONObject("settings").put("lengths", org.json.JSONArray(listOf("1", "104", "1")))
+            }
             assertEquals(original.toString(), result.getJSONArray("outbounds").toString())
             assertFalse(result.toString().contains("geosite:"))
             assertFalse(result.toString().contains("geoip:"))

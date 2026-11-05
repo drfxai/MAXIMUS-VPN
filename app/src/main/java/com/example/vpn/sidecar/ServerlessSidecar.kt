@@ -25,7 +25,7 @@ object ServerlessSidecar : SidecarEngine {
             protocolType = ProtocolType.MIXED, extraSettings = JSONObject().put("engine", ID)
                 .put("variant", variant).put("family", family).put("vpnFallback", vpnFallback).toString())
     }
-    /** Preserve finalmask/OOB exactly; replace host-app inlet and geo-dependent classifications. */
+    /** Keep DPI masks, repairing fragB's empty TLS record; replace the inlet and geo classifications. */
     fun config(source: String, port: Int, user: String, password: String, family: String): JSONObject {
         require(port in 1..65535 && user.isNotBlank() && password.isNotBlank())
         require(family in AetherSidecar.families)
@@ -74,8 +74,24 @@ object ServerlessSidecar : SidecarEngine {
         }
         root.getJSONObject("routing").put("rules", kept)
         val out = root.getJSONArray("outbounds")
-        for (i in 0 until out.length()) out.getJSONObject(i).optJSONObject("streamSettings")?.optJSONObject("sockopt")?.let { sock ->
-            if (family != "auto") { sock.remove("happyEyeballs"); sock.put("domainStrategy", if (family == "ipv4") "ForceIPv4" else "ForceIPv6") }
+        for (i in 0 until out.length()) out.getJSONObject(i).optJSONObject("streamSettings")?.let { stream ->
+            // The pinned fragB pattern [0,105,1] emits an empty Handshake record.
+            // Standards-compliant TLS servers reject it with unexpected_message.
+            // Move one byte into that record, retaining the next split's offset.
+            stream.optJSONObject("finalmask")?.optJSONArray("tcp")?.let { masks ->
+                for (j in 0 until masks.length()) {
+                    val mask = masks.getJSONObject(j)
+                    val config = mask.optJSONObject("settings")
+                    val lengths = config?.optJSONArray("lengths")
+                    if (mask.optString("type") == "fragment" && config?.optString("packets") == "tlshello" &&
+                        lengths?.optString(0) == "0" && lengths.optString(1) == "105") {
+                        lengths.put(0, "1").put(1, "104")
+                    }
+                }
+            }
+            stream.optJSONObject("sockopt")?.let { sock ->
+                if (family != "auto") { sock.remove("happyEyeballs"); sock.put("domainStrategy", if (family == "ipv4") "ForceIPv4" else "ForceIPv6") }
+            }
         }
         return root
     }
