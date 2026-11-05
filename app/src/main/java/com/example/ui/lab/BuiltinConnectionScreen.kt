@@ -286,8 +286,11 @@ private fun OptionRow(title: String, selected: String, options: List<String>, en
 private fun optionLabel(option: String) = when (option) {
     "auto" -> "Auto"
     "all" -> "All keys"
-    "wg" -> "WireGuard"
-    "masque" -> "MASQUE"
+    "chrome" -> "Chrome"
+    "chrome-120" -> "Chrome 120"
+    "firefox" -> "Firefox"
+    "semi-python" -> "Semi-Python"
+    "go" -> "Go"
     "gool-classic" -> "WARP-in-WARP"
     "off" -> "Off"
     "chain" -> "Inside WARP"
