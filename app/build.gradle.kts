@@ -1,3 +1,4 @@
+import java.io.File
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.Base64
@@ -214,8 +215,8 @@ dependencies {
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
   System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.takeIf { it.isNotBlank() }?.let {
     outputs.dir(it)
-    outputs.dir(java.io.File(it).parentFile.resolve("host-fixtures"))
-    outputs.file(java.io.File(it).parentFile.resolve("aether-options.json"))
+    outputs.dir(File(it).parentFile.resolve("host-fixtures"))
+    outputs.file(File(it).parentFile.resolve("aether-options.json"))
   }
   System.getenv("MAXIMUS_SINGBOX_FIXTURES")?.takeIf { it.isNotBlank() }?.let { outputs.dir(it) }
 }
