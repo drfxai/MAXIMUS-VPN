@@ -1,16 +1,16 @@
-MAXIMUS VPN V1.0.4 — versionCode 48 — LAB connections and Smart Manager refresh
+MAXIMUS VPN V1.0.4 — versionCode 49 — Aether / WARP and Direct connection fixes
 
-Publish the signed APK after the reviewed fixes pass Android unit tests and lint.
+Publish signed APKs from this commit after the release checks pass.
 
-Aether / WARP and Serverless Direct are available under the existing LAB tab.
-Smart Manager is available under Panels with authenticated VPS inspection,
-service management and installation review.
+Includes reviewed PR #173:
+- Wait for the Aether tunnel serving marker before access verification.
+- Try H2, H3 and WireGuard in automatic Aether mode.
+- Bootstrap Direct DNS from family-appropriate literal IPs, with independent Google DoH fallback.
+- Repair fragB's empty TLS Handshake record while preserving the following split offset.
 
-This refresh adds bounded shared HTTPS parsing, independent DNS diagnostics,
-visible WARP fallback status, cancellation on session changes and link-change
-invalidation. Smart Manager scopes selection and review to the selected VPS and
-uses full-width deployment forms on phones.
+Validation before release: Android unit tests and lint, native Direct DNS/bootstrap/fallback,
+authenticated 64 KiB transfer for fragA/fragB/oob, and transport recovery passed.
 
-Release checks include all three native ABIs, the permanent signing certificate,
-Android 15 install/launch, native Aether startup/version and Serverless schema
-validation, checksums and provenance.
+Retain versionName 1.0.4 and the permanent release signing certificate.
+Publish arm64-v8a and universal APKs, source offers, checksums, provenance and in-app update metadata.
+Physical-device/operator verification is not established by CI.
