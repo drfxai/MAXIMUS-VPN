@@ -11,6 +11,7 @@ authenticated Direct OOB proxy when keys are missing. The account HTTPS client
 alone uses it; the WARP carrier, explicit exit-node, Tor and Psiphon keep their
 configured routes. Stop all helper processes on cancellation, failure or disconnect.
 Keep CA and hostname verification mandatory and preserve ECH requirements.
+Do not advertise Chrome root IDs to account HTTPS while using Android CA roots.
 
 Keep the specific TLS/certificate/timeout cause in sanitized diagnostics. Stop
 repeating a shared registration failure across all three WARP transports.

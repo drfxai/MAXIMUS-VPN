@@ -24,12 +24,19 @@ old = '''        builder.set_verify(SslVerifyMode::PEER);
 assert old in text
 text = text.replace(old, '''        return Err(AetherError::Tls("Missing gateway SPKI pins".into()));''')
 (src / 'tls.rs').write_text(text)
-replace('https.rs', '    fingerprint.apply(&mut builder, ALPN_H2_HTTP1)?;', '''    fingerprint.apply(&mut builder, ALPN_H2_HTTP1)?;
+# Chrome's requested root IDs are not proof that Android trusts those roots. Let the
+# authenticated API server supply its ordinary chain, checked against Android's CA bundle.
+# Keep the transport fingerprint (including MASQUE's separate SPKI policy) unchanged.
+replace('https.rs', '    fingerprint.apply(&mut builder, ALPN_H2_HTTP1)?;', '''    let mut api_fingerprint = fingerprint.clone();
+    api_fingerprint.trust_anchors = None;
+    api_fingerprint.apply(&mut builder, ALPN_H2_HTTP1)?;
     let bundle = std::env::var("MAXIMUS_CA_BUNDLE")
         .map_err(|_| AetherError::Tls("Missing trusted certificate bundle".into()))?;
     builder.set_ca_file(bundle).map_err(|e| AetherError::Tls(e.to_string()))?;''')
-replace('https.rs', '    fingerprint.prepare(&mut config, ALPN_H2_HTTP1)?;', '''    fingerprint.prepare(&mut config, ALPN_H2_HTTP1)?;
+replace('https.rs', '    fingerprint.prepare(&mut config, ALPN_H2_HTTP1)?;', '''    api_fingerprint.prepare(&mut config, ALPN_H2_HTTP1)?;
     config.set_verify_hostname(true);''')
+replace('https.rs', '    // TLS server-certificate verification disabled (unconditional), as the fingerprint has it:\n    // the server name may be neither the HTTP host nor the address.',
+    '    // Account HTTPS authenticates its host using the Android CA bundle below.')
 # Consumer registration always uses its authenticated API host for both HTTP and TLS.
 replace('https.rs', '    let (address, port) = request.address.unwrap_or((request.host, request.port));', '''    if request.sni.is_some_and(|sni| sni != request.host) {
         return Err(AetherError::Tls("Account SNI must match authenticated host".into()));
