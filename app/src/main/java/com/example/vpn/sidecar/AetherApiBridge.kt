@@ -13,18 +13,26 @@ object AetherApiBridge {
     fun allowed(options: AetherSettings) = options.apiRoute != "native" &&
         !BuiltinExitNode.needed(options) && options.tor == "off" && options.psiphon == "off"
 
+    fun keyKind(profile: VlessProfile) = when (ProfileExtras.read(profile).optString("carrier")) {
+        "wireguard" -> "wg"; "wiw" -> "gool-classic"; "mim" -> "mim"; "gool" -> "gool"; else -> "masque"
+    }
+    fun hasStoredKeys(profile: VlessProfile): Boolean {
+        val root = AetherSidecar.identityDirectory?.invoke() ?: return false
+        return AetherIdentityStore.required(keyKind(profile)).all {
+            File(AetherIdentityStore.current(root), it).let { file -> file.isFile && file.length() >= 32 }
+        }
+    }
+    fun bootstrapBlocked(cause: String) = cause.startsWith("WARP API registration failed") &&
+        listOf("TLS", "certificate", "timed out").any { cause.contains(it, ignoreCase = true) }
+    fun skipAfterBootstrapFailure(profile: VlessProfile, failedKinds: Set<String>): Boolean =
+        failedKinds.isNotEmpty() && (keyKind(profile) in failedKinds || !hasStoredKeys(profile))
+
     fun start(profile: VlessProfile, settings: AppSettings, parent: SidecarContext,
         force: Boolean = false): BuiltinExitNode.Started? {
         val extras = ProfileExtras.read(profile)
         val options = AetherSettings.read(extras)
         if (!allowed(options)) return null
-        val kind = when (extras.optString("carrier")) {
-            "wireguard" -> "wg"; "wiw" -> "gool-classic"; "mim" -> "mim"; "gool" -> "gool"; else -> "masque"
-        }
-        val root = AetherSidecar.identityDirectory?.invoke()
-        if (!force && root != null && AetherIdentityStore.required(kind).all {
-                File(AetherIdentityStore.current(root), it).let { file -> file.isFile && file.length() >= 32 }
-            }) return null
+        if (!force && hasStoredKeys(profile)) return null
         val executable = Sidecars.executable(ServerlessSidecar)
         if (executable == null) {
             check(options.apiRoute == "auto") { "Direct API runtime is missing" }

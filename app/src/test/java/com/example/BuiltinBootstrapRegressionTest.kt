@@ -45,6 +45,21 @@ class BuiltinBootstrapRegressionTest {
         assertNotNull(AetherSettings(apiRoute = "arbitrary").problem())
     }
 
+    @Test fun failedMasqueApiStillAllowsAnExistingWireGuardIdentity() {
+        val original = AetherSidecar.identityDirectory
+        val dir = java.nio.file.Files.createTempDirectory("builtin-keys").toFile()
+        try {
+            AetherSidecar.identityDirectory = { dir }
+            val failed = setOf("masque")
+            assertTrue(AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("h3"), failed))
+            assertTrue(AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("wireguard"), failed))
+            java.io.File(dir, "wireguard.toml").writeText("x".repeat(64))
+            assertFalse(AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("wireguard"), failed))
+            assertTrue(AetherApiBridge.bootstrapBlocked("WARP API registration failed (TLS handshake failed)"))
+            assertFalse(AetherApiBridge.bootstrapBlocked("WARP API registration failed (WARP registration failed)"))
+        } finally { AetherSidecar.identityDirectory = original; dir.deleteRecursively() }
+    }
+
     @Test fun registrationSummaryDoesNotEraseCertificateOrTimeoutCause() {
         val certificate = SidecarProcess.preferFailure(null, "TLS CERTIFICATE_VERIFY_FAILED")
         assertEquals("certificate trust or hostname verification failed", certificate)

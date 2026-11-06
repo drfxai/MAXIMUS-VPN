@@ -69,10 +69,15 @@ object ConnectionEngineRunner {
         val choices = candidates(profile)
         val preferred = BuiltinMethodMemory.preferred(cacheScope, choices.map(::method))
         val ordered = choices.sortedBy { if (method(it) == preferred) 0 else 1 }
+        val failedRegistrationKinds = mutableSetOf<String>()
         for (candidate in ordered) {
             checkCancellation()
             val extras = ProfileExtras.read(candidate)
             val name = if (engine.id == AetherSidecar.ID) extras.optString("carrier") else extras.optString("variant")
+            if (engine.id == AetherSidecar.ID && AetherApiBridge.skipAfterBootstrapFailure(candidate, failedRegistrationKinds)) {
+                record(name, "registration", "SKIP", "account API unavailable; no independent stored identity")
+                continue
+            }
             var running: RunningEngine? = null
             var stage = "configuration preparation failed"
             try {
@@ -91,8 +96,10 @@ object ConnectionEngineRunner {
                     record(name, "startup", "FAIL", reason)
                     attempts += "$name: $reason"
                     if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
-                    // All transports need the same account registration; changing H2 to H3 cannot fix it.
-                    if (engine.id == AetherSidecar.ID && reason.startsWith("WARP API registration failed")) break
+                    // Reuse a stored WireGuard identity even if MASQUE provisioning failed.
+                    // Only skip repeated TLS/network bootstrap, not a protocol-specific API refusal.
+                    if (engine.id == AetherSidecar.ID && AetherApiBridge.bootstrapBlocked(reason))
+                        failedRegistrationKinds += AetherApiBridge.keyKind(candidate)
                     continue
                 }
                 record(name, "startup", "PASS")
