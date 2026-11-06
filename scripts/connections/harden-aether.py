@@ -35,6 +35,10 @@ replace('https.rs', '    let (address, port) = request.address.unwrap_or((reques
         return Err(AetherError::Tls("Account SNI must match authenticated host".into()));
     }
     let (address, port) = request.address.unwrap_or((request.host, request.port));''')
+# Keep the account bootstrap proxy separate from the actual WARP transport uplink.
+replace('https.rs', '    match crate::upstream::configured() {', '''    let api = std::env::var("MAXIMUS_API_UPSTREAM").ok()
+        .map(|value| crate::upstream::Upstream::parse(&value)).transpose()?;
+    match api.or_else(crate::upstream::configured) {''')
 # Require per-session RFC1929 credentials on the engine itself, including UDP associations.
 replace('socks.rs', '    sock.write_all(&[VER, 0x00]).await?;\n    Ok(())', r'''    let expected_user = std::env::var("MAXIMUS_SOCKS_USER").unwrap_or_default();
     let expected_pass = std::env::var("MAXIMUS_SOCKS_PASS").unwrap_or_default();

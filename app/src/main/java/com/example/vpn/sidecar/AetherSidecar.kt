@@ -86,17 +86,26 @@ object AetherSidecar : SidecarEngine {
     }
     override fun startPrepared(profile: VlessProfile, settings: AppSettings, launch: SidecarLaunch, context: SidecarContext): RunningEngine? {
         val options = AetherSettings.read(ProfileExtras.read(profile))
-        val exit = BuiltinExitNode.start(options, settings, context) ?: return null
+        val exit = BuiltinExitNode.start(options, settings, context)
+        var api: BuiltinExitNode.Started? = null
         try {
-            val child = SidecarProcess.start(ID, launch.copy(environment = launch.environment +
-                ("AETHER_UPSTREAM" to exit.upstream)), context.workDir, context.socksPort)
+            api = AetherApiBridge.start(profile, settings, context)
+            if (exit == null && api == null) return null
+            val helpers = listOfNotNull(exit, api)
+            val environment = launch.environment.toMutableMap()
+            exit?.let { environment["AETHER_UPSTREAM"] = it.upstream }
+            api?.let { environment["MAXIMUS_API_UPSTREAM"] = it.upstream }
+            val child = SidecarProcess.start(ID, launch.copy(environment = environment), context.workDir, context.socksPort)
             return object : RunningEngine {
-                override val isAlive get() = child.isAlive && exit.running.isAlive
+                override val isAlive get() = child.isAlive && helpers.all { it.running.isAlive }
                 override val startupFailure get() = child.startupFailure
-                override fun awaitReady(timeoutMs: Long) = child.awaitReady(timeoutMs) && exit.running.isAlive
-                override fun stop() { try { child.stop() } finally { exit.running.stop() } }
+                override fun awaitReady(timeoutMs: Long) = child.awaitReady(timeoutMs) && helpers.all { it.running.isAlive }
+                override fun stop() { try { child.stop() } finally { helpers.forEach { it.running.stop() } } }
             }
-        } catch (e: Throwable) { exit.running.stop(); throw e }
+        } catch (e: Throwable) {
+            try { api?.running?.stop() } finally { exit?.running?.stop() }
+            throw e
+        }
     }
 
     fun trustedRoots(dir: File): File {

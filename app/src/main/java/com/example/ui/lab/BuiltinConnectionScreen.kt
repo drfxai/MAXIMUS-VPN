@@ -162,6 +162,10 @@ internal fun BuiltinConnectionScreen(
                     OptionRow("API server name (SNI)", options.advanced.apiSni, AetherSettings.apiHosts, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(apiSni = value)) }
                     }
+                    OptionRow("Account API route", options.advanced.apiRoute, AetherSettings.apiRoutes, configurable) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(apiRoute = value)) }
+                    }
+                    Footnote(c, "Auto tests Direct OOB for key registration. Native uses the direct API path. This does not change the WARP tunnel or disable certificate checks.")
                     OptionRow("Fingerprint", options.advanced.fingerprint, com.example.vpn.sidecar.AetherTlsProfiles.names, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(fingerprint = value)) }
                     }

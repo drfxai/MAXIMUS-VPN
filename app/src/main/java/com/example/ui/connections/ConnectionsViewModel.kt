@@ -196,6 +196,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                 AetherIdentityStore.retainUnchanged(identityDir, staging, kind)
                 var process: Process? = null
                 var exit: BuiltinExitNode.Started? = null
+                var api: BuiltinExitNode.Started? = null
                 try {
                     val settings = app.settingsRepository.getSettings()
                     val ctx = SidecarContext(staging, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9),
@@ -210,9 +211,12 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                     }
                     args += listOf("--register", kind)
                     exit = BuiltinExitNode.start(_ui.value.options.advanced, settings, ctx)
+                    api = AetherApiBridge.start(AetherSidecar.profile("h2", _ui.value.options.family,
+                        _ui.value.options.fragment, _ui.value.options.advanced), settings, ctx, force = true)
                     process = ProcessBuilder(args).directory(staging).redirectErrorStream(true).apply {
                         environment().putAll(launch.environment)
                         exit?.let { environment()["AETHER_UPSTREAM"] = it.upstream }
+                        api?.let { environment()["MAXIMUS_API_UPSTREAM"] = it.upstream }
                     }.start()
                     process.outputStream.close()
                     val child = process
@@ -221,7 +225,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                         runCatching { child.inputStream.bufferedReader().useLines { lines ->
                             lines.forEach { line ->
                                 if (line.contains("error", true) || line.contains("failed", true))
-                                    failure.set(SidecarProcess.failureCategory(line))
+                                    failure.set(SidecarProcess.preferFailure(failure.get(), line))
                             }
                         } }
                     }, "aether-identity").apply { isDaemon = true; start() }
@@ -234,13 +238,15 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                     check(VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
                         "Connection started during identity renewal"
                     }
+                    api?.running?.stop()
+                    api = null
                     exit?.running?.stop()
                     exit = null
                     AetherIdentityStore.publish(identityDir, staging, kind, token)
                     com.example.xray.XrayLogManager.i("BUILTIN", "aether/keys · $kind · PASS")
                 } finally {
                     try { process?.let { if (isRunning(it)) EngineProcessStop.stop(it) } }
-                    finally { try { exit?.running?.stop() } finally { staging.deleteRecursively() } }
+                    finally { try { api?.running?.stop() } finally { try { exit?.running?.stop() } finally { staging.deleteRecursively() } } }
                 }
             }
         }

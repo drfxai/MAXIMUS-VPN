@@ -21,9 +21,11 @@ data class AetherSettings(
     val exitFinalMask: String = "",
     val exitDialMode: String = "",
     val tor: String = "off",
-    val psiphon: String = "off"
+    val psiphon: String = "off",
+    val apiRoute: String = "auto"
 ) {
     fun problem(carrier: String? = null): String? = when {
+        apiRoute !in apiRoutes -> "Unsupported account API route"
         scan !in scans -> "Unsupported scan mode"
         noize !in noises -> "Unsupported obfuscation"
         endpoint.isNotBlank() && !socketAddress(endpoint) -> "Endpoint must be an IP and port, for example 162.159.192.1:2408 or [2606:4700::1]:443"
@@ -61,7 +63,7 @@ data class AetherSettings(
         .put("fragmentDelay", fragmentDelay.trim()).put("ech", ech)
         .put("apiSni", apiSni).put("fingerprint", fingerprint).put("alias", alias.trim())
         .put("exitNode", exitNode).put("exitFinalMask", exitFinalMask).put("exitDialMode", exitDialMode.trim())
-        .put("tor", tor).put("psiphon", psiphon)
+        .put("tor", tor).put("psiphon", psiphon).put("apiRoute", apiRoute)
 
     fun arguments(carrier: String, fragment: Boolean): List<String> {
         require(problem() == null) { problem().orEmpty() }
@@ -96,6 +98,7 @@ data class AetherSettings(
     }
 
     companion object {
+        val apiRoutes = listOf("auto", "native", "oob")
         val relayModes = listOf("off", "chain", "reverse", "only")
         val keyKinds = listOf("all", "wg", "masque", "gool-classic", "mim", "gool")
         val scans = listOf("turbo", "balanced", "thorough", "verified", "ironclad")
@@ -107,7 +110,7 @@ data class AetherSettings(
             json.optString("fragmentSize"), json.optString("fragmentDelay"), json.optBoolean("ech"),
             json.optString("apiSni"), json.optString("fingerprint", "chrome"), json.optString("alias"),
             json.optString("exitNode"), json.optString("exitFinalMask"), json.optString("exitDialMode"),
-            json.optString("tor", "off"), json.optString("psiphon", "off"))
+            json.optString("tor", "off"), json.optString("psiphon", "off"), json.optString("apiRoute", "auto"))
 
         private fun range(value: String, bounds: IntRange): Boolean {
             if (value.isBlank()) return true
