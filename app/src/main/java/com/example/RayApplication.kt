@@ -305,6 +305,14 @@ class RayApplication : Application() {
         com.example.vpn.connectivity.ConnectivityBrain.networkKey = {
             runCatching { com.example.vpn.smart.NetworkIdentity.current(this) }.getOrNull()
         }
+        val builtinMethods = getSharedPreferences("builtin_verified_methods", MODE_PRIVATE)
+        com.example.vpn.connections.BuiltinMethodMemory.network = {
+            runCatching { com.example.vpn.smart.NetworkIdentity.current(this) }.getOrNull()
+        }
+        com.example.vpn.connections.BuiltinMethodMemory.read = { key -> builtinMethods.getString(key, null) }
+        com.example.vpn.connections.BuiltinMethodMemory.write = { key, value ->
+            builtinMethods.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
+        }
         com.example.xray.RealDelayProbe.observer = com.example.vpn.connectivity.ConnectivityBrain::onProbe
         // Probe targets: the last valid signed manifest, else the built-in list; refreshed in the background.
         com.example.vpn.connectivity.ProbeManifestStore.install(this)

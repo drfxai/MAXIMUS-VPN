@@ -12,7 +12,7 @@ object RouteDialers {
     /** Bound to Android's VPN network: names resolve and connections go through the tunnel. */
     fun vpn(context: Context): Dialer = Dialer { host, port, timeoutMs ->
         val network = LiveTunnelProbe.vpnNetwork(context)
-        val addresses = network.getAllByName(host).take(2)
+        val addresses = BoundedDnsLookup.resolve(timeoutMs) { network.getAllByName(host) }.take(2)
         if (addresses.isEmpty()) throw UnknownHostException(host)
         var last: IOException? = null
         for (address in addresses) {

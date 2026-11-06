@@ -2243,6 +2243,7 @@ class RayVpnService : VpnService() {
                     }
                     registry.finish(tunId, tunEvidence.bidirectional, "TUN: ${tunEvidence.describe()}",
                         if (tunEvidence.bidirectional) null else com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED)
+                    XrayLogManager.i("VPN", "Android TUN upload/download check: ${tunEvidence.describe()}")
                     // Prefer device-level evidence over a PASS only at the engine port.
                     mutateState { if (tunEvidence.appliesTo(it)) it.copy(trafficEvidence = tunEvidence) else it }
                     if (tunEvidence.bidirectional) activeRoute?.let { (net, id) ->
@@ -2262,6 +2263,7 @@ class RayVpnService : VpnService() {
                 } catch (e: Exception) {
                     // VPN binding can be unavailable for excluded-app sockets. This is
                     // untested, never evidence that the physical ISP path worked.
+                    XrayLogManager.w("VPN", "Android TUN check unavailable: ${e.javaClass.simpleName}; local proxy success is not device-level proof")
                     registry.finish(tunId, false, "TUN check unavailable: ${e.javaClass.simpleName}",
                         com.example.vpn.diagnostics.FailureStage.of(e))
                     com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(

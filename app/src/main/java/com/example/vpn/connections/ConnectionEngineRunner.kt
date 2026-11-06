@@ -50,10 +50,34 @@ object ConnectionEngineRunner {
             com.example.xray.XrayLogManager.i("BUILTIN", "${engine.id}/$method · $stage · $outcome" +
                 reason.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty())
         }
-        for (candidate in candidates(profile)) {
+        val automatic = ProfileExtras.read(profile).let {
+            if (engine.id == AetherSidecar.ID) it.optString("carrier", "auto") == "auto"
+            else it.optString("variant", "auto") == "auto"
+        }
+        fun scope(): String? {
+            if (!automatic) return null
+            val network = BuiltinMethodMemory.network() ?: return null
+            val options = org.json.JSONObject(profile.extraSettings).apply { remove("rescan") }.toString()
+            val input = network + "|" + engine.id + "|" + options + "|" + settings.dnsServer
+            return java.security.MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        }
+        fun method(candidate: VlessProfile) = ProfileExtras.read(candidate).let {
+            if (engine.id == AetherSidecar.ID) it.optString("carrier") else it.optString("variant")
+        }
+        val cacheScope = scope()
+        val choices = candidates(profile)
+        val preferred = BuiltinMethodMemory.preferred(cacheScope, choices.map(::method))
+        val ordered = choices.sortedBy { if (method(it) == preferred) 0 else 1 }
+        val failedRegistrationKinds = mutableSetOf<String>()
+        for (candidate in ordered) {
             checkCancellation()
             val extras = ProfileExtras.read(candidate)
             val name = if (engine.id == AetherSidecar.ID) extras.optString("carrier") else extras.optString("variant")
+            if (engine.id == AetherSidecar.ID && AetherApiBridge.skipAfterBootstrapFailure(candidate, failedRegistrationKinds)) {
+                record(name, "registration", "SKIP", "account API unavailable; no independent stored identity")
+                continue
+            }
             var running: RunningEngine? = null
             var stage = "configuration preparation failed"
             try {
@@ -71,6 +95,11 @@ object ConnectionEngineRunner {
                     val reason = process.startupFailure ?: stage
                     record(name, "startup", "FAIL", reason)
                     attempts += "$name: $reason"
+                    if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
+                    // Reuse a stored WireGuard identity even if MASQUE provisioning failed.
+                    // Only skip repeated TLS/network bootstrap, not a protocol-specific API refusal.
+                    if (engine.id == AetherSidecar.ID && AetherApiBridge.bootstrapBlocked(reason))
+                        failedRegistrationKinds += AetherApiBridge.keyKind(candidate)
                     continue
                 }
                 record(name, "startup", "PASS")
@@ -81,6 +110,7 @@ object ConnectionEngineRunner {
                 checkCancellation()
                 if (result.traffic && process.isAlive) {
                     record(name, "https", "PASS")
+                    if (scope() == cacheScope) BuiltinMethodMemory.record(cacheScope, name)
                     running = null
                     return Started(process, launch, candidate, result)
                 }
@@ -88,6 +118,7 @@ object ConnectionEngineRunner {
                 val reason = result.failure ?: "engine stopped during check"
                 record(name, "https", "FAIL", reason)
                 attempts += "$name: $reason"
+                if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
             } catch (e: Exception) {
                 if (e is InterruptedException || e is CancellationException) throw e
                 checkCancellation()

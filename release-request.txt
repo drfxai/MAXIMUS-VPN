@@ -1,19 +1,23 @@
-MAXIMUS VPN V1.0.4 — versionCode 51 — built-in TUN DNS fix and complete Aether controls
+MAXIMUS VPN V1.0.4 — versionCode 52 — measured Direct method and Aether API bootstrap
 
-Build the reviewed merged sources and publish signed ARM64 and universal APKs.
+Build and publish signed ARM64 and universal APKs from reviewed main.
 
-Fix the DNS handoff between Android's TUN and Aether / Direct by restoring domains
-before forwarding them to the local authenticated SOCKS engine. Connect starts
-the verified service directly, with optional standalone access checks.
+Remember a locally HTTPS-verified built-in method by network and options for six
+hours. Recheck it at every connection, evict failures, and retain the other methods
+as fallbacks. A UI access test and a service connection share the same scope.
 
-Add all six WARP key requests, independent API address/SNI/host, five TLS client
-profiles, remarks, exit-node selection, finalMask and dialMode, Tor/Psiphon
-placement controls, endpoint scanning, command preview and sanitized operation
-logs. Activate complete identity generations atomically.
+Offer auto/native/Direct OOB account API routes for Aether. Auto tests an isolated,
+authenticated Direct OOB proxy when keys are missing. The account HTTPS client
+alone uses it; the WARP carrier, explicit exit-node, Tor and Psiphon keep their
+configured routes. Stop all helper processes on cancellation, failure or disconnect.
+Keep CA and hostname verification mandatory and preserve ECH requirements.
+Do not advertise Chrome root IDs to account HTTPS while using Android CA roots.
 
-Build Aether with its native Tor feature. Verify relay authentication, the
-app-facing listener's readiness, native TLS options on Android, host FakeDNS to
-SOCKS domain restoration, existing direct traffic, unit tests and lint.
+Keep the specific TLS/certificate/timeout cause in sanitized diagnostics. Stop
+repeating a shared registration failure across all three WARP transports.
+Bound VPN DNS checks and report unavailable or failed TUN checks explicitly.
 
-Keep versionName 1.0.4, the permanent signing certificate and corresponding source
-offers. Physical operator-network acceptance requires device measurements.
+Validate native option parsing, independent API routing, local real traffic,
+method expiry/invalidation, bootstrap route isolation, DNS timeouts, unit tests,
+lint, signatures and Android 15 installation. Carrier acceptance remains a
+physical-device measurement, never inferred from a local proxy test.
