@@ -33,12 +33,25 @@ import com.example.data.model.ConnectionStatus
 import com.example.ui.connections.ConnectionsViewModel
 import com.example.ui.protocols.LabText
 import com.example.ui.protocols.labColors
+import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.VpnViewModel
 import com.example.vpn.VpnController
 import com.example.vpn.connections.BuiltinConnections
 import com.example.vpn.sidecar.AetherSettings
 import com.example.vpn.sidecar.AetherSidecar
 import com.example.vpn.sidecar.ServerlessSidecar
+
+/** Reuse LAB typography/components with the same palette as the main Maximus screen. */
+private val connectionColors: com.example.ui.protocols.LabColors
+    @Composable get() {
+        val colors = AppTheme.colors
+        return labColors.copy(bg = colors.background, card = colors.surfaceCard,
+            cardAlt = colors.surfaceInput, stroke = colors.borderSubtle,
+            text = colors.textPrimary, text2 = colors.textSecondary, text3 = colors.textMuted,
+            accent = colors.primary, onAccent = colors.onPrimary,
+            accentSoft = colors.primaryContainer, good = colors.statusConnected,
+            bad = colors.statusError, okay = colors.statusWarning)
+    }
 
 @Composable
 internal fun BuiltinConnectionScreen(
@@ -57,8 +70,9 @@ internal fun BuiltinConnectionScreen(
     val ui by model.ui.collectAsStateWithLifecycle()
     val session by vpn.connectionState.collectAsStateWithLifecycle()
     LaunchedEffect(model) { model.refreshOptions() }
-    val c = labColors
+    val c = connectionColors
     val idle = session.status == ConnectionStatus.DISCONNECTED
+    val failed = session.status == ConnectionStatus.FAILED
     val fallback = direct && session.selectedProfileId == BuiltinConnections.DIRECT && session.activeProfile?.id == BuiltinConnections.AETHER
     val own = fallback || session.activeProfile?.id == if (direct) BuiltinConnections.DIRECT else BuiltinConnections.AETHER
     val valid = ui.options.advanced.problem(if (direct) null else ui.options.transport) == null
@@ -69,7 +83,7 @@ internal fun BuiltinConnectionScreen(
     var tab by rememberSaveable(direct) { mutableIntStateOf(0) }
     val scroll = rememberScrollState()
     LaunchedEffect(tab) { scroll.scrollTo(0) }
-    Column(Modifier.fillMaxSize().background(c.bg)) {
+    Column(Modifier.fillMaxSize().background(c.bg).imePadding()) {
         TitleBar(c, title, "MAXIMUS VPN · CONNECTIONS", Icons.AutoMirrored.Rounded.ArrowBack, onBack)
         Surface(Modifier.padding(horizontal = Gutter, vertical = 8.dp).fillMaxWidth(),
             shape = RoundedCornerShape(24.dp), color = c.card,
@@ -85,6 +99,7 @@ internal fun BuiltinConnectionScreen(
                         LabText(when {
                             !bundled -> "Engine unavailable"
                             ui.working -> "Working…"
+                            failed -> "Connection failed"
                             fallback && !idle -> "WARP fallback"
                             own && !idle -> session.statusLabel
                             !idle -> "Another session is active"
@@ -98,7 +113,7 @@ internal fun BuiltinConnectionScreen(
                 if (ui.working || own && session.isBusy) LinearProgressIndicator(
                     Modifier.fillMaxWidth(), color = c.accent, trackColor = c.stroke)
                 if (fallback && !idle) LabText("Direct access failed. Your enabled WARP fallback is in use.", c.text2, 12.sp)
-                val message = if (own && !idle) session.errorMessage ?: ui.message else ui.message
+                val message = if (failed || own && !idle) session.errorMessage ?: ui.message else ui.message
                 message?.let { LabText(it, c.text2, 12.sp) }
                 if (ui.working) TextButton(onClick = model::cancel) { Text("Cancel operation") }
             }
@@ -294,13 +309,14 @@ internal fun BuiltinConnectionScreen(
             }
         }
         PrimaryButton(c, when {
+            failed -> "Stop failed session"
             own && !idle -> "Stop connection"
             direct && ui.options.vpnFallback -> "Connect with WARP fallback"
             else -> if (direct) "Connect Direct" else "Connect WARP"
         }, Icons.Rounded.PowerSettingsNew,
             Modifier.navigationBarsPadding().padding(horizontal = Gutter, vertical = 10.dp).fillMaxWidth(),
-            enabled = own && !idle || configurable && bundled && valid) {
-            if (own && !idle) VpnController.stopVpn(context)
+            enabled = failed || own && !idle || configurable && bundled && valid) {
+            if (failed || own && !idle) VpnController.stopVpn(context)
             else if (VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
                 vpn.startOrRequestPermission(context, model.profile(), exact = true) { onPermission() }
             }
@@ -316,7 +332,7 @@ private fun outcome(value: Boolean?) = when (value) {
 
 @Composable
 private fun OptionRow(title: String, selected: String, options: List<String>, enabled: Boolean, label: (String) -> String = ::optionLabel, onSelect: (String) -> Unit) {
-    val c = labColors
+    val c = connectionColors
     var expanded by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 7.dp)) {
         LabText(title, c.text2, 12.sp)
@@ -371,7 +387,7 @@ private fun optionLabel(option: String) = when (option) {
 
 @Composable
 private fun SettingField(label: String, value: String, enabled: Boolean, multiline: Boolean = false, onChange: (String) -> Unit) {
-    val c = labColors
+    val c = connectionColors
     OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) },
         enabled = enabled, singleLine = !multiline, maxLines = if (multiline) 8 else 1,
         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = c.text, unfocusedTextColor = c.text,
