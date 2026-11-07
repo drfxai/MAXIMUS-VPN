@@ -1,14 +1,22 @@
 package com.example.ui.lab
 
 import android.app.Application
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -25,12 +33,25 @@ import com.example.data.model.ConnectionStatus
 import com.example.ui.connections.ConnectionsViewModel
 import com.example.ui.protocols.LabText
 import com.example.ui.protocols.labColors
+import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.VpnViewModel
 import com.example.vpn.VpnController
 import com.example.vpn.connections.BuiltinConnections
 import com.example.vpn.sidecar.AetherSettings
 import com.example.vpn.sidecar.AetherSidecar
 import com.example.vpn.sidecar.ServerlessSidecar
+
+/** Reuse LAB typography/components with the same palette as the main Maximus screen. */
+private val connectionColors: com.example.ui.protocols.LabColors
+    @Composable get() {
+        val colors = AppTheme.colors
+        return labColors.copy(bg = colors.background, card = colors.surfaceCard,
+            cardAlt = colors.surfaceInput, stroke = colors.borderSubtle,
+            text = colors.textPrimary, text2 = colors.textSecondary, text3 = colors.textMuted,
+            accent = colors.primary, onAccent = colors.onPrimary,
+            accentSoft = colors.primaryContainer, good = colors.statusConnected,
+            bad = colors.statusError, okay = colors.statusWarning)
+    }
 
 @Composable
 internal fun BuiltinConnectionScreen(
@@ -49,36 +70,64 @@ internal fun BuiltinConnectionScreen(
     val ui by model.ui.collectAsStateWithLifecycle()
     val session by vpn.connectionState.collectAsStateWithLifecycle()
     LaunchedEffect(model) { model.refreshOptions() }
-    val c = labColors
+    val c = connectionColors
     val idle = session.status == ConnectionStatus.DISCONNECTED
-    val fallback = direct && ui.options.vpnFallback && session.activeProfile?.id == BuiltinConnections.AETHER
+    val failed = session.status == ConnectionStatus.FAILED
+    val fallback = direct && session.selectedProfileId == BuiltinConnections.DIRECT && session.activeProfile?.id == BuiltinConnections.AETHER
     val own = fallback || session.activeProfile?.id == if (direct) BuiltinConnections.DIRECT else BuiltinConnections.AETHER
     val valid = ui.options.advanced.problem(if (direct) null else ui.options.transport) == null
     val configurable = idle && !ui.working
     val bundled = model.bundled()
     val options = ui.options
-    val title = if (direct) "Serverless Direct" else "Aether / WARP"
-    Column(Modifier.fillMaxSize().background(c.bg)) {
-        TitleBar(c, title, "MAXIMUS LAB · Built-in connection", Icons.AutoMirrored.Rounded.ArrowBack, onBack)
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Panel(c) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    LabText(when {
-                        !bundled -> "Engine unavailable in this build"
-                        ui.working -> "Running checks"
-                        fallback && !idle -> "WARP fallback · ${session.statusLabel}"
-                        own && !idle -> session.statusLabel
-                        !idle -> "Another connection is active"
-                        ui.result?.traffic == true -> "Access check passed"
-                        else -> "Ready to test"
-                    }, c.text, 21.sp, FontWeight.Bold)
-                    LabText(if (fallback && !idle) "Direct access failed. The enabled WARP fallback is active."
-                        else if (direct) "Direct DPI profiles use your ISP's public exit IP."
-                        else "Cloudflare WARP tunnel with an identity stored on this device.", c.text2, 13.sp)
-                    if (ui.working) LinearProgressIndicator(Modifier.fillMaxWidth())
+    val title = if (direct) "Serverless Direct" else "Aether WARP"
+    var tab by rememberSaveable(direct) { mutableIntStateOf(0) }
+    val scroll = rememberScrollState()
+    LaunchedEffect(tab) { scroll.scrollTo(0) }
+    Column(Modifier.fillMaxSize().background(c.bg).imePadding()) {
+        TitleBar(c, title, "MAXIMUS VPN · CONNECTIONS", Icons.AutoMirrored.Rounded.ArrowBack, onBack)
+        Surface(Modifier.padding(horizontal = Gutter, vertical = 8.dp).fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp), color = c.card,
+            border = BorderStroke(1.dp, c.accent.copy(alpha = .28f))) {
+            Column(Modifier.background(Brush.linearGradient(listOf(c.accentSoft, c.card))).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Surface(shape = RoundedCornerShape(16.dp), color = c.accentSoft) {
+                        Icon(if (direct) Icons.Rounded.Bolt else Icons.Rounded.Cloud, null,
+                            Modifier.padding(12.dp).size(28.dp), tint = c.accent)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        LabText(when {
+                            !bundled -> "Engine unavailable"
+                            ui.working -> "Working…"
+                            failed -> "Connection failed"
+                            fallback && !idle -> "WARP fallback"
+                            own && !idle -> session.statusLabel
+                            !idle -> "Another session is active"
+                            ui.result?.traffic == true -> "Local access verified"
+                            else -> "Ready to connect"
+                        }, c.text, 18.sp, FontWeight.Bold)
+                        LabText(if (direct) "DPI bypass · ISP exit IP" else "Cloudflare tunnel · Private device keys",
+                            c.text2, 12.sp)
+                    }
                 }
+                if (ui.working || own && session.isBusy) LinearProgressIndicator(
+                    Modifier.fillMaxWidth(), color = c.accent, trackColor = c.stroke)
+                if (fallback && !idle) LabText("Direct access failed. Your enabled WARP fallback is in use.", c.text2, 12.sp)
+                val message = if (failed || own && !idle) session.errorMessage ?: ui.message else ui.message
+                message?.let { LabText(it, c.text2, 12.sp) }
+                if (ui.working) TextButton(onClick = model::cancel) { Text("Cancel operation") }
             }
+        }
+        TabRow(selectedTabIndex = tab, containerColor = c.bg, contentColor = c.accent,
+            modifier = Modifier.padding(horizontal = Gutter)) {
+            listOf("Connect", "Advanced", "Diagnostics").forEachIndexed { index, label ->
+                Tab(selected = tab == index, onClick = { tab = index },
+                    text = { Text(label, fontSize = 12.sp) })
+            }
+        }
+        Column(Modifier.weight(1f).verticalScroll(scroll).padding(top = 12.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (tab == 0) {
             Panel(c) {
                 SettingField("Alias (remarks)", options.advanced.alias, configurable) { value ->
                     model.options { it.copy(advanced = it.advanced.copy(alias = value)) }
@@ -113,7 +162,7 @@ internal fun BuiltinConnectionScreen(
                         verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             LabText("WARP identity", c.text, 14.sp)
-                            LabText(if (ui.identity) "Stored on this device" else "Created on first access check", c.text2, 12.sp)
+                            LabText(if (ui.identity) "Stored on this device" else "Created automatically when connecting", c.text2, 12.sp)
                         }
                         TextButton(onClick = { model.renewIdentity() }, enabled = configurable && bundled && valid) {
                             Text(if (ui.identity) "Renew" else "Create")
@@ -129,7 +178,18 @@ internal fun BuiltinConnectionScreen(
                     }
                 }
                 Footnote(c, "Both resolvers use authenticated HTTPS through the DPI profile. The other resolver remains available as fallback.")
-            } else {
+            }
+            Footnote(c, if (direct) "Auto tries DPI methods and remembers the last verified method for this network. Advanced routing is optional."
+                else "Auto selects a transport. Endpoint, registration, relay and exit-node controls are available in Advanced.")
+            SecondaryButton(c, "Run access checks", null,
+                Modifier.padding(horizontal = Gutter).fillMaxWidth(), enabled = configurable && bundled && valid) {
+                tab = 2
+                model.testAccess()
+            }
+            }
+            if (tab == 1) {
+            if (!direct) {
+                GroupLabel(c, "Relay chain")
                 Panel(c) {
                     OptionRow("Psiphon", options.advanced.psiphon, AetherSettings.relayModes, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(psiphon = value)) }
@@ -187,7 +247,7 @@ internal fun BuiltinConnectionScreen(
                     AetherSettings.keyKinds.forEach { kind ->
                         KeyValue(c, optionLabel(kind), if (ui.keyStatus[kind] == true) "Stored" else "Not created")
                     }
-                    var keyKind by remember { mutableStateOf("all") }
+                    var keyKind by rememberSaveable { mutableStateOf("all") }
                     OptionRow("New keys for", keyKind, AetherSettings.keyKinds, configurable) { keyKind = it }
                     TextButton(onClick = { model.renewIdentity(keyKind) }, enabled = configurable && bundled && valid) {
                         Text("Get new WARP keys")
@@ -216,16 +276,19 @@ internal fun BuiltinConnectionScreen(
                     model.testAccess()
                 }
             }
+            }
+            if (tab == 2) {
+            Footnote(c, "These checks measure the local engine. They do not prove that every Android app is using the VPN or that DNS cannot leak.")
             GroupLabel(c, if (direct) "Direct command" else "Aether command")
             Panel(c) {
                 val preview = model.commandPreview()
-                Text(preview, Modifier.padding(14.dp), color = c.text2, fontSize = 11.sp)
+                Text(preview, Modifier.padding(14.dp), color = c.text2, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 TextButton(onClick = { clipboard.setText(AnnotatedString(preview)) }) { Text("Copy") }
             }
             GroupLabel(c, "Log")
             Panel(c) {
                 Text(ui.log.joinToString("\n").ifBlank { ui.message ?: "No operation recorded" },
-                    Modifier.padding(14.dp), color = c.text2, fontSize = 12.sp)
+                    Modifier.padding(14.dp), color = c.text2, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                 TextButton(onClick = { clipboard.setText(AnnotatedString(ui.log.joinToString("\n").ifBlank { ui.message.orEmpty() })) }) { Text("Copy") }
             }
             GroupLabel(c, "Access checks")
@@ -238,23 +301,22 @@ internal fun BuiltinConnectionScreen(
                 KeyValue(c, "HTTPS traffic", outcome(result?.traffic))
                 result?.latencyMs?.let { KeyValue(c, "HTTPS check time", "$it ms") }
             }
-            (if (own && !idle) session.errorMessage ?: ui.message else ui.message)?.let {
-                Footnote(c, it)
-            }
             Footnote(c, "Connect starts the engine and checks access automatically. The optional access test checks the local engine.")
             SecondaryButton(c, if (ui.working) "Cancel" else "Run access checks", null,
                 Modifier.padding(horizontal = Gutter).fillMaxWidth(), enabled = ui.working || configurable && bundled && valid) {
                 if (ui.working) model.cancel() else model.testAccess()
             }
+            }
         }
         PrimaryButton(c, when {
+            failed -> "Stop failed session"
             own && !idle -> "Stop connection"
             direct && ui.options.vpnFallback -> "Connect with WARP fallback"
-            else -> "Connect"
-        }, null,
-            Modifier.padding(horizontal = Gutter, vertical = 10.dp).fillMaxWidth(),
-            enabled = own && !idle || configurable && bundled && valid) {
-            if (own && !idle) VpnController.stopVpn(context)
+            else -> if (direct) "Connect Direct" else "Connect WARP"
+        }, Icons.Rounded.PowerSettingsNew,
+            Modifier.navigationBarsPadding().padding(horizontal = Gutter, vertical = 10.dp).fillMaxWidth(),
+            enabled = failed || own && !idle || configurable && bundled && valid) {
+            if (failed || own && !idle) VpnController.stopVpn(context)
             else if (VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
                 vpn.startOrRequestPermission(context, model.profile(), exact = true) { onPermission() }
             }
@@ -270,11 +332,17 @@ private fun outcome(value: Boolean?) = when (value) {
 
 @Composable
 private fun OptionRow(title: String, selected: String, options: List<String>, enabled: Boolean, label: (String) -> String = ::optionLabel, onSelect: (String) -> Unit) {
-    val c = labColors
+    val c = connectionColors
     var expanded by remember { mutableStateOf(false) }
-    KeyValue(c, title, "") {
-        Box {
-            TextButton(onClick = { expanded = true }, enabled = enabled) { Text(label(selected)) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 7.dp)) {
+        LabText(title, c.text2, 12.sp)
+        Box(Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { expanded = true }, enabled = enabled,
+                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, c.stroke), contentPadding = PaddingValues(12.dp)) {
+                Text(label(selected), Modifier.weight(1f), color = if (enabled) c.text else c.text3)
+                Text("⌄", color = c.accent)
+            }
             DropdownMenu(expanded && enabled, onDismissRequest = { expanded = false }) {
                 options.forEach { option ->
                     DropdownMenuItem(text = { Text(label(option)) }, onClick = {
@@ -319,7 +387,7 @@ private fun optionLabel(option: String) = when (option) {
 
 @Composable
 private fun SettingField(label: String, value: String, enabled: Boolean, multiline: Boolean = false, onChange: (String) -> Unit) {
-    val c = labColors
+    val c = connectionColors
     OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) },
         enabled = enabled, singleLine = !multiline, maxLines = if (multiline) 8 else 1,
         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = c.text, unfocusedTextColor = c.text,

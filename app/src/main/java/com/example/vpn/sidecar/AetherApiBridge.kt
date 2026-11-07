@@ -13,14 +13,11 @@ object AetherApiBridge {
     fun allowed(options: AetherSettings) = options.apiRoute != "native" &&
         !BuiltinExitNode.needed(options) && options.tor == "off" && options.psiphon == "off"
 
-    fun keyKind(profile: VlessProfile) = when (ProfileExtras.read(profile).optString("carrier")) {
-        "wireguard" -> "wg"; "wiw" -> "gool-classic"; "mim" -> "mim"; "gool" -> "gool"; else -> "masque"
-    }
+    fun keyKind(profile: VlessProfile) = AetherIdentityStore.kindForTransport(
+        ProfileExtras.read(profile).optString("carrier"))
     fun hasStoredKeys(profile: VlessProfile): Boolean {
         val root = AetherSidecar.identityDirectory?.invoke() ?: return false
-        return AetherIdentityStore.required(keyKind(profile)).all {
-            File(AetherIdentityStore.current(root), it).let { file -> file.isFile && file.length() >= 32 }
-        }
+        return AetherIdentityStore.hasStored(root, keyKind(profile))
     }
     fun bootstrapBlocked(cause: String) = cause.startsWith("WARP API registration failed") &&
         listOf("TLS", "certificate", "timed out").any { cause.contains(it, ignoreCase = true) }
@@ -42,9 +39,11 @@ object AetherApiBridge {
             executable = executable, socksPort = Sidecars.freeLoopbackPort(),
             socksUser = Sidecars.randomToken(9), socksPass = Sidecars.randomToken())
         val direct = ServerlessSidecar.profile("oob", extras.optString("family", "auto"))
-        val launch = ServerlessSidecar.prepare(direct, settings, context)
-        val process = SidecarProcess.start("aether-api-oob", launch, context.workDir, context.socksPort)
+        var started: RunningEngine? = null
         try {
+            val launch = ServerlessSidecar.prepare(direct, settings, context)
+            val process = SidecarProcess.start("aether-api-oob", launch, context.workDir, context.socksPort)
+            started = process
             check(process.awaitReady(launch.readyTimeoutMs)) { "Direct API bridge did not start" }
             if (options.apiRoute == "auto" && !AccessProbe.check(
                     Socks5.Endpoint("127.0.0.1", context.socksPort, context.socksUser, context.socksPass), false).traffic) {
@@ -56,7 +55,7 @@ object AetherApiBridge {
             return BuiltinExitNode.Started(process,
                 "socks5://${context.socksUser}:${context.socksPass}@127.0.0.1:${context.socksPort}")
         } catch (e: Throwable) {
-            process.stop()
+            started?.stop()
             if (options.apiRoute == "auto" && e is Exception && e !is InterruptedException &&
                 e !is java.util.concurrent.CancellationException) {
                 XrayLogManager.i("BUILTIN", "aether/api · Direct OOB bootstrap unavailable; using native API route")

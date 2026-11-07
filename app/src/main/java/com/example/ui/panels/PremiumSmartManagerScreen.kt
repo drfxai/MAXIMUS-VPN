@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -51,7 +52,6 @@ internal fun PremiumSmartManagerScreen(
     var page by rememberSaveable { mutableIntStateOf(0) }
     var selectedServer by rememberSaveable { mutableStateOf<String?>(null) }
     val server = state.servers.firstOrNull { it.id == selectedServer } ?: state.servers.firstOrNull()
-    var logServerId by remember(server?.id) { mutableStateOf<String?>(null) }
     var chosen by remember(server?.id) { mutableStateOf(setOf<String>()) }
     var showPlan by remember(server?.id) { mutableStateOf(false) }
     var batchDomain by rememberSaveable(server?.id) { mutableStateOf("") }
@@ -83,7 +83,7 @@ internal fun PremiumSmartManagerScreen(
         facts.publicUdpPorts?.let { 53 !in it } else null
 
     Column(Modifier.fillMaxWidth().background(StudioInk).padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
         StudioHeading(onBack, onOpenCloudflare)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically) {
@@ -91,7 +91,6 @@ internal fun PremiumSmartManagerScreen(
                 StudioTab(vps.displayName, Icons.Default.Storage, vps.id == server?.id) {
                     selectedServer = vps.id
                     chosen = emptySet()
-                    logServerId = null
                 }
             }
             IconButton(onClick = { vm.openAdd() }) {
@@ -100,7 +99,7 @@ internal fun PremiumSmartManagerScreen(
         }
         HorizontalDivider(color = StudioLine)
         StudioHero(titles, icons)
-        Text(server?.displayName ?: "Connect your first VPS", color = Color.White,
+        Text(server?.displayName ?: "Connect your first VPS", color = StudioText,
             fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
         Text(when {
             fresh && server?.canSignIn == true -> "SSH authenticated · Inspection fresh"
@@ -144,7 +143,8 @@ internal fun PremiumSmartManagerScreen(
                         candidate?.status == SmartManagerPlanner.Status.BLOCKED -> Triple("Review required", StudioGold, "Review")
                         else -> Triple("Not installed", StudioMuted, "Set up")
                     }
-                    StudioServiceRow(titles[index], icons[index], status, tint, action) {
+                    StudioServiceRow(titles[index], icons[index], status, tint, action,
+                        enabled = state.busy.isBlank() && server.id !in state.checking && state.bundle?.running != true) {
                         when {
                             !fresh -> vm.refresh(server.id)
                             psiphon -> onOpenPsiphon(server.id)
@@ -222,14 +222,15 @@ internal fun PremiumSmartManagerScreen(
             5 -> {
                 MxCard("Service logs", "Selected VPS · Read-only SSH", StudioBlue) {
                     server.tools.forEach { tool ->
-                        MxAction(ServerToolCatalog.byId(tool.id)?.title ?: tool.id, { logServerId = server.id; vm.logs(server.id, tool.id) })
+                        MxAction(ServerToolCatalog.byId(tool.id)?.title ?: tool.id, { vm.logs(server.id, tool.id) },
+                            enabled = state.busy.isBlank())
                     }
                     if (server.tools.isEmpty()) Text("No managed services yet.", color = StudioMuted)
                     vm.operationsFor(server.id).forEach { operation ->
                         Text("${operation.toolId} · ${operation.status.name.lowercase()}", color = StudioMuted, fontSize = 11.sp)
                     }
-                    state.logs?.takeIf { logServerId == server.id && state.busy.isBlank() && state.error.isBlank() }?.let { (title, lines) ->
-                        Text(title, color = Color.White, fontWeight = FontWeight.Bold)
+                    state.logsFor(server.id)?.takeIf { state.busy.isBlank() && state.error.isBlank() }?.let { (title, lines) ->
+                        Text(title, color = StudioText, fontWeight = FontWeight.Bold)
                         lines.takeLast(80).forEach { Text(it, color = StudioMuted, fontSize = 11.sp) }
                     }
                 }
@@ -267,7 +268,8 @@ internal fun PremiumSmartManagerScreen(
             onDismissRequest = { showPlan = false },
             title = { Text("Smart Installation Review") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Selected: ${chosenCandidates.joinToString { it.title }.ifBlank { "None" }}")
                     if (chosenCandidates.size > 1) {
                         Text("Supported batch: 3X-UI + exactly one DNS tunnel. One approval starts a sequential, stop-on-error installation; it is NOT atomic. Existing successful installs are preserved on later failure.")
@@ -457,8 +459,8 @@ private fun MxChecks(
     inspection: SmartManagerPlanner.Inspection?,
     vm: ServersViewModel, modifier: Modifier = Modifier
 ) {
-    val facts = server?.facts
-    val fresh = server != null && System.currentTimeMillis() - server.checkedAt in 0..60_000L
+    val fresh = server != null && System.currentTimeMillis() - server.checkedAt in 0..INSPECTION_TTL_MS
+    val facts = server?.facts.takeIf { fresh }
     MxCard("Pre-flight Checks", "Validated against the selected VPS", Mx.Cyan, modifier) {
         MxInfoRow("SSH fingerprint",
             if (server?.hostKeySha256.isNullOrBlank()) "Pending" else "Pinned",
