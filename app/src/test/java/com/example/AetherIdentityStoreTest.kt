@@ -7,6 +7,27 @@ import java.nio.file.Files
 import java.io.File
 
 class AetherIdentityStoreTest {
+    @Test fun layeredTransportsRequireBothIdentitiesAndUseTheMatchingRenewalKind() {
+        val root = Files.createTempDirectory("aether-layered").toFile()
+        try {
+            val modes = mapOf("wireguard" to "wg", "wiw" to "gool-classic", "mim" to "mim", "gool" to "gool")
+            modes.forEach { (transport, kind) -> assertEquals(kind, AetherIdentityStore.kindForTransport(transport)) }
+            assertEquals("masque", AetherIdentityStore.kindForTransport("h3"))
+            File(root, "wireguard.toml").writeText("x".repeat(64))
+            File(root, "identity.toml").writeText("x".repeat(64))
+            assertTrue(AetherIdentityStore.hasStored(root, "wg"))
+            assertFalse(AetherIdentityStore.hasStored(root, "gool-classic"))
+            assertFalse(AetherIdentityStore.hasStored(root, "mim"))
+            assertFalse(AetherIdentityStore.hasStored(root, "gool"))
+            File(root, "wireguard-secondary.toml").writeText("x")
+            assertFalse(AetherIdentityStore.hasStored(root, "gool-classic"))
+            File(root, "wireguard-secondary.toml").writeText("x".repeat(64))
+            assertTrue(AetherIdentityStore.hasStored(root, "gool-classic"))
+            File(root, "identity-secondary.toml").writeText("x".repeat(131073))
+            assertFalse(AetherIdentityStore.hasStored(root, "mim"))
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun incompleteMultipleKeyRegistrationKeepsThePreviousGeneration() {
         val root = Files.createTempDirectory("aether-identities").toFile()
         try {
