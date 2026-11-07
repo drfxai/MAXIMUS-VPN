@@ -86,13 +86,16 @@ data class ServersState(
     val busy: String = "",
     val error: String = "",
     val logs: Pair<String, List<String>>? = null,
+    val logsServerId: String? = null,
     /** "serverId/toolId" -> (passed, text). */
     val tests: Map<String, Pair<Boolean, String>> = emptyMap(),
     /** Servers whose "Hiddify found" card was closed with Not now (this session only). */
     val foundDismissed: Set<String> = emptySet(),
     val bundle: SmartBatchUi? = null,
     val psiphonInstall: PsiphonServerInstallUi? = null
-)
+) {
+    fun logsFor(serverId: String) = logs.takeIf { logsServerId == serverId }
+}
 
 /** Server-side service and Android client are distinct from verified VPN tunnel traffic. */
 data class PsiphonServerInstallUi(
@@ -514,7 +517,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 ?.let { hiddifySummary(it) },
             advice = ToolAdvisor.suggest(s, f).map { AdviceUi(it.toolId, s.id, s.displayName, s.location, it.reason) },
             busy = st.busy, error = st.error,
-            logsTitle = st.logs?.first.orEmpty(), logs = st.logs?.second
+            logsTitle = st.logsFor(id)?.first.orEmpty(),
+            logs = st.logsFor(id)?.second
         )
     }
 
@@ -630,7 +634,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     private fun serverAction(id: String, busy: String, block: suspend (ManagedServer) -> Unit) {
         val s = server(id) ?: return
         if (_state.value.busy.isNotBlank()) return
-        _state.update { it.copy(busy = busy, error = "") }
+        _state.update { it.copy(busy = busy, error = "", logs = null, logsServerId = null) }
         job = viewModelScope.launch {
             try {
                 block(s)
@@ -668,7 +672,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logs(id: String, toolId: String) = serverAction(id, "Reading logs…") { s ->
         val lines = withContext(Dispatchers.IO) { manager.logs(s, toolId) }
-        _state.update { it.copy(logs = "${toolTitle(toolId)} logs" to lines) }
+        _state.update { it.copy(logsServerId = s.id, logs = "${toolTitle(toolId)} logs" to lines) }
     }
 
     fun rotatePort(id: String, toolId: String) = serverAction(id, "Moving ${toolTitle(toolId)} to a new port…") { s ->
@@ -802,11 +806,11 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 val checked = withContext(Dispatchers.IO) { manager.check(s) }
                 save(checked)
                 val lines = withContext(Dispatchers.IO) { manager.logs(checked, toolId) }
-                _state.update { it.copy(logs = "${toolTitle(toolId)} server diagnostics (phone test failed)" to lines) }
+                _state.update { it.copy(logsServerId = s.id, logs = "${toolTitle(toolId)} server diagnostics (phone test failed)" to lines) }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) {
                 val detail = com.example.panels.servers.ServerLogSanitizer.redact(e.message ?: "SSH unavailable")
-                _state.update { it.copy(logs = "Server diagnostics unavailable" to listOf(detail)) }
+                _state.update { it.copy(logsServerId = s.id, logs = "Server diagnostics unavailable" to listOf(detail)) }
             }
         }
     }

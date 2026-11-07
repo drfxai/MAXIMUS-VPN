@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import com.example.ui.theme.AppTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,23 +25,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Reference-driven MAXIMUS premium palette: AMOLED black, navy, electric blue, gold and cyan. */
+/** Shared Maximus colors keep the management workspace readable in both app themes. */
 internal object Mx {
-    val Black = Color(0xFF050914)
-    val Navy = Color(0xFF0B182C)
-    val Card = Color(0xFF101F36)
-    val Line = Color(0xFF315475)
-    val Gold = Color(0xFFF4C263)
-    val Blue = Color(0xFF1379FF)
-    val Cyan = Color(0xFF3CCEFF)
-    val Green = Color(0xFF42DEAD)
-    val Orange = Color(0xFFFFAD55)
-    val Red = Color(0xFFFF697C)
-    val White = Color(0xFFF4F7FF)
-    val Muted = Color(0xFF99AAC2)
+    val Black @Composable get() = AppTheme.colors.background
+    val Navy @Composable get() = AppTheme.colors.surface
+    val Card @Composable get() = AppTheme.colors.surfaceCard
+    val Line @Composable get() = AppTheme.colors.borderSubtle
+    val Gold @Composable get() = AppTheme.colors.primary
+    val Blue @Composable get() = AppTheme.colors.primary
+    val Cyan @Composable get() = AppTheme.colors.primaryLight
+    val Green @Composable get() = AppTheme.colors.statusConnected
+    val Orange @Composable get() = AppTheme.colors.statusWarning
+    val Red @Composable get() = AppTheme.colors.statusError
+    val White @Composable get() = AppTheme.colors.textPrimary
+    val Muted @Composable get() = AppTheme.colors.textSecondary
 }
 @Composable
 internal fun MxHero(kicker: String, title: String, subtitle: String) {
+    val gold = Mx.Gold
+    val cyan = Mx.Cyan
     Surface(
         shape = RoundedCornerShape(19.dp),
         color = Mx.Navy,
@@ -48,18 +51,18 @@ internal fun MxHero(kicker: String, title: String, subtitle: String) {
         modifier = Modifier.fillMaxWidth()
     ) {
         Box(Modifier.fillMaxWidth().heightIn(min = 115.dp).background(
-            Brush.linearGradient(listOf(Color(0xFF362815), Color(0xFF0A182F), Color(0xFF092E55)))
+            Brush.linearGradient(listOf(AppTheme.colors.primaryContainer, AppTheme.colors.surface, AppTheme.colors.surfaceCard))
         )) {
             // Gold orbital arcs echo the approved reference without embedding a flat screenshot.
             Canvas(Modifier.size(145.dp).align(Alignment.TopEnd)) {
                 val center = Offset(size.width * .90f, size.height * .83f)
                 listOf(.80f, .59f, .39f).forEach { radius ->
-                    drawCircle(Mx.Gold.copy(alpha = .32f), size.minDimension * radius,
+                    drawCircle(gold.copy(alpha = .32f), size.minDimension * radius,
                         center = center, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx()))
                 }
                 for (i in 0..8) {
                     val x = size.width * (.25f + i * .10f)
-                    drawLine(Mx.Cyan.copy(alpha = .11f), Offset(x, 0f), Offset(x, size.height),
+                    drawLine(cyan.copy(alpha = .11f), Offset(x, 0f), Offset(x, size.height),
                         strokeWidth = .6.dp.toPx())
                 }
             }
@@ -69,7 +72,7 @@ internal fun MxHero(kicker: String, title: String, subtitle: String) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(Modifier.size(49.dp).clip(RoundedCornerShape(15.dp)).background(
-                    Brush.verticalGradient(listOf(Color(0xFF73521F), Color(0xFF1C2B3A)))
+                    Brush.verticalGradient(listOf(AppTheme.colors.primaryContainer, AppTheme.colors.surfaceCard))
                 ), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Security, contentDescription = null, tint = Mx.Gold,
                         modifier = Modifier.size(31.dp))
@@ -125,7 +128,7 @@ internal fun MxAction(
         onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 42.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (strong) Mx.Gold else Mx.Card,
-            contentColor = if (strong) Mx.Black else Mx.Cyan,
+            contentColor = if (strong) AppTheme.colors.onPrimary else Mx.Cyan,
             disabledContainerColor = Color(0xFF202B3C),
             disabledContentColor = Mx.Muted
         ),

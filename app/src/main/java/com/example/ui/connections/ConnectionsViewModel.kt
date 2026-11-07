@@ -32,7 +32,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         prefs.getString(if (direct) "direct_family" else "aether_family", prefs.getString("family", "auto")).orEmpty().takeIf { it in AetherSidecar.families } ?: "auto",
         prefs.getString("variant", "auto").orEmpty().takeIf { it in ServerlessSidecar.variants } ?: "auto",
         prefs.getBoolean("fragment", true), prefs.getBoolean("vpnFallback", false),
-        AetherSettings.read(org.json.JSONObject(prefs.getString(if (direct) "direct_advanced" else "aether_advanced", "{}") ?: "{}")),
+        runCatching { AetherSettings.read(org.json.JSONObject(prefs.getString(if (direct) "direct_advanced" else "aether_advanced", "{}") ?: "{}")) }.getOrDefault(AetherSettings()),
         prefs.getString("direct_resolver", "auto").orEmpty().takeIf { it in ServerlessSidecar.resolvers } ?: "auto")
     private val _ui = MutableStateFlow(UiState(readOptions()))
     val ui = _ui.asStateFlow()
@@ -129,14 +129,14 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
     fun bundled(): Boolean = Sidecars.isBundled(if (direct) ServerlessSidecar else AetherSidecar)
     fun cancel() { operation?.cancel() }
     private fun refreshIdentity() {
-        val dir = AetherIdentityStore.current(File(app.noBackupFilesDir, "identities/aether"))
-        fun present(name: String) = File(dir, name).let { it.isFile && it.length() > 0 }
-        val wg = present("wireguard.toml")
-        val masque = present("identity.toml")
-        _ui.update { it.copy(wireguardIdentity = wg, masqueIdentity = masque,
-            identity = if (it.options.transport in listOf("wireguard", "wiw")) wg else masque,
-            keyStatus = AetherSettings.keyKinds.associateWith { kind -> AetherIdentityStore.required(kind).all(::present) }) }
+        val root = File(app.noBackupFilesDir, "identities/aether")
+        val keys = AetherSettings.keyKinds.associateWith { AetherIdentityStore.hasStored(root, it) }
+        _ui.update { it.copy(wireguardIdentity = keys["wg"] == true,
+            masqueIdentity = keys["masque"] == true,
+            identity = keys[AetherIdentityStore.kindForTransport(it.options.transport)] == true,
+            keyStatus = keys) }
     }
+
     private fun task(block: suspend () -> Unit) {
         if (_ui.value.working) return
         if (VpnController.connectionState.value.status != ConnectionStatus.DISCONNECTED) {
@@ -145,7 +145,10 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         operation = viewModelScope.launch {
             _ui.update { it.copy(working = true, message = null, result = null, log = emptyList()) }
             try { block() }
-            catch (e: CancellationException) { throw e }
+            catch (e: CancellationException) {
+                _ui.update { it.copy(message = "Operation cancelled; stored keys were preserved.") }
+                throw e
+            }
             catch (e: ConnectionEngineRunner.NoVerifiedPath) {
                 _ui.update { it.copy(message = e.message, result = e.lastCheck) }
             }
@@ -160,7 +163,9 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         }
     }
     fun testAccess() = task {
-        if (!direct) _ui.value.options.advanced.problem()?.let { error(it) }
+        _ui.value.options.advanced.problem(if (direct) null else _ui.value.options.transport)?.let {
+            _ui.update { state -> state.copy(message = it) }; return@task
+        }
         val original = profile()
         val profile = original.copy(extraSettings = org.json.JSONObject(original.extraSettings).put("rescan", true).toString())
         val testedEpoch = networkEpoch.get()
@@ -184,7 +189,10 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
             else it.copy(result = null, message = "Network changed during the test. Run access checks again.")
         }
     }
-    fun renewIdentity(kind: String = if (_ui.value.options.transport in listOf("wireguard", "wiw")) "wg" else "masque") = task {
+    fun renewIdentity(kind: String = AetherIdentityStore.kindForTransport(_ui.value.options.transport)) = task {
+        _ui.value.options.advanced.problem(_ui.value.options.transport)?.let {
+            _ui.update { state -> state.copy(message = it) }; return@task
+        }
         require(kind in AetherSettings.keyKinds)
         identityRenewal.withLock {
             runInterruptible(Dispatchers.IO) {

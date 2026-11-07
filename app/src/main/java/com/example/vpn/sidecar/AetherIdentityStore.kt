@@ -16,6 +16,22 @@ object AetherIdentityStore {
         else -> error("Unsupported key kind")
     }
 
+    fun kindForTransport(transport: String): String = when (transport) {
+        "wireguard" -> "wg"
+        "wiw" -> "gool-classic"
+        "mim" -> "mim"
+        "gool" -> "gool"
+        else -> "masque"
+    }
+
+    /** Availability only; the native engine still parses and validates the credentials. */
+    fun hasStored(root: File, kind: String): Boolean {
+        val active = current(root)
+        return required(kind).all { name ->
+            File(active, name).let { it.isFile && it.length() in 32..131072 }
+        }
+    }
+
     fun current(root: File): File {
         val name = runCatching { File(root, "active-generation").readText().trim() }.getOrDefault("")
         return if (name.matches(Regex("generation-[A-Za-z0-9_-]+")) && File(root, name).isDirectory) File(root, name) else root
