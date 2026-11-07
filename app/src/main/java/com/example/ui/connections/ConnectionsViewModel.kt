@@ -32,7 +32,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         prefs.getString(if (direct) "direct_family" else "aether_family", prefs.getString("family", "auto")).orEmpty().takeIf { it in AetherSidecar.families } ?: "auto",
         prefs.getString("variant", "auto").orEmpty().takeIf { it in ServerlessSidecar.variants } ?: "auto",
         prefs.getBoolean("fragment", true), prefs.getBoolean("vpnFallback", false),
-        runCatching { AetherSettings.read(org.json.JSONObject(prefs.getString(if (direct) "direct_advanced" else "aether_advanced", "{}") ?: "{}")) }.getOrDefault(AetherSettings()),
+        AetherSettings.read(org.json.JSONObject(prefs.getString(if (direct) "direct_advanced" else "aether_advanced", "{}") ?: "{}")),
         prefs.getString("direct_resolver", "auto").orEmpty().takeIf { it in ServerlessSidecar.resolvers } ?: "auto")
     private val _ui = MutableStateFlow(UiState(readOptions()))
     val ui = _ui.asStateFlow()
