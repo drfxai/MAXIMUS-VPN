@@ -16,9 +16,27 @@ def scroll_to(label):
     for _ in range(8):
         if ui.locate(label):
             return
-        ui.adb('shell', 'input', 'swipe', '550', '1850', '550', '760', '350')
+        bounds = [list(map(int, ui.re.findall(r'\d+', n.get('bounds', ''))))
+                  for n in ui.hierarchy().iter('node')]
+        width = max(b[2] for b in bounds if len(b) == 4)
+        height = max(b[3] for b in bounds if len(b) == 4)
+        ui.adb('shell', 'input', 'swipe', str(width // 2), str(int(height * .80)),
+               str(width // 2), str(int(height * .42)), '350')
         time.sleep(.8)
     raise AssertionError('Missing control: ' + label)
+
+
+def open_manager():
+    for _ in range(7):
+        if ui.tap('Smart Manager'):
+            return
+        position = next((ui.locate(label) for label in ('Install', 'Cloudflare', 'Clean IP', 'Servers')
+                         if ui.locate(label)), None)
+        if position is None:
+            raise AssertionError('Panels navigation is missing')
+        ui.adb('shell', 'input', 'swipe', '900', str(position[1]), '130', str(position[1]), '350')
+        time.sleep(1)
+    raise AssertionError('Smart Manager navigation is missing')
 
 
 def main():
@@ -30,7 +48,10 @@ def main():
     captures = []
     for theme in ('Dark', 'Light'):
         ui.require('Tunnel')
-        ui.require(theme + ' Theme')
+        active = any((node.get('content-desc') or '').startswith(theme + ' mode active.')
+                     for node in ui.hierarchy().iter('node'))
+        if not active:
+            ui.require(theme + ' Theme')
         for link, title, name in [('Aether / WARP', 'Aether WARP', 'aether'),
                                   ('Serverless Direct', 'Serverless Direct', 'direct')]:
             ui.require('LAB')
@@ -49,7 +70,7 @@ def main():
             ui.adb('shell', 'input', 'keyevent', '4')
             time.sleep(2)
         ui.goto_panels()
-        ui.navigate_horizontal('Smart Manager', 'left')
+        open_manager()
         captures.append(ui.capture('smart-manager-' + theme.lower(), 'Connect your first VPS'))
         ui.require('Add VPS')
         # The form must be reachable; do not populate credentials or inspect a remote host.
