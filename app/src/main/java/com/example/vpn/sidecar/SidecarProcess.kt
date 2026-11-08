@@ -80,12 +80,13 @@ class SidecarProcess(
     companion object {
         fun isFailureLine(line: String): Boolean = listOf("error", "failed", "no such file", "unknown argument",
             "timed out", "timeout", "did not answer", "deadline has elapsed", "connection refused", "connection reset",
-            "unexpected eof", "caused by:", "HTTP 429", "HTTP 403", "HTTP 401").any { line.contains(it, true) }
+            "unexpected eof", "caused by:", "HTTP 429", "HTTP 403", "HTTP 401",
+            "status 429", "status 403", "status 401").any { line.contains(it, true) }
 
         fun failureCategory(line: String): String = when {
-            line.contains("HTTP 429", true) -> "WARP API rate limited (HTTP 429)"
-            line.contains("HTTP 403", true) -> "WARP API returned HTTP 403"
-            line.contains("HTTP 401", true) -> "WARP API returned HTTP 401"
+            (line.contains("HTTP 429", true) || line.contains("status 429", true)) -> "WARP API rate limited (HTTP 429)"
+            (line.contains("HTTP 403", true) || line.contains("status 403", true)) -> "WARP API returned HTTP 403"
+            (line.contains("HTTP 401", true) || line.contains("status 401", true)) -> "WARP API returned HTTP 401"
             line.contains("timed out", true) || line.contains("timeout", true) || line.contains("did not answer", true) || line.contains("deadline has elapsed", true) -> "network operation timed out"
             line.contains("certificate_verify_failed", true) || line.contains("certificate verify failed", true) || line.contains("hostname mismatch", true) -> "certificate trust or hostname verification failed"
             line.contains("certificate", true) -> "certificate processing failed"
