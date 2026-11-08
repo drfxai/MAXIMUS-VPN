@@ -88,7 +88,7 @@ object AetherApiBridge {
                 }
                 error("WARP API TLS unreachable via forced Direct OOB route")
             }
-            XrayLogManager.i("BUILTIN", "aether/api · WARP API host TLS reachable via Direct OOB; registration not yet verified")
+            XrayLogManager.i("BUILTIN", "aether/api · Android TLS precheck passed via Direct OOB; native Aether registration still pending")
             return BuiltinExitNode.Started(process,
                 "socks5://${context.socksUser}:${context.socksPass}@127.0.0.1:${context.socksPort}")
         } catch (e: Throwable) {

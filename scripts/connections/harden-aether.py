@@ -46,6 +46,55 @@ replace('https.rs', '    let (address, port) = request.address.unwrap_or((reques
 replace('https.rs', '    match crate::upstream::configured() {', '''    let api = std::env::var("MAXIMUS_API_UPSTREAM").ok()
         .map(|value| crate::upstream::Upstream::parse(&value)).transpose()?;
     match api.or_else(crate::upstream::configured) {''')
+# A Direct OOB helper already changes the wire pattern. Fragmenting its input a
+# second time differs from the Android TLS reachability probe and can break it.
+# Retry only a failed TLS handshake, before HTTP bytes (and registration) were sent.
+replace('https.rs', '    tokio::time::timeout(timeout, exchange(request, fingerprint, ech, fragment))', r'''    let bridged = std::env::var_os("MAXIMUS_API_UPSTREAM").is_some();
+    let fragment = if bridged { FragmentConfig::disabled() } else { fragment };
+    tokio::time::timeout(timeout, async {
+        let mut ech = ech;
+        let first = exchange(request, fingerprint, ech.as_deref_mut(), fragment).await;
+        match first {
+            Err(ref error) if maximus_api_tls_retry(error) => {
+                eprintln!("MAXIMUS_AETHER_API_TLS:compatible-retry");
+                let compatible = Fingerprint {
+                    groups: "X25519:P-256".to_string(),
+                    grease: false,
+                    permute_extensions: false,
+                    ..Fingerprint::default()
+                };
+                // Same CA/hostname authentication and explicit ECH key. No HTTP
+                // request existed on the failed TLS connection, so no signup is replayed.
+                exchange(request, &compatible, ech, fragment).await
+            }
+            other => other,
+        }
+    })''')
+replace('https.rs', 'async fn exchange(', r'''fn maximus_api_tls_retry(error: &AetherError) -> bool {
+    let AetherError::Tls(message) = error else { return false; };
+    let lower = message.to_ascii_lowercase();
+    message.starts_with("handshake with ") &&
+        !["certificate", "hostname", "unknown ca", "ech_rejected"].iter().any(|word| lower.contains(word))
+}
+
+#[cfg(test)]
+mod maximus_api_retry_tests {
+    use super::*;
+    #[test]
+    fn only_pre_http_handshake_errors_can_retry() {
+        assert!(maximus_api_tls_retry(&AetherError::Tls("handshake with api: connection reset".into())));
+        for text in ["handshake with api: CERTIFICATE_VERIFY_FAILED", "handshake with api: hostname mismatch",
+            "handshake with api: unknown ca", "handshake with api: ECH_REJECTED", "Missing trusted certificate bundle"] {
+            assert!(!maximus_api_tls_retry(&AetherError::Tls(text.into())));
+        }
+        // Includes response timeouts: POST might already have registered the device.
+        assert!(!maximus_api_tls_retry(&AetherError::Api("registration did not answer".into())));
+        assert!(!maximus_api_tls_retry(&AetherError::Api("h2 answer failed".into())));
+    }
+}
+
+async fn exchange(''')
+
 # Require per-session RFC1929 credentials on the engine itself, including UDP associations.
 replace('socks.rs', '    sock.write_all(&[VER, 0x00]).await?;\n    Ok(())', r'''    let expected_user = std::env::var("MAXIMUS_SOCKS_USER").unwrap_or_default();
     let expected_pass = std::env::var("MAXIMUS_SOCKS_PASS").unwrap_or_default();

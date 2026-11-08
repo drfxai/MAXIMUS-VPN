@@ -26,6 +26,7 @@ class SidecarProcess(
             process.inputStream.bufferedReader().useLines { lines ->
                 // Engines can print server addresses and keys; only redacted, bounded lines reach the log.
                 lines.forEachIndexed { index, line ->
+                    reportApiTlsEvent(line)
                     if (!sawReadyLine && readyLine?.containsMatchIn(line) == true) sawReadyLine = true
                     // Categorize first: a summary must not freeze an earlier, less specific cause.
                     if (isFailureLine(line)) failureHint = preferFailure(failureHint, line)
@@ -78,6 +79,11 @@ class SidecarProcess(
     }
 
     companion object {
+        fun reportApiTlsEvent(line: String) {
+            if (line.trim() == "MAXIMUS_AETHER_API_TLS:compatible-retry")
+                XrayLogManager.i("BUILTIN", "aether/api · retrying TLS before sending HTTP with compatible API settings; CA, hostname and ECH checks preserved")
+        }
+
         fun isFailureLine(line: String): Boolean = listOf("error", "failed", "no such file", "unknown argument",
             "timed out", "timeout", "did not answer", "deadline has elapsed", "connection refused", "connection reset",
             "unexpected eof", "caused by:", "HTTP 429", "HTTP 403", "HTTP 401",

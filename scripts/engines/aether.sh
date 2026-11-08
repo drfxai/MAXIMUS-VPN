@@ -26,6 +26,7 @@ rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
 rustup target add "$target"
 # boring-sys 5.3 names ErrLib from rustfmt-formatted bindgen output.
 rustup component add rustfmt --toolchain "$RUSTUP_TOOLCHAIN"
+python3 "$TASK_ROOT/scripts/connections/test-aether-api-policy.py" "$source_dir"
 if ! cargo ndk --version | grep -q '3.5.4'; then cargo install cargo-ndk --version 3.5.4 --locked; fi
 ndk="${ANDROID_NDK_HOME:-${ANDROID_HOME}/ndk/26.3.11579264}"
 export ANDROID_NDK_HOME="$ndk" ANDROID_NDK_ROOT="$ndk"
