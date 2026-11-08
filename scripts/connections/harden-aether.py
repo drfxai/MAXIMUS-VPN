@@ -74,7 +74,7 @@ replace('https.rs', 'async fn exchange(', r'''fn maximus_api_tls_retry(error: &A
     let AetherError::Tls(message) = error else { return false; };
     let lower = message.to_ascii_lowercase();
     message.starts_with("handshake with ") &&
-        !["certificate", "hostname", "unknown ca", "unknown_ca", "ip address mismatch", "ech"].iter().any(|word| lower.contains(word))
+        !["certificate", "hostname", "unknown ca", "unknown_ca", "ip address mismatch", "ech"].iter().any(|word| lower.contains(*word))
 }
 
 #[cfg(test)]
