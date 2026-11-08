@@ -79,7 +79,7 @@ class SidecarProcess(
 
     companion object {
         fun isFailureLine(line: String): Boolean = listOf("error", "failed", "no such file", "unknown argument",
-            "timed out", "timeout", "deadline has elapsed", "connection refused", "connection reset",
+            "timed out", "timeout", "did not answer", "deadline has elapsed", "connection refused", "connection reset",
             "unexpected eof", "caused by:").any { line.contains(it, true) }
 
         fun failureCategory(line: String): String = when {

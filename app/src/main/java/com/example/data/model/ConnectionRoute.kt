@@ -25,7 +25,7 @@ object ConnectionRoute {
             "tor" -> "Tor"
             "psiphon" -> "Psiphon"
             "sing-box" -> "sing-box · ${profile.protocolType}"
-            "" -> "${profile.protocolType} · ${profile.network}"
+            "" -> "${profile.protocolType} · ${profile.transport}"
             else -> e.optString("engine")
         }
         return method
