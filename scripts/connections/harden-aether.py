@@ -74,7 +74,7 @@ replace('https.rs', 'async fn exchange(', r'''fn maximus_api_tls_retry(error: &A
     let AetherError::Tls(message) = error else { return false; };
     let lower = message.to_ascii_lowercase();
     message.starts_with("handshake with ") &&
-        !["certificate", "hostname", "unknown ca", "ech_rejected"].iter().any(|word| lower.contains(word))
+        !["certificate", "hostname", "unknown ca", "unknown_ca", "ip address mismatch", "ech"].iter().any(|word| lower.contains(word))
 }
 
 #[cfg(test)]
@@ -84,7 +84,8 @@ mod maximus_api_retry_tests {
     fn only_pre_http_handshake_errors_can_retry() {
         assert!(maximus_api_tls_retry(&AetherError::Tls("handshake with api: connection reset".into())));
         for text in ["handshake with api: CERTIFICATE_VERIFY_FAILED", "handshake with api: hostname mismatch",
-            "handshake with api: unknown ca", "handshake with api: ECH_REJECTED", "Missing trusted certificate bundle"] {
+            "handshake with api: unknown ca", "handshake with api: TLSV1_ALERT_UNKNOWN_CA",
+            "handshake with api: IP address mismatch", "handshake with api: ECH_REJECTED", "Missing trusted certificate bundle"] {
             assert!(!maximus_api_tls_retry(&AetherError::Tls(text.into())));
         }
         // Includes response timeouts: POST might already have registered the device.
