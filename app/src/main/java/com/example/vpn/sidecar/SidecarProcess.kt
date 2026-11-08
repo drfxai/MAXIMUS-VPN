@@ -26,15 +26,11 @@ class SidecarProcess(
             process.inputStream.bufferedReader().useLines { lines ->
                 // Engines can print server addresses and keys; only redacted, bounded lines reach the log.
                 lines.forEachIndexed { index, line ->
-                    if (line.contains("registration", true) &&
-                        (line.contains("error", true) || line.contains("failed", true))) {
-                        startupFailure = "WARP API registration failed (${failureHint ?: failureCategory(line)})"
-                    }
                     if (!sawReadyLine && readyLine?.containsMatchIn(line) == true) sawReadyLine = true
-                    // Only fixed categories are retained: raw output may contain credentials.
-                    if (line.contains("error", true) || line.contains("failed", true) ||
-                        line.contains("no such file", true) || line.contains("unknown argument", true)) {
-                        failureHint = preferFailure(failureHint, line)
+                    // Categorize first: a summary must not freeze an earlier, less specific cause.
+                    if (isFailureLine(line)) failureHint = preferFailure(failureHint, line)
+                    if ((line.contains("registration", true) && isFailureLine(line)) || startupFailure?.startsWith("WARP API registration failed") == true) {
+                        startupFailure = "WARP API registration failed (${failureHint ?: failureCategory(line)})"
                     }
                     if (logOutput && index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line).take(300))
                 }
@@ -82,11 +78,16 @@ class SidecarProcess(
     }
 
     companion object {
+        fun isFailureLine(line: String): Boolean = listOf("error", "failed", "no such file", "unknown argument",
+            "timed out", "timeout", "deadline has elapsed", "connection refused", "connection reset",
+            "unexpected eof", "caused by:").any { line.contains(it, true) }
+
         fun failureCategory(line: String): String = when {
-            line.contains("timed out", true) || line.contains("timeout", true) || line.contains("did not answer", true) -> "network operation timed out"
+            line.contains("timed out", true) || line.contains("timeout", true) || line.contains("did not answer", true) || line.contains("deadline has elapsed", true) -> "network operation timed out"
             line.contains("certificate_verify_failed", true) || line.contains("certificate verify failed", true) || line.contains("hostname mismatch", true) -> "certificate trust or hostname verification failed"
             line.contains("certificate", true) -> "certificate processing failed"
             line.contains("tls", true) || line.contains("handshake", true) -> "TLS handshake failed"
+            line.contains("connection refused", true) || line.contains("connection reset", true) || line.contains("unexpected eof", true) -> "account network connection closed or refused"
             line.contains("registration", true) || line.contains("enroll", true) -> "WARP registration failed"
             line.contains("permission denied", true) -> "file permission denied"
             line.contains("no such file", true) || line.contains("not found", true) -> "required file missing"
@@ -100,7 +101,7 @@ class SidecarProcess(
             fun rank(value: String?) = when (value) {
                 "certificate trust or hostname verification failed", "unsupported command-line option", "required file missing", "file permission denied" -> 4
                 "certificate processing failed", "TLS handshake failed", "configuration rejected" -> 3
-                "network operation timed out" -> 2
+                "network operation timed out", "account network connection closed or refused" -> 2
                 else -> 0
             }
             return if (previous != null && rank(previous) > rank(next)) previous else next

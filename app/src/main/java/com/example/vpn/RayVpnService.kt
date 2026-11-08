@@ -1424,6 +1424,7 @@ class RayVpnService : VpnService() {
                 profile = reuseSidecar
             } else if (engineChain != null) profile = startChain(engineChain, settings)
             else if (sidecarEngine != null) profile = startSidecar(sidecarEngine, profile, settings)
+            mutateState { it.copy(activeRoute = com.example.data.model.ConnectionRoute.label(profile)) }
             engineEndpoint = if (sidecarEngine?.id == com.example.vpn.sidecar.ByedpiSidecar.ID)
                 com.example.vpn.sidecar.ByedpiSidecar.healthEndpoint(profile)
                 else if (engineChain != null || sidecarEngine != null) com.example.vpn.verify.Socks5.endpointOf(profile) else null

@@ -402,7 +402,7 @@ fun HomeScreen(
         }
         Text(
             text = when (earthMode) {
-                EarthMode.ON -> "Protected"
+                EarthMode.ON -> "Connected"
                 EarthMode.CONNECTING -> "Finding a path…"
                 EarthMode.OFF -> "Not connected"
             },
@@ -432,7 +432,31 @@ fun HomeScreen(
         }
 
         val connectedProfile = connectionState.activeProfile ?: activeProfile
-        if (connectionState.isConnected && connectedProfile?.security?.let { it.isBlank() || it.equals("none", ignoreCase = true) } == true) {
+        val directRoute = connectedProfile?.let { com.example.vpn.sidecar.ServerlessSidecar.handles(it) } == true
+        if (connectionState.isConnected) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard)
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("ACTIVE CONNECTION PATH", color = AppTheme.colors.textSecondary, fontSize = 11.sp)
+                    Text(connectionState.activeRoute ?: "Route not reported", color = AppTheme.colors.primary,
+                        fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (directRoute) "Device → Direct DPI bypass → Internet · ISP exit IP"
+                        else "Device → Android VPN → ${connectionState.activeRoute ?: "selected route"} → Internet",
+                        color = AppTheme.colors.textPrimary, fontSize = 12.sp)
+                    Text(if (connectionState.trafficEvidence?.takeIf { it.appliesTo(connectionState) }?.let {
+                        it.path == com.example.vpn.verify.ProbePath.TUN && it.bidirectional } == true)
+                        "Android VPN upload and download verified"
+                        else "Engine traffic checked · full-device route not verified",
+                        color = AppTheme.colors.textSecondary, fontSize = 12.sp)
+                }
+            }
+        }
+        if (connectionState.isConnected && (directRoute || (connectedProfile?.let {
+            !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) &&
+                (it.security.isBlank() || it.security.equals("none", ignoreCase = true)) } == true))) {
             Card(
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 shape = RoundedCornerShape(12.dp),
@@ -451,7 +475,7 @@ fun HomeScreen(
                     Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "This profile has no TLS/REALITY encryption between this device and the VPN server. Use a TLS or REALITY profile for a confidential connection.",
+                        text = if (directRoute) "Direct bypass keeps your ISP exit IP and does not add an encrypted VPN tunnel. App encryption still applies. Some apps, including Telegram, may need a separate proxy or a working tunnel." else "This profile has no TLS/REALITY encryption between this device and the VPN server. Use a TLS or REALITY profile for a confidential connection.",
                         color = AppTheme.colors.textPrimary,
                         fontSize = 12.sp
                     )

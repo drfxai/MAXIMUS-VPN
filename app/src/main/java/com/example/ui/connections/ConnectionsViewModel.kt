@@ -232,7 +232,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                     val reader = Thread({
                         runCatching { child.inputStream.bufferedReader().useLines { lines ->
                             lines.forEach { line ->
-                                if (line.contains("error", true) || line.contains("failed", true))
+                                if (SidecarProcess.isFailureLine(line))
                                     failure.set(SidecarProcess.preferFailure(failure.get(), line))
                             }
                         } }
