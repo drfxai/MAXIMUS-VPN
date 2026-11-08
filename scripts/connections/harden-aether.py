@@ -70,6 +70,13 @@ replace('https.rs', '    tokio::time::timeout(timeout, exchange(request, fingerp
             other => other,
         }
     })''')
+# Bound only the handshake, where no POST can have been written. A whole-request
+# timeout remains non-retryable because the server may already have registered it.
+replace('https.rs', '        match tokio_boring::connect(config, request.sni.unwrap_or(request.host), stream).await {', r'''        let handshake = tokio::time::timeout(Duration::from_secs(8),
+            tokio_boring::connect(config, request.sni.unwrap_or(request.host), stream))
+            .await.map_err(|_| AetherError::Tls(format!(
+                "handshake with {}: pre-HTTP timeout", authority(address, port))))?;
+        match handshake {''')
 replace('https.rs', 'async fn exchange(', r'''fn maximus_api_tls_retry(error: &AetherError) -> bool {
     let AetherError::Tls(message) = error else { return false; };
     let lower = message.to_ascii_lowercase();
@@ -83,6 +90,7 @@ mod maximus_api_retry_tests {
     #[test]
     fn only_pre_http_handshake_errors_can_retry() {
         assert!(maximus_api_tls_retry(&AetherError::Tls("handshake with api: connection reset".into())));
+        assert!(maximus_api_tls_retry(&AetherError::Tls("handshake with api: pre-HTTP timeout".into())));
         for text in ["handshake with api: CERTIFICATE_VERIFY_FAILED", "handshake with api: hostname mismatch",
             "handshake with api: unknown ca", "handshake with api: TLSV1_ALERT_UNKNOWN_CA",
             "handshake with api: IP address mismatch", "handshake with api: ECH_REJECTED", "Missing trusted certificate bundle"] {
