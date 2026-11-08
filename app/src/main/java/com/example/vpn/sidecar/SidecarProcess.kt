@@ -80,9 +80,12 @@ class SidecarProcess(
     companion object {
         fun isFailureLine(line: String): Boolean = listOf("error", "failed", "no such file", "unknown argument",
             "timed out", "timeout", "did not answer", "deadline has elapsed", "connection refused", "connection reset",
-            "unexpected eof", "caused by:").any { line.contains(it, true) }
+            "unexpected eof", "caused by:", "HTTP 429", "HTTP 403", "HTTP 401").any { line.contains(it, true) }
 
         fun failureCategory(line: String): String = when {
+            line.contains("HTTP 429", true) -> "WARP API rate limited (HTTP 429)"
+            line.contains("HTTP 403", true) -> "WARP API returned HTTP 403"
+            line.contains("HTTP 401", true) -> "WARP API returned HTTP 401"
             line.contains("timed out", true) || line.contains("timeout", true) || line.contains("did not answer", true) || line.contains("deadline has elapsed", true) -> "network operation timed out"
             line.contains("certificate_verify_failed", true) || line.contains("certificate verify failed", true) || line.contains("hostname mismatch", true) -> "certificate trust or hostname verification failed"
             line.contains("certificate", true) -> "certificate processing failed"
@@ -99,7 +102,9 @@ class SidecarProcess(
         fun preferFailure(previous: String?, line: String): String {
             val next = failureCategory(line)
             fun rank(value: String?) = when (value) {
-                "certificate trust or hostname verification failed", "unsupported command-line option", "required file missing", "file permission denied" -> 4
+                "certificate trust or hostname verification failed", "unsupported command-line option",
+                "required file missing", "file permission denied", "WARP API rate limited (HTTP 429)",
+                "WARP API returned HTTP 403", "WARP API returned HTTP 401" -> 4
                 "certificate processing failed", "TLS handshake failed", "configuration rejected" -> 3
                 "network operation timed out", "account network connection closed or refused" -> 2
                 else -> 0
