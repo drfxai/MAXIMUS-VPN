@@ -52,21 +52,44 @@ class BuiltinBootstrapRegressionTest {
             AetherSidecar.identityDirectory = { dir }
             val failed = setOf("masque")
             assertTrue(AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("h3"), failed))
-            assertTrue(AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("wireguard"), failed))
+            assertFalse("A MASQUE-only signup refusal must not suppress independent WG registration",
+                AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("wireguard"), failed))
+            val unreachable = setOf(AetherApiBridge.API_UNAVAILABLE)
+            assertTrue(AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("h3"), unreachable))
+            assertTrue(AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("wireguard"), unreachable))
             java.io.File(dir, "wireguard.toml").writeText("x".repeat(64))
-            assertFalse(AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("wireguard"), failed))
+            assertFalse(AetherApiBridge.skipAfterBootstrapFailure(AetherSidecar.profile("wireguard"), unreachable))
             assertTrue(AetherApiBridge.bootstrapBlocked("WARP API registration failed (TLS handshake failed)"))
+            assertTrue(AetherApiBridge.bootstrapBlocked("WARP API registration failed (WARP API rate limited (HTTP 429))"))
+            assertTrue(AetherApiBridge.registrationFailed("WARP API registration failed (WARP registration failed)"))
             assertFalse(AetherApiBridge.bootstrapBlocked("WARP API registration failed (WARP registration failed)"))
         } finally { AetherSidecar.identityDirectory = original; dir.deleteRecursively() }
     }
 
-    @Test fun registrationSummaryDoesNotEraseCertificateOrTimeoutCause() {
+    @Test fun apiPreflightChecksAuthenticatedRegistrationHostsInsteadOfGenericWebsites() {
+        assertEquals(listOf("api.devices.cloudflare.com", "api.cloudflareclient.com"),
+            AetherApiBridge.apiHostsForProbe(AetherSettings()))
+        assertEquals(listOf("api.cloudflareclient.com"),
+            AetherApiBridge.apiHostsForProbe(AetherSettings(apiHost = "api.cloudflareclient.com")))
+        assertEquals(listOf("api.devices.cloudflare.com"),
+            AetherApiBridge.apiHostsForProbe(AetherSettings(apiSni = "api.devices.cloudflare.com")))
+    }
+
+        @Test fun registrationSummaryDoesNotEraseCertificateOrTimeoutCause() {
         val certificate = SidecarProcess.preferFailure(null, "TLS CERTIFICATE_VERIFY_FAILED")
         assertEquals("certificate trust or hostname verification failed", certificate)
         assertEquals(certificate, SidecarProcess.preferFailure(certificate, "registration failed"))
         val timeout = SidecarProcess.failureCategory("TLS request timed out")
         assertEquals("network operation timed out", timeout)
         assertEquals(timeout, SidecarProcess.preferFailure(timeout, "registration failed"))
+        val limited = SidecarProcess.failureCategory("WARP registration HTTP 429")
+        assertEquals("WARP API rate limited (HTTP 429)", limited)
+        assertEquals(limited, SidecarProcess.preferFailure(limited, "WARP registration failed"))
+        assertEquals("WARP API returned HTTP 403", SidecarProcess.failureCategory("WARP API HTTP 403"))
+        assertTrue(SidecarProcess.isFailureLine("[!] warp registration: status 429: too many requests"))
+        assertEquals("WARP API rate limited (HTTP 429)",
+            SidecarProcess.failureCategory("[!] warp registration: status 429: too many requests"))
+        assertEquals("WARP API returned HTTP 403", SidecarProcess.failureCategory("warp register: status 403"))
     }
 
     @Test fun stalledVpnDnsIsBoundedAndDoesNotPreventAnotherLookup() {
