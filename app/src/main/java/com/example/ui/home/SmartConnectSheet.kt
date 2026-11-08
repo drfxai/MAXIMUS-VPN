@@ -68,6 +68,7 @@ internal enum class SmartConnectMode { SEARCHING, CONNECTED }
 
 /** The view for [state], or null when this attempt has no search to show. */
 internal fun smartConnectMode(state: ConnectionState): SmartConnectMode? {
+    if (!state.smartSession) return null
     val search = state.search?.takeIf { it.attemptId == state.attemptId } ?: return null
     return when {
         state.status == ConnectionStatus.CONNECTED -> SmartConnectMode.CONNECTED

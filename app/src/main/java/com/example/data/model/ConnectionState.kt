@@ -42,6 +42,8 @@ data class ConnectionState(
     /** The profile the session belongs to (what the screen shows as the server in use). */
     val activeProfile: VlessProfile? = null,
     val activeEngineName: String? = null,
+    /** Actual resolved runtime route; cleared for every new attempt. */
+    val activeRoute: String? = null,
     val connectedDurationSeconds: Long = 0,
     val uploadBytes: Long = 0,
     val downloadBytes: Long = 0,
