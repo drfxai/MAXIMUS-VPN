@@ -3,7 +3,8 @@ package com.example.vpn.sidecar
 import com.example.data.model.AppSettings
 import com.example.data.model.VlessProfile
 import com.example.vpn.engine.ProfileExtras
-import com.example.vpn.connections.AccessProbe
+import com.example.vpn.verify.Dialer
+import com.example.vpn.verify.TrafficCheck
 import com.example.vpn.verify.Socks5
 import com.example.xray.XrayLogManager
 import java.io.File
@@ -19,10 +20,43 @@ object AetherApiBridge {
         val root = AetherSidecar.identityDirectory?.invoke() ?: return false
         return AetherIdentityStore.hasStored(root, keyKind(profile))
     }
-    fun bootstrapBlocked(cause: String) = cause.startsWith("WARP API registration failed") &&
-        listOf("TLS", "certificate", "timed out").any { cause.contains(it, ignoreCase = true) }
+    /** Distinguish shared API outages from a failure specific to MASQUE or WireGuard signup. */
+    const val API_UNAVAILABLE = "api-unavailable"
+    fun registrationFailed(cause: String) = cause.startsWith("WARP API registration failed")
+    fun bootstrapBlocked(cause: String) = registrationFailed(cause) &&
+        listOf("TLS", "certificate", "timed out", "network operation", "closed or refused",
+            "rate limited", "API unreachable").any { cause.contains(it, ignoreCase = true) }
     fun skipAfterBootstrapFailure(profile: VlessProfile, failedKinds: Set<String>): Boolean =
-        failedKinds.isNotEmpty() && (keyKind(profile) in failedKinds || !hasStoredKeys(profile))
+        (API_UNAVAILABLE in failedKinds || keyKind(profile) in failedKinds) && !hasStoredKeys(profile)
+
+    /** Check the actual WARP API TLS identity, not a generic website that may be reachable
+     * through Direct OOB while both Cloudflare registration hosts are blocked.
+     * An HTTP error status still proves TLS/HTTP reachability; it does not prove signup will work.
+     */
+    internal fun apiHostsForProbe(options: AetherSettings): List<String> {
+        val selected = options.apiHost.ifBlank { options.apiSni }
+        return if (selected.isNotBlank()) listOf(selected)
+            else listOf("api.devices.cloudflare.com", "api.cloudflareclient.com")
+    }
+
+    private fun apiTlsReachable(options: AetherSettings, endpoint: Socks5.Endpoint): Boolean {
+        val pinnedAddress = options.apiAddress.trim()
+        val dialer = Dialer { host, port, timeout ->
+            Socks5.connect(endpoint, pinnedAddress.ifBlank { host }, port, timeout)
+        }
+        val probe = TrafficCheck(dialer, stepTimeoutMs = 6_000)
+        for (host in apiHostsForProbe(options)) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException()
+            try {
+                val response = probe.exchange(TrafficCheck.Target(host, 443, "/"), "HEAD", null, keepBody = false)
+                if (response.status in 200..599) return true
+            } catch (e: Exception) {
+                if (e is InterruptedException || e is java.util.concurrent.CancellationException) throw e
+                // The other authenticated hostname may still work.
+            }
+        }
+        return false
+    }
 
     fun start(profile: VlessProfile, settings: AppSettings, parent: SidecarContext,
         force: Boolean = false): BuiltinExitNode.Started? {
@@ -45,13 +79,16 @@ object AetherApiBridge {
             val process = SidecarProcess.start("aether-api-oob", launch, context.workDir, context.socksPort)
             started = process
             check(process.awaitReady(launch.readyTimeoutMs)) { "Direct API bridge did not start" }
-            if (options.apiRoute == "auto" && !AccessProbe.check(
-                    Socks5.Endpoint("127.0.0.1", context.socksPort, context.socksUser, context.socksPass), false).traffic) {
-                XrayLogManager.i("BUILTIN", "aether/api · Direct OOB unverified; using native API route")
-                process.stop()
-                return null
+            val endpoint = Socks5.Endpoint("127.0.0.1", context.socksPort, context.socksUser, context.socksPass)
+            if (!apiTlsReachable(options, endpoint) || !process.isAlive) {
+                if (options.apiRoute == "auto") {
+                    XrayLogManager.i("BUILTIN", "aether/api · WARP API TLS unreachable via Direct OOB; trying native API route")
+                    process.stop()
+                    return null
+                }
+                error("WARP API TLS unreachable via forced Direct OOB route")
             }
-            XrayLogManager.i("BUILTIN", "aether/api · Direct OOB bootstrap selected; CA and hostname checks enabled")
+            XrayLogManager.i("BUILTIN", "aether/api · WARP API host TLS reachable via Direct OOB; registration not yet verified")
             return BuiltinExitNode.Started(process,
                 "socks5://${context.socksUser}:${context.socksPass}@127.0.0.1:${context.socksPort}")
         } catch (e: Throwable) {
