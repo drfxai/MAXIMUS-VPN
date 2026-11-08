@@ -96,10 +96,13 @@ object ConnectionEngineRunner {
                     record(name, "startup", "FAIL", reason)
                     attempts += "$name: $reason"
                     if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
-                    // Reuse a stored WireGuard identity even if MASQUE provisioning failed.
-                    // Only skip repeated TLS/network bootstrap, not a protocol-specific API refusal.
-                    if (engine.id == AetherSidecar.ID && AetherApiBridge.bootstrapBlocked(reason))
-                        failedRegistrationKinds += AetherApiBridge.keyKind(candidate)
+                    // Registration is shared by H2/H3 MASQUE. Do not repeat a failed signup
+                    // for the same identity, but allow an independent stored or new WG identity.
+                    // A proven API transport failure/rate limit blocks all *new* registrations.
+                    if (engine.id == AetherSidecar.ID && AetherApiBridge.registrationFailed(reason)) {
+                        failedRegistrationKinds += if (AetherApiBridge.bootstrapBlocked(reason))
+                            AetherApiBridge.API_UNAVAILABLE else AetherApiBridge.keyKind(candidate)
+                    }
                     continue
                 }
                 record(name, "startup", "PASS")
