@@ -432,7 +432,8 @@ fun HomeScreen(
         }
 
         val connectedProfile = connectionState.activeProfile ?: activeProfile
-        val directRoute = connectedProfile?.let { com.example.vpn.sidecar.ServerlessSidecar.handles(it) } == true
+        val directRoute = connectedProfile?.let { com.example.vpn.sidecar.ServerlessSidecar.handles(it) &&
+            com.example.vpn.engine.ProfileExtras.read(it).optString("exitNode").isBlank() } == true
         if (connectionState.isConnected) {
             Card(
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),

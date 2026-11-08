@@ -28,6 +28,10 @@ object ConnectionRoute {
             "" -> "${profile.protocolType} · ${profile.transport}"
             else -> e.optString("engine")
         }
-        return method
+        val exit = if (e.optString("exitNode").isNotBlank()) " · custom exit" else ""
+        val relays = listOf("tor" to "Tor", "psiphon" to "Psiphon").mapNotNull { (key, title) ->
+            e.optString(key, "off").takeIf { it != "off" }?.let { "$title ($it)" }
+        }
+        return (listOf(method + exit) + relays).joinToString(" · ")
     }
 }

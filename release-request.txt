@@ -1,1 +1,1 @@
-v1.0.4 code 53: theme-aligned connection workspaces, complete layered WARP identity selection, scoped VPS logs and safe API bootstrap fallback.
+V1.0.4 code 54: actual runtime connection path on Home, Direct compatibility notice, and WARP registration cause diagnostics.
