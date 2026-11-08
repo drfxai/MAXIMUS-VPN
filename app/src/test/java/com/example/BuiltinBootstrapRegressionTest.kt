@@ -86,6 +86,10 @@ class BuiltinBootstrapRegressionTest {
         assertEquals("WARP API rate limited (HTTP 429)", limited)
         assertEquals(limited, SidecarProcess.preferFailure(limited, "WARP registration failed"))
         assertEquals("WARP API returned HTTP 403", SidecarProcess.failureCategory("WARP API HTTP 403"))
+        assertTrue(SidecarProcess.isFailureLine("[!] warp registration: status 429: too many requests"))
+        assertEquals("WARP API rate limited (HTTP 429)",
+            SidecarProcess.failureCategory("[!] warp registration: status 429: too many requests"))
+        assertEquals("WARP API returned HTTP 403", SidecarProcess.failureCategory("warp register: status 403"))
     }
 
     @Test fun stalledVpnDnsIsBoundedAndDoesNotPreventAnotherLookup() {
