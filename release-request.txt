@@ -1,1 +1,1 @@
-V1.0.4 code 55: verify WARP API hosts via authenticated TLS, avoid repeated Aether H2/H3 registration failures, preserve WireGuard fallback, classify errors. Requires post-release Android TUN and Irancell verification.
+V1.0.4 code 56: avoid stacked API fragmentation over Direct OOB and retry pre-HTTP Aether TLS handshake with compatible account-only settings.
