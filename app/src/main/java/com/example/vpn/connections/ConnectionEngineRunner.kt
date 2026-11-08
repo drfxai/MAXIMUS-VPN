@@ -125,8 +125,13 @@ object ConnectionEngineRunner {
             } catch (e: Exception) {
                 if (e is InterruptedException || e is CancellationException) throw e
                 checkCancellation()
-                record(name, "startup", "FAIL", stage)
-                attempts += "$name: $stage"
+                // Never print arbitrary process exceptions: they may contain profile secrets.
+                // This fixed, non-sensitive preflight error is safe and actionable.
+                val reason = if (engine.id == AetherSidecar.ID &&
+                    e.message == "WARP API TLS unreachable via forced Direct OOB route")
+                    "WARP API TLS unreachable via forced Direct OOB route" else stage
+                record(name, "startup", "FAIL", reason)
+                attempts += "$name: $reason"
             } finally {
                 running?.stop()
             }
