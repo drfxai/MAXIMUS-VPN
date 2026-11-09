@@ -88,9 +88,16 @@ object AetherApiBridge {
                 }
                 error("WARP API TLS unreachable via forced Direct OOB route")
             }
-            XrayLogManager.i("BUILTIN", "aether/api · Android TLS precheck passed via Direct OOB; native Aether registration still pending")
-            return BuiltinExitNode.Started(process,
-                "socks5://${context.socksUser}:${context.socksPass}@127.0.0.1:${context.socksPort}")
+            val account = AetherPlatformApi(endpoint, options.apiAddress.trim())
+            val owner = object : RunningEngine {
+                override val isAlive get() = process.isAlive
+                override val startupFailure get() = process.startupFailure
+                override fun awaitReady(timeoutMs: Long) = process.awaitReady(timeoutMs)
+                override fun stop() { try { account.close() } finally { process.stop() } }
+            }
+            XrayLogManager.i("BUILTIN", "aether/api · account HTTPS uses Android TLS through Direct OOB; registration still pending")
+            return BuiltinExitNode.Started(owner,
+                "socks5://${context.socksUser}:${context.socksPass}@127.0.0.1:${context.socksPort}", account.address, account.token)
         } catch (e: Throwable) {
             started?.stop()
             if (options.apiRoute == "auto" && e is Exception && e !is InterruptedException &&

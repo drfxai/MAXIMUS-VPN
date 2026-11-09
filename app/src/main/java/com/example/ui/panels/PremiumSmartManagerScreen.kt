@@ -53,6 +53,7 @@ internal fun PremiumSmartManagerScreen(
     var selectedServer by rememberSaveable { mutableStateOf<String?>(null) }
     val server = state.servers.firstOrNull { it.id == selectedServer } ?: state.servers.firstOrNull()
     var chosen by remember(server?.id) { mutableStateOf(setOf<String>()) }
+    var showRegionHop by remember(server?.id) { mutableStateOf(false) }
     var showPlan by remember(server?.id) { mutableStateOf(false) }
     var batchDomain by rememberSaveable(server?.id) { mutableStateOf("") }
     var batchLabel by rememberSaveable(server?.id) { mutableStateOf("t") }
@@ -121,6 +122,7 @@ internal fun PremiumSmartManagerScreen(
         }
         when (page) {
             0 -> {
+                MxAction("RegionHop · Psiphon country exits", { showRegionHop = true })
                 StudioTableHeader()
                 engineIds.forEachIndexed { index, id ->
                     val candidate = inspection?.candidate(id)
@@ -250,6 +252,8 @@ internal fun PremiumSmartManagerScreen(
         if (state.error.isNotBlank()) Text(state.error, color = Mx.Red, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
     }
+
+    if (showRegionHop && server != null) RegionHopDialog(vm, state, server.id) { showRegionHop = false }
 
     if (showPlan) {
         val chosenCandidates = candidates.filter { it.id in chosen }

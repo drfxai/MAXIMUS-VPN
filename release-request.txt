@@ -1,1 +1,1 @@
-V1.0.4 code 56: avoid stacked API fragmentation over Direct OOB and retry pre-HTTP Aether TLS handshake with compatible account-only settings.
+V1.0.4 code 57: Android TLS account adapter for Aether, RegionHop after 3X-UI and in Smart Manager, private Psiphon listener/firewall repair and secure config import.

@@ -87,13 +87,15 @@ data class AetherSettings(
                 addAll(listOf("--api-sni", apiSni.ifBlank { apiHost }))
                 if (apiHost.isBlank()) addAll(listOf("--api-host", apiSni))
             }
-            if (fragment) {
+            val masque = carrier !in listOf("wireguard", "wiw")
+            if (fragment && carrier in listOf("h2", "gool", "mim")) {
                 add("--fragment")
                 if (fragmentSize.isNotBlank()) addAll(listOf("--fragment-size", fragmentSize.trim()))
                 if (fragmentDelay.isNotBlank()) addAll(listOf("--fragment-delay", fragmentDelay.trim()))
             }
-            if (ech) addAll(listOf("--ech", "auto"))
-            addAll(AetherTlsProfiles.arguments(fingerprint))
+            if (ech && masque) addAll(listOf("--ech", "auto"))
+            if (masque) addAll(AetherTlsProfiles.arguments(fingerprint))
+            if (endpoint.isBlank() && carrier in listOf("wiw", "mim")) add(if (carrier == "wiw") "--wiw-scan" else "--mim-scan")
         }
     }
 

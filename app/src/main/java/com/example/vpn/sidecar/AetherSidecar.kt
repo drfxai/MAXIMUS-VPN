@@ -5,7 +5,7 @@ import com.example.vpn.engine.ProfileExtras
 import org.json.JSONObject
 import java.io.File
 
-/** Separately built Aether 2.4.0, authenticated registration and native SOCKS authentication. */
+/** Separately built PattNG-pinned Aether, authenticated registration and native SOCKS authentication. */
 object AetherSidecar : SidecarEngine {
     const val ID = "aether"
     fun readyLine(port: Int) = Regex("^MAXIMUS_AETHER_SOCKS_READY:$port$")
@@ -94,7 +94,11 @@ object AetherSidecar : SidecarEngine {
             val helpers = listOfNotNull(exit, api)
             val environment = launch.environment.toMutableMap()
             exit?.let { environment["AETHER_UPSTREAM"] = it.upstream }
-            api?.let { environment["MAXIMUS_API_UPSTREAM"] = it.upstream }
+            api?.let {
+                environment["MAXIMUS_API_UPSTREAM"] = it.upstream
+                it.apiHttp?.let { value -> environment["MAXIMUS_API_HTTP"] = value }
+                it.apiToken?.let { value -> environment["MAXIMUS_API_HTTP_TOKEN"] = value }
+            }
             val child = SidecarProcess.start(ID, launch.copy(environment = environment), context.workDir, context.socksPort)
             return object : RunningEngine {
                 override val isAlive get() = child.isAlive && helpers.all { it.running.isAlive }

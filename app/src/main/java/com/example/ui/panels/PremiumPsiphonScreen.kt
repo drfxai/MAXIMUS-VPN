@@ -73,6 +73,7 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState, ini
 
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
         .background(Mx.Black).padding(8.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+        PsiphonSettingsImportButton(vm, state.busy.isBlank() && state.psiphonInstall?.running != true)
         MxHero("MAXIMUS VPN  /  PRIVATE SERVER", "Private Psiphon Server",
             "Guided deployment • encrypted server entry • real tunnel verification")
 

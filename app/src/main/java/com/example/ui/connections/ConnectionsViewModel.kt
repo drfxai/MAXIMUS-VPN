@@ -224,7 +224,11 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                     process = ProcessBuilder(args).directory(staging).redirectErrorStream(true).apply {
                         environment().putAll(launch.environment)
                         exit?.let { environment()["AETHER_UPSTREAM"] = it.upstream }
-                        api?.let { environment()["MAXIMUS_API_UPSTREAM"] = it.upstream }
+                        api?.let {
+                            environment()["MAXIMUS_API_UPSTREAM"] = it.upstream
+                            it.apiHttp?.let { value -> environment()["MAXIMUS_API_HTTP"] = value }
+                            it.apiToken?.let { value -> environment()["MAXIMUS_API_HTTP_TOKEN"] = value }
+                        }
                     }.start()
                     process.outputStream.close()
                     val child = process

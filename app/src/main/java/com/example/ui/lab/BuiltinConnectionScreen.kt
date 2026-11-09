@@ -225,7 +225,7 @@ internal fun BuiltinConnectionScreen(
                     OptionRow("Account API route", options.advanced.apiRoute, AetherSettings.apiRoutes, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(apiRoute = value)) }
                     }
-                    Footnote(c, "Auto tests Direct OOB for key registration. Native uses the direct API path. This does not change the WARP tunnel or disable certificate checks.")
+                    Footnote(c, "Auto/OOB uses Android TLS for account HTTPS. Native applies the API fingerprint directly. Explicit ECH and tunnel TLS stay native; certificate checks remain enabled.")
                     OptionRow("Fingerprint", options.advanced.fingerprint, com.example.vpn.sidecar.AetherTlsProfiles.names, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(fingerprint = value)) }
                     }

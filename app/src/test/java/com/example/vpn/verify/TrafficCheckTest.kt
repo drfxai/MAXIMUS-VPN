@@ -149,6 +149,25 @@ class TrafficCheckTest {
         assertTrue(check().smallRequest() >= 1)
     }
 
+    @Test fun accountJsonHeadersAndResponseStatusSurviveAuthenticatedTls() {
+        val root = HeldCertificate.Builder().certificateAuthority(0).build()
+        val leaf = HeldCertificate.Builder().signedBy(root).addSubjectAlternativeName("localhost").build()
+        server.useHttps(HandshakeCertificates.Builder().heldCertificate(leaf, root.certificate).build().sslSocketFactory(), false)
+        server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "9").setBody("{}"))
+        server.start()
+        val client = HandshakeCertificates.Builder().addTrustedCertificate(root.certificate).build()
+        val probe = TrafficCheck(direct, stepTimeoutMs = 3000, sslFactory = { client.sslSocketFactory() },
+            hostnameVerifier = okhttp3.internal.tls.OkHostnameVerifier)
+        val response = probe.exchange(TrafficCheck.Target("localhost", server.port, "/v0a4005/reg"), "POST",
+            "{}".toByteArray(), true, mapOf("Authorization" to "Bearer test-only", "Content-Type" to "application/json", "CF-Client-Version" to "test-only"))
+        val request = server.takeRequest(3, TimeUnit.SECONDS)!!
+        assertEquals("application/json", request.getHeader("Content-Type"))
+        assertEquals("Bearer test-only", request.getHeader("Authorization"))
+        assertEquals("{}", request.body.readUtf8())
+        assertEquals(429, response.status); assertEquals("9", response.headers["retry-after"])
+        assertEquals(1, server.requestCount)
+    }
+
     @Test fun aCertificateForAnotherNameIsAFailureNeverAPass() {
         val root = HeldCertificate.Builder().certificateAuthority(0).build()
         val leaf = HeldCertificate.Builder().signedBy(root).addSubjectAlternativeName("other.example").build()

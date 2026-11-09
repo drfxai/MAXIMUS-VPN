@@ -4,6 +4,9 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,6 +105,7 @@ internal fun ServersOverlay(
     onInstallCenter: () -> Unit
 ): Boolean {
     val clipboard = LocalClipboardManager.current
+    var regionHopServer by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     var quickHiddify by remember { mutableStateOf<String?>(null) }
@@ -114,7 +118,7 @@ internal fun ServersOverlay(
     val tunnelState by vm.tunnel.state.collectAsState()
     if (tunnelState.route != TunnelRoute.None) {
         TunnelOverlay(vm, tunnelState, copy) { confirm = it }
-        ConfirmHost(vm, confirm) { confirm = null }
+    ConfirmHost(vm, confirm) { confirm = null }
         return true
     }
 
@@ -154,6 +158,7 @@ internal fun ServersOverlay(
                 ui,
                 ServerDetailActions(
                     onBack = vm::close,
+                    onRegionHop = { regionHopServer = id },
                     onRefresh = { vm.refresh(id) },
                     onSignIn = { vm.openAdd(id) },
                     onKeyLogin = { vm.addKeyLogin(id) },
@@ -194,6 +199,9 @@ internal fun ServersOverlay(
     }
     quickHiddify?.let { id -> HiddifyQuickDialog(vm, id, state.busy.isNotBlank()) { quickHiddify = null } }
     telegramHiddify?.let { id -> HiddifyTelegramDialog(vm, id, state.busy.isNotBlank(), copy) { telegramHiddify = null } }
+    regionHopServer?.let { id ->
+        com.example.ui.panels.RegionHopDialog(vm, state, id) { regionHopServer = null }
+    }
     ConfirmHost(vm, confirm) { confirm = null }
     return true
 }

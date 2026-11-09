@@ -1,0 +1,17 @@
+{
+  "version": "1.27.0",
+  "commit": "d5798d80f77fa6f40406ba30886d810c3c462147",
+  "files": {
+    "VERSION": "7ef1ea58fece676ff7345f6edac427e671daf20f0d7499ef2e42ada241d4fe24",
+    "install.sh": "0dc097a6618d027e27bcef1522fa6b3e1dc71b3ef5e02d7b24569f78acf34685",
+    "systemd/psi-panel.service": "d0bbfa6d845f5db3d5e66d7759c9c64ec48ce0e8c5cdb9b78d9c3cd2d29bb3f0",
+    "systemd/psi-tunnel@.service": "6fa74ad68f5587e2681117445a9e0d0df79e4391e62eb216254ff750a4c302e7",
+    "systemd/regionhop-upstream.service": "c5916f34ecc7a3273c2ac27ccc13437eb8c7d3bece6cb0554ed343dbe345eab8",
+    "LICENSE": "cbceb85561c95e7cb914c8aed2f91625fa6381ce6245f4806c4704b433ea18ed"
+  },
+  "bundles": {
+    "amd64": "ff309a82f54500feb4a200590022a9ea4e8cd22de074f4cc332ed159723c5f77",
+    "arm64": "88ef27ca2ddb5cc33f3bfccd4732bbd7bca31039e7b9d6c25586b7955d12787b",
+    "armv7": "d76c3bae0c2351a0d60a3322ee194ada7d3a3d4e5344ef71320b839cc63a74ea"
+  }
+}

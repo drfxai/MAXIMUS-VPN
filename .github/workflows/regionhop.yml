@@ -1,0 +1,57 @@
+name: RegionHop provisioning
+on:
+  pull_request:
+    paths:
+      - 'app/src/main/assets/regionhop/**'
+      - 'app/src/main/java/com/example/panels/servers/RegionHop*'
+      - 'tools/regionhop/**'
+      - '.github/workflows/regionhop.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  provision:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test authenticated controls and same-server token scope
+        run: |
+          python3 -m unittest discover -s tools/regionhop -v
+          bash -n app/src/main/assets/regionhop/install.sh
+      - name: Install the real pinned RegionHop panel on an ephemeral systemd runner
+        run: |
+          set -euo pipefail
+          # Only an executable prerequisite fixture: no real 3X-UI installation is claimed.
+          sudo install -d /usr/local/x-ui
+          printf '#!/bin/sh\nexit 0\n' > /tmp/x-ui-fixture
+          sudo install -m 755 /tmp/x-ui-fixture /usr/local/x-ui/x-ui
+          sudo install -d -m 700 /tmp/maximus-regionhop-ci
+          sudo cp app/src/main/assets/regionhop/{install.sh,control.py,pins.json} /tmp/maximus-regionhop-ci/
+          # A synthetic deployment config; no user file or deployment credentials enter CI.
+          printf '{"PropagationChannelId":"0000000000000000","SponsorId":"0000000000000000","NetworkID":"CI","RemoteServerListSignaturePublicKey":"fixture-only","RemoteServerListURLs":[{"URL":"https://example.com/fixture"}]}' > /tmp/psiphon-fixture.json
+          sudo install -m 600 /tmp/psiphon-fixture.json /tmp/maximus-regionhop-ci/Psiphon.config
+          sudo bash /tmp/maximus-regionhop-ci/install.sh
+          sudo systemctl is-active --quiet psi-panel
+          sudo python3 - <<'PY'
+          import json,pathlib,subprocess,urllib.request
+          cfg=json.loads(pathlib.Path('/opt/maximus-regionhop/control.json').read_text())
+          url=f"http://127.0.0.1:{cfg['port']}{cfg['prefix']}/login"
+          with urllib.request.urlopen(url,timeout=10) as response: assert response.status==200
+          sockets=subprocess.check_output(['ss','-Hlnt'],text=True)
+          assert f"127.0.0.1:{cfg['port']}" in sockets
+          assert f"0.0.0.0:{cfg['port']}" not in sockets
+          assert pathlib.Path('/opt/maximus-regionhop/control.json').stat().st_mode & 0o077 == 0
+          PY
+          printf '{"operation":"status"}' > /tmp/regionhop-status.json
+          sudo python3 /opt/maximus-regionhop/control.py /tmp/regionhop-status.json | python3 -c 'import json,sys; assert json.load(sys.stdin)["installed"]'
+          # A second install must refuse to overwrite the managed panel or 3X-UI.
+          if sudo bash /tmp/maximus-regionhop-ci/install.sh; then exit 1; fi
+          sudo test -x /usr/local/x-ui/x-ui
+      - name: Remove ephemeral services and private fixture data
+        if: always()
+        run: |
+          if sudo test -f /opt/maximus-regionhop/source/install.sh; then
+            printf 'YES\n' | sudo bash -c 'source /opt/maximus-regionhop/source/install.sh; uninstall_all'
+          fi
+          sudo rm -rf /opt/maximus-regionhop /tmp/maximus-regionhop-ci /tmp/regionhop-status.json /tmp/psiphon-fixture.json
