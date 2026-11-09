@@ -143,7 +143,7 @@ class TrafficCheck(
         return sb.toString()
     }
 
-    internal class Response(val status: Int, val bodyBytes: Int, val body: ByteArrayOutputStream?)
+    internal class Response(val status: Int, val bodyBytes: Int, val body: ByteArrayOutputStream?, val headers: Map<String, String> = emptyMap())
 
     /** A failed exchange; [moved] is how many body bytes went (upload) or came (download) before it. */
     internal class TransferException(cause: Throwable, val moved: Int, val timedOut: Boolean) : IOException(cause.message, cause)
@@ -152,7 +152,11 @@ class TrafficCheck(
      * One HTTP/1.1 request over a fresh connection, bounded by [stepTimeoutMs] in total: a socket write has
      * no timeout of its own, so a watchdog closes the socket at the deadline.
      */
-    internal fun exchange(t: Target, method: String, payload: ByteArray?, keepBody: Boolean): Response {
+    internal fun exchange(t: Target, method: String, payload: ByteArray?, keepBody: Boolean, extraHeaders: Map<String, String> = emptyMap()): Response {
+        require(method in setOf("GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"))
+        require(extraHeaders.all { (key, value) -> key.matches(Regex("[A-Za-z0-9-]+")) &&
+            value.length <= 8192 && value.none { it == '\r' || it == '\n' } &&
+            key.lowercase() !in setOf("host", "content-length", "transfer-encoding", "connection") })
         var moved = 0
         val socket = AtomicReference<Socket?>(null)
         val expired = AtomicBoolean(false)
@@ -168,15 +172,16 @@ class TrafficCheck(
             val head = buildString {
                 append("$method ${t.path} HTTP/1.1\r\n")
                 append("Host: ${t.host}\r\n")
-                append("User-Agent: Mozilla/5.0\r\n")
-                append("Accept: */*\r\n")
+                if (extraHeaders.keys.none { it.equals("User-Agent", true) }) append("User-Agent: Mozilla/5.0\r\n")
+                if (extraHeaders.keys.none { it.equals("Accept", true) }) append("Accept: */*\r\n")
                 append("Accept-Encoding: identity\r\n")
                 append("Cache-Control: no-cache\r\n")
                 append("Connection: close\r\n")
                 if (payload != null) {
-                    append("Content-Type: text/plain\r\n")
+                    if (extraHeaders.keys.none { it.equals("Content-Type", true) }) append("Content-Type: text/plain\r\n")
                     append("Content-Length: ${payload.size}\r\n")
                 }
+                extraHeaders.forEach { (key, value) -> append("$key: $value\r\n") }
                 append("\r\n")
             }
             out.write(head.toByteArray(Charsets.US_ASCII))
@@ -204,7 +209,7 @@ class TrafficCheck(
                 length != null -> readFixed(input, length, body, counter)
                 else -> readFixed(input, MAX_BODY, body, counter, untilEof = true)
             }
-            return Response(status, total, body)
+            return Response(status, total, body, headers.second)
         } catch (e: Exception) {
             val timedOut = expired.get() || e is SocketTimeoutException
             throw TransferException(if (expired.get() && e !is SocketTimeoutException) SocketTimeoutException("deadline") else e, moved, timedOut)

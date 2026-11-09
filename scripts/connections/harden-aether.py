@@ -104,6 +104,27 @@ mod maximus_api_retry_tests {
 
 async fn exchange(''')
 
+# Android account HTTPS adapter: authenticated loopback IPC, only the two WARP
+# account hosts. Explicit ECH remains on native TLS rather than silently losing ECH.
+replace('https.rs', '    let (address, port) = request.address.unwrap_or((request.host, request.port));', r'''    if ech.is_none() && matches!(request.host, "api.devices.cloudflare.com" | "api.cloudflareclient.com") {
+        if let Ok(address) = std::env::var("MAXIMUS_API_HTTP") {
+            let relay: std::net::SocketAddr = address.parse()
+                .map_err(|_| AetherError::Api("Invalid account adapter address".into()))?;
+            if !relay.ip().is_loopback() { return Err(AetherError::Api("Account adapter must be loopback".into())); }
+            let token = std::env::var("MAXIMUS_API_HTTP_TOKEN")
+                .map_err(|_| AetherError::Api("Account adapter authentication missing".into()))?;
+            if token.len() < 32 || !token.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+                return Err(AetherError::Api("Invalid account adapter authentication".into()));
+            }
+            let mut headers = request.headers.to_vec();
+            headers.push(("X-Maximus-Api-Token".into(), token));
+            let local = Request { method: request.method, host: request.host, port: request.port,
+                address: None, sni: None, path: request.path, headers: &headers, body: request.body };
+            return over_http1(TcpStream::connect(relay).await?, &local).await;
+        }
+    }
+    let (address, port) = request.address.unwrap_or((request.host, request.port));''')
+
 # Require per-session RFC1929 credentials on the engine itself, including UDP associations.
 replace('socks.rs', '    sock.write_all(&[VER, 0x00]).await?;\n    Ok(())', r'''    let expected_user = std::env::var("MAXIMUS_SOCKS_USER").unwrap_or_default();
     let expected_pass = std::env::var("MAXIMUS_SOCKS_PASS").unwrap_or_default();

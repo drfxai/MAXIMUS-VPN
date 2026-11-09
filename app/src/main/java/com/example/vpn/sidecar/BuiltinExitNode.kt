@@ -46,7 +46,7 @@ object BuiltinExitNode {
         put("streamSettings", stream)
     }
 
-    data class Started(val running: RunningEngine, val upstream: String)
+    data class Started(val running: RunningEngine, val upstream: String, val apiHttp: String? = null, val apiToken: String? = null)
 
     fun start(options: AetherSettings, settings: AppSettings, parent: SidecarContext): Started? {
         if (!needed(options)) return null

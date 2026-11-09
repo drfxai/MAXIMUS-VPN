@@ -92,7 +92,8 @@ data class ServersState(
     /** Servers whose "Hiddify found" card was closed with Not now (this session only). */
     val foundDismissed: Set<String> = emptySet(),
     val bundle: SmartBatchUi? = null,
-    val psiphonInstall: PsiphonServerInstallUi? = null
+    val psiphonInstall: PsiphonServerInstallUi? = null,
+    val regionHop: Map<String, com.example.panels.servers.RegionHopManager.Snapshot> = emptyMap()
 ) {
     fun logsFor(serverId: String) = logs.takeIf { logsServerId == serverId }
 }
@@ -645,6 +646,29 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(busy = "") }
             }
         }
+    }
+
+    fun regionHopAction(serverId: String, operation: String, data: org.json.JSONObject = org.json.JSONObject()) =
+        serverAction(serverId, "RegionHop · $operation…") { s ->
+            check(psiphonJob?.isActive != true && bundleJob?.isActive != true) { "Wait for the active server installation." }
+            val result = withContext(Dispatchers.IO) {
+                val backend = com.example.panels.servers.RegionHopManager({ name -> getApplication<Application>().assets.open(name).use { it.readBytes() } })
+                if (operation == "install") {
+                    val config = com.example.data.security.SecureStorage(getApplication()).getAndDecrypt("psiphon_network_settings_v1")
+                        ?: error("Import your Psiphon.config first.")
+                    backend.install(s, config, quiet)
+                } else backend.action(s, operation, data)
+            }
+            _state.update { it.copy(regionHop = it.regionHop + (serverId to result)) }
+        }
+
+    fun importPsiphonConfig(raw: String) {
+        val problem = com.example.vpn.sidecar.PsiphonSidecar.validateNetworkSettings(raw)
+        if (problem != null) { _state.update { it.copy(error = problem) }; return }
+        if (runCatching { com.example.data.security.SecureStorage(getApplication()).encryptAndSave("psiphon_network_settings_v1", raw.trim()) }.isFailure) {
+            _state.update { it.copy(error = "Could not save Psiphon settings in encrypted device storage.") }; return
+        }
+        _events.tryEmit(ServersEvent.Message("Psiphon settings saved privately. They will be sent only to a VPS you choose to install RegionHop on."))
     }
 
     private val quiet = object : ActionProgress {

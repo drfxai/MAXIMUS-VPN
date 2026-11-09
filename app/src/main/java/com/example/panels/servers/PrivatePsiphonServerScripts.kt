@@ -74,6 +74,9 @@ object PrivatePsiphonServerScripts {
               code=§?
               trap - 0
               if [ "§code" -ne 0 ]; then
+                if [ -f '$INSTALL_DIR/ufw-owned' ]; then
+                  ufw --force delete allow ${r.port}/tcp comment 'maximus-private-psiphon' >/dev/null 2>&1 || :
+                fi
                 systemctl disable --now '$UNIT.service' >/dev/null 2>&1 || :
                 rm -f '/etc/systemd/system/$UNIT.service'
                 systemctl daemon-reload >/dev/null 2>&1 || :
@@ -130,9 +133,21 @@ object PrivatePsiphonServerScripts {
             MXUNIT
             chmod 644 '/etc/systemd/system/$UNIT.service'
             systemctl daemon-reload
+            if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
+              if ! ufw status | grep -Eq '^${r.port}/tcp[[:space:]]+ALLOW'; then
+                ufw allow ${r.port}/tcp comment 'maximus-private-psiphon' >/dev/null
+                touch '$INSTALL_DIR/ufw-owned'
+              fi
+            fi
+            echo '${r.port}' > '$INSTALL_DIR/listen-port'
             systemctl enable --now '$UNIT.service' >/dev/null
-            sleep 2
-            systemctl is-active --quiet '$UNIT.service' || { echo 'psiphond did not stay running' >&2; exit 1; }
+            ready=0
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              pid=§(systemctl show '$UNIT.service' -p MainPID --value)
+              if [ "§pid" != 0 ] && ss -Hlntp 'sport = :${r.port}' | grep -Fq "pid=§pid,"; then ready=1; break; fi
+              sleep 1
+            done
+            [ "§ready" = 1 ] && systemctl is-active --quiet '$UNIT.service' || { echo 'psiphond did not own the selected TCP listener' >&2; exit 1; }
             trap - 0
             echo '##RESULT PSIPHON_UNIT_ACTIVE=1'
         """.trimIndent().replace('§', '$')
@@ -157,6 +172,12 @@ object PrivatePsiphonServerScripts {
             dir='$INSTALL_DIR'
             if [ ! -f "§unit" ] && [ ! -d "§dir" ]; then
               echo 'No Maximus Psiphon unit or files were found' >&2; exit 78
+            fi
+            if [ -f "§dir/ufw-owned" ] && [ -f "§dir/listen-port" ]; then
+              port=§(cat "§dir/listen-port")
+              case "§port" in ''|*[!0-9]*) echo 'Invalid managed firewall metadata' >&2; exit 1;; esac
+              ufw --force delete allow "§port/tcp" comment 'maximus-private-psiphon'
+              rm -f "§dir/ufw-owned"
             fi
             if [ -f "§unit" ]; then
               systemctl disable --now '$UNIT.service'

@@ -133,7 +133,7 @@ class PsiphonSidecar(
             "DataRootDirectory", "MigrateDataStoreDirectory", "ListenInterface", "UseUnixDomainSockets",
             "LocalSocksProxyUnixPath", "LocalHttpProxyUnixPath", "EgressRegion", "EnableUpgradeDownload",
             "UpgradeDownloadURLs", "UpgradeDownloadClientVersionHeader", "UseNoticeFiles", "DisableTunnels",
-            "UpstreamProxyURL"
+            "UpstreamProxyURL", "UpstreamProxyUrl"
         )
 
         /** A new Psiphon profile; [region] is a two-letter country code, or empty for any. */
@@ -247,6 +247,9 @@ class PsiphonSidecar(
             val config = JSONObject(networkSettings.toString())
             LOCAL_FIELDS.forEach { config.remove(it) }
             config.put("LocalSocksProxyPort", socksPort)
+            config.put("ListenInterface", "lo")
+            config.put("ClientPlatform", "Android")
+            config.put("EmitDiagnosticNetworkParameters", false)
             // Xray only needs SOCKS; an HTTP proxy would be one more open local port.
             config.put("DisableLocalHTTPProxy", true)
             config.put("DataRootDirectory", dataDir.absolutePath)

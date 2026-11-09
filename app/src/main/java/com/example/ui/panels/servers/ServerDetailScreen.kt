@@ -124,6 +124,7 @@ data class ServerDetailActions(
     val onCopy: (String) -> Unit,
     val onUninstall: (String) -> Unit,
     val onOpenTunnel: () -> Unit = {},
+    val onRegionHop: () -> Unit = {},
     val onBackup: (String) -> Unit = {},
     val onUpdate: (String) -> Unit = {},
     val onStart: (String) -> Unit = {},
@@ -210,6 +211,12 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
             } else {
                 Rows(ui.tools) { ToolBlock(it, actions, idle) }
             }
+        }
+
+        if (ui.tools.any { it.id == ServerToolCatalog.XUI }) {
+            SectionLabel("Optional after 3X-UI")
+            GroupCard { ListRow("RegionHop · Psiphon locations", subtitle = "Manage country exits over private SSH",
+                trailing = { TextAction("Manage", actions.onRegionHop, enabled = idle) }) }
         }
 
         if (!ui.needsSignIn) {
