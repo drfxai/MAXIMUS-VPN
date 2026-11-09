@@ -70,7 +70,10 @@ object PrivatePsiphonServerScripts {
               echo 'Chosen TCP port has a listener; no install started' >&2; exit 78
             fi
             mkdir -m 700 '$INSTALL_DIR'
-            mkdir -m 700 '$CONTROL_DIR'
+            if ! mkdir -m 700 '$CONTROL_DIR'; then
+              rmdir '$INSTALL_DIR'
+              exit 1
+            fi
             # Only the freshly created Maximus directory may be removed by this trap.
             cleanup_install() {
               code=§?
