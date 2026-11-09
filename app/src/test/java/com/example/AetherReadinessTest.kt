@@ -27,7 +27,8 @@ class AetherReadinessTest {
         }
         override fun waitFor(): Int { ended.await(); return 0 }
         override fun destroy() { writer.close(); ended.countDown() }
-        fun serving(port: Int) { writer.write("MAXIMUS_AETHER_SOCKS_READY:$port\n".toByteArray()); writer.flush() }
+        fun line(value: String) { writer.write("$value\n".toByteArray()); writer.flush() }
+        fun serving(port: Int) = line("MAXIMUS_AETHER_SOCKS_READY:$port")
     }
 
     @Test fun boundPortDoesNotPassUntilTunnelStartsServing() {
@@ -40,6 +41,44 @@ class AetherReadinessTest {
                 assertTrue("Serving marker and listener must both be ready", process.awaitReady(2000))
             } finally { process.stop() }
         }
+    }
+
+    @Test fun accountTimeoutRetainsCauseAndCannotPassAsReady() {
+        ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
+            val child = PendingEngine()
+            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.readyLine(listener.localPort), logOutput = false)
+            try {
+                child.line("MAXIMUS_AETHER_STAGE:account")
+                child.line("registration retry: network operation timed out; private-token-must-not-escape")
+                assertFalse(process.awaitReady(500))
+                val failure = process.startupFailure.orEmpty()
+                assertTrue(failure.startsWith("WARP API registration failed"))
+                assertTrue(failure.contains("network operation timed out"))
+                assertFalse(failure.contains("private-token-must-not-escape"))
+            } finally { process.stop() }
+        }
+    }
+
+    @Test fun completedIdentityFollowedByScanIsNotMisreportedAsRegistrationFailure() {
+        ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
+            val child = PendingEngine()
+            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.readyLine(listener.localPort), logOutput = false)
+            try {
+                child.line("MAXIMUS_AETHER_STAGE:account")
+                child.line("registration retry failed: HTTP 429")
+                child.line("MAXIMUS_AETHER_STAGE:identity")
+                child.line("MAXIMUS_AETHER_STAGE:scan")
+                assertFalse(process.awaitReady(500))
+                assertTrue(process.startupFailure.orEmpty().contains("gateway scan"))
+                assertFalse(process.startupFailure.orEmpty().contains("registration failed"))
+            } finally { process.stop() }
+        }
+    }
+
+    @Test fun arbitraryStageTextIsNeverPublished() {
+        assertNull(SidecarProcess.aetherStage("MAXIMUS_AETHER_STAGE:secret-token"))
+        assertNull(SidecarProcess.aetherStage("scan"))
+        assertNull(SidecarProcess.aetherStage("prefix MAXIMUS_AETHER_STAGE:account"))
     }
 
     @Test fun servingMarkerCannotPassWithNoListener() {

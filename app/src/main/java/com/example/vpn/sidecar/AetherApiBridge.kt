@@ -58,12 +58,13 @@ object AetherApiBridge {
         return false
     }
 
-    fun start(profile: VlessProfile, settings: AppSettings, parent: SidecarContext,
-        force: Boolean = false): BuiltinExitNode.Started? {
+    fun start(profile: VlessProfile, settings: AppSettings, parent: SidecarContext): BuiltinExitNode.Started? {
         val extras = ProfileExtras.read(profile)
         val options = AetherSettings.read(extras)
         if (!allowed(options)) return null
-        if (!force && hasStoredKeys(profile)) return null
+        // A saved identity still calls refresh_profile before scanning. Keep those
+        // authenticated account requests on the same reachable route as registration;
+        // otherwise H3/reconnect silently falls back to blocked native API TLS.
         val executable = Sidecars.executable(ServerlessSidecar)
         if (executable == null) {
             check(options.apiRoute == "auto") { "Direct API runtime is missing" }
