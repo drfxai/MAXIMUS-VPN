@@ -22,8 +22,10 @@ with tempfile.TemporaryDirectory(prefix='direct-native-') as tmp:
     test_env=dict(env, MAXIMUS_SERVERLESS_FIXTURES=str(args.fixtures.resolve()))
     subprocess.run(['go','test','-count=1','-timeout=90s','./maximusvalidation'],cwd=source,env=test_env,check=True)
     subprocess.run(['go','build','-mod=readonly','-trimpath','-ldflags=-checklinkname=0','-o',str(binary),'./main'],cwd=source,env=env,check=True)
+    requests_seen=[]
     class Echo(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
+            requests_seen.append(self.path)
             import hashlib
             n=int(self.headers.get('Content-Length','0'));assert 0<n<=65536
             data=self.rfile.read(n);body=hashlib.sha256(data).hexdigest().encode()+b':'+data
@@ -80,9 +82,11 @@ with tempfile.TemporaryDirectory(prefix='direct-native-') as tmp:
                             with socket.create_connection(('127.0.0.1',port),timeout=.2):break
                         except OSError:
                             assert time.monotonic()<deadline;time.sleep(.05)
+                    before=len(requests_seen)
                     try:traffic.request(port,server.server_port,auth['user'],auth['pass'],b'exit-must-not-be-bypassed')
-                    except (AssertionError,OSError):pass
+                    except (AssertionError,OSError,IndexError):pass
                     else:raise AssertionError('Selected serverless exit was bypassed')
+                    assert len(requests_seen)==before, 'Traffic reached the target despite an unavailable selected exit'
                     print('PASS',path.stem,'selected exit enforced by native direct outbounds')
                 finally:
                     p.terminate()
