@@ -18,6 +18,7 @@ class SidecarProcess(
     @Volatile private var stopping = false
     @Volatile private var ready = false
     @Volatile private var failureHint: String? = null
+    @Volatile private var startupStage: String? = null
     @Volatile override var startupFailure: String? = null
         private set
 
@@ -27,6 +28,16 @@ class SidecarProcess(
                 // Engines can print server addresses and keys; only redacted, bounded lines reach the log.
                 lines.forEachIndexed { index, line ->
                     reportApiTlsEvent(line)
+                    if (name == AetherSidecar.ID) aetherStage(line)?.let { stage ->
+                        if (startupStage != stage) {
+                            // An account retry warning is no longer the failure once
+                            // identity loading completed and gateway work started.
+                            startupFailure = null
+                            failureHint = null
+                        }
+                        startupStage = stage
+                        XrayLogManager.i("BUILTIN", "aether · $stage · pending; traffic unverified")
+                    }
                     if (!sawReadyLine && readyLine?.containsMatchIn(line) == true) sawReadyLine = true
                     // Categorize first: a summary must not freeze an earlier, less specific cause.
                     if (isFailureLine(line)) failureHint = preferFailure(failureHint, line)
@@ -53,8 +64,8 @@ class SidecarProcess(
 
     /** Waits until the SOCKS port accepts connections, the program exits, or [timeoutMs] passes. */
     override fun awaitReady(timeoutMs: Long): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
+        val started = System.nanoTime()
+        while ((System.nanoTime() - started) / 1_000_000 < timeoutMs) {
             if (!isAlive) {
                 logThread.join(200) // Let the bounded diagnostic reader publish the exit reason.
                 if (startupFailure == null) startupFailure = "Engine process exited before local readiness " +
@@ -65,7 +76,9 @@ class SidecarProcess(
             if (sawReadyLine && portOpen(socksPort)) { ready = true; return true }
             Thread.sleep(100)
         }
-        if (startupFailure == null) startupFailure = if (portOpen(socksPort) && !sawReadyLine)
+        if (startupFailure == null) startupFailure = if (name == AetherSidecar.ID && !sawReadyLine)
+            aetherTimeout(startupStage, failureHint, timeoutMs)
+        else if (portOpen(socksPort) && !sawReadyLine)
             "Local proxy socket opened, but the required transport readiness marker was not observed within ${timeoutMs / 1000}s; traffic is unverified."
         else if (readyLine != null) "Engine never reported a connected session with its server within ${timeoutMs / 1000}s: " +
             "no reply came back through its transport (for a DNS tunnel: check the NS delegation and the resolvers); inspect engine logs."
@@ -79,6 +92,22 @@ class SidecarProcess(
     }
 
     companion object {
+        /** Fixed native events only: never expose identity IDs, API bodies, endpoints or keys. */
+        internal fun aetherStage(line: String): String? = line.trim()
+            .removePrefix("MAXIMUS_AETHER_STAGE:")
+            .takeIf { line.trim().startsWith("MAXIMUS_AETHER_STAGE:") &&
+                it in setOf("account", "identity", "scan", "transport") }
+
+        internal fun aetherTimeout(stage: String?, hint: String?, timeoutMs: Long): String {
+            val detail = hint?.let { "; $it" }.orEmpty()
+            return when (stage) {
+                "account" -> "WARP API registration failed (account bootstrap or refresh timed out after ${timeoutMs / 1000}s$detail); traffic is unverified."
+                "identity", "scan" -> "Aether gateway scan did not reach a serving tunnel within ${timeoutMs / 1000}s$detail; traffic is unverified."
+                "transport" -> "Aether transport did not start serving within ${timeoutMs / 1000}s$detail; traffic is unverified."
+                else -> "Aether readiness marker missing after ${timeoutMs / 1000}s (native startup stage unavailable$detail); traffic is unverified."
+            }
+        }
+
         fun reportApiTlsEvent(line: String) {
             if (line.trim() == "MAXIMUS_AETHER_API_TLS:compatible-retry")
                 XrayLogManager.i("BUILTIN", "aether/api · retrying TLS before sending HTTP with compatible API settings; CA, hostname and ECH checks preserved")

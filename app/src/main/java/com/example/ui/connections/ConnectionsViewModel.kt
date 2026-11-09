@@ -220,7 +220,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                     args += listOf("--register", kind)
                     exit = BuiltinExitNode.start(_ui.value.options.advanced, settings, ctx)
                     api = AetherApiBridge.start(AetherSidecar.profile("h2", _ui.value.options.family,
-                        _ui.value.options.fragment, _ui.value.options.advanced), settings, ctx, force = true)
+                        _ui.value.options.fragment, _ui.value.options.advanced), settings, ctx)
                     process = ProcessBuilder(args).directory(staging).redirectErrorStream(true).apply {
                         environment().putAll(launch.environment)
                         exit?.let { environment()["AETHER_UPSTREAM"] = it.upstream }

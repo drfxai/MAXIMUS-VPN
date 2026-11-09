@@ -159,6 +159,23 @@ replace('lib.rs', '    upstream::check_setting()?;', '''    upstream::check_sett
         println!("MAXIMUS_AETHER_OPTIONS_OK");
         return Ok(());
     }''')
+# Emit fixed stage events even when upstream logging is suppressed. A saved identity
+# still refreshes its account before gateway selection; neither event proves traffic.
+replace('lib.rs', '    upstream::check_setting()?;', '''    upstream::check_setting()?;
+    eprintln!("MAXIMUS_AETHER_STAGE:account");''')
+for function in ('run_masque', 'run_wireguard'):
+    path = src / 'lib.rs'
+    text = path.read_text()
+    start = text.index(f'async fn {function}(')
+    body = text.index(') -> Result<()> {', start) + len(') -> Result<()> {')
+    text = text[:body] + '\n    eprintln!("MAXIMUS_AETHER_STAGE:identity");' + text[body:]
+    path.write_text(text)
+replace('lib.rs', '    let mode = prober::ScanMode::parse(mode_str);', '''    eprintln!("MAXIMUS_AETHER_STAGE:scan");
+    let mode = prober::ScanMode::parse(mode_str);''')
+replace('lib.rs', '    let mode = wg_prober::WgScanMode::parse(mode_str);', '''    eprintln!("MAXIMUS_AETHER_STAGE:scan");
+    let mode = wg_prober::WgScanMode::parse(mode_str);''')
+replace('lib.rs', '        log::info!("[+] using cloudflare edge {peer}");', '''        eprintln!("MAXIMUS_AETHER_STAGE:transport");
+        log::info!("[+] using cloudflare edge {peer}");''')
 # Mark the precise SOCKS listener only when it is being served.
 replace('socks.rs', '    let listen = listener.borrow().local_addr()?;', '''    let listen = listener.borrow().local_addr()?;
     eprintln!("MAXIMUS_AETHER_SOCKS_READY:{}", listen.port());''')
