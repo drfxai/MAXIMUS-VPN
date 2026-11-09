@@ -1,1 +1,1 @@
-V1.0.4 code 57: Android TLS account adapter for Aether, RegionHop after 3X-UI and in Smart Manager, private Psiphon listener/firewall repair and secure config import.
+V1.0.4 code 58: unify Smart Connect built-in engine tests, interrupt cancelled Aether/Direct startup, fail promptly on dead Aether helpers, apply Direct serverless exit settings to pinned direct outbounds, and include saved-account HTTPS route repair.

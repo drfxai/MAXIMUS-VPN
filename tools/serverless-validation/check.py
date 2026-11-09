@@ -58,4 +58,34 @@ with tempfile.TemporaryDirectory(prefix='direct-native-') as tmp:
                 p.terminate()
                 try:p.wait(timeout=5)
                 except subprocess.TimeoutExpired:p.kill();p.wait(timeout=5)
+        # Actual configs exported by Kotlin: a selected exit that cannot be reached
+        # must fail instead of bypassing it through a pinned `direct` outbound.
+        exit_fixtures=sorted((args.fixtures/'exit').glob('*.json'));assert len(exit_fixtures)==3
+        for path in exit_fixtures:
+            config=json.loads(path.read_text());inbound=config['inbounds'][0]
+            port=traffic.free_port();inbound['port']=port;auth=inbound['settings']['accounts'][0]
+            # Hold a non-listening socket so the selected SOCKS exit cannot be reached
+            # or accidentally occupied by another process during the assertion.
+            with socket.socket() as unavailable:
+                unavailable.bind(('127.0.0.1',0))
+                config['outbounds'][-1]['settings']['servers'][0]['port']=unavailable.getsockname()[1]
+                active=root/'exit-config.json';active.write_text(json.dumps(config))
+                subprocess.run([str(binary),'run','-test','-c',str(active)],check=True,capture_output=True)
+                p=subprocess.Popen([str(binary),'run','-c',str(active)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                try:
+                    deadline=time.monotonic()+10
+                    while True:
+                        assert p.poll() is None
+                        try:
+                            with socket.create_connection(('127.0.0.1',port),timeout=.2):break
+                        except OSError:
+                            assert time.monotonic()<deadline;time.sleep(.05)
+                    try:traffic.request(port,server.server_port,auth['user'],auth['pass'],b'exit-must-not-be-bypassed')
+                    except (AssertionError,OSError):pass
+                    else:raise AssertionError('Selected serverless exit was bypassed')
+                    print('PASS',path.stem,'selected exit enforced by native direct outbounds')
+                finally:
+                    p.terminate()
+                    try:p.wait(timeout=5)
+                    except subprocess.TimeoutExpired:p.kill();p.wait(timeout=5)
     finally:server.shutdown();server.server_close()

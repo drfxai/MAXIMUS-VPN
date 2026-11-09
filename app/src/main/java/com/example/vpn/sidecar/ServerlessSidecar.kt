@@ -108,7 +108,7 @@ object ServerlessSidecar : SidecarEngine {
             exitOutbound.put("tag", exitTag)
             for (i in 0 until out.length()) {
                 val outbound = out.getJSONObject(i)
-                if (outbound.optString("protocol") != "freedom") continue
+                if (outbound.optString("protocol") !in setOf("freedom", "direct")) continue
                 val stream = outbound.optJSONObject("streamSettings") ?: JSONObject().also { outbound.put("streamSettings", it) }
                 val sock = stream.optJSONObject("sockopt") ?: JSONObject().also { stream.put("sockopt", it) }
                 sock.put("dialerProxy", exitTag)
@@ -117,7 +117,7 @@ object ServerlessSidecar : SidecarEngine {
         } else if (advanced.exitFinalMask.isNotBlank() || advanced.exitDialMode.isNotBlank()) {
             for (i in 0 until out.length()) {
                 val outbound = out.getJSONObject(i)
-                if (outbound.optString("protocol") != "freedom") continue
+                if (outbound.optString("protocol") !in setOf("freedom", "direct")) continue
                 val stream = outbound.optJSONObject("streamSettings") ?: JSONObject().also { outbound.put("streamSettings", it) }
                 if (advanced.exitFinalMask.isNotBlank()) stream.put("finalmask", JSONObject(advanced.exitFinalMask))
                 if (advanced.exitDialMode.isNotBlank()) {

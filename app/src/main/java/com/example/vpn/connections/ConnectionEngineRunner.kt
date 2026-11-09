@@ -108,7 +108,8 @@ object ConnectionEngineRunner {
                 record(name, "startup", "PASS")
                 stage = "access check failed"
                 val result = AccessProbe.check(
-                    Socks5.Endpoint("127.0.0.1", context.socksPort, context.socksUser, context.socksPass), checkDns
+                    Socks5.Endpoint("127.0.0.1", context.socksPort,
+                        context.socksUser.takeIf { launch.socksAuth }, context.socksPass.takeIf { launch.socksAuth }), checkDns
                 )
                 checkCancellation()
                 if (result.traffic && process.isAlive) {
