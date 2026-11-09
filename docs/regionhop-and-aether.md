@@ -10,7 +10,9 @@ traffic never uses this account adapter.
 
 Reference comparison: PattN `my-releases` AetherArguments.cs and PattNG
 `my-releases` AetherCoreManager.kt/AetherIdentityManager.kt, whose Aether submodule
-is patterniha/Aether d58f9d568083129ce2c767c85054021eb3ee6a38. Carrier-specific TLS
+is patterniha/Aether d58f9d568083129ce2c767c85054021eb3ee6a38.
+The native build now pins that same fork/revision and applies MAXIMUS authentication
+and certificate checks to it. Carrier-specific TLS
 options and explicit two-hop scans follow those protocol distinctions. This
 implementation retains MAXIMUS certificate verification and does not adopt the
 upstream account client's unconditional disabled verification.

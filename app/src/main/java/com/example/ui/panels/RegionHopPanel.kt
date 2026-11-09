@@ -26,6 +26,7 @@ internal fun RegionHopPanel(vm: ServersViewModel, state: ServersState, serverId:
     var region by remember(serverId) { mutableStateOf("DE") }
     var menu by remember { mutableStateOf(false) }
     var confirmInstall by remember { mutableStateOf(false) }
+    var confirmRemoveAll by remember { mutableStateOf(false) }
     var remove by remember { mutableStateOf<String?>(null) }
     var address by remember(serverId) { mutableStateOf("https://127.0.0.1:2053/") }
     var token by remember(serverId) { mutableStateOf("") }
@@ -54,7 +55,7 @@ internal fun RegionHopPanel(vm: ServersViewModel, state: ServersState, serverId:
                 Button(onClick = { vm.regionHopAction(serverId, "add", JSONObject().put("region", region)) }, enabled = idle) { Text("Add + start location") }
                 snapshot.locations.forEach { location ->
                     HorizontalDivider()
-                    Text("${location.region} · ${location.name} · ${location.outbound}", style = MaterialTheme.typography.titleSmall)
+                    Text("Requested ${location.region} · ${location.name} · ${location.outbound}", style = MaterialTheme.typography.titleSmall)
                     Text("Local SOCKS ${location.port} · ${location.state} · phone traffic untested", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf("start", "stop", "restart", "test").forEach { action ->
@@ -73,6 +74,7 @@ internal fun RegionHopPanel(vm: ServersViewModel, state: ServersState, serverId:
                     vm.regionHopAction(serverId, "sync", JSONObject().put("url", address.trim()).put("token", token.trim()))
                     token = ""
                 }, enabled = idle && token.isNotBlank()) { Text("Save token + sync outbounds") }
+                TextButton(onClick = { confirmRemoveAll = true }, enabled = idle) { Text("Uninstall managed RegionHop") }
             }
         }
     }
@@ -80,6 +82,10 @@ internal fun RegionHopPanel(vm: ServersViewModel, state: ServersState, serverId:
         text = { Text("Install pinned RegionHop 1.27.0 on ${server.displayName}, create isolated services and a loopback panel, and send your privately imported Psiphon settings to this VPS. 3X-UI routing changes require the separate Sync action.") },
         confirmButton = { TextButton(onClick = { confirmInstall = false; vm.regionHopAction(serverId, "install") }) { Text("Install on this VPS") } },
         dismissButton = { TextButton(onClick = { confirmInstall = false }) { Text("Cancel") } })
+    if (confirmRemoveAll) AlertDialog(onDismissRequest = { confirmRemoveAll = false }, title = { Text("Uninstall RegionHop?") },
+        text = { Text("Stops all locations and removes their linked RegionHop outbounds and managed panel files. Review 3X-UI routing rules that used these outbounds. 3X-UI itself is preserved.") },
+        confirmButton = { TextButton(onClick = { confirmRemoveAll = false; vm.regionHopAction(serverId, "uninstall") }) { Text("Uninstall") } },
+        dismissButton = { TextButton(onClick = { confirmRemoveAll = false }) { Text("Cancel") } })
     remove?.let { name -> AlertDialog(onDismissRequest = { remove = null }, title = { Text("Remove $name?") },
         text = { Text("Stops this location and removes its RegionHop outbound from the linked 3X-UI panel.") },
         confirmButton = { TextButton(onClick = { remove = null; vm.regionHopAction(serverId, "remove", JSONObject().put("name", name)) }) { Text("Remove") } },

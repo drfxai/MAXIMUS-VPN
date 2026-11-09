@@ -29,9 +29,25 @@ class RegionHopManager(
         }
         return action(server, "status")
     }
+    fun uninstall(server: ManagedServer, progress: ActionProgress): Snapshot {
+        action(server, "prepare-remove")
+        connect(server).use { shell ->
+            shell.runTool(ToolScript("""
+                bash <<'MXREMOVE'
+                set -euo pipefail
+                test -f /opt/maximus-regionhop/control.json
+                source /opt/maximus-regionhop/source/install.sh
+                uninstall_all <<<YES
+                rm -rf -- /opt/maximus-regionhop
+                MXREMOVE
+            """.trimIndent(), listOf("Remove linked outbounds", "Remove managed RegionHop")), progress)
+        }
+        return Snapshot(false, detail = "Managed RegionHop removed. 3X-UI and imported phone settings were preserved.")
+    }
+
     fun action(server: ManagedServer, operation: String, data: JSONObject = JSONObject()): Snapshot {
         require(server.username == "root" && server.canSignIn) { "Pinned root SSH is required." }
-        require(operation in setOf("status", "add", "start", "stop", "restart", "remove", "test", "sync"))
+        require(operation in setOf("status", "add", "start", "stop", "restart", "remove", "test", "sync", "prepare-remove"))
         if (operation == "add") require(data.optString("region") in REGIONS)
         if (operation in setOf("start", "stop", "restart", "remove", "test")) require(validName(data.optString("name")))
         connect(server).use { shell ->
@@ -46,12 +62,16 @@ class RegionHopManager(
                 check(reply.exitCode == 0 && !json.has("error")) {
                     ServerLogSanitizer.redact(json.optString("error", "RegionHop did not confirm the operation.")).take(300)
                 }
+                if (operation == "prepare-remove") check(json.optBoolean("readyToRemove")) { "RegionHop cleanup was not confirmed." }
                 val rows = json.optJSONArray("locations")
                 val locations = (0 until (rows?.length() ?: 0)).map { i -> rows!!.getJSONObject(i).let {
                     Location(it.getString("name"), it.getString("region"), it.getInt("port"), it.getString("outbound"), it.optString("state", "unknown"))
                 } }
                 return Snapshot(json.optBoolean("installed"), json.optString("version"), locations,
-                    if (json.has("test")) json.getJSONObject("test").toString().take(1000) else "Server services inspected; phone tunnel traffic not tested.",
+                    if (json.has("test")) json.getJSONObject("test").let { result ->
+                        if (result.optBoolean("ok")) "${data.optString("name")}: VPS proxy verified · ${result.optInt("latencyMs")} ms · exit ${result.optString("ip").ifBlank { "not measured" }}"
+                        else "${data.optString("name")}: VPS proxy test failed · ${ServerLogSanitizer.redact(result.optString("error", "No verified response")).take(250)}"
+                    } else "Server services inspected; phone tunnel traffic not tested.",
                     json.opt("statuses")?.toString().orEmpty())
             } finally { shell.run("rm -rf -- '$dir'", 20_000) }
         }

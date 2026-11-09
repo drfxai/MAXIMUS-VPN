@@ -657,7 +657,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                     val config = com.example.data.security.SecureStorage(getApplication()).getAndDecrypt("psiphon_network_settings_v1")
                         ?: error("Import your Psiphon.config first.")
                     backend.install(s, config, quiet)
-                } else backend.action(s, operation, data)
+                } else if (operation == "uninstall") backend.uninstall(s, quiet)
+                else backend.action(s, operation, data)
             }
             _state.update { it.copy(regionHop = it.regionHop + (serverId to result)) }
         }

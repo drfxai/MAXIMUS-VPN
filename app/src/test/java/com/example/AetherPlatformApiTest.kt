@@ -12,7 +12,7 @@ import org.junit.Test
 class AetherPlatformApiTest {
     @Test fun registrationPayloadAndAuthorizationArePreservedAndAdapterTokenIsNotForwarded() {
         val count = AtomicInteger()
-        AetherPlatformApi(Socks5.Endpoint("127.0.0.1", 1), exchange = { host, path, method, headers, body ->
+        AetherPlatformApi(Socks5.Endpoint("127.0.0.1", 1, null, null), exchange = { host, path, method, headers, body ->
             count.incrementAndGet()
             assertEquals("api.cloudflareclient.com", host); assertEquals("/v0a4005/reg", path)
             assertEquals("POST", method); assertEquals("Bearer test-only", headers["authorization"])
@@ -28,7 +28,7 @@ class AetherPlatformApiTest {
     }
     @Test fun wrongTokenAndArbitraryHostsNeverReachTheNetwork() {
         val count = AtomicInteger()
-        AetherPlatformApi(Socks5.Endpoint("127.0.0.1", 1), exchange = { _, _, _, _, _ ->
+        AetherPlatformApi(Socks5.Endpoint("127.0.0.1", 1, null, null), exchange = { _, _, _, _, _ ->
             count.incrementAndGet(); error("Forbidden adapter request reached the network")
         }).use { api ->
             assertTrue(request(api, "wrong-token", "api.cloudflareclient.com").startsWith("HTTP/1.1 502"))

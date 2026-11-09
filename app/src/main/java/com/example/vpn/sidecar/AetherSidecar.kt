@@ -5,7 +5,7 @@ import com.example.vpn.engine.ProfileExtras
 import org.json.JSONObject
 import java.io.File
 
-/** Separately built Aether 2.4.0, authenticated registration and native SOCKS authentication. */
+/** Separately built PattNG-pinned Aether, authenticated registration and native SOCKS authentication. */
 object AetherSidecar : SidecarEngine {
     const val ID = "aether"
     fun readyLine(port: Int) = Regex("^MAXIMUS_AETHER_SOCKS_READY:$port$")

@@ -177,7 +177,9 @@ pub fn maximus_loopback_proxy(address: std::net::SocketAddr) -> String {
     format!("socks5://{}:{}@{}", percent_encode(&user), percent_encode(&pass), address)
 }
 ''')
-replace('tor.rs', 'format!("socks5://{tunnel}").parse()', 'crate::upstream::maximus_loopback_proxy(tunnel).parse()')
+replace('tor.rs', 'let parsed: ProxyProtocol = format!("socks5://{proxy}")', '''let setting = if through.is_some() { crate::upstream::maximus_loopback_proxy(proxy) }
+                else { format!("socks5://{proxy}") };
+            let parsed: ProxyProtocol = setting''')
 replace('psiphon.rs', 'Some(format!("socks5://{through}"))', 'Some(crate::upstream::maximus_loopback_proxy(through))')
 replace('lib.rs', 'let tunnel = upstream::Upstream::parse(&format!("socks5h://{through}"))?;',
         'let tunnel = upstream::Upstream::parse(&upstream::maximus_loopback_proxy(through))?;')

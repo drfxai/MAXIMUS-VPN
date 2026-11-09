@@ -18,7 +18,7 @@ python3 - "$stage" <<'PY'
 import hashlib,json,pathlib,subprocess,sys
 root=pathlib.Path(sys.argv[1]); pins=json.loads((root/'pins.json').read_text())
 for name,digest in pins['files'].items():
-    assert name in ['install.sh','VERSION','systemd/psi-panel.service','systemd/psi-tunnel@.service','systemd/regionhop-upstream.service']
+    assert name in ['install.sh','VERSION','LICENSE','systemd/psi-panel.service','systemd/psi-tunnel@.service','systemd/regionhop-upstream.service']
     dest=root/'source'/name
     subprocess.run(['curl','--proto','=https','-fsSL','--connect-timeout','15','--max-time','90',f"https://raw.githubusercontent.com/freeb5d/regionhop/{pins['commit']}/{name}",'-o',str(dest)],check=True)
     assert hashlib.sha256(dest.read_bytes()).hexdigest()==digest, 'RegionHop source checksum mismatch'
@@ -65,6 +65,9 @@ install -m 755 -o root -g root "$stage/bundle/psi-panel" "$PREFIX/panel/psi-pane
 install -m 755 -o root -g root "$stage/bundle/ConsoleClient" "$PREFIX/core/ConsoleClient"
 [[ ! -f "$stage/bundle/xray" ]] || install -m 755 -o root -g root "$stage/bundle/xray" "$PREFIX/core/xray"
 echo '1.27.0' > "$VERSION_FILE"
+install -m 644 "$stage/source/LICENSE" "$PREFIX/LICENSE.regionhop"
+[[ ! -f "$stage/bundle/core-version.txt" ]] || install -m 644 "$stage/bundle/core-version.txt" "$PREFIX/core/VERSION"
+echo 'RegionHop pinned source: d5798d80f77fa6f40406ba30886d810c3c462147; upstream release v1.27.0' > "$PREFIX/SOURCE-PROVENANCE"
 mkdir -m 700 /opt/maximus-regionhop
 cp -R "$stage/source" /opt/maximus-regionhop/source
 install -m 700 "$stage/control.py" /opt/maximus-regionhop/control.py

@@ -3,13 +3,13 @@
 set -euo pipefail
 : "${ABI:?}" "${OUT:?}"
 TASK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REV=9ebdcc945af12ea532b32119884f846bdb9c4bfc
+REV=d58f9d568083129ce2c767c85054021eb3ee6a38
 patch_hash=$(sha256sum "$TASK_ROOT/scripts/connections/harden-aether.py" | cut -c1-16)
-source_dir="$TASK_ROOT/build/aether-source-$patch_hash"
+source_dir="$TASK_ROOT/build/aether-source-${REV:0:12}-$patch_hash"
 if [[ ! -f "$source_dir/MAXIMUS_POLICY" ]]; then
   mkdir -p "$source_dir"
   git -C "$source_dir" init -q
-  git -C "$source_dir" fetch --depth=1 https://github.com/CluvexStudio/Aether.git "$REV"
+  git -C "$source_dir" fetch --depth=1 https://github.com/patterniha/Aether.git "$REV"
   git -C "$source_dir" checkout --detach FETCH_HEAD
   test "$(git -C "$source_dir" rev-parse HEAD)" = "$REV"
   python3 "$TASK_ROOT/scripts/connections/harden-aether.py" "$source_dir"

@@ -133,7 +133,7 @@ class PsiphonSidecar(
             "DataRootDirectory", "MigrateDataStoreDirectory", "ListenInterface", "UseUnixDomainSockets",
             "LocalSocksProxyUnixPath", "LocalHttpProxyUnixPath", "EgressRegion", "EnableUpgradeDownload",
             "UpgradeDownloadURLs", "UpgradeDownloadClientVersionHeader", "UseNoticeFiles", "DisableTunnels",
-            "UpstreamProxyURL", "UpstreamProxyUrl"
+            "UpstreamProxyURL", "UpstreamProxyUrl", "ClientPlatform", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters"
         )
 
         /** A new Psiphon profile; [region] is a two-letter country code, or empty for any. */
@@ -245,7 +245,8 @@ class PsiphonSidecar(
         /** The config file ConsoleClient reads: the build's settings plus what this connection needs. */
         fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false): JSONObject {
             val config = JSONObject(networkSettings.toString())
-            LOCAL_FIELDS.forEach { config.remove(it) }
+            val owned = LOCAL_FIELDS.map { it.lowercase() }.toSet()
+            config.keys().asSequence().filter { it.lowercase() in owned }.toList().forEach { config.remove(it) }
             config.put("LocalSocksProxyPort", socksPort)
             config.put("ListenInterface", "lo")
             config.put("ClientPlatform", "Android")
