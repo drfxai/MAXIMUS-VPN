@@ -48,6 +48,42 @@ class ServerlessConnectionsTest {
             }
         }
     }
+    @Test fun pinnedDirectOutboundsApplyTheSelectedExitWithoutBypassingDpiMasks() {
+        for (variant in listOf("fragA", "fragB", "oob")) {
+            val source = File("src/main/assets/serverless/Serverless-$variant.jsonc").readText()
+            val exit = JSONObject().put("protocol", "socks").put("settings", JSONObject().put("servers",
+                org.json.JSONArray().put(JSONObject().put("address", "127.0.0.1").put("port", 19080))))
+            val root = ServerlessSidecar.config(source, 12345, "u", "p", "auto", exitOutbound = exit)
+            val out = root.getJSONArray("outbounds")
+            var linked = 0
+            for (i in 0 until out.length()) {
+                val outbound = out.getJSONObject(i)
+                if (outbound.optString("protocol") !in setOf("direct", "freedom")) continue
+                assertEquals("serverless-exit", outbound.getJSONObject("streamSettings").getJSONObject("sockopt").getString("dialerProxy"))
+                linked++
+            }
+            assertTrue("The pinned source uses direct outbounds", linked > 0)
+            assertEquals("serverless-exit", out.getJSONObject(out.length() - 1).getString("tag"))
+            assertTrue("DPI masks must stay on the original direct outbounds", root.toString().contains("finalmask"))
+            System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.let { directory ->
+                val exitFixtures = File(directory, "exit").apply { mkdirs() }
+                File(exitFixtures, "$variant.json").writeText(root.toString())
+            }
+        }
+    }
+    @Test fun advancedDirectDialModeIsAppliedToThePinnedProtocolAlias() {
+        val source = File("src/main/assets/serverless/Serverless-oob.jsonc").readText()
+        val root = ServerlessSidecar.config(source, 12345, "u", "p", "auto",
+            advanced = AetherSettings(exitDialMode = "oob.1", exitFinalMask = "{\"tcp\":[]}"))
+        val out = root.getJSONArray("outbounds")
+        for (i in 0 until out.length()) {
+            val outbound = out.getJSONObject(i)
+            if (outbound.optString("protocol") != "direct") continue
+            assertEquals("oob.1", outbound.getJSONObject("streamSettings").getJSONObject("sockopt").getString("dialMode"))
+            assertEquals(0, outbound.getJSONObject("streamSettings").getJSONObject("finalmask").getJSONArray("tcp").length())
+        }
+    }
+
     @Test fun ipFamilyRemovesConflictingHappyEyeballs() {
         val source = File("src/main/assets/serverless/Serverless-fragA.jsonc").readText()
         val result = ServerlessSidecar.config(source, 12345, "u", "p", "ipv4")

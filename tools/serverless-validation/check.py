@@ -22,8 +22,10 @@ with tempfile.TemporaryDirectory(prefix='direct-native-') as tmp:
     test_env=dict(env, MAXIMUS_SERVERLESS_FIXTURES=str(args.fixtures.resolve()))
     subprocess.run(['go','test','-count=1','-timeout=90s','./maximusvalidation'],cwd=source,env=test_env,check=True)
     subprocess.run(['go','build','-mod=readonly','-trimpath','-ldflags=-checklinkname=0','-o',str(binary),'./main'],cwd=source,env=env,check=True)
+    requests_seen=[]
     class Echo(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
+            requests_seen.append(self.path)
             import hashlib
             n=int(self.headers.get('Content-Length','0'));assert 0<n<=65536
             data=self.rfile.read(n);body=hashlib.sha256(data).hexdigest().encode()+b':'+data
@@ -58,4 +60,36 @@ with tempfile.TemporaryDirectory(prefix='direct-native-') as tmp:
                 p.terminate()
                 try:p.wait(timeout=5)
                 except subprocess.TimeoutExpired:p.kill();p.wait(timeout=5)
+        # Actual configs exported by Kotlin: a selected exit that cannot be reached
+        # must fail instead of bypassing it through a pinned `direct` outbound.
+        exit_fixtures=sorted((args.fixtures/'exit').glob('*.json'));assert len(exit_fixtures)==3
+        for path in exit_fixtures:
+            config=json.loads(path.read_text());inbound=config['inbounds'][0]
+            port=traffic.free_port();inbound['port']=port;auth=inbound['settings']['accounts'][0]
+            # Hold a non-listening socket so the selected SOCKS exit cannot be reached
+            # or accidentally occupied by another process during the assertion.
+            with socket.socket() as unavailable:
+                unavailable.bind(('127.0.0.1',0))
+                config['outbounds'][-1]['settings']['servers'][0]['port']=unavailable.getsockname()[1]
+                active=root/'exit-config.json';active.write_text(json.dumps(config))
+                subprocess.run([str(binary),'run','-test','-c',str(active)],check=True,capture_output=True)
+                p=subprocess.Popen([str(binary),'run','-c',str(active)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                try:
+                    deadline=time.monotonic()+10
+                    while True:
+                        assert p.poll() is None
+                        try:
+                            with socket.create_connection(('127.0.0.1',port),timeout=.2):break
+                        except OSError:
+                            assert time.monotonic()<deadline;time.sleep(.05)
+                    before=len(requests_seen)
+                    try:traffic.request(port,server.server_port,auth['user'],auth['pass'],b'exit-must-not-be-bypassed')
+                    except (AssertionError,OSError,IndexError):pass
+                    else:raise AssertionError('Selected serverless exit was bypassed')
+                    assert len(requests_seen)==before, 'Traffic reached the target despite an unavailable selected exit'
+                    print('PASS',path.stem,'selected exit enforced by native direct outbounds')
+                finally:
+                    p.terminate()
+                    try:p.wait(timeout=5)
+                    except subprocess.TimeoutExpired:p.kill();p.wait(timeout=5)
     finally:server.shutdown();server.server_close()

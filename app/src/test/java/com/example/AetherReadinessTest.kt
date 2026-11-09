@@ -81,6 +81,36 @@ class AetherReadinessTest {
         assertNull(SidecarProcess.aetherStage("prefix MAXIMUS_AETHER_STAGE:account"))
     }
 
+    @Test fun deadAccountHelperStopsWaitingWithoutAcceptingBoundPort() {
+        ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
+            val child = PendingEngine()
+            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.readyLine(listener.localPort), logOutput = false)
+            try {
+                val began = System.nanoTime()
+                assertFalse(process.awaitReadyWhile(180_000) { false })
+                assertTrue((System.nanoTime() - began) / 1_000_000 < 1_000)
+                assertTrue(process.startupFailure.orEmpty().contains("helper stopped"))
+            } finally { process.stop() }
+        }
+    }
+
+    @Test fun interruptedReadinessStopsRatherThanWaitingForAllCarriers() {
+        val child = PendingEngine()
+        val port = ServerSocket(0).use { it.localPort }
+        val process = SidecarProcess("aether", child, port, AetherSidecar.readyLine(port), logOutput = false)
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean()
+        val worker = Thread {
+            try { process.awaitReady(180_000) }
+            catch (_: InterruptedException) { cancelled.set(true) }
+            finally { process.stop() }
+        }
+        worker.start()
+        worker.interrupt()
+        worker.join(2_000)
+        assertFalse("An interrupted engine wait must release its worker", worker.isAlive)
+        assertTrue(cancelled.get())
+    }
+
     @Test fun servingMarkerCannotPassWithNoListener() {
         val port = ServerSocket(0).use { it.localPort }
         val child = PendingEngine()

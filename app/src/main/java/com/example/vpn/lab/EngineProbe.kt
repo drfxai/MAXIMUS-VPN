@@ -159,37 +159,48 @@ object EngineProbe {
         }
     }
 
-    private fun runIsolated(
+    internal fun runIsolated(
         engine: SidecarEngine, profile: VlessProfile, executable: File, workDir: File, timeoutSec: Int, requests: Int, gapMs: Long,
         mode: OperationalMode, keep: Boolean
     ): Result {
         val ctx = SidecarContext(workDir, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9), Sidecars.randomToken(), mode)
-        val launch = runCatching { engine.prepare(profile, AppSettings(), ctx) }.getOrElse {
-            return Result(engine.id, ConnectionStage.NOT_TESTED, null, it.message ?: "could not prepare the engine", notTested = true)
-        }
-        val running = runCatching { EngineReaper.track(engine.startPrepared(profile, AppSettings(), launch, ctx) ?: SidecarProcess.start("lab-${engine.id}", launch, workDir, ctx.socksPort)) }.getOrElse {
-            return Result(engine.id, ConnectionStage.NOT_TESTED, null, it.message ?: "the engine did not start", notTested = false)
-        }
+        var running: com.example.vpn.sidecar.RunningEngine? = null
         var kept = false
         try {
-            val ready = running.awaitReady(launch.readyTimeoutMs)
-            if (!ready) return judge(engine.id, false, null).copy(failure = running.startupFailure
+            val settings = AppSettings().copy(operationalMode = mode)
+            val managed = engine.id in setOf(com.example.vpn.sidecar.AetherSidecar.ID,
+                com.example.vpn.sidecar.ServerlessSidecar.ID)
+            // Smart Connect must test the same automatic carrier/variant sequence
+            // as Connect and the Connections page, rather than only the first config.
+            val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, ctx) else null
+            val launch = started?.launch ?: engine.prepare(profile, settings, ctx)
+            val process = started?.running ?: EngineReaper.track(engine.startPrepared(profile, settings, launch, ctx)
+                ?: SidecarProcess.start(engine.id, launch, workDir, ctx.socksPort))
+            running = process
+            val ready = started != null || process.awaitReady(launch.readyTimeoutMs)
+            if (!ready) return judge(engine.id, false, null).copy(failure = process.startupFailure
                 ?: "engine startup or traffic readiness failed")
-            val chained = SidecarChain.probeProfile(profile, ctx, launch)
-            val started = System.currentTimeMillis()
-            val first = judge(engine.id, true, RealDelayProbe.measure(chained, timeoutSec))
+            val chained = SidecarChain.probeProfile(started?.profile ?: profile, ctx, launch)
+            val began = System.currentTimeMillis()
+            val first = if (started != null) judge(engine.id, true, RealDelayProbe.Outcome.Delay(checkNotNull(started.check.latencyMs)))
+                else judge(engine.id, true, RealDelayProbe.measure(chained, timeoutSec))
             val result = if (!first.stage.carriesTraffic || requests <= 1) first else combine(first, (2..requests).map {
                 Thread.sleep(gapMs)
-                RealDelayProbe.measure(chained, timeoutSec) to (System.currentTimeMillis() - started)
+                RealDelayProbe.measure(chained, timeoutSec) to (System.currentTimeMillis() - began)
             })
-            // Its last request passed: the connect takes this engine over instead of bootstrapping it again.
-            if (keep && result.outcomes.lastOrNull() == true && running.isAlive) {
-                EngineHandoff.park(EngineHandoff.Parked(profile.id, engine.id, mode, running, ctx, launch, System.currentTimeMillis()))
+            if (keep && result.outcomes.lastOrNull() == true && process.isAlive) {
+                EngineHandoff.park(EngineHandoff.Parked(profile.id, engine.id, mode, process, ctx, launch, System.currentTimeMillis()))
                 kept = true
             }
             return result
+        } catch (e: Exception) {
+            // A recovery window timing out must terminate the worker and its engine;
+            // it is never a measured failure of a server or a reason to try another variant.
+            if (e is InterruptedException || e is kotlinx.coroutines.CancellationException) throw e
+            val detail = (e as? com.example.vpn.connections.ConnectionEngineRunner.NoVerifiedPath)?.message
+            return judge(engine.id, false, null).copy(failure = detail ?: "engine preparation or startup failed")
         } finally {
-            if (!kept) running.stop()
+            if (!kept) running?.stop()
         }
     }
 

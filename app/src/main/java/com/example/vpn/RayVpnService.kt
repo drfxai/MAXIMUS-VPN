@@ -1757,55 +1757,57 @@ class RayVpnService : VpnService() {
      * outbound to that program. If the program dies later, Xray's proxy stops answering and traffic
      * stays blocked until failover picks another path.
      */
-    private fun startSidecar(engine: com.example.vpn.sidecar.SidecarEngine, profile: VlessProfile, settings: AppSettings): VlessProfile {
-        sidecar?.stop()
-        sidecar = null
-        // The recovery test just ran this engine and it carried real requests: take it over as it is.
-        com.example.vpn.sidecar.EngineHandoff.take(profile.id, engine.id, settings.operationalMode)?.let { kept ->
-            sidecar = kept.engine
-            XrayLogManager.i("VPN", "Engine ${engine.id} kept running from the recovery test; no second start-up")
-            watchSidecar(engine, kept.engine)
-            return com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, kept.context, kept.launch)
-        }
-        val executable = com.example.vpn.sidecar.Sidecars.executable(engine)
-            ?: error("The ${engine.id} engine is not included in this build for this phone")
-        val workDir = java.io.File(noBackupFilesDir, "engines/${engine.id}").apply { mkdirs() }
-        val context = com.example.vpn.sidecar.SidecarContext(
-            workDir = workDir,
-            executable = executable,
-            socksPort = com.example.vpn.sidecar.Sidecars.freeLoopbackPort(),
-            socksUser = com.example.vpn.sidecar.Sidecars.randomToken(9),
-            socksPass = com.example.vpn.sidecar.Sidecars.randomToken(),
-            mode = settings.operationalMode
-        )
-        val managed = engine.id in setOf(com.example.vpn.sidecar.AetherSidecar.ID, com.example.vpn.sidecar.ServerlessSidecar.ID)
-        if (managed) showForegroundNotification("Testing the ${engine.id} connection...")
-        val connectionOwner = connectJob
-        val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
-            cancelled = { connectionOwner?.isActive == false }) else null
-        val launch = started?.launch ?: engine.prepare(profile, settings, context)
-        if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
-        showForegroundNotification("Starting the ${engine.id} engine...")
-        val process = started?.running ?: com.example.vpn.sidecar.EngineReaper.track(engine.startPrepared(profile, settings, launch, context)
-            ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort))
-        sidecar = process
-        if (!process.awaitReady(launch.readyTimeoutMs)) {
-            process.stop()
+    private suspend fun startSidecar(engine: com.example.vpn.sidecar.SidecarEngine, profile: VlessProfile, settings: AppSettings): VlessProfile =
+        kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
+            // Cancellation interrupts native readiness waits as well as the HTTPS test.
+            // A plain withContext(IO) does not interrupt these blocking operations.
+            sidecar?.stop()
             sidecar = null
-            val hint = process.startupFailure ?: "No readiness signal; inspect redacted engine logs"
-            com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "startup failed: ${hint}")
-            com.example.vpn.diagnostics.events.EventLog.event("engine.startup.failure",
-                com.example.vpn.diagnostics.events.Severity.ERROR,
-                attributes = mapOf("engine.name" to engine.id, "reason" to hint),
-                stage = com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED, result = "FAIL")
-            error("The ${engine.id} engine did not start: ${hint}")
-        }
-        com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
-        XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
-        watchSidecar(engine, process)
-        return com.example.vpn.sidecar.SidecarChain.xrayProfile(started?.profile ?: profile, context, launch)
+            // The recovery test just ran this engine and it carried real requests: take it over as it is.
+            com.example.vpn.sidecar.EngineHandoff.take(profile.id, engine.id, settings.operationalMode)?.let { kept ->
+                sidecar = kept.engine
+                XrayLogManager.i("VPN", "Engine ${engine.id} kept running from the recovery test; no second start-up")
+                watchSidecar(engine, kept.engine)
+                return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, kept.context, kept.launch)
+            }
+            val executable = com.example.vpn.sidecar.Sidecars.executable(engine)
+                ?: error("The ${engine.id} engine is not included in this build for this phone")
+            val workDir = java.io.File(noBackupFilesDir, "engines/${engine.id}").apply { mkdirs() }
+            val context = com.example.vpn.sidecar.SidecarContext(
+                workDir = workDir,
+                executable = executable,
+                socksPort = com.example.vpn.sidecar.Sidecars.freeLoopbackPort(),
+                socksUser = com.example.vpn.sidecar.Sidecars.randomToken(9),
+                socksPass = com.example.vpn.sidecar.Sidecars.randomToken(),
+                mode = settings.operationalMode
+            )
+            val managed = engine.id in setOf(com.example.vpn.sidecar.AetherSidecar.ID, com.example.vpn.sidecar.ServerlessSidecar.ID)
+            if (managed) showForegroundNotification("Testing the ${engine.id} connection...")
+            val connectionOwner = connectJob
+            val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
+                cancelled = { connectionOwner?.isActive == false }) else null
+            val launch = started?.launch ?: engine.prepare(profile, settings, context)
+            if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
+            showForegroundNotification("Starting the ${engine.id} engine...")
+            val process = started?.running ?: com.example.vpn.sidecar.EngineReaper.track(engine.startPrepared(profile, settings, launch, context)
+                ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort))
+            sidecar = process
+            if (!process.awaitReady(launch.readyTimeoutMs)) {
+                process.stop()
+                sidecar = null
+                val hint = process.startupFailure ?: "No readiness signal; inspect redacted engine logs"
+                com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "startup failed: ${hint}")
+                com.example.vpn.diagnostics.events.EventLog.event("engine.startup.failure",
+                    com.example.vpn.diagnostics.events.Severity.ERROR,
+                    attributes = mapOf("engine.name" to engine.id, "reason" to hint),
+                    stage = com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED, result = "FAIL")
+                error("The ${engine.id} engine did not start: ${hint}")
+            }
+            com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
+            XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
+            watchSidecar(engine, process)
+            return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(started?.profile ?: profile, context, launch)
     }
-
     /**
      * Before a CottenDNS engine starts: one plain DNS question to each of its resolvers (up to four, at once),
      * from this app, which like the engine is outside the VPN. The log then says which resolvers this phone
@@ -1916,13 +1918,16 @@ class RayVpnService : VpnService() {
      * blocking interface is restored afterwards.
      */
     private suspend fun <T> engineWindow(test: () -> T): T = withContext(Dispatchers.IO) {
-        val open = runCatching { createBlockingInterface(excludeApp = true) }.getOrNull()
+        // A failed exemption leaves engine sockets inside the blocking interface.
+        // Do not turn that local setup failure into a failed network measurement.
+        val open = createBlockingInterface(excludeApp = true)
         val previous = vpnInterface
-        if (open != null) { vpnInterface = open; runCatching { previous?.close() } }
+        vpnInterface = open
+        runCatching { previous?.close() }
         try {
             kotlinx.coroutines.runInterruptible { test() }
         } finally {
-            if (open != null && vpnInterface === open) {
+            if (vpnInterface === open) {
                 runCatching { createBlockingInterface() }.getOrNull()?.let { closed ->
                     vpnInterface = closed
                     runCatching { open.close() }

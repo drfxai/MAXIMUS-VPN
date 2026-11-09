@@ -63,9 +63,16 @@ class SidecarProcess(
     }
 
     /** Waits until the SOCKS port accepts connections, the program exits, or [timeoutMs] passes. */
-    override fun awaitReady(timeoutMs: Long): Boolean {
+    override fun awaitReady(timeoutMs: Long): Boolean = awaitReadyWhile(timeoutMs) { true }
+
+    /** A helper exiting invalidates readiness immediately; do not wait for a child that cannot start. */
+    internal fun awaitReadyWhile(timeoutMs: Long, prerequisitesAlive: () -> Boolean): Boolean {
         val started = System.nanoTime()
         while ((System.nanoTime() - started) / 1_000_000 < timeoutMs) {
+            if (!prerequisitesAlive()) {
+                startupFailure = "Required account or exit helper stopped before engine readiness; traffic is unverified."
+                return false
+            }
             if (!isAlive) {
                 logThread.join(200) // Let the bounded diagnostic reader publish the exit reason.
                 if (startupFailure == null) startupFailure = "Engine process exited before local readiness " +
