@@ -9,6 +9,10 @@ import kotlinx.coroutines.withContext
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.Proxy
+import java.net.URL
+import javax.net.ssl.HttpsURLConnection
+import com.example.vpn.safety.DnsResolvers
 import java.security.SecureRandom
 
 /** Local DNS path evidence is not an internet-side resolver leak verdict. */
@@ -40,6 +44,71 @@ internal object DnsProbePacket {
 }
 
 internal object DnsPathTest {
+    /** Tests the configured endpoint on Android's current app network. */
+    suspend fun testResolver(context: Context, resolver: String): DnsPathResult = withContext(Dispatchers.IO) {
+        val value = DnsResolvers.literal(resolver)
+        if (!DnsResolvers.isUsable(value)) return@withContext DnsPathResult(false, "Invalid DNS resolver.")
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        val network = manager.activeNetwork
+            ?: return@withContext DnsPathResult(false, "No active network for the resolver test.")
+        val vpn = manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        val path = if (vpn) "VPN network" else "current network"
+        val query = DnsProbePacket.query()
+        val start = SystemClock.elapsedRealtime()
+        try {
+            val answer = if (value.startsWith("https://", ignoreCase = true)) {
+                val connection = network.openConnection(URL(value), Proxy.NO_PROXY) as HttpsURLConnection
+                try {
+                    connection.connectTimeout = 8000
+                    connection.readTimeout = 8000
+                    connection.instanceFollowRedirects = false
+                    connection.requestMethod = "POST"
+                    connection.doOutput = true
+                    connection.setRequestProperty("Content-Type", "application/dns-message")
+                    connection.setRequestProperty("Accept", "application/dns-message")
+                    connection.setFixedLengthStreamingMode(query.size)
+                    connection.outputStream.use { it.write(query) }
+                    check(connection.responseCode == 200)
+                    check(connection.contentType?.substringBefore(';')?.trim()
+                        .equals("application/dns-message", ignoreCase = true))
+                    connection.inputStream.use { input ->
+                        val data = ByteArray(4097)
+                        var size = 0
+                        while (size < data.size) {
+                            val read = input.read(data, size, data.size - size)
+                            if (read < 0) break
+                            size += read
+                        }
+                        check(size < data.size)
+                        data.copyOf(size)
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            } else {
+                DatagramSocket(null).use { socket ->
+                    network.bindSocket(socket)
+                    socket.soTimeout = 8000
+                    socket.connect(InetAddress.getByName(value), 53)
+                    socket.send(DatagramPacket(query, query.size))
+                    val reply = DatagramPacket(ByteArray(4096), 4096)
+                    socket.receive(reply)
+                    reply.data.copyOfRange(reply.offset, reply.offset + reply.length)
+                }
+            }
+            if (manager.activeNetwork != network) {
+                return@withContext DnsPathResult(false, "Network changed during the resolver test.")
+            }
+            check(DnsProbePacket.matches(query, answer))
+            val elapsed = SystemClock.elapsedRealtime() - start
+            DnsPathResult(true, "Selected resolver responded over the $path in $elapsed ms.", latencyMs = elapsed)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            DnsPathResult(false, "Selected resolver returned no valid response over the $path.")
+        }
+    }
+
     suspend fun run(context: Context): DnsPathResult = withContext(Dispatchers.IO) {
         val manager = context.getSystemService(ConnectivityManager::class.java)
         // Never use the default/underlying network as a fallback. Require our TUN address.

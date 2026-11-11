@@ -110,7 +110,7 @@ object ConnectionEngineRunner {
                 val endpoint = Socks5.Endpoint("127.0.0.1", context.socksPort,
                     context.socksUser.takeIf { launch.socksAuth }, context.socksPass.takeIf { launch.socksAuth })
                 val generation = process.transportGeneration
-                val first = AccessProbe.check(endpoint, checkDns)
+                val first = AccessProbe.check(endpoint, checkDns, diagnoseAddress = engine.id == AetherSidecar.ID)
                 checkCancellation()
                 val result = if (engine.id == AetherSidecar.ID && first.traffic) {
                     record(name, "https", "RECHECK", "checking that the same transport keeps carrying traffic")

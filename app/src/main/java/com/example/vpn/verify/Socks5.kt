@@ -52,7 +52,15 @@ object Socks5 {
         val name = host.toByteArray(Charsets.US_ASCII)
         require(name.size in 1..255) { "Host name too long" }
         require(port in 1..65535) { "Bad port" }
-        return byteArrayOf(5, 1, 0, 3, name.size.toByte()) + name + byteArrayOf((port shr 8).toByte(), port.toByte())
+        val suffix = byteArrayOf((port shr 8).toByte(), port.toByte())
+        val ipv4 = host.split('.').takeIf { parts ->
+            parts.size == 4 && parts.all { part ->
+                part.length in 1..3 && part.all { it in '0'..'9' } &&
+                    (part.length == 1 || part[0] != '0') && part.toInt() in 0..255
+            }
+        }
+        if (ipv4 != null) return byteArrayOf(5, 1, 0, 1) + ipv4.map { it.toInt().toByte() }.toByteArray() + suffix
+        return byteArrayOf(5, 1, 0, 3, name.size.toByte()) + name + suffix
     }
 
     /** Opens a TCP stream to [host]:[port] through [endpoint]; the returned socket is ready for TLS. */

@@ -1,1 +1,1 @@
-V1.0.4 code 60: rebuild the Aether readiness update with the pinned native CI runner.
+V1.0.4 code 61: DNS settings, connection labels, and stage-specific Aether diagnostics.
