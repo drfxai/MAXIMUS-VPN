@@ -2595,17 +2595,20 @@ class RayVpnService : VpnService() {
     private fun connectedNotification(): Notification {
         val state = _vpnState.value
         val server = state.activeProfile?.name ?: activeProfile?.name ?: "Maximus VPN"
+        val route = com.example.data.model.ConnectionRoute.withExitCountry(
+            state.activeRoute ?: notificationCore, state.exitCountryCode
+        )
         val since = notificationSince.takeIf { it > 0 } ?: System.currentTimeMillis()
         return baseNotification()
             .setContentTitle(server)
             .setContentText(ConnectedNotification.speedLine(state.downloadSpeedBps, state.uploadSpeedBps))
-            .setSubText(notificationCore)
+            .setSubText(route)
             .setWhen(since)
             .setShowWhen(true)
             .setUsesChronometer(true)
             .setStyle(NotificationCompat.BigTextStyle()
                 .setBigContentTitle(server)
-                .bigText(ConnectedNotification.expandedText(state.downloadSpeedBps, state.uploadSpeedBps,
+                .bigText(route + "\n" + ConnectedNotification.expandedText(state.downloadSpeedBps, state.uploadSpeedBps,
                     state.downloadBytes, state.uploadBytes)))
             .addAction(0, "Disconnect", disconnectPendingIntent())
             .build()

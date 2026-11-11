@@ -442,7 +442,8 @@ fun HomeScreen(
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("ACTIVE CONNECTION PATH", color = AppTheme.colors.textSecondary, fontSize = 11.sp)
-                    Text(connectionState.activeRoute ?: "Route not reported", color = AppTheme.colors.primary,
+                    Text(com.example.data.model.ConnectionRoute.withExitCountry(
+                        connectionState.activeRoute ?: "Route not reported", exitCode), color = AppTheme.colors.primary,
                         fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Text(if (directRoute) "Device → Direct DPI bypass → Internet · ISP exit IP"
                         else "Device → Android VPN → ${connectionState.activeRoute ?: "selected route"} → Internet",

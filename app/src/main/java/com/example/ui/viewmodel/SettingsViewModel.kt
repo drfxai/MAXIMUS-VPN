@@ -76,7 +76,7 @@ class SettingsViewModel(
             return
         }
         val current = settingsRepository.getSettings()
-        XrayLogManager.i("SETTINGS", "DNS server updated: ${current.dnsServer} -> $dns")
+        XrayLogManager.i("SETTINGS", "DNS server updated")
         settingsRepository.updateSettings(current.copy(dnsServer = dns))
     }
 
