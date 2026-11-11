@@ -86,6 +86,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
 import com.example.R
+import com.example.data.model.AppSettings
 import com.example.data.model.EngineType
 import com.example.data.model.RoutingMode
 import com.example.data.model.ScoringProfile
@@ -97,6 +98,8 @@ import com.example.ui.popups.YouTubeLogo
 import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.SettingsViewModel
 import com.example.update.AppUpdateChecker
+import com.example.vpn.diagnostics.DnsPathTest
+import com.example.vpn.safety.DnsResolvers
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,6 +123,37 @@ fun SettingsScreen(
     val learnedNetworks by viewModel.learnedNetworks.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { viewModel.refreshLearnedNetworks() }
     var dnsDropdownExpanded by remember { mutableStateOf(false) }
+    var customDns by remember { mutableStateOf<String?>(null) }
+    var dnsTestRunning by remember { mutableStateOf(false) }
+    var dnsTestResult by remember { mutableStateOf<String?>(null) }
+
+    customDns?.let { address ->
+        val usable = DnsResolvers.isUsable(address)
+        AlertDialog(
+            onDismissRequest = { customDns = null },
+            title = { Text("Custom DNS") },
+            text = {
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { customDns = it },
+                    label = { Text("IP address or DNS-over-HTTPS URL") },
+                    supportingText = { Text("Example: https://1.1.1.1/dns-query") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = usable,
+                    onClick = {
+                        viewModel.setDnsServer(address.trim())
+                        customDns = null
+                    }
+                ) { Text("Apply DNS") }
+            },
+            dismissButton = { TextButton(onClick = { customDns = null }) { Text("Cancel") } }
+        )
+    }
 
     // APP UPDATE section: looks up public release info only. Nothing is downloaded or installed here;
     // "Download" simply opens the GitHub release page in the browser.
@@ -473,6 +507,13 @@ fun SettingsScreen(
                             .background(AppTheme.colors.surfaceCard)
                             .border(1.dp, AppTheme.colors.borderSubtle)
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Use default DNS", color = AppTheme.colors.textPrimary) },
+                            onClick = {
+                                viewModel.setDnsServer(AppSettings().dnsServer)
+                                dnsDropdownExpanded = false
+                            }
+                        )
                         listOf(
                             "https://1.1.1.1/dns-query" to "Cloudflare DoH (Encrypted)",
                             "https://8.8.8.8/dns-query" to "Google DoH (Encrypted)",
@@ -489,8 +530,40 @@ fun SettingsScreen(
                                 }
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text("Custom DNS…", color = AppTheme.colors.textPrimary) },
+                            onClick = {
+                                customDns = settings.dnsServer
+                                dnsDropdownExpanded = false
+                            }
+                        )
                     }
                 }
+                Text(
+                    "DNS changes apply the next time you connect.",
+                    color = AppTheme.colors.textSecondary,
+                    fontSize = 12.sp
+                )
+                TextButton(
+                    enabled = !dnsTestRunning,
+                    onClick = {
+                        dnsTestRunning = true
+                        dnsTestResult = null
+                        scope.launch {
+                            try {
+                                val result = DnsPathTest.run(context)
+                                dnsTestResult = if (result.completed) {
+                                    "VPN DNS responded in ${result.latencyMs} ms."
+                                } else {
+                                    "No VPN DNS result. Connect Maximus and try again, or check Diagnostics."
+                                }
+                            } finally {
+                                dnsTestRunning = false
+                            }
+                        }
+                    }
+                ) { Text(if (dnsTestRunning) "Testing VPN DNS…" else "Test current VPN DNS") }
+                dnsTestResult?.let { Text(it, color = AppTheme.colors.textSecondary, fontSize = 12.sp) }
             }
         }
 
@@ -1377,6 +1450,6 @@ private fun getDnsLabel(dns: String): String {
         "https://1.1.1.1/dns-query" -> "Cloudflare DoH (Encrypted)"
         "https://8.8.8.8/dns-query", "https://dns.google/dns-query" -> "Google DoH (Encrypted)"
         "https://9.9.9.9/dns-query", "https://dns.quad9.net/dns-query" -> "Quad9 DoH (Secure)"
-        else -> dns
+        else -> "Custom DNS"
     }
 }

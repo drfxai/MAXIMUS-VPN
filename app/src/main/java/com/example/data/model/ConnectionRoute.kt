@@ -1,9 +1,17 @@
 package com.example.data.model
 
 import com.example.vpn.engine.ProfileExtras
+import java.util.Locale
 
 /** Display only the resolved runtime profile, never a guessed Auto transport. */
 object ConnectionRoute {
+    fun withExitCountry(route: String, countryCode: String?): String {
+        val code = countryCode?.uppercase(Locale.US)
+        val country = code?.takeIf { it.length == 2 && it in Locale.getISOCountries() }
+            ?.let { Locale.Builder().setRegion(it).build().getDisplayCountry(Locale.ENGLISH) }
+        return "$route · ${country ?: "Unknown country"}"
+    }
+
     fun label(profile: VlessProfile): String {
         val e = ProfileExtras.read(profile)
         val method = when (e.optString("engine")) {
