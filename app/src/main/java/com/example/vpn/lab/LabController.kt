@@ -855,7 +855,10 @@ class LabController(
                 }
             }.distinct().take(48)
         }.getOrDefault(emptyList())
-        val candidates = ResolverIntelligence.candidates(own, manual, max = 16)
+        val bundled = com.example.vpn.BundledResolvers.labSample(ctx.networkKey)
+        val candidates = (ResolverIntelligence.candidates(own, manual, max = 16) +
+            bundled.map { ResolverIntelligence.Candidate("Bundled DNS", it, "bundled") })
+            .distinctBy { it.address to it.port }
         val cache = store.resolversFor(ctx.networkKey)
         val wanted = candidates.map { it.address to it.port }.toSet()
         if (ResolverIntelligence.reusable(cache) &&

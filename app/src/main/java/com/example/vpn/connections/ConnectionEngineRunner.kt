@@ -129,8 +129,8 @@ object ConnectionEngineRunner {
                 // Never print arbitrary process exceptions: they may contain profile secrets.
                 // This fixed, non-sensitive preflight error is safe and actionable.
                 val reason = if (engine.id == AetherSidecar.ID &&
-                    e.message == "WARP API TLS unreachable via forced Direct OOB route")
-                    "WARP API TLS unreachable via forced Direct OOB route" else stage
+                    e.message in setOf("WARP API TLS unreachable via forced Direct OOB route", AetherApiBridge.INCOMPATIBLE_OOB))
+                    e.message ?: stage else stage
                 record(name, "startup", "FAIL", reason)
                 attempts += "$name: $reason"
             } finally {
