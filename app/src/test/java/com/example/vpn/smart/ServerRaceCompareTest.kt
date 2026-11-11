@@ -4,6 +4,7 @@ import com.example.data.model.VlessProfile
 import com.example.xray.RealDelayProbe
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -47,8 +48,17 @@ class ServerRaceCompareTest {
         val win = race(script).run((1..6).map { node("$it") }, { it }, timeoutSec = 6, maxBatches = 3,
             contenders = 3, sleep = { sleeps += it })!!
         assertEquals("4", win.owner.id)
-        assertEquals(listOf("3", "1"), win.runnersUp.map { it.owner.id })
+        assertEquals(listOf("3"), win.runnersUp.map { it.owner.id })
         assertEquals("two rechecks, spaced", ContenderPick.RECHECKS, sleeps.size)
+    }
+
+    @Test fun failedRechecksCannotRestoreTheSelectedServerOrAnotherStaleWinner() {
+        val selected = node("1")
+        val alternate = node("2")
+        val result = race(mapOf("2" to listOf(120L, null, null))).run(
+            listOf(alternate), { it }, timeoutSec = 6, maxBatches = 3, contenders = 3,
+            seed = listOf(ServerRace.Winner(selected, selected, 90L)), sleep = {})
+        assertNull(result)
     }
 
     @Test fun theSelectedServerCompetesAndKeepsItsPlaceWhenItIsBest() {
