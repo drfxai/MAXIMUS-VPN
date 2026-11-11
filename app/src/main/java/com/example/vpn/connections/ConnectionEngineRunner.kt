@@ -107,10 +107,21 @@ object ConnectionEngineRunner {
                 }
                 record(name, "startup", "PASS")
                 stage = "access check failed"
-                val result = AccessProbe.check(
-                    Socks5.Endpoint("127.0.0.1", context.socksPort,
-                        context.socksUser.takeIf { launch.socksAuth }, context.socksPass.takeIf { launch.socksAuth }), checkDns
-                )
+                val endpoint = Socks5.Endpoint("127.0.0.1", context.socksPort,
+                    context.socksUser.takeIf { launch.socksAuth }, context.socksPass.takeIf { launch.socksAuth })
+                val generation = process.transportGeneration
+                val first = AccessProbe.check(endpoint, checkDns)
+                checkCancellation()
+                val result = if (engine.id == AetherSidecar.ID && first.traffic) {
+                    record(name, "https", "RECHECK", "checking that the same transport keeps carrying traffic")
+                    Thread.sleep(6_000)
+                    checkCancellation()
+                    if (process.isAlive && process.transportGeneration == generation) {
+                        val second = AccessProbe.check(endpoint, checkDns = false)
+                        if (process.transportGeneration == generation) second.copy(dns = first.dns)
+                        else first.copy(traffic = false, latencyMs = null, failure = "Aether transport restarted during traffic verification")
+                    } else first.copy(traffic = false, latencyMs = null, failure = "Aether transport stopped or restarted before traffic recheck")
+                } else first
                 checkCancellation()
                 if (result.traffic && process.isAlive) {
                     record(name, "https", "PASS")
