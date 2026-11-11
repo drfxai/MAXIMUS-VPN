@@ -195,8 +195,10 @@ class ServerRace(
                 "${if (c.preferred) ", proven by LAB" else ""}${if (c.penaltyMs > 0) ", slow here before (+${c.penaltyMs} ms)" else ""}" +
                 "${if (!c.stable) ", failed a recheck" else ""}.")
         }
-        val chosen = ordered.map { it.item.winner.copy(latencyMs = it.medianMs.coerceAtLeast(1)) }
-        val best = chosen.first()
+        if (shouldStop()) return null
+        val chosen = ordered.filter { it.samples.lastOrNull() != null }
+            .map { it.item.winner.copy(latencyMs = it.medianMs.coerceAtLeast(1)) }
+        val best = chosen.firstOrNull() ?: return null
         log("Chose ${SecretRedactor.redact(best.owner.name)}${if (best.variantKey != null) " (disguised)" else ""} of ${found.size} working " +
             "(${best.latencyMs} ms median).")
         return best.copy(runnersUp = chosen.drop(1))

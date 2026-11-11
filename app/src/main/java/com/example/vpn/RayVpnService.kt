@@ -577,7 +577,7 @@ class RayVpnService : VpnService() {
                 contenders = if (compare) com.example.vpn.smart.ContenderPick.CONTENDERS else 1,
                 seed = seed, preferred = proven, penaltyMs = penalty)
         }?.let { return it }
-        seed.firstOrNull()?.let { return it }
+        if (compare) return null
         val best = candidates.firstOrNull() ?: return null
         val choice = com.example.vpn.Abandonable.run { runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() } ?: return null
         return choice.latencyMs?.let { com.example.vpn.smart.ServerRace.Winner(choice.profile, choice.owner, it) }
@@ -1011,10 +1011,19 @@ class RayVpnService : VpnService() {
                             val selected = com.example.vpn.smart.ServerRace.Winner(first.profile, requestedProfile, outcome.latencyMs, first.variantKey)
                             val best = raceServers(exclude + requestedProfile.id, network, timeouts.alternateSec, finder, retryDisguised = false,
                                 compare = true, seed = listOf(selected), routeNetwork = routeNetwork)
-                            if (best != null && best.owner.id != requestedProfile.id) adopt(best)
-                            else chosenVariant = best?.variantKey ?: first.variantKey
+                            if (best == null) {
+                                raced = false
+                                firstFailed = true
+                                provenDead = true
+                                chosenVariant = null
+                                ladder.advance(com.example.vpn.connectivity.RecoveryStage.SAVED_PROFILE_RACE)
+                            } else if (best.owner.id != requestedProfile.id) {
+                                adopt(best)
+                            } else {
+                                chosenVariant = best.variantKey
+                            }
                             smartRunnersUp = best?.runnersUp.orEmpty()
-                            tracker.finish(com.example.vpn.smart.SearchStage.OTHER_SERVERS, verified = true)
+                            tracker.finish(com.example.vpn.smart.SearchStage.OTHER_SERVERS, verified = raced)
                         }
                     }
                     is com.example.xray.RealDelayProbe.Outcome.Failed -> {

@@ -1,1 +1,1 @@
-V1.0.4 code 58: unify Smart Connect built-in engine tests, interrupt cancelled Aether/Direct startup, fail promptly on dead Aether helpers, apply Direct serverless exit settings to pinned direct outbounds, and include saved-account HTTPS route repair.
+V1.0.4 code 59: exclude Smart Connect paths that failed their latest recheck, continue recovery when none remain, and verify the six bundled resolver assets in signed APKs.
