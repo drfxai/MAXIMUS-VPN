@@ -11,6 +11,8 @@ import java.io.File
 
 /** Account HTTPS only: never puts the WARP transport itself inside Direct. */
 object AetherApiBridge {
+    internal const val INCOMPATIBLE_OOB = "Forced Direct OOB account access is incompatible with the selected exit or relay"
+
     fun allowed(options: AetherSettings) = options.apiRoute != "native" &&
         !BuiltinExitNode.needed(options) && options.tor == "off" && options.psiphon == "off"
 
@@ -61,7 +63,10 @@ object AetherApiBridge {
     fun start(profile: VlessProfile, settings: AppSettings, parent: SidecarContext): BuiltinExitNode.Started? {
         val extras = ProfileExtras.read(profile)
         val options = AetherSettings.read(extras)
-        if (!allowed(options)) return null
+        if (!allowed(options)) {
+            check(options.apiRoute != "oob") { INCOMPATIBLE_OOB }
+            return null
+        }
         // A saved identity still calls refresh_profile before scanning. Keep those
         // authenticated account requests on the same reachable route as registration;
         // otherwise H3/reconnect silently falls back to blocked native API TLS.

@@ -65,6 +65,7 @@ object AetherSidecar : SidecarEngine {
             Sidecars.nativeLibraryDir?.let { dir -> command += listOf("--tor-pt-dir", dir, "--tor-pt", "obfs4=$dir/liblyrebird.so") }
         }
         val environment = mutableMapOf(
+            "AETHER_DNS" to com.example.vpn.BundledResolvers.known("1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4").joinToString(","),
             "MAXIMUS_CA_BUNDLE" to ca.absolutePath, "MAXIMUS_SOCKS_USER" to context.socksUser,
             "MAXIMUS_SOCKS_PASS" to context.socksPass, "AETHER_TLS_VERIFY" to "1", "RUST_LOG" to "warn",
             "LD_LIBRARY_PATH" to context.executable.parentFile!!.absolutePath)

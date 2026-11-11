@@ -22,7 +22,7 @@ object EndpointResolver {
      * one blocked provider does not stop the fallback. JSON API where the operator offers one, RFC 8484
      * wire format otherwise.
      */
-    val DOH_ENDPOINTS = listOf(
+    private val defaultDohEndpoints = listOf(
         "https://1.1.1.1/dns-query?name=%s&type=A",
         "https://8.8.8.8/resolve?name=%s&type=A",
         "https://1.0.0.1/dns-query?name=%s&type=A",
@@ -30,6 +30,13 @@ object EndpointResolver {
         "wire:https://9.9.9.9/dns-query",
         "wire:https://94.140.14.14/dns-query"
     )
+    val DOH_ENDPOINTS: List<String>
+        get() {
+            val approved = BundledResolvers.known("1.1.1.1", "8.8.8.8", "1.0.0.1", "8.8.4.4", "9.9.9.9", "94.140.14.14")
+            return defaultDohEndpoints.sortedByDescending {
+                java.net.URI(it.removePrefix("wire:").replace("%s", "example.com")).host in approved
+            }
+        }
     private const val TIMEOUT_MS = 5000
 
     /** How long the network's own DNS gets before the DoH resolvers are asked as well. */

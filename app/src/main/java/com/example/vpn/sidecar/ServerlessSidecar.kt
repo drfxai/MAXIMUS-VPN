@@ -51,9 +51,9 @@ object ServerlessSidecar : SidecarEngine {
             else -> v4 + v6
         })
         dns.put("hosts", JSONObject()
-            .put("cloudflare-dns.com", bootstrap(listOf("1.1.1.1", "1.0.0.1"),
+            .put("cloudflare-dns.com", bootstrap(com.example.vpn.BundledResolvers.known("1.1.1.1", "1.0.0.1"),
                 listOf("2606:4700:4700::1111", "2606:4700:4700::1001")))
-            .put("dns.google", bootstrap(listOf("8.8.8.8", "8.8.4.4"),
+            .put("dns.google", bootstrap(com.example.vpn.BundledResolvers.known("8.8.8.8", "8.8.4.4"),
                 listOf("2001:4860:4860::8888", "2001:4860:4860::8844"))))
         upstream.remove("finalQuery")
         upstream.put("timeoutMs", 4_000)
