@@ -125,7 +125,7 @@ fun SettingsScreen(
     var dnsDropdownExpanded by remember { mutableStateOf(false) }
     var customDns by remember { mutableStateOf<String?>(null) }
     var dnsTestRunning by remember { mutableStateOf(false) }
-    var dnsTestResult by remember { mutableStateOf<String?>(null) }
+    var dnsTestResult by remember(settings.dnsServer) { mutableStateOf<String?>(null) }
 
     customDns?.let { address ->
         val usable = DnsResolvers.isUsable(address)
@@ -563,6 +563,20 @@ fun SettingsScreen(
                         }
                     }
                 ) { Text(if (dnsTestRunning) "Testing VPN DNS…" else "Test current VPN DNS") }
+                TextButton(
+                    enabled = !dnsTestRunning,
+                    onClick = {
+                        dnsTestRunning = true
+                        dnsTestResult = null
+                        scope.launch {
+                            try {
+                                dnsTestResult = DnsPathTest.testResolver(context, settings.dnsServer).summary
+                            } finally {
+                                dnsTestRunning = false
+                            }
+                        }
+                    }
+                ) { Text("Test selected resolver") }
                 dnsTestResult?.let { Text(it, color = AppTheme.colors.textSecondary, fontSize = 12.sp) }
             }
         }

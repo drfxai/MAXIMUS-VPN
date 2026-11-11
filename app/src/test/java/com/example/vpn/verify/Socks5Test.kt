@@ -98,6 +98,7 @@ class Socks5Test {
         assertArrayEquals(byteArrayOf(5, 2, 0, 2), Socks5.greeting(true))
         assertArrayEquals(byteArrayOf(1, 1, 'a'.code.toByte(), 1, 'b'.code.toByte()), Socks5.authRequest("a", "b"))
         assertArrayEquals(byteArrayOf(5, 1, 0, 3, 1, 'h'.code.toByte(), 1, 0xBB.toByte()), Socks5.connectRequest("h", 443))
+        assertArrayEquals(byteArrayOf(5, 1, 0, 1, 1, 1, 1, 1, 1, 0xBB.toByte()), Socks5.connectRequest("1.1.1.1", 443))
     }
 
     @Test fun theEnginePortIsReadFromTheForwardingProfile() {
