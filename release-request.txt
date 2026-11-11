@@ -1,1 +1,1 @@
-V1.0.4 code 59: exclude Smart Connect paths that failed their latest recheck, continue recovery when none remain, and verify the six bundled resolver assets in signed APKs.
+V1.0.4 code 60: revoke stale Aether readiness on rescans and require two HTTPS responses on the same transport before handoff.

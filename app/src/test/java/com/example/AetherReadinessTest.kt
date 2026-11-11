@@ -43,6 +43,25 @@ class AetherReadinessTest {
         }
     }
 
+    @Test fun aRescanRevokesReadinessUntilTheNewTransportServes() {
+        ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
+            val child = PendingEngine()
+            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.readyLine(listener.localPort), logOutput = false)
+            try {
+                child.serving(listener.localPort)
+                assertTrue(process.awaitReady(2_000))
+                val before = process.transportGeneration
+                child.line("MAXIMUS_AETHER_STAGE:scan")
+                val deadline = System.nanoTime() + 2_000_000_000L
+                while (process.transportGeneration == before && System.nanoTime() < deadline) Thread.sleep(10)
+                assertTrue(process.transportGeneration > before)
+                assertFalse(process.awaitReady(150))
+                child.serving(listener.localPort)
+                assertTrue(process.awaitReady(2_000))
+            } finally { process.stop() }
+        }
+    }
+
     @Test fun accountTimeoutRetainsCauseAndCannotPassAsReady() {
         ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
             val child = PendingEngine()

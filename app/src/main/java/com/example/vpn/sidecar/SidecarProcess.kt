@@ -15,6 +15,8 @@ class SidecarProcess(
     private val logOutput: Boolean = true
 ) : RunningEngine {
     @Volatile private var sawReadyLine = readyLine == null
+    @Volatile override var transportGeneration: Long = 0
+        private set
     @Volatile private var stopping = false
     @Volatile private var ready = false
     @Volatile private var failureHint: String? = null
@@ -35,6 +37,8 @@ class SidecarProcess(
                             startupFailure = null
                             failureHint = null
                         }
+                        sawReadyLine = false
+                        transportGeneration++
                         startupStage = stage
                         XrayLogManager.i("BUILTIN", "aether · $stage · pending; traffic unverified")
                     }
