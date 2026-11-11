@@ -1,1 +1,1 @@
-V1.0.4 code 60: revoke stale Aether readiness on rescans and require two HTTPS responses on the same transport before handoff.
+V1.0.4 code 60: rebuild the Aether readiness update with the pinned native CI runner.
