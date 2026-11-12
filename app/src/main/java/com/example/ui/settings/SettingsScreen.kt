@@ -98,6 +98,7 @@ import com.example.ui.popups.YouTubeLogo
 import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.SettingsViewModel
 import com.example.update.AppUpdateChecker
+import com.example.update.InAppUpdater
 import com.example.vpn.diagnostics.DnsPathTest
 import com.example.vpn.safety.DnsResolvers
 import kotlinx.coroutines.launch
@@ -155,25 +156,91 @@ fun SettingsScreen(
         )
     }
 
-    // APP UPDATE section: looks up public release info only. Nothing is downloaded or installed here;
-    // "Download" simply opens the GitHub release page in the browser.
+    // Official release metadata contains the APK SHA-256 and size; the platform installer
+    // still requires consent. No browser handoff is necessary when trusted APK metadata exists.
     val uriHandler = LocalUriHandler.current
     var updateChecking by remember { mutableStateOf(false) }
     var updateChecked by remember { mutableStateOf(false) }
-    var updateUrl by remember { mutableStateOf<String?>(null) }
+    var updateRelease by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var updateDownloading by remember { mutableStateOf(false) }
+    var updateProgress by remember { mutableStateOf(0) }
+    var verifiedApk by remember { mutableStateOf<java.io.File?>(null) }
+    var updateError by remember { mutableStateOf<String?>(null) }
     var showCryptoSupport by remember { mutableStateOf(false) }
     val performUpdateCheck: suspend () -> Unit = {
         updateChecking = true
         val latest = runCatching { AppUpdateChecker.fetchLatest() }.getOrNull()
-        updateUrl = latest?.takeIf {
+        val newer = latest?.takeIf {
             AppUpdateChecker.shouldShow(
                 it, BuildConfig.VERSION_NAME, BuildConfig.RELEASE_BUILD, 0, 0L, System.currentTimeMillis()
             )
-        }?.pageUrl
+        }
+        if (updateRelease?.version != newer?.version || updateRelease?.build != newer?.build) verifiedApk = null
+        updateRelease = newer
         updateChecking = false
         updateChecked = true
     }
     LaunchedEffect(Unit) { performUpdateCheck() }
+
+    if (showUpdateDialog && updateRelease != null) {
+        val release = updateRelease!!
+        AlertDialog(
+            onDismissRequest = { if (!updateDownloading) showUpdateDialog = false },
+            title = { Text("Update Maximus VPN") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Available: ${release.version} (build ${release.build}). Download and install without opening a browser.")
+                    if (release.apk == null) {
+                        Text("This release has no verifiable APK metadata. Open the official release page to update manually.")
+                    } else {
+                        Text("Official APK • SHA-256 and publisher signature checked before installation.")
+                    }
+                    if (updateDownloading) {
+                        CircularProgressIndicator(color = AppTheme.colors.primary)
+                        Text("Downloading… $updateProgress%")
+                    }
+                    updateError?.let { Text(it, color = AppTheme.colors.statusError) }
+                    if (verifiedApk != null) Text("APK verified. Android will ask you to confirm installation.")
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !updateDownloading, onClick = {
+                    val saved = verifiedApk?.takeIf { it.isFile }
+                    when {
+                        saved != null -> {
+                            runCatching { InAppUpdater.install(context, saved) }
+                                .onSuccess { allowed ->
+                                    if (!allowed) updateError = "Allow app installs for Maximus in Android Settings, then return here and tap Install."
+                                }
+                                .onFailure { updateError = it.message ?: "Could not start Android installer" }
+                        }
+                        release.apk != null -> {
+                            updateDownloading = true
+                            updateProgress = 0
+                            updateError = null
+                            scope.launch {
+                                runCatching { InAppUpdater.download(context, release.apk) { updateProgress = it } }
+                                    .onSuccess { verifiedApk = it }
+                                    .onFailure { updateError = it.message ?: "Download or signature verification failed" }
+                                updateDownloading = false
+                            }
+                        }
+                        else -> uriHandler.openUri(release.pageUrl)
+                    }
+                }) {
+                    Text(when {
+                        verifiedApk?.isFile == true -> "Install"
+                        release.apk != null -> "Download APK"
+                        else -> "Official release"
+                    })
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !updateDownloading, onClick = { showUpdateDialog = false }) { Text("Close") }
+            }
+        )
+    }
 
     Column(
         modifier = modifier
@@ -1053,9 +1120,8 @@ fun SettingsScreen(
                         scope.launch {
                             if (!updateChecking) {
                                 performUpdateCheck()
-                                val url = updateUrl
-                                if (url != null) uriHandler.openUri(url)
-                                else Toast.makeText(context, "You're on the latest version.", Toast.LENGTH_SHORT).show()
+                                if (updateRelease != null) showUpdateDialog = true
+                                else Toast.makeText(context, "No newer release available (or update check unavailable).", Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
@@ -1080,7 +1146,7 @@ fun SettingsScreen(
                         Text("v${BuildConfig.VERSION_NAME} · stable channel", color = AppTheme.colors.textMuted, fontSize = 11.5.sp)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    UpdateStatusChip(checking = updateChecking, checked = updateChecked, hasUpdate = updateUrl != null)
+                    UpdateStatusChip(checking = updateChecking, checked = updateChecked, hasUpdate = updateRelease != null)
                 }
             }
         }
