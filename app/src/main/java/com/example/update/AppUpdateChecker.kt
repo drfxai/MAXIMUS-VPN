@@ -32,11 +32,24 @@ object AppUpdateChecker {
     const val SNOOZE_MS = 24L * 60 * 60 * 1000
 
     data class ApkAsset(val url: String, val sha256: String, val size: Long)
-    data class ReleaseInfo(val version: String, val build: Int, val pageUrl: String, val apk: ApkAsset? = null)
+    data class ResolverPack(val url: String, val sha256: String, val size: Long)
+    data class ReleaseInfo(
+        val version: String, val build: Int, val pageUrl: String,
+        val apk: ApkAsset? = null, val resolverPack: ResolverPack? = null
+    )
 
     private const val MAX_APK_BYTES = 700L * 1024 * 1024
     private val digestPattern = Regex("[a-fA-F0-9]{64}")
     private val apkNames = listOf("arm64-v8a", "universal")
+    private const val MAX_RESOLVER_PACK_BYTES = 2L * 1024 * 1024
+
+    /** Resolver bundles are data only, never remote executable code. */
+    fun safeResolverPack(tag: String, url: String, digest: String, size: Long): ResolverPack? {
+        if (!versionPattern.matches(tag) || size !in 1..MAX_RESOLVER_PACK_BYTES) return null
+        val expected = "https://github.com/drfxai/MAXIMUS-VPN/releases/download/$tag/MaximusResolverPack-$tag.zip"
+        val sha = digest.removePrefix("sha256:")
+        return if (url == expected && digestPattern.matches(sha)) ResolverPack(url, sha.lowercase(), size) else null
+    }
 
     /** Refuse externally hosted or mismatched release files, even when metadata is compromised. */
     fun safeApkAsset(tag: String, flavor: String, url: String, digest: String, size: Long): ApkAsset? {
@@ -70,7 +83,11 @@ object AppUpdateChecker {
             val flavor = apkNames.firstOrNull { asset.optString("name") == "MAXIMUSVPN-$tag-$it.apk" }
             flavor?.let { it to asset }
         }
-        release(tag, build, o.optString("html_url"), preferredApk(tag, candidates))
+        val bundle = (0 until (assets?.length() ?: 0))
+            .mapNotNull { assets?.optJSONObject(it) }
+            .firstOrNull { it.optString("name") == "MaximusResolverPack-$tag.zip" }
+        val pack = bundle?.let { safeResolverPack(tag, it.optString("browser_download_url"), it.optString("digest"), it.optLong("size")) }
+        release(tag, build, o.optString("html_url"), preferredApk(tag, candidates), pack)
     }.getOrNull()
 
     /** update.json: {"version": "V1.0.0", "build": 142, "url": "https://github.com/..."} */
@@ -84,13 +101,18 @@ object AppUpdateChecker {
             flavor to JSONObject().put("browser_download_url", metadata.optString("url"))
                 .put("digest", metadata.optString("sha256")).put("size", metadata.optLong("size"))
         }
-        release(tag, build, o.optString("url"), preferredApk(tag, candidates))
+        val bundle = o.optJSONObject("resolverPack")
+        val pack = bundle?.let { safeResolverPack(tag, it.optString("url"), it.optString("sha256"), it.optLong("size")) }
+        release(tag, build, o.optString("url"), preferredApk(tag, candidates), pack)
     }.getOrNull()
 
-    private fun release(version: String, build: Int, url: String, apk: ApkAsset? = null): ReleaseInfo? {
+    private fun release(
+        version: String, build: Int, url: String,
+        apk: ApkAsset? = null, resolverPack: ResolverPack? = null
+    ): ReleaseInfo? {
         if (build <= 0) return null
         val v = version.trim().takeIf { versionPattern.matches(it) } ?: return null
-        return ReleaseInfo("V" + v.trimStart('v', 'V'), build, safePageUrl(url), apk)
+        return ReleaseInfo("V" + v.trimStart('v', 'V'), build, safePageUrl(url), apk, resolverPack)
     }
 
     /** Only this repository's release pages may be opened; anything else falls back to the releases page. */
