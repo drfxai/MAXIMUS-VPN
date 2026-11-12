@@ -7,6 +7,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,6 +30,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.BuildConfig
 import com.example.R
 import com.example.update.AppUpdateChecker
+import com.example.update.InAppUpdater
 
 /** What the launch pop-ups remember on this phone. Nothing here leaves the device. */
 private class LaunchPopupPrefs(context: Context) {
@@ -53,6 +62,12 @@ fun LaunchPopups() {
     val emblem = painterResource(R.drawable.img_maximus_emblem)
     var showCommunity by remember { mutableStateOf(!LaunchPopupSession.communityHandled && !prefs.communityHidden) }
     var update by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
+    var installerRelease by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
+    var installing by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf(0) }
+    var verifiedFile by remember { mutableStateOf<java.io.File?>(null) }
+    var installError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val installedBuild = BuildConfig.RELEASE_BUILD
 
     fun open(url: String) {
@@ -65,6 +80,54 @@ fun LaunchPopups() {
         if (AppUpdateChecker.shouldShow(latest, BuildConfig.VERSION_NAME, installedBuild, prefs.snoozedBuild, prefs.snoozedUntil, System.currentTimeMillis())) {
             update = latest
         }
+    }
+
+    installerRelease?.let { candidate ->
+        AlertDialog(
+            onDismissRequest = { if (!installing) installerRelease = null },
+            title = { Text("Update Maximus VPN") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Download ${candidate.version} (build ${candidate.build}) in Maximus.")
+                    if (installing) {
+                        CircularProgressIndicator()
+                        Text("Downloading and checking… $progress%")
+                    }
+                    if (verifiedFile?.isFile == true) Text("SHA-256 and publisher signature checked. Confirm installation in Android.")
+                    installError?.let { Text(it) }
+                    if (candidate.apk == null) Text("Verified download metadata unavailable; official release page required.")
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !installing, onClick = {
+                    val installed = verifiedFile?.takeIf { it.isFile }
+                    val asset = candidate.apk
+                    when {
+                        installed != null -> runCatching { InAppUpdater.install(context, installed) }
+                            .onSuccess { if (!it) installError = "Allow installation for Maximus in Android Settings, then come back and tap Install." }
+                            .onFailure { installError = it.message ?: "Android installer unavailable" }
+                        asset != null -> {
+                            installing = true
+                            progress = 0
+                            installError = null
+                            scope.launch {
+                                runCatching { InAppUpdater.download(context, asset) { progress = it } }
+                                    .onSuccess { verifiedFile = it }
+                                    .onFailure { installError = it.message ?: "APK verification/download failed" }
+                                installing = false
+                            }
+                        }
+                        else -> open(candidate.pageUrl)
+                    }
+                }) {
+                    Text(if (verifiedFile?.isFile == true) "Install" else if (candidate.apk != null) "Download APK" else "Official release")
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !installing, onClick = { installerRelease = null }) { Text("Close") }
+            }
+        )
+        return
     }
 
     if (showCommunity) {
@@ -103,7 +166,7 @@ fun LaunchPopups() {
             onDownload = {
                 LaunchPopupSession.updateHandled = true
                 update = null
-                open(release.pageUrl)
+                installerRelease = release
             }
         )
     }
