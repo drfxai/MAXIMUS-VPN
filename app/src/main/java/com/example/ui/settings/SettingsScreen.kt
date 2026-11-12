@@ -1103,7 +1103,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Core Proxy Engines", color = AppTheme.colors.textSecondary, fontSize = 12.sp)
-                    Text("Xray 1.8.24 • Mihomo Meta", color = AppTheme.colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text("${com.example.vpn.lab.CoreCapabilityRegistry.CORE} • Mihomo ${com.example.vpn.sidecar.MihomoSidecar.VERSION}", color = AppTheme.colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
