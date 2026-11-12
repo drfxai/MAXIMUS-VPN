@@ -89,6 +89,35 @@ class AppUpdateCheckerTest {
     }
 
     @Test
+    fun aResolverPackIsOnlyAcceptedFromTheMatchingOfficialRelease() {
+        val tag = "V1.0.4"
+        val url = "https://github.com/drfxai/MAXIMUS-VPN/releases/download/$tag/MaximusResolverPack-$tag.zip"
+        val digest = "c".repeat(64)
+        val pack = AppUpdateChecker.safeResolverPack(tag, url, digest, 40000)
+        assertEquals(AppUpdateChecker.ResolverPack(url, digest, 40000), pack)
+        assertNull(AppUpdateChecker.safeResolverPack(tag, "https://evil.example/resolvers.zip", digest, 40000))
+        assertNull(AppUpdateChecker.safeResolverPack(tag, url, digest, 2_100_000))
+        assertNull(AppUpdateChecker.safeResolverPack(tag, url, "invalid", 40000))
+        val manifest = org.json.JSONObject().put("version", tag).put("build", 170)
+            .put("url", "https://github.com/drfxai/MAXIMUS-VPN/releases/tag/$tag")
+            .put("resolverPack", org.json.JSONObject().put("url", url)
+                .put("sha256", digest).put("size", 40000))
+        assertEquals(pack, AppUpdateChecker.parseManifest(manifest.toString())?.resolverPack)
+    }
+
+    @Test
+    fun doesNotRegressToOlderMirroredReleaseWhenApiVersionIsNewer() = runBlocking {
+        val latest = AppUpdateChecker.fetchLatest { url ->
+            when {
+                url.contains("api.github.com") -> """{"tag_name":"V1.0.5","html_url":"https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.5","body":"maximus-build: 180"}"""
+                else -> """{"version":"V1.0.4","build":200,"url":"https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4"}"""
+            }
+        }
+        assertEquals("V1.0.5", latest?.version)
+        assertEquals(180, latest?.build)
+    }
+
+    @Test
     fun versionNumbersCompareAsNumbers() {
         assertTrue(AppUpdateChecker.compareVersions("V1.0.10", "1.0.9") > 0)
         assertEquals(0, AppUpdateChecker.compareVersions("V1.0", "1.0.0-debug"))
