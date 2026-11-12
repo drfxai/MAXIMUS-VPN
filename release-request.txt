@@ -1,1 +1,1 @@
-V1.0.4 code 61: DNS settings, connection labels, and stage-specific Aether diagnostics.
+V1.0.4 signed update request: in-app APK installer, verified resolver pack, Clean-IP refresh, rollback, VPN-only updates, recovery fixes. Base 13f1a23c7f9bbde80fd3dc406d4b309d6d0ce219.
