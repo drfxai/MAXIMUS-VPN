@@ -31,6 +31,7 @@ import com.example.BuildConfig
 import com.example.R
 import com.example.update.AppUpdateChecker
 import com.example.update.InAppUpdater
+import com.example.update.UpdateNetworkPolicy
 
 /** What the launch pop-ups remember on this phone. Nothing here leaves the device. */
 private class LaunchPopupPrefs(context: Context) {
@@ -76,7 +77,10 @@ fun LaunchPopups() {
 
     LaunchedEffect(Unit) {
         if (LaunchPopupSession.updateHandled) return@LaunchedEffect
-        val latest = AppUpdateChecker.fetchLatest() ?: return@LaunchedEffect
+        val latest = runCatching {
+            UpdateNetworkPolicy.requireAllowed(context)
+            AppUpdateChecker.fetchLatest()
+        }.getOrNull() ?: return@LaunchedEffect
         if (AppUpdateChecker.shouldShow(latest, BuildConfig.VERSION_NAME, installedBuild, prefs.snoozedBuild, prefs.snoozedUntil, System.currentTimeMillis())) {
             update = latest
         }
