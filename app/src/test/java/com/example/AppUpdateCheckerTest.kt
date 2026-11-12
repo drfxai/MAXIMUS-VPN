@@ -69,6 +69,26 @@ class AppUpdateCheckerTest {
     }
 
     @Test
+    fun officialApkMetadataMustContainMatchingUrlHashAndSize() {
+        val tag = "V1.0.4"
+        val hash = "a".repeat(64)
+        val url = "https://github.com/drfxai/MAXIMUS-VPN/releases/download/$tag/MAXIMUSVPN-$tag-universal.apk"
+        val asset = AppUpdateChecker.safeApkAsset(tag, "universal", url, "sha256:$hash", 123456L)
+        assertEquals(AppUpdateChecker.ApkAsset(url, hash, 123456L), asset)
+        assertNull(AppUpdateChecker.safeApkAsset(tag, "universal", "https://other.example/app.apk", hash, 123456L))
+        assertNull(AppUpdateChecker.safeApkAsset(tag, "universal", url, "untrusted", 123456L))
+        assertNull(AppUpdateChecker.safeApkAsset(tag, "universal", url, hash, 0))
+        val manifest = org.json.JSONObject().apply {
+            put("version", tag)
+            put("build", 160)
+            put("url", "https://github.com/drfxai/MAXIMUS-VPN/releases/tag/$tag")
+            put("apks", org.json.JSONObject().put("universal", org.json.JSONObject()
+                .put("url", url).put("sha256", hash).put("size", 123456)))
+        }
+        assertEquals(asset, AppUpdateChecker.parseManifest(manifest.toString())?.apk)
+    }
+
+    @Test
     fun versionNumbersCompareAsNumbers() {
         assertTrue(AppUpdateChecker.compareVersions("V1.0.10", "1.0.9") > 0)
         assertEquals(0, AppUpdateChecker.compareVersions("V1.0", "1.0.0-debug"))
