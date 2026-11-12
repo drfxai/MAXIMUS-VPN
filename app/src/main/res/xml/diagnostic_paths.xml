@@ -2,4 +2,5 @@
 <!-- Only exported diagnostic reports can be shared; nothing else in the app's storage. -->
 <paths>
     <files-path name="reports" path="diagnostics/reports/" />
+    <files-path name="verified_updates" path="updates/" />
 </paths>
