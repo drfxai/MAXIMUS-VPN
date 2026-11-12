@@ -297,8 +297,10 @@ jobs:
           if [ -z "$RELEASE_TAG" ]; then RELEASE_TAG=$(cat release-version.txt); fi
           dir="$RUNNER_TEMP/update-info"
           mkdir -p "$dir" && cd "$dir"
-          python3 -c 'import json,sys; print(json.dumps({"version": sys.argv[1], "build": int(sys.argv[2]), "url": "https://github.com/" + sys.argv[3] + "/releases/tag/" + sys.argv[1]}))' \
-            "$RELEASE_TAG" "$MAXIMUS_RELEASE_BUILD" "$GITHUB_REPOSITORY" > update.json
+          # Include hashes and lengths of the exact official APK assets. The phone can verify a
+          # download even when the GitHub API is blocked and update.json came from a mirror.
+          python3 -c 'import json,sys,pathlib; tag,build,repo,root=sys.argv[1:]; names=["arm64-v8a","universal"]; sums={v[1]:v[0] for ln in (pathlib.Path(root)/"SHA256SUMS").read_text().splitlines() if len(v:=ln.split())==2}; apks={abi:{"url":f"https://github.com/{repo}/releases/download/{tag}/MAXIMUSVPN-{tag}-{abi}.apk","sha256":sums[f"MAXIMUSVPN-{tag}-{abi}.apk"],"size":(pathlib.Path(root)/f"MAXIMUSVPN-{tag}-{abi}.apk").stat().st_size} for abi in names}; print(json.dumps({"version":tag,"build":int(build),"url":f"https://github.com/{repo}/releases/tag/{tag}","apks":apks}))' \
+            "$RELEASE_TAG" "$MAXIMUS_RELEASE_BUILD" "$GITHUB_REPOSITORY" "$GITHUB_WORKSPACE" > update.json
           cat update.json
           git init -q -b update-info
           git config user.name "github-actions[bot]"
