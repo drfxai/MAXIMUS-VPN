@@ -121,8 +121,16 @@ object ResolverPackUpdater {
 
     fun rollback(context: Context): Boolean = synchronized(this) {
         val old = previous(context)
-        if (!old.isDirectory || names.any { !File(old, it).isFile }) return@synchronized false
         val active = current(context)
+        // On the first update there is no disk backup: deleting the override immediately
+        // restores the six immutable resolver lists already bundled in the signed APK.
+        if (!old.isDirectory) {
+            if (!active.isDirectory) return@synchronized false
+            if (!active.deleteRecursively()) return@synchronized false
+            BundledResolvers.invalidate()
+            return@synchronized true
+        }
+        if (names.any { !File(old, it).isFile }) return@synchronized false
         val swap = File(base(context), "rollback-swap")
         swap.deleteRecursively()
         if (active.exists() && !active.renameTo(swap)) return@synchronized false
