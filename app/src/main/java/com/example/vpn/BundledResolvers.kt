@@ -6,18 +6,26 @@ import java.net.InetAddress
 /** Raw asset entries are candidates. Only known provider addresses are used for live DNS. */
 object BundledResolvers {
     private val ipv4 = Regex("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}")
-    private val parts by lazy {
-        (1..6).map { part ->
-            val open = Sidecars.openAsset ?: return@lazy emptyList()
-            try {
-                open("resolvers/part_$part.txt").bufferedReader().useLines { lines ->
-                    lines.map(String::trim).filter(::publicIpv4).distinct().toList()
+    /** Application-private, hash-checked resolver data can replace the bundled lists. */
+    @Volatile var updatedAsset: ((Int) -> java.io.InputStream?)? = null
+    @Volatile private var loaded: List<List<String>>? = null
+
+    fun invalidate() { synchronized(this) { loaded = null } }
+
+    private val parts: List<List<String>>
+        get() = synchronized(this) {
+            loaded ?: (1..6).map { part ->
+                try {
+                    val source = updatedAsset?.invoke(part)
+                        ?: Sidecars.openAsset?.invoke("resolvers/part_$part.txt")
+                    source?.bufferedReader()?.useLines { lines ->
+                        lines.map(String::trim).filter(::publicIpv4).distinct().toList()
+                    }.orEmpty()
+                } catch (_: java.io.IOException) {
+                    emptyList()
                 }
-            } catch (_: java.io.IOException) {
-                emptyList()
-            }
+            }.also { loaded = it }
         }
-    }
 
     internal fun publicIpv4(ip: String): Boolean {
         if (!ipv4.matches(ip)) return false
