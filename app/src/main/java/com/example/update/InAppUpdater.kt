@@ -41,6 +41,7 @@ object InAppUpdater {
             val ready = File(dir, "maximus-verified.apk")
             val temporary = File(dir, "maximus-downloading.part")
             try {
+                UpdateNetworkPolicy.requireAllowed(context)
                 temporary.delete()
                 val request = Request.Builder().url(asset.url).header("Accept", "application/octet-stream").build()
                 client.newCall(request).execute().use { response ->
@@ -55,6 +56,7 @@ object InAppUpdater {
                             val buffer = ByteArray(64 * 1024)
                             while (true) {
                                 currentCoroutineContext().ensureActive()
+                                UpdateNetworkPolicy.requireAllowed(context)
                                 val n = input.read(buffer)
                                 if (n < 0) break
                                 read += n
@@ -104,7 +106,9 @@ object InAppUpdater {
         val installed = manager.getPackageInfo(context.packageName, flags)
         val expected = certificates(installed)
         check(expected.isNotEmpty() && certificates(archive) == expected) { "Update is not signed by the installed app publisher" }
-        check(archive.longVersionCode >= installed.longVersionCode) { "Update would downgrade the installed version" }
+        val newCode = if (Build.VERSION.SDK_INT >= 28) archive.longVersionCode else archive.versionCode.toLong()
+        val oldCode = if (Build.VERSION.SDK_INT >= 28) installed.longVersionCode else installed.versionCode.toLong()
+        check(newCode > oldCode) { "Update must increment Android versionCode" }
     }
 
     /**
