@@ -181,7 +181,7 @@ fun SettingsScreen(
     var showCryptoSupport by remember { mutableStateOf(false) }
     val performUpdateCheck: suspend () -> Unit = {
         updateChecking = true
-        val latest = runCatching { AppUpdateChecker.fetchLatest() }.getOrNull()
+        val latest = runCatching { UpdateNetworkPolicy.requireAllowed(context); AppUpdateChecker.fetchLatest() }.getOrNull()
         latestPublished = latest
         val newer = latest?.takeIf {
             AppUpdateChecker.shouldShow(
@@ -1178,7 +1178,7 @@ fun SettingsScreen(
                             resolverBusy = true
                             resolverStatus = null
                             scope.launch {
-                                val latest = latestPublished ?: runCatching { AppUpdateChecker.fetchLatest() }.getOrNull()
+                                val latest = latestPublished ?: runCatching { UpdateNetworkPolicy.requireAllowed(context); AppUpdateChecker.fetchLatest() }.getOrNull()
                                 latestPublished = latest
                                 val pack = latest?.resolverPack
                                 if (pack == null) {
