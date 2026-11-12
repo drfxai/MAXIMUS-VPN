@@ -183,7 +183,9 @@ jobs:
             "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "$apk"
             "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
           done
-          sha256sum MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk > SHA256SUMS
+          # Only six plain-text resolver data files, no code, executables or symlinks.
+          python3 -c 'import zipfile,os; from pathlib import Path; v=os.environ["APP_VERSION"]; root=Path("app/src/main/assets/resolvers"); out=f"MaximusResolverPack-{v}.zip"; z=zipfile.ZipFile(out,"w",compression=zipfile.ZIP_DEFLATED); [z.write(root/f"part_{i}.txt",f"part_{i}.txt") for i in range(1,7)]; z.close(); assert Path(out).stat().st_size < 2*1024*1024'
+          sha256sum MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk MaximusResolverPack-${APP_VERSION}.zip > SHA256SUMS
           cp build/transport-offer/MatrixTransport-source.tar.gz MatrixTransport-source.tar.gz
           sha256sum MatrixTransport-source.tar.gz >> SHA256SUMS
           cp build/transport-offer/Aether-source.tar.gz Aether-source.tar.gz
@@ -275,7 +277,7 @@ jobs:
           fi
           # The hidden maximus-build line is what the in-app update check reads.
           notes=$(printf 'Build %s\n\n<!-- maximus-build: %s -->' "$MAXIMUS_RELEASE_BUILD" "$MAXIMUS_RELEASE_BUILD")
-          gh release upload "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk SHA256SUMS build/transport-offer/MatrixTransport-source.tar.gz build/transport-offer/Aether-source.tar.gz build/transport-offer/Serverless-source.tar.gz --clobber
+          gh release upload "$RELEASE_TAG" MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk MaximusResolverPack-${APP_VERSION}.zip SHA256SUMS build/transport-offer/MatrixTransport-source.tar.gz build/transport-offer/Aether-source.tar.gz build/transport-offer/Serverless-source.tar.gz --clobber
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" -F force=true
           else
@@ -283,7 +285,7 @@ jobs:
           fi
           gh release edit "$RELEASE_TAG" --title "Android version $RELEASE_TAG" --notes "$notes" --draft=false --prerelease=false --latest
           actual="$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$actual" = "Aether-source.tar.gz,MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,MatrixTransport-source.tar.gz,SHA256SUMS,Serverless-source.tar.gz" || { echo "Unexpected assets: $actual"; exit 1; }
+          test "$actual" = "Aether-source.tar.gz,MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk,MAXIMUSVPN-${APP_VERSION}-universal.apk,MatrixTransport-source.tar.gz,MaximusResolverPack-${APP_VERSION}.zip,SHA256SUMS,Serverless-source.tar.gz" || { echo "Unexpected assets: $actual"; exit 1; }
           echo 'Published APKs, checksums and the native transport corresponding-source archive.'
       - name: Publish update information for the in-app update pop-up
         # update.json on the update-info branch is what the app reads through jsDelivr/Statically when
@@ -299,7 +301,7 @@ jobs:
           mkdir -p "$dir" && cd "$dir"
           # Include hashes and lengths of the exact official APK assets. The phone can verify a
           # download even when the GitHub API is blocked and update.json came from a mirror.
-          python3 -c 'import json,sys,pathlib; tag,build,repo,root=sys.argv[1:]; names=["arm64-v8a","universal"]; sums={v[1]:v[0] for ln in (pathlib.Path(root)/"SHA256SUMS").read_text().splitlines() if len(v:=ln.split())==2}; apks={abi:{"url":f"https://github.com/{repo}/releases/download/{tag}/MAXIMUSVPN-{tag}-{abi}.apk","sha256":sums[f"MAXIMUSVPN-{tag}-{abi}.apk"],"size":(pathlib.Path(root)/f"MAXIMUSVPN-{tag}-{abi}.apk").stat().st_size} for abi in names}; print(json.dumps({"version":tag,"build":int(build),"url":f"https://github.com/{repo}/releases/tag/{tag}","apks":apks}))' \
+          python3 -c 'import json,sys,pathlib; tag,build,repo,root=sys.argv[1:]; names=["arm64-v8a","universal"]; sums={v[1]:v[0] for ln in (pathlib.Path(root)/"SHA256SUMS").read_text().splitlines() if len(v:=ln.split())==2}; apks={abi:{"url":f"https://github.com/{repo}/releases/download/{tag}/MAXIMUSVPN-{tag}-{abi}.apk","sha256":sums[f"MAXIMUSVPN-{tag}-{abi}.apk"],"size":(pathlib.Path(root)/f"MAXIMUSVPN-{tag}-{abi}.apk").stat().st_size} for abi in names}; pack=f"MaximusResolverPack-{tag}.zip"; rp={"url":f"https://github.com/{repo}/releases/download/{tag}/{pack}","sha256":sums[pack],"size":(pathlib.Path(root)/pack).stat().st_size}; print(json.dumps({"version":tag,"build":int(build),"url":f"https://github.com/{repo}/releases/tag/{tag}","apks":apks,"resolverPack":rp}))' \
             "$RELEASE_TAG" "$MAXIMUS_RELEASE_BUILD" "$GITHUB_REPOSITORY" "$GITHUB_WORKSPACE" > update.json
           cat update.json
           git init -q -b update-info
