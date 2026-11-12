@@ -162,7 +162,15 @@ object EndpointResolver {
         return address.isSiteLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
             address.isAnyLocalAddress || address.isMulticastAddress ||
             (b.size == 16 && (b[0] and 0xfe) == 0xfc) ||
-            (b.size == 4 && ((b[0] == 100 && b[1] and 0xc0 == 64) || (b[0] == 198 && b[1] and 0xfe == 18) || b[0] >= 240))
+            (b.size == 4 && (
+                b[0] == 0 ||
+                (b[0] == 100 && b[1] and 0xc0 == 64) ||
+                (b[0] == 198 && b[1] and 0xfe == 18) ||
+                (b[0] == 192 && b[1] == 0 && b[2] in listOf(0, 2)) ||
+                (b[0] == 198 && b[1] == 51 && b[2] == 100) ||
+                (b[0] == 203 && b[1] == 0 && b[2] == 113) ||
+                b[0] >= 240
+            )) || (b.size == 16 && b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x0d && b[3] == 0xb8)
     }
 
     internal fun queryDoh(url: String, open: (URL) -> HttpURLConnection): String? {
