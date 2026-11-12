@@ -218,8 +218,12 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
             return true
         }
 
-        /** Configs [reviveProfile] can rebind to a clean IP: Cloudflare-compatible, TLS with a checked certificate, not raw JSON. */
-        fun canRevive(p: VlessProfile): Boolean = isCloudflareCompatible(p) && p.security.equals("tls", true) &&
+        /**
+         * Only claim validated revival for transports whose origin endpoint this scanner can actually
+         * challenge. A generic Cloudflare HTTP/1.1 trace does NOT validate a gRPC HTTP/2 service.
+         */
+        fun canRevive(p: VlessProfile): Boolean = isCloudflareCompatible(p) &&
+            p.transport.lowercase() in setOf("ws", "httpupgrade") && p.security.equals("tls", true) &&
             !p.allowInsecure && p.rawConfig.isBlank()
 
         /** The name a clean-IP copy is based on: earlier clean-IP prefixes and grade suffixes removed. */

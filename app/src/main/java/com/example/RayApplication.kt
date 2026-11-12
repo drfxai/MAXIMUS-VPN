@@ -247,6 +247,7 @@ class RayApplication : Application() {
         com.example.vpn.sidecar.AetherSidecar.identityDirectory = { java.io.File(noBackupFilesDir, "identities/aether") }
         com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
         com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
+        com.example.vpn.BundledResolvers.updatedAsset = { part -> com.example.update.ResolverPackUpdater.open(this, part) }
         com.example.vpn.sidecar.Sidecars.torStarter = { torrc, port -> com.example.vpn.sidecar.TorInApp.start(this, torrc, port) }
         com.example.vpn.sidecar.Sidecars.privatePsiphonSettings = { id ->
             com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)

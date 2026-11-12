@@ -2,7 +2,7 @@ package com.example.vpn.lab
 
 /**
  * What Maximus actually supports, per layer (spec section 34), so nothing parse-only is shown or tested as
- * working. Each entry was checked against the code named in [evidence] for Xray-core v26.9.9
+ * working. Each entry was checked against the code named in [evidence] for Xray-core v26.10.31
  * (scripts/fetch-libxray-android.sh). "Parser" means share links; Xray JSON imports pass every Xray field
  * through and are not counted here. Updating the core means re-checking this table (CoreUpdatePolicy).
  */
@@ -24,7 +24,7 @@ object CoreCapabilityRegistry {
         val usable: Boolean get() = model == Support.YES && builder == Support.YES && runtime == Support.YES
     }
 
-    const val CORE = "Xray-core v26.9.9"
+    const val CORE = "Xray-core v26.10.31"
 
     val ALL: List<Capability> = listOf(
         Capability("ech", "ECH", Support.YES, Support.YES, Support.YES, Support.YES, Support.YES,
@@ -126,7 +126,7 @@ object CapabilityMatrix {
     // Order of values: PARSER, MODEL, BUILDER, RUNTIME_PRESENT, RUNTIME_CONFIG_ACCEPTED, RUNTIME_TRAFFIC_VERIFIED,
     // UNIT, SIMULATOR, EMULATOR, DEVICE, FIELD. Device and field stay UNKNOWN until a run is recorded.
     val ROWS: List<Row> = listOf(
-        row("xray", "Xray-core v26.9.9", "libXray (scripts/fetch-libxray-android.sh), XrayConfigBuilder, RealDelayProbe; config tests in CI",
+        row("xray", "Xray-core v26.10.31", "libXray (scripts/fetch-libxray-android.sh), XrayConfigBuilder, RealDelayProbe; config tests in CI",
             Y, Y, Y, Y, P, U, Y, P, N, U, U),
         row("mihomo", "Mihomo v1.19.32", "scripts/engines/mihomo.sh (source tag), MihomoSidecar; Linux build of the same tag accepted configs with -t",
             P, Y, Y, Y, P, U, Y, N, N, U, U),

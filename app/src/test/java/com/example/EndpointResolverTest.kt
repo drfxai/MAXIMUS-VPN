@@ -63,7 +63,8 @@ class EndpointResolverTest {
 
     @Test
     fun privateAndUnspecifiedAddressesCountAsBlocked() {
-        listOf("10.10.34.36", "192.168.1.1", "127.0.0.1", "0.0.0.0", "169.254.1.1", "fc00::1")
+        listOf("10.10.34.36", "192.168.1.1", "127.0.0.1", "0.0.0.0", "169.254.1.1", "fc00::1",
+            "192.0.2.12", "198.51.100.9", "203.0.113.7", "0.21.1.1", "2001:db8::1")
             .forEach { assertTrue(it, EndpointResolver.isBlockedAnswer(InetAddress.getByName(it))) }
         assertFalse(EndpointResolver.isBlockedAnswer(InetAddress.getByName("104.16.1.2")))
     }

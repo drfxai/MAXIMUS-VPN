@@ -112,9 +112,13 @@ class ConfigRevival(
                 // One dead origin must not prevent discovering a path for another origin.
                 for (parent in dead.distinctBy { it.sni.ifBlank { it.host } }.take(3)) {
                     if (cancelled()) break
-                    runCatching { findCleanIps(parent, network) }
+                    // A scanner may return valid edges before its cache is committed. Do not
+                    // discard those live results by only reading the endpoint cache again.
+                    val found = runCatching { findCleanIps(parent, network) }.getOrDefault(emptyList())
                     scanned = true
-                    ips = endpoints(network).distinct().take(12)
+                    ips = (ips + found + endpoints(network))
+                        .filter(com.example.vpn.BundledResolvers::publicIpv4)
+                        .distinct().take(12)
                     if (ips.isNotEmpty()) break
                 }
             }

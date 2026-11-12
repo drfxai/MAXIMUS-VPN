@@ -84,6 +84,7 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
 
     private var job: Job? = null
     private var scannedProfile: com.example.data.model.VlessProfile? = null
+    private var scannedPort: Int? = null
     private var scannedAt = 0L
     private var scannedNetwork: android.net.Network? = null
     private val connectivity =
@@ -304,6 +305,7 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
 
         scannedNetwork = connectivity.activeNetwork
         scannedProfile = profile
+        scannedPort = profile?.port ?: port
         val profileLabel = profile?.name ?: "General Cloudflare CDN"
         resetLogs("[CF_SCANNER_START] region=$region port=$port target=$profileLabel speedTest=$speedTest")
         if (chosen != null && profile == null) {
@@ -324,7 +326,8 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
 
         val edges = CleanIpOptimizer().scan(
             p = profile,
-            targetPort = port,
+            // Validate the actual port of the config that will later use this edge.
+            targetPort = scannedPort ?: port,
             region = region,
             customSubnet = customSubnet?.ifBlank { null } ?: _state.value.customSubnet.ifBlank { null },
             enableSpeedTest = speedTest,
@@ -387,16 +390,11 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
     fun applyEdge(edge: CleanIpOptimizer.Result, connect: Boolean) =
         runJob(if (connect) "Saving clean IP and connecting…" else "Saving clean IP…") {
             val app = RayApplication.instance
-            val profile = cleanIpTarget()
-                ?: com.example.data.model.VlessProfile(
-                    name = "Clean IP ${edge.ip}",
-                    address = edge.ip,
-                    port = 443,
-                    uuid = java.util.UUID.randomUUID().toString(),
-                    sni = "cloudflare.com",
-                    host = "cloudflare.com"
-                )
-
+            // Never fabricate a random UUID/Cloudflare-host profile: such a node cannot authenticate.
+            val profile = scannedProfile ?: error("Select a CDN-compatible config and scan that origin first.")
+            check(scannedPort == profile.port && edge.originVerified && edge in _state.value.edges) {
+                "This IP was not verified against the config's origin and port. Scan the selected config again."
+            }
             val variant = CleanIpOptimizer.variant(profile, edge)
             val (inserted, duplicates) = app.serverRepository.insertAllWithDeduplication(listOf(variant))
             val saved = inserted.firstOrNull()
@@ -427,6 +425,11 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         connectNow: Boolean
     ) = runJob(if (connectNow) "Optimizing configuration and connecting…" else "Optimizing configuration…") {
         check(CleanIpOptimizer.canRevive(targetProfile)) { cannotTakeCleanIp(targetProfile) }
+        check(edge.originVerified && edge in _state.value.edges &&
+            scannedProfile?.effectiveFingerprint == targetProfile.effectiveFingerprint &&
+            scannedPort == targetProfile.port) {
+            "Clean IP was not checked against this exact config, host and port. Select it and run a fresh scan."
+        }
         val app = RayApplication.instance
         val revived = CleanIpOptimizer.reviveProfile(targetProfile, edge, asClone)
 

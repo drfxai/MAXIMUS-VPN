@@ -186,8 +186,8 @@ class ConfigRevivalTest {
         val report = r.run(listOf(dead), net)
         assertEquals(1, scans)
         assertTrue(report.scannedForIps)
-        // The scan's findings reach the engine only through the endpoint scores, which this test does not fill.
-        assertTrue(report.cleanIps.isEmpty())
+        // Keep validated IPs returned by the scan even before the endpoint cache is persisted.
+        assertEquals(listOf("188.114.97.3"), report.cleanIps)
         val alive = revival(alive = setOf("ok"), scan = { _, _ -> scans++; emptyList() }).run(listOf(cf("ok", "ok.example.workers.dev")), net)
         assertEquals(1, scans)
         assertFalse(alive.scannedForIps)

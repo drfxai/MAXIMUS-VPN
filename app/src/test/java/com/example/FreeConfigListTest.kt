@@ -20,7 +20,7 @@ import java.security.spec.ECGenParameterSpec
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class FreeConfigListTest {
-    private val list = "vless://11111111-1111-1111-1111-111111111111@203.0.113.7:443?security=reality&sni=www.example.com&pbk=abc&sid=ab&type=tcp#Free%20VLESS%201\n"
+    private val list = "vless://11111111-1111-1111-1111-111111111111@104.21.10.7:443?security=reality&sni=www.example.com&pbk=abc&sid=ab&type=tcp#Free%20VLESS%201\n"
     private val manifest = """{"count":1,"created":"2026-10-05T18:00:00Z","files":{"free.txt":{"bytes":${list.length},"sha256":"${sha(list)}"}},"version":1}"""
     private val keys = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
     private val publicKey = java.util.Base64.getEncoder().encodeToString(keys.public.encoded)
@@ -75,18 +75,18 @@ class FreeConfigListTest {
         assertEquals("DE", FreeConfigList.countryOf("DE \u00B7 VLESS 12"))
         assertEquals(null, FreeConfigList.countryOf("Free VLESS 12"))
         assertEquals(null, FreeConfigList.countryOf("de \u00B7 VLESS 12"))
-        assertEquals("NL", FreeConfigList.prepare(listOf(profile("NL \u00B7 VLESS 3", "203.0.113.3"))).single().countryCode)
+        assertEquals("NL", FreeConfigList.prepare(listOf(profile("NL \u00B7 VLESS 3", "104.21.10.3"))).single().countryCode)
     }
 
     @Test fun neverMoreThanThirtyServersAreTakenFromAList() {
-        val long = (1..300).map { profile("Free VLESS $it", "203.0.113.${it % 250 + 1}").copy(id = "p$it") }
+        val long = (1..300).map { profile("Free VLESS $it", "104.21.10.${it % 250 + 1}").copy(id = "p$it") }
         val taken = FreeConfigList.prepare(long)
         assertEquals(30, taken.size)
         assertEquals((1..30).map { "p$it" }, taken.map { it.id })
     }
 
     @Test fun anInstallHoldingHundredsKeepsTheFastestThirtyAndWhatTheUserChose() {
-        val saved = (1..300).map { profile("Free VLESS $it", "203.0.113.${it % 250 + 1}").copy(id = "p$it", lastLatencyMs = if (it % 2 == 0) it * 10L else null) }
+        val saved = (1..300).map { profile("Free VLESS $it", "104.21.10.${it % 250 + 1}").copy(id = "p$it", lastLatencyMs = if (it % 2 == 0) it * 10L else null) }
         val favourite = saved[298].copy(isFavorite = true)       // slow and untested, but the user's
         val inUse = saved[299]
         val all = saved.take(298) + favourite + inUse
@@ -100,10 +100,10 @@ class FreeConfigListTest {
     }
 
     @Test fun serversDroppedFromTheListGoExceptFavouritesAndTheOneInUse() {
-        val kept = profile("a", "203.0.113.1")
-        val gone = profile("b", "203.0.113.2")
-        val favourite = profile("c", "203.0.113.3", favorite = true)
-        val inUse = profile("d", "203.0.113.4")
+        val kept = profile("a", "104.21.10.1")
+        val gone = profile("b", "104.21.10.2")
+        val favourite = profile("c", "104.21.10.3", favorite = true)
+        val inUse = profile("d", "104.21.10.4")
         val stale = FreeConfigList.stale(listOf(kept, gone, favourite, inUse), listOf(kept.copy(id = "new")), keepId = inUse.id)
         assertEquals(listOf(gone), stale)
     }
