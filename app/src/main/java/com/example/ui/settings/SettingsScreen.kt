@@ -100,6 +100,7 @@ import com.example.ui.viewmodel.SettingsViewModel
 import com.example.update.AppUpdateChecker
 import com.example.update.InAppUpdater
 import com.example.update.ResolverPackUpdater
+import com.example.update.CleanIpMaintenance
 import com.example.update.UpdateNetworkPolicy
 import com.example.vpn.diagnostics.DnsPathTest
 import com.example.vpn.safety.DnsResolvers
@@ -167,6 +168,8 @@ fun SettingsScreen(
     var latestPublished by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
     var resolverProgress by remember { mutableStateOf(-1) }
     var resolverBusy by remember { mutableStateOf(false) }
+    var cleanIpBusy by remember { mutableStateOf(false) }
+    var cleanIpStatus by remember { mutableStateOf<String?>(null) }
     var resolverStatus by remember { mutableStateOf<String?>(null) }
     var vpnOnlyUpdates by remember { mutableStateOf(UpdateNetworkPolicy.vpnOnly(context)) }
     var showCoreInventory by remember { mutableStateOf(false) }
@@ -1190,6 +1193,32 @@ fun SettingsScreen(
                         }
                     }
                 )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = "Refresh verified Clean IPs",
+                    subtitle = if (cleanIpBusy) "Testing the selected CDN node…" else
+                        "Retest endpoints for the selected node on this network",
+                    leading = { SettingsIconBox(Icons.Default.Speed, AppTheme.colors.primary) },
+                    onClick = {
+                        if (!cleanIpBusy) {
+                            cleanIpBusy = true
+                            cleanIpStatus = null
+                            scope.launch {
+                                runCatching { CleanIpMaintenance.refresh(context) { done, total ->
+                                    cleanIpStatus = "Tested $done / $total Cloudflare candidates…"
+                                } }.onSuccess {
+                                    cleanIpStatus = "${it.validated} of ${it.tested} addresses verified against the selected origin."
+                                }.onFailure {
+                                    cleanIpStatus = it.message ?: "Clean-IP scan failed."
+                                }
+                                cleanIpBusy = false
+                            }
+                        }
+                    }
+                )
+                cleanIpStatus?.let {
+                    Text(it, color = AppTheme.colors.textSecondary, modifier = Modifier.padding(12.dp))
+                }
                 if (ResolverPackUpdater.installed(context)) {
                     SettingsRowDivider()
                     SettingsRow(
