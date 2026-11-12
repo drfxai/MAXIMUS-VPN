@@ -17,7 +17,8 @@ import java.util.concurrent.TimeUnit
  * jsDelivr/Statically mirrors serve when GitHub is blocked.
  *
  * The check is a plain GET of public release information: no identifiers, cookies or device data
- * are sent, and nothing is downloaded or installed. Download only opens the GitHub release page.
+ * are sent. The app downloads APKs only when an official SHA-256 digest is available.
+ * Android still requires user consent for installation.
  */
 object AppUpdateChecker {
 
@@ -30,7 +31,30 @@ object AppUpdateChecker {
     /** How long "Later" hides the same release. */
     const val SNOOZE_MS = 24L * 60 * 60 * 1000
 
-    data class ReleaseInfo(val version: String, val build: Int, val pageUrl: String)
+    data class ApkAsset(val url: String, val sha256: String, val size: Long)
+    data class ReleaseInfo(val version: String, val build: Int, val pageUrl: String, val apk: ApkAsset? = null)
+
+    private const val MAX_APK_BYTES = 700L * 1024 * 1024
+    private val digestPattern = Regex("[a-fA-F0-9]{64}")
+    private val apkNames = listOf("arm64-v8a", "universal")
+
+    /** Refuse externally hosted or mismatched release files, even when metadata is compromised. */
+    fun safeApkAsset(tag: String, flavor: String, url: String, digest: String, size: Long): ApkAsset? {
+        if (!versionPattern.matches(tag) || flavor !in apkNames || size !in 1..MAX_APK_BYTES) return null
+        val expected = "https://github.com/drfxai/MAXIMUS-VPN/releases/download/$tag/MAXIMUSVPN-$tag-$flavor.apk"
+        val sha = digest.removePrefix("sha256:")
+        return if (url == expected && digestPattern.matches(sha)) ApkAsset(url, sha.lowercase(), size) else null
+    }
+
+    private fun preferredApk(tag: String, assets: List<Pair<String, JSONObject>>): ApkAsset? {
+        val preference = if (android.os.Build.SUPPORTED_ABIS.contains("arm64-v8a")) apkNames else listOf("universal")
+        for (flavor in preference) {
+            val asset = assets.firstOrNull { it.first == flavor }?.second ?: continue
+            safeApkAsset(tag, flavor, asset.optString("browser_download_url"), asset.optString("digest"), asset.optLong("size"))
+                ?.let { return it }
+        }
+        return null
+    }
 
     private val buildMarker = Regex("""maximus-build:\s*(\d{1,9})""")
     private val versionPattern = Regex("""[vV]?\d{1,4}(\.\d{1,4}){1,3}""")
@@ -39,20 +63,34 @@ object AppUpdateChecker {
     fun parseGitHubRelease(json: String): ReleaseInfo? = runCatching {
         val o = JSONObject(json)
         val build = buildMarker.find(o.optString("body"))?.groupValues?.get(1)?.toIntOrNull() ?: return null
-        release(o.optString("tag_name"), build, o.optString("html_url"))
+        val tag = o.optString("tag_name")
+        val assets = o.optJSONArray("assets")
+        val candidates = (0 until (assets?.length() ?: 0)).mapNotNull { index ->
+            val asset = assets?.optJSONObject(index) ?: return@mapNotNull null
+            val flavor = apkNames.firstOrNull { asset.optString("name") == "MAXIMUSVPN-$tag-$it.apk" }
+            flavor?.let { it to asset }
+        }
+        release(tag, build, o.optString("html_url"), preferredApk(tag, candidates))
     }.getOrNull()
 
     /** update.json: {"version": "V1.0.0", "build": 142, "url": "https://github.com/..."} */
     fun parseManifest(json: String): ReleaseInfo? = runCatching {
         val o = JSONObject(json)
         val build = o.optInt("build", 0)
-        release(o.optString("version"), build, o.optString("url"))
+        val tag = o.optString("version")
+        val apks = o.optJSONObject("apks")
+        val candidates = apkNames.mapNotNull { flavor ->
+            val metadata = apks?.optJSONObject(flavor) ?: return@mapNotNull null
+            flavor to JSONObject().put("browser_download_url", metadata.optString("url"))
+                .put("digest", metadata.optString("sha256")).put("size", metadata.optLong("size"))
+        }
+        release(tag, build, o.optString("url"), preferredApk(tag, candidates))
     }.getOrNull()
 
-    private fun release(version: String, build: Int, url: String): ReleaseInfo? {
+    private fun release(version: String, build: Int, url: String, apk: ApkAsset? = null): ReleaseInfo? {
         if (build <= 0) return null
         val v = version.trim().takeIf { versionPattern.matches(it) } ?: return null
-        return ReleaseInfo("V" + v.trimStart('v', 'V'), build, safePageUrl(url))
+        return ReleaseInfo("V" + v.trimStart('v', 'V'), build, safePageUrl(url), apk)
     }
 
     /** Only this repository's release pages may be opened; anything else falls back to the releases page. */
