@@ -169,11 +169,22 @@ object AppUpdateChecker {
 
     /** The newest published release, or null when no source answered. */
     suspend fun fetchLatest(download: (String) -> String? = ::get): ReleaseInfo? = withContext(Dispatchers.IO) {
+        var best: ReleaseInfo? = null
         for ((url, parse) in sources()) {
             val body = runCatching { download(url) }.getOrNull() ?: continue
-            parse(body)?.let { return@withContext it }
+            val info = parse(body) ?: continue
+            val old = best
+            val newer = old == null || compareVersions(info.version, old.version) > 0 ||
+                (compareVersions(info.version, old.version) == 0 && info.build > old.build)
+            if (newer || (old != null && info.version == old.version && info.build == old.build &&
+                    (info.apk != null && old.apk == null || info.resolverPack != null && old.resolverPack == null))) {
+                best = if (old != null && info.version == old.version && info.build == old.build)
+                    info.copy(apk = info.apk ?: old.apk, resolverPack = info.resolverPack ?: old.resolverPack) else info
+            }
+            // GitHub release metadata is complete: do not spend time contacting mirrors.
+            if (best?.apk != null && best.resolverPack != null) break
         }
-        null
+        best
     }
 
     private fun get(url: String): String? {
