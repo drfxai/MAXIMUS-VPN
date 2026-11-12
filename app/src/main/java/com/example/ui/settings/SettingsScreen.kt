@@ -99,6 +99,8 @@ import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.SettingsViewModel
 import com.example.update.AppUpdateChecker
 import com.example.update.InAppUpdater
+import com.example.update.ResolverPackUpdater
+import com.example.update.UpdateNetworkPolicy
 import com.example.vpn.diagnostics.DnsPathTest
 import com.example.vpn.safety.DnsResolvers
 import kotlinx.coroutines.launch
@@ -162,6 +164,12 @@ fun SettingsScreen(
     var updateChecking by remember { mutableStateOf(false) }
     var updateChecked by remember { mutableStateOf(false) }
     var updateRelease by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
+    var latestPublished by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
+    var resolverProgress by remember { mutableStateOf(-1) }
+    var resolverBusy by remember { mutableStateOf(false) }
+    var resolverStatus by remember { mutableStateOf<String?>(null) }
+    var vpnOnlyUpdates by remember { mutableStateOf(UpdateNetworkPolicy.vpnOnly(context)) }
+    var showCoreInventory by remember { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     var updateDownloading by remember { mutableStateOf(false) }
     var updateProgress by remember { mutableStateOf(0) }
@@ -171,6 +179,7 @@ fun SettingsScreen(
     val performUpdateCheck: suspend () -> Unit = {
         updateChecking = true
         val latest = runCatching { AppUpdateChecker.fetchLatest() }.getOrNull()
+        latestPublished = latest
         val newer = latest?.takeIf {
             AppUpdateChecker.shouldShow(
                 it, BuildConfig.VERSION_NAME, BuildConfig.RELEASE_BUILD, 0, 0L, System.currentTimeMillis()
@@ -182,6 +191,27 @@ fun SettingsScreen(
         updateChecked = true
     }
     LaunchedEffect(Unit) { performUpdateCheck() }
+
+    if (showCoreInventory) {
+        AlertDialog(
+            onDismissRequest = { showCoreInventory = false },
+            title = { Text("Core & resource manager") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(com.example.vpn.lab.CoreCapabilityRegistry.CORE + " • inside the signed APK")
+                    com.example.vpn.sidecar.Sidecars.ENGINES
+                        .filter { it.id in setOf("sing-box", "mihomo", "aether", "psiphon", "tor") }
+                        .forEach { engine ->
+                            val present = com.example.vpn.sidecar.Sidecars.isBundled(engine)
+                            Text("${engine.id}: " + if (present) "Installed in APK" else "Not present on this device")
+                        }
+                    Text("Executable engine upgrades are released as signed APKs, not remotely executable code.")
+                    Text("Psiphon fetches and validates its own server lists using Psiphon's configured signing key when it runs.")
+                }
+            },
+            confirmButton = { TextButton(onClick = { showCoreInventory = false }) { Text("Close") } }
+        )
+    }
 
     if (showUpdateDialog && updateRelease != null) {
         val release = updateRelease!!
@@ -1126,6 +1156,72 @@ fun SettingsScreen(
                         }
                     }
                 )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = "Core manager",
+                    subtitle = "Bundled engines, runtime availability and update policy",
+                    leading = { SettingsIconBox(Icons.Default.Refresh, AppTheme.colors.primary) },
+                    onClick = { showCoreInventory = true }
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    title = "Update resolver databases",
+                    subtitle = if (resolverBusy) "Downloading verified data… ${resolverProgress.coerceAtLeast(0)}%"
+                        else if (ResolverPackUpdater.installed(context)) "Verified update installed • rollback available"
+                        else "Six resolver lists • SHA-256 checked • original assets retained",
+                    leading = { SettingsIconBox(Icons.Default.CloudDownload, AppTheme.colors.primary) },
+                    onClick = {
+                        if (!resolverBusy) {
+                            resolverBusy = true
+                            resolverStatus = null
+                            scope.launch {
+                                val latest = latestPublished ?: runCatching { AppUpdateChecker.fetchLatest() }.getOrNull()
+                                latestPublished = latest
+                                val pack = latest?.resolverPack
+                                if (pack == null) {
+                                    resolverStatus = "No verified resolver data pack is available in the official release."
+                                } else {
+                                    runCatching { ResolverPackUpdater.refresh(context, pack) { resolverProgress = it } }
+                                        .onSuccess { resolverStatus = "Updated and validated $it resolver lists." }
+                                        .onFailure { resolverStatus = it.message ?: "Resolver database update failed." }
+                                }
+                                resolverBusy = false
+                            }
+                        }
+                    }
+                )
+                if (ResolverPackUpdater.installed(context)) {
+                    SettingsRowDivider()
+                    SettingsRow(
+                        title = "Rollback resolver databases",
+                        subtitle = "Restore the previously verified list set",
+                        leading = { SettingsIconBox(Icons.Default.Restore, AppTheme.colors.textSecondary) },
+                        onClick = {
+                            resolverStatus = if (ResolverPackUpdater.rollback(context))
+                                "Previous resolver pack restored." else "No previous verified pack available."
+                        }
+                    )
+                }
+                resolverStatus?.let {
+                    Text(it, color = AppTheme.colors.textSecondary, modifier = Modifier.padding(12.dp))
+                }
+                SettingsRowDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("VPN-only updates", color = AppTheme.colors.textPrimary, fontSize = 14.sp)
+                        Text("No direct fallback when the VPN is disconnected", color = AppTheme.colors.textSecondary, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = vpnOnlyUpdates,
+                        onCheckedChange = { value ->
+                            UpdateNetworkPolicy.setVpnOnly(context, value)
+                            vpnOnlyUpdates = value
+                        }
+                    )
+                }
                 SettingsRowDivider()
                 SettingsRow(
                     title = "View changelog",
