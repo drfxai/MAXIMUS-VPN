@@ -17,6 +17,7 @@ import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Download an official signed release inside Maximus; never execute an arbitrary URL.
@@ -31,6 +32,9 @@ object InAppUpdater {
             .followRedirects(true)
             .build()
     }
+    private val activeCall = AtomicReference<okhttp3.Call?>(null)
+    /** Abort a blocked GitHub socket immediately when the user cancels at 0%. */
+    fun cancelCurrentDownload() { activeCall.get()?.cancel() }
     private const val MIME = "application/vnd.android.package-archive"
     private const val MAX_BYTES = 700L * 1024L * 1024L
 
@@ -50,7 +54,10 @@ object InAppUpdater {
                 temporary.delete()
                 withContext(Dispatchers.Main) { onStatus("Connecting to official GitHub release…") }
                 val request = Request.Builder().url(asset.url).header("Accept", "application/octet-stream").build()
-                client.newCall(request).execute().use { response ->
+                val call = client.newCall(request)
+                activeCall.getAndSet(call)?.cancel()
+                try {
+                    call.execute().use { response ->
                     check(response.isSuccessful) { "APK download failed (HTTP ${response.code})" }
                     val body = response.body ?: error("Empty APK download")
                     if (body.contentLength() > MAX_BYTES) error("APK exceeds size limit")
@@ -89,6 +96,9 @@ object InAppUpdater {
                     check(read == asset.size) { "Incomplete APK download" }
                     val actual = digest.digest().joinToString("") { "%02x".format(it) }
                     check(actual.equals(asset.sha256, ignoreCase = true)) { "APK SHA-256 verification failed" }
+                    }
+                } finally {
+                    activeCall.compareAndSet(call, null)
                 }
                 withContext(Dispatchers.Main) { onStatus("Verifying publisher signature and Android package…") }
                 verifyPackage(context, temporary)
