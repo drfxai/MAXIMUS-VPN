@@ -83,7 +83,9 @@ object EventLog {
             else null
             val normalized = if (startedAt != null && prepared.timestamp >= startedAt)
                 prepared.copy(durationMs = prepared.timestamp - startedAt)
-            else prepared.copy(durationMs = prepared.durationMs?.takeIf { it > 0 })
+            else if (prepared.name == "session.end")
+                prepared.copy(durationMs = prepared.durationMs?.takeIf { it > 0 })
+            else prepared
             if (ring.size >= MAX_MEMORY) {
                 ring.pollFirst()
                 truncated = true
