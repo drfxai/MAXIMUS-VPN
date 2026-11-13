@@ -1,10 +1,12 @@
 package com.example
 
 import com.example.vpn.smart.NetworkEnvironment
+import com.example.vpn.smart.NetworkCapabilityProfile
 import com.example.vpn.smart.NetworkEnvironment.Level
 import com.example.vpn.smart.NetworkEnvironment.Signal
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -44,4 +46,37 @@ class NetworkEnvironmentTest {
             failedKinds = setOf("TLS"), workingKinds = listOf("CDN"), sniComparisonCut = true)
         assertTrue(Signal.SNI_INTERFERENCE_SUSPECTED in compared.signals)
     }
+    @Test fun failedInternationalAndCloudflareTlsMustNotBeReportedOpen() {
+        val measured = NetworkCapabilityProfile(
+            transport = "cellular", networkIdentity = "cell:43235", measuredAt = 1_000L,
+            internationalOk = 0, internationalTried = 3, cloudflareReachable = false,
+            cloudflareIpv4Tls = false, domesticReachable = true
+        )
+        val report = NetworkEnvironment.classify("cell:43235", validated = true, metered = true,
+            roaming = false, dnsPoisoned = false, failedKinds = emptySet(), workingKinds = emptyList(),
+            evidence = measured)
+        assertEquals(Level.HEAVY, report.level)
+        assertTrue(Signal.INTERNATIONAL_TLS_PATH_FAILURE in report.signals)
+        assertTrue(Signal.CLOUDFLARE_TLS_PATH_FAILURE in report.signals)
+        assertFalse(Signal.SNI_INTERFERENCE_SUSPECTED in report.signals)
+    }
+
+    @Test fun measurementsFromOtherNetworksOrOldSessionsAreIgnored() {
+        val measured = NetworkCapabilityProfile(
+            networkIdentity = "cell:43235", measuredAt = 1_000L,
+            internationalOk = 0, internationalTried = 3, cloudflareReachable = false,
+            cloudflareIpv4Tls = false
+        )
+        assertEquals(measured, NetworkEnvironment.freshEvidence(measured, "cell:43235", 1_100L))
+        assertNull(NetworkEnvironment.freshEvidence(measured, "cell:99999", 1_100L))
+        assertNull(NetworkEnvironment.freshEvidence(measured, "cell:43235", 1_000L + 10 * 60_000L + 1))
+        assertNull(NetworkEnvironment.freshEvidence(measured, "cell:43235", 999L))
+        val insufficient = measured.copy(internationalTried = 1, cloudflareReachable = null,
+            cloudflareIpv4Tls = null)
+        val report = NetworkEnvironment.classify("cell:43235", validated = true, metered = true,
+            roaming = false, dnsPoisoned = false, failedKinds = emptySet(), workingKinds = emptyList(),
+            evidence = insufficient)
+        assertEquals(Level.OPEN, report.level)
+    }
+
 }

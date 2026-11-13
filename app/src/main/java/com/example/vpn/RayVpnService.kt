@@ -1671,6 +1671,28 @@ class RayVpnService : VpnService() {
                     else com.example.vpn.diagnostics.FailureStage.of(e)
             ))
             disconnectResources()
+            // Aether's selected engine is only verified *after* startup. If every built-in
+            // carrier failed, the earlier Smart Connect preflight may have had nothing to
+            // probe. Continue once with saved-server discovery, subject to user policy.
+            val configured = runCatching { settingsRepository.getSettings() }.getOrNull()
+            if (e is com.example.vpn.connections.ConnectionEngineRunner.NoVerifiedPath && configured != null &&
+                com.example.vpn.connections.ConnectionEngineRunner.mayRecoverAether(
+                    aether = com.example.vpn.sidecar.AetherSidecar.handles(requestedProfile),
+                    smart = smart, autoFailover = configured.autoFailoverEnabled,
+                    exact = exactSession,
+                    exitLocked = com.example.vpn.safety.OperatingModePolicy.of(configured.operationalMode).lockExit,
+                    force = force, alreadyEscalated = exclude.isNotEmpty())) {
+                val alternate = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                    .firstOrNull { it.id != requestedProfile.id && it.id !in exclude &&
+                        !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) &&
+                        com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) }
+                if (alternate != null) {
+                    XrayLogManager.w("SMART", "Aether carries no verified traffic; continuing Smart Connect on saved servers.")
+                    showForegroundNotification("Aether failed; trying verified saved-server paths...")
+                    connectLocked(alternate, smart = true, exclude = exclude + requestedProfile.id)
+                    return@withContext
+                }
+            }
             if (fallbackFromDirect(requestedProfile)) return@withContext
             if (protectionRequested) showForegroundNotification("Traffic blocked: connection failed")
             if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
@@ -1793,7 +1815,20 @@ class RayVpnService : VpnService() {
             val managed = engine.id in setOf(com.example.vpn.sidecar.AetherSidecar.ID, com.example.vpn.sidecar.ServerlessSidecar.ID)
             if (managed) showForegroundNotification("Testing the ${engine.id} connection...")
             val connectionOwner = connectJob
+            // Network measurements are admissible only for the current physical link
+            // and for a short freshness window. Never apply them to a different SIM/Wi-Fi.
+            val measured = if (engine.id == com.example.vpn.sidecar.AetherSidecar.ID)
+                com.example.vpn.smart.NetworkEnvironment.freshEvidence(
+                    com.example.vpn.smart.NetworkCapabilityDetector.last,
+                    com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService),
+                    System.currentTimeMillis())
+            else null
+            val ipv4Only = measured?.ipv4Available == true && measured?.ipv6Available == false
+            val preferWireGuard = measured?.udpAvailable == true &&
+                measured?.cloudflareIpv4Tls == false && measured?.internationalReachable == false &&
+                (measured?.internationalTried ?: 0) >= 2
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
+                ipv4Only = ipv4Only, preferWireGuard = preferWireGuard,
                 cancelled = { connectionOwner?.isActive == false }) else null
             val launch = started?.launch ?: engine.prepare(profile, settings, context)
             if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
