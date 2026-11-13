@@ -17,6 +17,7 @@ import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Download an official signed release inside Maximus; never execute an arbitrary URL.
@@ -31,10 +32,18 @@ object InAppUpdater {
             .followRedirects(true)
             .build()
     }
+    private val activeCall = AtomicReference<okhttp3.Call?>(null)
+    /** Abort a blocked GitHub socket immediately when the user cancels at 0%. */
+    fun cancelCurrentDownload() { activeCall.get()?.cancel() }
     private const val MIME = "application/vnd.android.package-archive"
     private const val MAX_BYTES = 700L * 1024L * 1024L
 
-    suspend fun download(context: Context, asset: AppUpdateChecker.ApkAsset, onProgress: (Int) -> Unit): File =
+    suspend fun download(
+        context: Context,
+        asset: AppUpdateChecker.ApkAsset,
+        onStatus: (String) -> Unit = {},
+        onProgress: (Int) -> Unit
+    ): File =
         withContext(Dispatchers.IO) {
             require(asset.size in 1..MAX_BYTES) { "APK size is invalid" }
             val dir = File(context.filesDir, "updates").apply { check(isDirectory || mkdirs()) { "Cannot create update folder" } }
@@ -43,14 +52,20 @@ object InAppUpdater {
             try {
                 UpdateNetworkPolicy.requireAllowed(context)
                 temporary.delete()
+                withContext(Dispatchers.Main) { onStatus("Connecting to official GitHub release…") }
                 val request = Request.Builder().url(asset.url).header("Accept", "application/octet-stream").build()
-                client.newCall(request).execute().use { response ->
+                val call = client.newCall(request)
+                activeCall.getAndSet(call)?.cancel()
+                try {
+                    call.execute().use { response ->
                     check(response.isSuccessful) { "APK download failed (HTTP ${response.code})" }
                     val body = response.body ?: error("Empty APK download")
                     if (body.contentLength() > MAX_BYTES) error("APK exceeds size limit")
+                    withContext(Dispatchers.Main) { onStatus("Connected • receiving ${asset.size / (1024 * 1024)} MiB signed APK") }
                     val digest = MessageDigest.getInstance("SHA-256")
                     var read = 0L
                     var lastProgress = -1
+                    var lastBytesReported = 0L
                     body.byteStream().use { input ->
                         temporary.outputStream().buffered().use { output ->
                             val buffer = ByteArray(64 * 1024)
@@ -64,17 +79,28 @@ object InAppUpdater {
                                 digest.update(buffer, 0, n)
                                 output.write(buffer, 0, n)
                                 val pct = (read * 100L / asset.size).toInt().coerceIn(0, 100)
-                                if (pct != lastProgress && pct % 2 == 0) {
+                                if (pct != lastProgress) {
                                     lastProgress = pct
                                     withContext(Dispatchers.Main) { onProgress(pct) }
+                                }
+                                if (read - lastBytesReported >= 512 * 1024 || read == asset.size) {
+                                    lastBytesReported = read
+                                    withContext(Dispatchers.Main) {
+                                        onStatus("Received ${read / 1024} / ${asset.size / 1024} KiB")
+                                    }
                                 }
                             }
                         }
                     }
+                    withContext(Dispatchers.Main) { onStatus("Checking SHA-256 digest…") }
                     check(read == asset.size) { "Incomplete APK download" }
                     val actual = digest.digest().joinToString("") { "%02x".format(it) }
                     check(actual.equals(asset.sha256, ignoreCase = true)) { "APK SHA-256 verification failed" }
+                    }
+                } finally {
+                    activeCall.compareAndSet(call, null)
                 }
+                withContext(Dispatchers.Main) { onStatus("Verifying publisher signature and Android package…") }
                 verifyPackage(context, temporary)
                 check(temporary.renameTo(ready)) { "Could not finalize verified APK" }
                 withContext(Dispatchers.Main) { onProgress(100) }

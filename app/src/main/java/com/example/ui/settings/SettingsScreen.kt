@@ -1,6 +1,7 @@
 package com.example.ui.settings
 
 import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.filled.CurrencyBitcoin
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Lock
@@ -106,7 +110,7 @@ import com.example.vpn.diagnostics.DnsPathTest
 import com.example.vpn.safety.DnsResolvers
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
@@ -116,6 +120,8 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val dnsRequester = remember { BringIntoViewRequester() }
+    val resolverRequester = remember { BringIntoViewRequester() }
     val settingsClipboard = LocalClipboardManager.current
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val localProxy by com.example.vpn.share.LocalProxyService.state.collectAsStateWithLifecycle()
@@ -175,7 +181,9 @@ fun SettingsScreen(
     var showCoreInventory by remember { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     var updateDownloading by remember { mutableStateOf(false) }
+    var updateJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var updateProgress by remember { mutableStateOf(0) }
+    var updateStatus by remember { mutableStateOf<String?>(null) }
     var verifiedApk by remember { mutableStateOf<java.io.File?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
     var showCryptoSupport by remember { mutableStateOf(false) }
@@ -218,59 +226,46 @@ fun SettingsScreen(
 
     if (showUpdateDialog && updateRelease != null) {
         val release = updateRelease!!
-        AlertDialog(
-            onDismissRequest = { if (!updateDownloading) showUpdateDialog = false },
-            title = { Text("Update Maximus VPN") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Available: ${release.version} (build ${release.build}). Download and install without opening a browser.")
-                    if (release.apk == null) {
-                        Text("This release has no verifiable APK metadata. Open the official release page to update manually.")
-                    } else {
-                        Text("Official APK • SHA-256 and publisher signature checked before installation.")
-                    }
-                    if (updateDownloading) {
-                        CircularProgressIndicator(color = AppTheme.colors.primary)
-                        Text("Downloading… $updateProgress%")
-                    }
-                    updateError?.let { Text(it, color = AppTheme.colors.statusError) }
-                    if (verifiedApk != null) Text("APK verified. Android will ask you to confirm installation.")
-                }
+        com.example.ui.popups.VerifiedUpdateDialog(
+            release = release,
+            installedBuild = BuildConfig.RELEASE_BUILD,
+            downloading = updateDownloading,
+            progress = updateProgress,
+            downloadStatus = updateStatus,
+            verified = verifiedApk?.isFile == true,
+            error = updateError,
+            onDismiss = {
+                updateJob?.cancel()
+                InAppUpdater.cancelCurrentDownload()
+                updateDownloading = false
+                showUpdateDialog = false
             },
-            confirmButton = {
-                TextButton(enabled = !updateDownloading, onClick = {
-                    val saved = verifiedApk?.takeIf { it.isFile }
-                    when {
-                        saved != null -> {
-                            runCatching { InAppUpdater.install(context, saved) }
-                                .onSuccess { allowed ->
-                                    if (!allowed) updateError = "Allow app installs for Maximus in Android Settings, then return here and tap Install."
+            onOfficialLink = { uriHandler.openUri(release.pageUrl) },
+            onPrimary = {
+                val saved = verifiedApk?.takeIf { it.isFile }
+                when {
+                    saved != null -> runCatching { InAppUpdater.install(context, saved) }
+                        .onSuccess { allowed ->
+                            if (!allowed) updateError = "Allow app installs for Maximus in Android Settings, then return and tap Install."
+                        }
+                        .onFailure { updateError = it.message ?: "Could not start Android installer" }
+                    release.apk != null -> {
+                        updateDownloading = true
+                        updateProgress = 0
+                        updateStatus = null
+                        updateError = null
+                        updateJob = scope.launch {
+                            runCatching { InAppUpdater.download(context, release.apk, onStatus = { updateStatus = it }) { updateProgress = it } }
+                                .onSuccess { verifiedApk = it }
+                                .onFailure {
+                                    if (it !is kotlinx.coroutines.CancellationException)
+                                        updateError = it.message ?: "Download or verification failed"
                                 }
-                                .onFailure { updateError = it.message ?: "Could not start Android installer" }
+                            updateDownloading = false
                         }
-                        release.apk != null -> {
-                            updateDownloading = true
-                            updateProgress = 0
-                            updateError = null
-                            scope.launch {
-                                runCatching { InAppUpdater.download(context, release.apk) { updateProgress = it } }
-                                    .onSuccess { verifiedApk = it }
-                                    .onFailure { updateError = it.message ?: "Download or signature verification failed" }
-                                updateDownloading = false
-                            }
-                        }
-                        else -> uriHandler.openUri(release.pageUrl)
                     }
-                }) {
-                    Text(when {
-                        verifiedApk?.isFile == true -> "Install"
-                        release.apk != null -> "Download APK"
-                        else -> "Official release"
-                    })
+                    else -> uriHandler.openUri(release.pageUrl)
                 }
-            },
-            dismissButton = {
-                TextButton(enabled = !updateDownloading, onClick = { showUpdateDialog = false }) { Text("Close") }
             }
         )
     }
@@ -301,6 +296,32 @@ fun SettingsScreen(
             )
         }
 
+        Spacer(modifier = Modifier.height(14.dp))
+        // Quick access to the configuration sections that used to be far below the fold.
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Card(
+                modifier = Modifier.weight(1f).clickable { scope.launch { dnsRequester.bringIntoView() } },
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Default.Dns, contentDescription = null, tint = AppTheme.colors.primary)
+                    Text("DNS & DoH", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Providers • diagnostics", color = AppTheme.colors.textSecondary, fontSize = 10.sp)
+                }
+            }
+            Card(
+                modifier = Modifier.weight(1f).clickable { scope.launch { resolverRequester.bringIntoView() } },
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = AppTheme.colors.primary)
+                    Text("Resolvers", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Update • rollback", color = AppTheme.colors.textSecondary, fontSize = 10.sp)
+                }
+            }
+        }
         Spacer(modifier = Modifier.height(18.dp))
 
         // SECTION: GEMINI AI AGENT
@@ -503,17 +524,17 @@ fun SettingsScreen(
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 RoutingOptionItem(
-                    title = "sing-box 1.14.4",
-                    subtitle = "VLESS, VMess, Trojan and Shadowsocks; incompatible custom settings stay on Xray",
-                    isSelected = settings.preferredEngine == EngineType.SING_BOX,
-                    onSelect = { viewModel.setPreferredEngine(EngineType.SING_BOX) }
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                RoutingOptionItem(
                     title = "Auto (Protocol Smart Select)",
                     subtitle = "Automatically selects the best engine (Xray for VLESS/XTLS Reality, Mihomo for YAML & proxy groups)",
                     isSelected = settings.preferredEngine == EngineType.AUTO,
                     onSelect = { viewModel.setPreferredEngine(EngineType.AUTO) }
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                RoutingOptionItem(
+                    title = "sing-box 1.14.4",
+                    subtitle = "VLESS, VMess, Trojan and Shadowsocks; incompatible custom settings stay on Xray",
+                    isSelected = settings.preferredEngine == EngineType.SING_BOX,
+                    onSelect = { viewModel.setPreferredEngine(EngineType.SING_BOX) }
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 RoutingOptionItem(
@@ -569,7 +590,9 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(18.dp))
 
         // SECTION: DNS CONFIGURATION
-        SectionHeader("DNS & DOH CONFIGURATION")
+        Box(Modifier.bringIntoViewRequester(dnsRequester)) {
+            SectionHeader("DNS & DOH CONFIGURATION")
+        }
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
@@ -1128,7 +1151,9 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(18.dp))
 
         // SECTION: APP UPDATE
-        SectionHeader("APP UPDATE")
+        Box(Modifier.bringIntoViewRequester(resolverRequester)) {
+            SectionHeader("APP UPDATE & RESOLVER DATABASES")
+        }
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
