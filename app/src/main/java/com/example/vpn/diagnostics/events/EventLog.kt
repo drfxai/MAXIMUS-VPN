@@ -68,19 +68,29 @@ object EventLog {
     /** Records [event] (redacted, with the current context filled in where the event has none). */
     fun record(event: DiagEvent): DiagEvent {
         val ctx = runCatching { context() }.getOrDefault(Context())
-        val e = event.copy(
+        val prepared = event.copy(
             sessionId = event.sessionId ?: ctx.sessionId,
             attemptId = event.attemptId ?: ctx.attemptId,
             engine = event.engine ?: ctx.engine,
             network = event.network ?: ctx.network
         ).redacted()
-        synchronized(this) {
+        val e = synchronized(this) {
+            // connectedDurationSeconds is zero for failed/unverified sessions. Measure the
+            // actual wall-clock lifetime from the matching session.start event instead;
+            // do not report a misleading 0 ms for an eight-minute failed connection.
+            val startedAt = if (prepared.name == "session.end" && prepared.sessionId != null)
+                ring.lastOrNull { it.name == "session.start" && it.sessionId == prepared.sessionId }?.timestamp
+            else null
+            val normalized = if (startedAt != null && prepared.timestamp >= startedAt)
+                prepared.copy(durationMs = prepared.timestamp - startedAt)
+            else prepared.copy(durationMs = prepared.durationMs?.takeIf { it > 0 })
             if (ring.size >= MAX_MEMORY) {
                 ring.pollFirst()
                 truncated = true
             }
-            ring.addLast(e)
+            ring.addLast(normalized)
             _events.value = ring.toList()
+            normalized
         }
         val line = e.toJson().toString()
         writer?.let { w -> runCatching { w.execute { append(line) } } }
