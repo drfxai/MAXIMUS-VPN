@@ -1671,6 +1671,28 @@ class RayVpnService : VpnService() {
                     else com.example.vpn.diagnostics.FailureStage.of(e)
             ))
             disconnectResources()
+            // Aether's selected engine is only verified *after* startup. If every built-in
+            // carrier failed, the earlier Smart Connect preflight may have had nothing to
+            // probe. Continue once with saved-server discovery, subject to user policy.
+            val configured = runCatching { settingsRepository.getSettings() }.getOrNull()
+            if (e is com.example.vpn.connections.ConnectionEngineRunner.NoVerifiedPath && configured != null &&
+                com.example.vpn.connections.ConnectionEngineRunner.mayRecoverAether(
+                    aether = com.example.vpn.sidecar.AetherSidecar.handles(requestedProfile),
+                    smart = smart, autoFailover = configured.autoFailoverEnabled,
+                    exact = exactSession,
+                    exitLocked = com.example.vpn.safety.OperatingModePolicy.of(configured.operationalMode).lockExit,
+                    force = force, alreadyEscalated = exclude.isNotEmpty())) {
+                val alternate = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                    .firstOrNull { it.id != requestedProfile.id && it.id !in exclude &&
+                        !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) &&
+                        com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) }
+                if (alternate != null) {
+                    XrayLogManager.w("SMART", "Aether carries no verified traffic; continuing Smart Connect on saved servers.")
+                    showForegroundNotification("Aether failed; trying verified saved-server paths...")
+                    connectLocked(alternate, smart = true, exclude = exclude + requestedProfile.id)
+                    return@withContext
+                }
+            }
             if (fallbackFromDirect(requestedProfile)) return@withContext
             if (protectionRequested) showForegroundNotification("Traffic blocked: connection failed")
             if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
