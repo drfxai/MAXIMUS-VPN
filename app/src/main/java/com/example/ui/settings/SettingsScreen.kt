@@ -235,6 +235,7 @@ fun SettingsScreen(
             error = updateError,
             onDismiss = {
                 updateJob?.cancel()
+                InAppUpdater.cancelCurrentDownload()
                 updateDownloading = false
                 showUpdateDialog = false
             },
