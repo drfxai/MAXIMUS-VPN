@@ -200,7 +200,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
             _ui.update { state -> state.copy(message = it) }; return@task
         }
         require(kind in AetherSettings.keyKinds)
-        identityRenewal.withLock {
+        AetherIdentityRegistrar.lock.withLock {
             runInterruptible(Dispatchers.IO) {
                 val engine = AetherSidecar
                 val executable = Sidecars.executable(engine) ?: error("Engine unavailable")
@@ -277,6 +277,5 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         super.onCleared()
     }
     private class RegistrationFailure(message: String) : IllegalStateException(message)
-    companion object { private val identityRenewal = kotlinx.coroutines.sync.Mutex() }
     private fun isRunning(process: Process) = try { process.exitValue(); false } catch (_: IllegalThreadStateException) { true }
 }

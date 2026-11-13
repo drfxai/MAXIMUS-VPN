@@ -1815,6 +1815,7 @@ class RayVpnService : VpnService() {
                 sidecar = kept.engine
                 XrayLogManager.i("VPN", "Engine ${engine.id} kept running from the recovery test; no second start-up")
                 watchSidecar(engine, kept.engine)
+                registerWarpThroughCarrier(engine.id, kept.engine, kept.context, kept.launch, settings)
                 return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, kept.context, kept.launch)
             }
             val executable = com.example.vpn.sidecar.Sidecars.executable(engine)
@@ -1866,7 +1867,45 @@ class RayVpnService : VpnService() {
             com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
             XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
             watchSidecar(engine, process)
+            registerWarpThroughCarrier(engine.id, process, context, launch, settings)
             return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(started?.profile ?: profile, context, launch)
+    }
+
+    /**
+     * Psiphon or Tor carries this connection: once it is verified, register the WireGuard WARP identities
+     * through it when none is saved, so a later session on a Cloudflare-filtered network (cf=0) can start
+     * WireGuard straight away (AetherIdentityRegistrar). Background, once per 6 h at most, abandoned as soon as
+     * this engine stops being the connection's engine.
+     */
+    private fun registerWarpThroughCarrier(engineId: String, watched: com.example.vpn.sidecar.RunningEngine,
+                                           context: com.example.vpn.sidecar.SidecarContext,
+                                           launch: com.example.vpn.sidecar.SidecarLaunch, settings: AppSettings) {
+        if (engineId !in com.example.vpn.sidecar.AetherIdentityRegistrar.CARRIER_ENGINES) return
+        val upstream = runCatching {
+            com.example.vpn.sidecar.AetherIdentityRegistrar.upstream(context.socksPort,
+                context.socksUser.takeIf { launch.socksAuth }, context.socksPass.takeIf { launch.socksAuth })
+        }.getOrNull() ?: return
+        serviceScope.launch(Dispatchers.IO) {
+            fun current() = sidecar === watched && watched.isAlive
+            var waited = 0L
+            while (isActive && current() && _vpnState.value.status != ConnectionStatus.CONNECTED && waited < 300_000L) {
+                delay(2_000); waited += 2_000
+            }
+            if (!isActive || !current() || _vpnState.value.status != ConnectionStatus.CONNECTED) return@launch
+            delay(com.example.vpn.sidecar.AetherIdentityRegistrar.SETTLE_MS)
+            if (!current() || _vpnState.value.status != ConnectionStatus.CONNECTED) return@launch
+            try {
+                com.example.vpn.sidecar.AetherIdentityRegistrar.lock.withLock {
+                    kotlinx.coroutines.runInterruptible {
+                        com.example.vpn.sidecar.AetherIdentityRegistrar.registerThroughCarrier(engineId, upstream, settings,
+                            stillValid = { current() && _vpnState.value.status == ConnectionStatus.CONNECTED })
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                XrayLogManager.w("BUILTIN", "aether/keys · registration through $engineId could not run: ${e.javaClass.simpleName}")
+            }
+        }
     }
     /**
      * Before a CottenDNS engine starts: one plain DNS question to each of its resolvers (up to four, at once),
