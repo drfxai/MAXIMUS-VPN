@@ -65,6 +65,7 @@ fun LaunchPopups() {
     var update by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
     var installerRelease by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
     var installing by remember { mutableStateOf(false) }
+    var installJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var progress by remember { mutableStateOf(0) }
     var verifiedFile by remember { mutableStateOf<java.io.File?>(null) }
     var installError by remember { mutableStateOf<String?>(null) }
@@ -87,48 +88,42 @@ fun LaunchPopups() {
     }
 
     installerRelease?.let { candidate ->
-        AlertDialog(
-            onDismissRequest = { if (!installing) installerRelease = null },
-            title = { Text("Update Maximus VPN") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Download ${candidate.version} (build ${candidate.build}) in Maximus.")
-                    if (installing) {
-                        CircularProgressIndicator()
-                        Text("Downloading and checking… $progress%")
-                    }
-                    if (verifiedFile?.isFile == true) Text("SHA-256 and publisher signature checked. Confirm installation in Android.")
-                    installError?.let { Text(it) }
-                    if (candidate.apk == null) Text("Verified download metadata unavailable; official release page required.")
-                }
+        VerifiedUpdateDialog(
+            release = candidate,
+            installedBuild = installedBuild,
+            downloading = installing,
+            progress = progress,
+            verified = verifiedFile?.isFile == true,
+            error = installError,
+            onDismiss = {
+                installJob?.cancel()
+                installing = false
+                installerRelease = null
             },
-            confirmButton = {
-                TextButton(enabled = !installing, onClick = {
-                    val installed = verifiedFile?.takeIf { it.isFile }
-                    val asset = candidate.apk
-                    when {
-                        installed != null -> runCatching { InAppUpdater.install(context, installed) }
-                            .onSuccess { if (!it) installError = "Allow installation for Maximus in Android Settings, then come back and tap Install." }
-                            .onFailure { installError = it.message ?: "Android installer unavailable" }
-                        asset != null -> {
-                            installing = true
-                            progress = 0
-                            installError = null
-                            scope.launch {
-                                runCatching { InAppUpdater.download(context, asset) { progress = it } }
-                                    .onSuccess { verifiedFile = it }
-                                    .onFailure { installError = it.message ?: "APK verification/download failed" }
-                                installing = false
-                            }
+            onOfficialLink = { open(candidate.pageUrl) },
+            onPrimary = {
+                val installed = verifiedFile?.takeIf { it.isFile }
+                val asset = candidate.apk
+                when {
+                    installed != null -> runCatching { InAppUpdater.install(context, installed) }
+                        .onSuccess { if (!it) installError = "Allow installation for Maximus in Android Settings, then come back and tap Install." }
+                        .onFailure { installError = it.message ?: "Android installer unavailable" }
+                    asset != null -> {
+                        installing = true
+                        progress = 0
+                        installError = null
+                        installJob = scope.launch {
+                            runCatching { InAppUpdater.download(context, asset) { progress = it } }
+                                .onSuccess { verifiedFile = it }
+                                .onFailure {
+                                    if (it !is kotlinx.coroutines.CancellationException)
+                                        installError = it.message ?: "APK verification/download failed"
+                                }
+                            installing = false
                         }
-                        else -> open(candidate.pageUrl)
                     }
-                }) {
-                    Text(if (verifiedFile?.isFile == true) "Install" else if (candidate.apk != null) "Download APK" else "Official release")
+                    else -> open(candidate.pageUrl)
                 }
-            },
-            dismissButton = {
-                TextButton(enabled = !installing, onClick = { installerRelease = null }) { Text("Close") }
             }
         )
         return
