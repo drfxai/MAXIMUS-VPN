@@ -69,7 +69,7 @@ object NetworkEnvironment {
         val internationalFailed = (evidence?.internationalTried ?: 0) >= 2 &&
             evidence?.internationalReachable == false
         val cloudflareFailed = evidence?.cloudflareReachable == false &&
-            (evidence.cloudflareIpv4Tls == false || evidence.cloudflareIpv6Tls == false)
+            (evidence?.cloudflareIpv4Tls == false || evidence?.cloudflareIpv6Tls == false)
         if (internationalFailed) signals += Signal.INTERNATIONAL_TLS_PATH_FAILURE
         if (cloudflareFailed) signals += Signal.CLOUDFLARE_TLS_PATH_FAILURE
         val stillWorking = workingKinds.filter { it !in failedKinds }
@@ -89,7 +89,7 @@ object NetworkEnvironment {
     /** Reject old measurements or measurements from another physical network. */
     internal fun freshEvidence(profile: NetworkCapabilityProfile?, networkIdentity: String, now: Long): NetworkCapabilityProfile? =
         profile?.takeIf { it.networkIdentity == networkIdentity && it.measuredAt > 0 &&
-            now - it.measuredAt in 0..SmartConnectPlan.READING_MAX_AGE_MS }
+            now - it.measuredAt in 0L..SmartConnectPlan.READING_MAX_AGE_MS }
 
     /** GOD MODE is worth suggesting when filtering is heavy and the user is in DAILY mode. */
     fun suggestsGodMode(report: Report): Boolean = report.level == Level.HEAVY || report.level == Level.NO_VERIFIED_EGRESS
