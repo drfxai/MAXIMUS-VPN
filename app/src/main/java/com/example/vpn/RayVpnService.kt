@@ -1793,7 +1793,20 @@ class RayVpnService : VpnService() {
             val managed = engine.id in setOf(com.example.vpn.sidecar.AetherSidecar.ID, com.example.vpn.sidecar.ServerlessSidecar.ID)
             if (managed) showForegroundNotification("Testing the ${engine.id} connection...")
             val connectionOwner = connectJob
+            // Network measurements are admissible only for the current physical link
+            // and for a short freshness window. Never apply them to a different SIM/Wi-Fi.
+            val measured = if (engine.id == com.example.vpn.sidecar.AetherSidecar.ID)
+                com.example.vpn.smart.NetworkEnvironment.freshEvidence(
+                    com.example.vpn.smart.NetworkCapabilityDetector.last,
+                    com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService),
+                    System.currentTimeMillis())
+            else null
+            val ipv4Only = measured?.ipv4Available == true && measured.ipv6Available == false
+            val preferWireGuard = measured?.udpAvailable == true &&
+                measured.cloudflareIpv4Tls == false && measured.internationalReachable == false &&
+                (measured.internationalTried ?: 0) >= 2
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
+                ipv4Only = ipv4Only, preferWireGuard = preferWireGuard,
                 cancelled = { connectionOwner?.isActive == false }) else null
             val launch = started?.launch ?: engine.prepare(profile, settings, context)
             if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
