@@ -47,6 +47,7 @@ fun VerifiedUpdateDialog(
     progress: Int,
     verified: Boolean,
     error: String?,
+    downloadStatus: String? = null,
     onPrimary: () -> Unit,
     onDismiss: () -> Unit,
     onOfficialLink: () -> Unit
@@ -114,7 +115,7 @@ fun VerifiedUpdateDialog(
                         color = accent, trackColor = accent.copy(alpha = 0.16f)
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(if (percent == 0) "Waiting for the first bytes…" else "$percent% downloaded",
+                        Text(downloadStatus ?: if (percent == 0) "Waiting for the first bytes…" else "$percent% downloaded",
                             fontSize = 12.sp, color = AppTheme.colors.textSecondary)
                         Text(if (percent == 0) "Connecting" else "$percent%",
                             fontSize = 12.sp, color = accent, fontWeight = FontWeight.Bold)
