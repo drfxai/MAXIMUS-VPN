@@ -82,7 +82,8 @@ internal class AetherPlatformApi(
             client.getOutputStream().apply { write(head.toByteArray()); write(payload); flush() }
         } catch (e: Exception) {
             // Never print account request/response bodies, bearer tokens or keys.
-            XrayLogManager.i("BUILTIN", "aether/api · Android account HTTPS failed (${com.example.vpn.diagnostics.FailureStage.of(e.cause ?: e).name}); registration unverified")
+            XrayLogManager.i("BUILTIN", "aether/api · Android account HTTPS failed (${com.example.vpn.diagnostics.FailureStage.of(e.cause ?: e).name}); " +
+                "this account call (registration or refresh) did not complete; a saved identity is still used")
             runCatching { client.getOutputStream().write("HTTP/1.1 502 Account unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray()) }
         }
     }

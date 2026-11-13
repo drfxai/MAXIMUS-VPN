@@ -99,7 +99,12 @@ object EngineProbe {
         engine.problem(profile)?.let { return Result(engine.id, ConnectionStage.NOT_TESTED, null, it, notTested = true) }
         val workDir = File(context.noBackupFilesDir, "lab-engines/${engine.id}-${Sidecars.randomToken(6)}").apply { mkdirs() }
         try {
-            return runIsolated(engine, profile, executable, workDir, timeoutSec, requests, gapMs, mode, keep)
+            val hints = runCatching {
+                com.example.vpn.connections.ConnectionEngineRunner.linkHints(com.example.vpn.smart.NetworkEnvironment.freshEvidence(
+                    com.example.vpn.smart.NetworkCapabilityDetector.last,
+                    com.example.vpn.smart.NetworkIdentity.current(context), System.currentTimeMillis()))
+            }.getOrDefault(com.example.vpn.connections.ConnectionEngineRunner.LinkHints())
+            return runIsolated(engine, profile, executable, workDir, timeoutSec, requests, gapMs, mode, keep, hints)
                 .also { record(context, listOf(engine.id), it, failures = true) }
         } finally {
             if (!EngineHandoff.holds(workDir)) cleanup(workDir)
@@ -161,7 +166,8 @@ object EngineProbe {
 
     internal fun runIsolated(
         engine: SidecarEngine, profile: VlessProfile, executable: File, workDir: File, timeoutSec: Int, requests: Int, gapMs: Long,
-        mode: OperationalMode, keep: Boolean
+        mode: OperationalMode, keep: Boolean,
+        hints: com.example.vpn.connections.ConnectionEngineRunner.LinkHints = com.example.vpn.connections.ConnectionEngineRunner.LinkHints()
     ): Result {
         val ctx = SidecarContext(workDir, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9), Sidecars.randomToken(), mode)
         var running: com.example.vpn.sidecar.RunningEngine? = null
@@ -172,7 +178,8 @@ object EngineProbe {
                 com.example.vpn.sidecar.ServerlessSidecar.ID)
             // Smart Connect must test the same automatic carrier/variant sequence
             // as Connect and the Connections page, rather than only the first config.
-            val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, ctx) else null
+            val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, ctx,
+                ipv4Only = hints.ipv4Only, preferWireGuard = hints.cloudflareFiltered) else null
             val launch = started?.launch ?: engine.prepare(profile, settings, ctx)
             val process = started?.running ?: EngineReaper.track(engine.startPrepared(profile, settings, launch, ctx)
                 ?: SidecarProcess.start(engine.id, launch, workDir, ctx.socksPort))

@@ -178,7 +178,13 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                 try {
                     val ctx = SidecarContext(dir, executable, Sidecars.freeLoopbackPort(), Sidecars.randomToken(9),
                         Sidecars.randomToken(), app.settingsRepository.getSettings().operationalMode)
+                    // The LAB's fresh reading of this same link: on a Cloudflare-filtered network WireGuard goes
+                    // first and MASQUE gets its short window, exactly as Connect does.
+                    val hints = ConnectionEngineRunner.linkHints(com.example.vpn.smart.NetworkEnvironment.freshEvidence(
+                        com.example.vpn.smart.NetworkCapabilityDetector.last,
+                        com.example.vpn.smart.NetworkIdentity.current(app), System.currentTimeMillis()))
                     started = ConnectionEngineRunner.start(engine, profile, app.settingsRepository.getSettings(), ctx, checkDns = true,
+                        ipv4Only = hints.ipv4Only, preferWireGuard = hints.cloudflareFiltered,
                         onProgress = { line -> _ui.update { it.copy(message = line, log = (it.log + line).takeLast(40)) } })
                     started.check
                 } finally { try { started?.running?.stop() } finally { dir.deleteRecursively() } }
