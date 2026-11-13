@@ -182,16 +182,24 @@ class SubscriptionManager(
             if (isBlockedHost(hostname)) {
                 throw SecurityException("SSRF blocked: Hostname '$hostname' is in restricted host list.")
             }
+            // Inside the tunnel the phone's DNS answers with FakeDNS placeholders; dropping them is not a
+            // sign that the network's DNS is blocked, so the log says which of the two happened.
+            val onlyPlaceholders = java.util.concurrent.atomic.AtomicBoolean(false)
             val result = com.example.vpn.EndpointResolver.resolve(
                 hostname,
-                system = { okhttp3.Dns.SYSTEM.lookup(it).filterNot(::isFakeDnsAddress) },
+                system = { name ->
+                    val all = okhttp3.Dns.SYSTEM.lookup(name)
+                    all.filterNot(::isFakeDnsAddress).also { real -> onlyPlaceholders.set(all.isNotEmpty() && real.isEmpty()) }
+                },
                 open = { it.openConnection() as java.net.HttpURLConnection }
             )
             val address = java.net.InetAddress.getByName(result.address)
             if (isRestrictedIp(address)) {
                 throw SecurityException("DNS for '$hostname' answered a restricted address ($address); blocked or rebinding")
             }
-            if (result.viaDoh) XrayLogManager.i("SUBSCRIPTION", "Resolved $hostname through DoH (network DNS blocked).")
+            if (result.viaDoh) XrayLogManager.i("SUBSCRIPTION",
+                if (onlyPlaceholders.get()) "Resolved $hostname through DoH (the tunnel's DNS gives placeholders only)."
+                else "Resolved $hostname through DoH (network DNS blocked).")
             return listOf(address)
         }
     }
@@ -362,7 +370,10 @@ class SubscriptionManager(
                 }
             },
             count = { parse(it, subscription).validProfiles.size },
-            staggerMs = staggerMs
+            staggerMs = staggerMs,
+            // A signed list costs three requests per source (manifest, signature, list), each with its own
+            // lookup; over a slow tunnel 30 s is not enough for even one source to finish.
+            deadlineMs = if (isFree || signedOfficial) SubscriptionFetcher.SIGNED_DEADLINE_MS else SubscriptionFetcher.DEADLINE_MS
         )
         try {
             when (val outcome = fetcher.fetch(candidates)) {
@@ -392,12 +403,12 @@ class SubscriptionManager(
                     SyncResult(subscription.id, importResult.configurationsFound, inserted.size, duplicates.size, true, viaMirror = viaMirror)
                 }
                 is SubscriptionFetcher.Outcome.AllFailed -> {
-                    val reason = outcome.failures.firstOrNull()?.second ?: "no source to try"
+                    val reason = SubscriptionFetcher.mainReason(outcome.failures) ?: "no source to try"
                     val tried = outcome.failures.count { it.first.startsWith("http") }
                     val snapshot = snapshots?.load(subscription.id)
                     if (isFree) return@withContext keepFreeListAfterFailure(subscription, snapshot, outcome, reason, tried)
                     if (snapshot == null) {
-                        val errMsg = if (tried > 1) "All $tried sources failed. First: $reason" else reason
+                        val errMsg = if (tried > 1) "All $tried sources failed. Main cause: $reason" else reason
                         XrayLogManager.e("SUBSCRIPTION", "Sync failed for '${subscription.name}': ${com.example.panels.servers.ServerLogSanitizer.redact(errMsg)}")
                         subscriptionRepository.updateSyncStatus(subscription.id, subscription.nodeCount, errMsg)
                         return@withContext SyncResult(subscription.id, 0, 0, 0, false, errMsg)
@@ -468,7 +479,7 @@ class SubscriptionManager(
         reason: String,
         tried: Int
     ): SyncResult {
-        val why = if (tried > 1) "All $tried sources failed. First: $reason" else reason
+        val why = if (tried > 1) "All $tried sources failed. Main cause: $reason" else reason
         val saved = serverRepository.getAllProfilesOnce().count {
             it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
         }

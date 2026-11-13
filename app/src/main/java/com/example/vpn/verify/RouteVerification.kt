@@ -85,6 +85,10 @@ sealed class LegResult {
     data class NotTested(val reason: String) : LegResult()
 }
 
+/** Bytes after which a "fixed-size freeze" stops a download (see [TrafficEvidence.fixedSizeFreeze]). */
+const val FREEZE_MIN_BYTES = 12 * 1024
+const val FREEZE_MAX_BYTES = 20 * 1024
+
 /** The result of the upload and download check for one attempt on one network. */
 data class TrafficEvidence(
     val attemptId: String?,
@@ -99,6 +103,14 @@ data class TrafficEvidence(
     /** Small requests passed (the connection is verified) but a bulk transfer stopped part-way. */
     val bulkStalled: Boolean get() =
         (download as? LegResult.Failed)?.stalled == true || (upload as? LegResult.Failed)?.stalled == true
+
+    /**
+     * The download stopped after roughly the first 16 KB and nothing more came: the signature of a
+     * censor that lets a new TLS session to a flagged address carry its first ~16 KB and then freezes it.
+     * Lowering the MTU does not change where it stops, so this is not treated as an MTU problem.
+     */
+    val fixedSizeFreeze: Boolean get() =
+        (download as? LegResult.Failed)?.let { it.stalled && it.bytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES } == true
 
     fun appliesTo(state: ConnectionState): Boolean =
         attemptId != null && attemptId == state.attemptId && networkGeneration == state.networkGeneration

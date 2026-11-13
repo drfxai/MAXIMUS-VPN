@@ -20,4 +20,37 @@ object BuiltinMethodMemory {
         if (scope != null) write(scope, "$method|$now")
     }
     fun forget(scope: String?) { if (scope != null) write(scope, null) }
+
+    /**
+     * Methods that failed on this scope (same network, engine and options) in the last [FAILED_TTL_MS].
+     * Only an ordering hint: a recently failed method is tried last, never skipped, so one bad minute on
+     * a network cannot lock a method out (PattNG keeps the endpoint its scan found in the same spirit).
+     */
+    const val FAILED_TTL_MS = 30 * 60 * 1000L
+
+    private fun failedKey(scope: String) = "$scope#failed"
+
+    fun recentlyFailed(scope: String?, now: Long = System.currentTimeMillis()): Set<String> {
+        if (scope == null) return emptySet()
+        return parseFailed(read(failedKey(scope))).filterValues { now - it in 0 until FAILED_TTL_MS }.keys
+    }
+
+    fun recordFailure(scope: String?, method: String, now: Long = System.currentTimeMillis()) {
+        if (scope == null || method.isBlank()) return
+        val live = parseFailed(read(failedKey(scope))).filterValues { now - it in 0 until FAILED_TTL_MS }.toMutableMap()
+        live[method] = now
+        write(failedKey(scope), live.entries.joinToString(";") { "${it.key}=${it.value}" })
+    }
+
+    fun clearFailure(scope: String?, method: String) {
+        if (scope == null) return
+        val all = parseFailed(read(failedKey(scope))).toMutableMap()
+        if (all.remove(method) == null) return
+        write(failedKey(scope), all.entries.joinToString(";") { "${it.key}=${it.value}" }.ifEmpty { null })
+    }
+
+    private fun parseFailed(text: String?): Map<String, Long> = text.orEmpty().split(';').mapNotNull { part ->
+        val i = part.indexOf('=')
+        if (i <= 0) null else part.substring(0, i) to (part.substring(i + 1).toLongOrNull() ?: return@mapNotNull null)
+    }.toMap()
 }

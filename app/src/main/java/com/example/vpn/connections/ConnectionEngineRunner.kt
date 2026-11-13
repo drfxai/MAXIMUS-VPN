@@ -34,8 +34,32 @@ object ConnectionEngineRunner {
         engineId: String, automatic: Boolean, filteredTlsWithUdp: Boolean,
         carrier: String, defaultMs: Long
     ): Long = if (engineId == AetherSidecar.ID && automatic && filteredTlsWithUdp) {
-        minOf(defaultMs, if (carrier == "wireguard") 75_000L else 65_000L)
+        // H2 MASQUE is TLS over TCP to Cloudflare: exactly what the probe just saw fail. It still gets a
+        // short try (fragmentation can pass), but not the full gateway scan the UDP carriers need.
+        minOf(defaultMs, when (carrier) { "wireguard" -> 75_000L; "h2" -> H2_BLOCKED_TLS_BUDGET_MS; else -> 65_000L })
     } else defaultMs
+
+    const val H2_BLOCKED_TLS_BUDGET_MS = 40_000L
+
+    /** One line telling the user what to do when Aether found nothing on a link whose Cloudflare TLS is filtered. */
+    const val CLOUDFLARE_FILTERED_HINT = "Cloudflare TLS is filtered on this network: Smart Connect can try saved servers, Psiphon or Tor"
+
+    /**
+     * The order the methods are tried in: a method verified here first, then WireGuard when Cloudflare TLS
+     * is filtered but UDP answers, then the rest, with methods that failed here in the last half hour last.
+     */
+    fun order(methods: List<String>, preferred: String?, preferWireGuard: Boolean, recentlyFailed: Set<String>): List<String> =
+        methods.withIndex().sortedWith(compareBy<IndexedValue<String>>({
+            when {
+                it.value == preferred -> 0
+                it.value in recentlyFailed -> 3
+                preferWireGuard && it.value == "wireguard" -> 1
+                else -> 2
+            }
+        }, {
+            // Among the rest keep the declared order, but on a filtered link put H2 (TCP TLS) after H3.
+            if (preferWireGuard && it.value == "h2") methods.size else it.index
+        })).map { it.value }
 
     fun candidates(profile: VlessProfile, ipv4Only: Boolean = false): List<VlessProfile> {
         val e = ProfileExtras.read(profile)
@@ -105,13 +129,9 @@ object ConnectionEngineRunner {
         // Keep a previously HTTPS-verified method first. Without such evidence, try WG
         // before long MASQUE gateway scans when fresh physical-link probes show that
         // ordinary Cloudflare TLS is unreachable but UDP is answering.
-        val ordered = choices.sortedBy {
-            when {
-                method(it) == preferred -> 0
-                preferWireGuard && method(it) == "wireguard" -> 1
-                else -> 2
-            }
-        }
+        val recentlyFailed = BuiltinMethodMemory.recentlyFailed(cacheScope)
+        val rank = order(choices.map(::method), preferred, preferWireGuard, recentlyFailed)
+        val ordered = choices.sortedBy { rank.indexOf(method(it)) }
         val failedRegistrationKinds = mutableSetOf<String>()
         for (candidate in ordered) {
             checkCancellation()
@@ -140,6 +160,7 @@ object ConnectionEngineRunner {
                     val reason = process.startupFailure ?: stage
                     record(name, "startup", "FAIL", reason)
                     attempts += "$name: $reason"
+                    BuiltinMethodMemory.recordFailure(cacheScope, name)
                     if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
                     // Registration is shared by H2/H3 MASQUE. Do not repeat a failed signup
                     // for the same identity, but allow an independent stored or new WG identity.
@@ -170,7 +191,10 @@ object ConnectionEngineRunner {
                 checkCancellation()
                 if (result.traffic && process.isAlive) {
                     record(name, "https", "PASS")
-                    if (scope() == cacheScope) BuiltinMethodMemory.record(cacheScope, name)
+                    if (scope() == cacheScope) {
+                        BuiltinMethodMemory.record(cacheScope, name)
+                        BuiltinMethodMemory.clearFailure(cacheScope, name)
+                    }
                     running = null
                     return Started(process, launch, candidate, result)
                 }
@@ -178,6 +202,7 @@ object ConnectionEngineRunner {
                 val reason = result.failure ?: "engine stopped during check"
                 record(name, "https", "FAIL", reason)
                 attempts += "$name: $reason"
+                BuiltinMethodMemory.recordFailure(cacheScope, name)
                 if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
             } catch (e: Exception) {
                 if (e is InterruptedException || e is CancellationException) throw e
@@ -189,11 +214,13 @@ object ConnectionEngineRunner {
                     e.message ?: stage else stage
                 record(name, "startup", "FAIL", reason)
                 attempts += "$name: $reason"
+                BuiltinMethodMemory.recordFailure(cacheScope, name)
             } finally {
                 running?.stop()
             }
         }
         checkCancellation()
+        if (engine.id == AetherSidecar.ID && preferWireGuard) attempts += CLOUDFLARE_FILTERED_HINT
         throw NoVerifiedPath(attempts, lastCheck)
     }
 }

@@ -358,7 +358,7 @@ export function gitHubMirrors(url) {
     `https://fastly.jsdelivr.net/gh/${o}/${r}@${ref}/${path}`,
     `https://gcore.jsdelivr.net/gh/${o}/${r}@${ref}/${path}`,
     `https://testingcf.jsdelivr.net/gh/${o}/${r}@${ref}/${path}`,
-    `https://cdn.statically.io/gh/${o}/${r}/${ref}/${path}`,
+    `https://cdn.statically.io/gh/${o}/${r}@${ref}/${path}`,
     `https://raw.githack.com/${o}/${r}/${ref}/${path}`,
   ].filter((m) => m !== url);
 }

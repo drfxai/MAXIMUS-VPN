@@ -36,7 +36,9 @@ object SubscriptionSources {
             "https://fastly.jsdelivr.net/gh/$owner/$repo@$ref/$path",
             "https://gcore.jsdelivr.net/gh/$owner/$repo@$ref/$path",
             "https://testingcf.jsdelivr.net/gh/$owner/$repo@$ref/$path",
-            "https://cdn.statically.io/gh/$owner/$repo/$ref/$path",
+            // Statically answers /gh/<owner>/<repo>/<ref>/<path> with a 301 to plain HTTP (refused by the
+            // redirect guard); the @ref form is served over HTTPS directly.
+            "https://cdn.statically.io/gh/$owner/$repo@$ref/$path",
             "https://raw.githack.com/$owner/$repo/$ref/$path"
         ).filter { !it.equals(url.trim(), ignoreCase = false) }
     }
@@ -61,6 +63,11 @@ object SubscriptionSources {
             host == "raw.githubusercontent.com" && parts.size >= 4 -> file(parts[0], parts[1], parts.drop(2))
             host == "github.com" && parts.size >= 5 && parts[2] in setOf("raw", "blob") -> file(parts[0], parts[1], parts.drop(3))
             host.endsWith("jsdelivr.net") && parts.size >= 4 && parts[0] == "gh" && '@' in parts[2] -> {
+                val repo = parts[2].substringBefore('@')
+                val ref = parts[2].substringAfter('@')
+                if (ref.isEmpty()) null else GitHubFile(parts[1], repo, ref, parts.drop(3).joinToString("/"))
+            }
+            host == "cdn.statically.io" && parts.size >= 4 && parts[0] == "gh" && '@' in parts[2] -> {
                 val repo = parts[2].substringBefore('@')
                 val ref = parts[2].substringAfter('@')
                 if (ref.isEmpty()) null else GitHubFile(parts[1], repo, ref, parts.drop(3).joinToString("/"))
