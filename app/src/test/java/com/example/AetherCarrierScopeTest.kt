@@ -28,4 +28,21 @@ class AetherCarrierScopeTest {
         assertTrue(userPinnedIpv6.all { ProfileExtras.read(it).optString("family") == "ipv6" })
     }
 
+    @Test fun aetherSmartFallbackRespectsExactAndTradeBoundaries() {
+        fun permitted(smart: Boolean = true, auto: Boolean = false, exact: Boolean = false,
+                      locked: Boolean = false, forced: Boolean = false, retried: Boolean = false,
+                      aether: Boolean = true) =
+            ConnectionEngineRunner.mayRecoverAether(
+                aether = aether, smart = smart, autoFailover = auto,
+                exact = exact, exitLocked = locked, force = forced, alreadyEscalated = retried)
+        assertTrue(permitted())
+        assertTrue(permitted(smart = false, auto = true))
+        assertFalse(permitted(smart = false))
+        assertFalse(permitted(exact = true))
+        assertFalse(permitted(locked = true))
+        assertFalse(permitted(forced = true))
+        assertFalse(permitted(retried = true))
+        assertFalse(permitted(aether = false))
+    }
+
 }
