@@ -182,6 +182,7 @@ fun SettingsScreen(
     var updateDownloading by remember { mutableStateOf(false) }
     var updateJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var updateProgress by remember { mutableStateOf(0) }
+    var updateStatus by remember { mutableStateOf<String?>(null) }
     var verifiedApk by remember { mutableStateOf<java.io.File?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
     var showCryptoSupport by remember { mutableStateOf(false) }
@@ -229,6 +230,7 @@ fun SettingsScreen(
             installedBuild = BuildConfig.RELEASE_BUILD,
             downloading = updateDownloading,
             progress = updateProgress,
+            downloadStatus = updateStatus,
             verified = verifiedApk?.isFile == true,
             error = updateError,
             onDismiss = {
@@ -248,9 +250,10 @@ fun SettingsScreen(
                     release.apk != null -> {
                         updateDownloading = true
                         updateProgress = 0
+                        updateStatus = null
                         updateError = null
                         updateJob = scope.launch {
-                            runCatching { InAppUpdater.download(context, release.apk) { updateProgress = it } }
+                            runCatching { InAppUpdater.download(context, release.apk, onStatus = { updateStatus = it }) { updateProgress = it } }
                                 .onSuccess { verifiedApk = it }
                                 .onFailure {
                                     if (it !is kotlinx.coroutines.CancellationException)
