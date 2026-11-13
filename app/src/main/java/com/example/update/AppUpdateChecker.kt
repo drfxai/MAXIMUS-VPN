@@ -35,8 +35,36 @@ object AppUpdateChecker {
     data class ResolverPack(val url: String, val sha256: String, val size: Long)
     data class ReleaseInfo(
         val version: String, val build: Int, val pageUrl: String,
-        val apk: ApkAsset? = null, val resolverPack: ResolverPack? = null
+        val apk: ApkAsset? = null, val resolverPack: ResolverPack? = null,
+        /** Plain-text "What's new" lines from the release notes; empty when the release has none. */
+        val notes: List<String> = emptyList()
     )
+
+    /**
+     * "What's new" lines from a release body: plain text only (Markdown markers, links and HTML removed),
+     * without the build marker or a bare "Build N" line, at most [MAX_NOTES] lines of [MAX_NOTE_CHARS].
+     * Never rendered as HTML or Markdown, so a release body cannot inject markup or links into the app.
+     */
+    fun releaseNotes(body: String): List<String> {
+        val withoutComments = body.replace(Regex("(?s)<!--.*?-->"), "")
+        return withoutComments.lineSequence()
+            .map { line ->
+                line.replace(Regex("<[^>]*>"), "")
+                    .replace(Regex("\\[([^\\]]*)\\]\\([^)]*\\)"), "$1")
+                    .replace(Regex("[`*_]"), "")
+                    .trim()
+                    .removePrefix("#").removePrefix("#").removePrefix("#").trim()
+                    .removePrefix("- ").removePrefix("+ ").removePrefix("• ").trim()
+                    .filter { !it.isISOControl() }
+            }
+            .filter { it.isNotBlank() && !buildMarker.containsMatchIn(it) && !it.matches(Regex("(?i)build\\s*#?\\d{1,9}")) }
+            .map { if (it.length > MAX_NOTE_CHARS) it.take(MAX_NOTE_CHARS - 1).trimEnd() + "…" else it }
+            .take(MAX_NOTES)
+            .toList()
+    }
+
+    const val MAX_NOTES = 8
+    const val MAX_NOTE_CHARS = 160
 
     private const val MAX_APK_BYTES = 700L * 1024 * 1024
     private val digestPattern = Regex("[a-fA-F0-9]{64}")
@@ -87,7 +115,7 @@ object AppUpdateChecker {
             .mapNotNull { assets?.optJSONObject(it) }
             .firstOrNull { it.optString("name") == "MaximusResolverPack-$tag.zip" }
         val pack = bundle?.let { safeResolverPack(tag, it.optString("browser_download_url"), it.optString("digest"), it.optLong("size")) }
-        release(tag, build, o.optString("html_url"), preferredApk(tag, candidates), pack)
+        release(tag, build, o.optString("html_url"), preferredApk(tag, candidates), pack, releaseNotes(o.optString("body")))
     }.getOrNull()
 
     /** update.json: {"version": "V1.0.0", "build": 142, "url": "https://github.com/..."} */
@@ -103,16 +131,16 @@ object AppUpdateChecker {
         }
         val bundle = o.optJSONObject("resolverPack")
         val pack = bundle?.let { safeResolverPack(tag, it.optString("url"), it.optString("sha256"), it.optLong("size")) }
-        release(tag, build, o.optString("url"), preferredApk(tag, candidates), pack)
+        release(tag, build, o.optString("url"), preferredApk(tag, candidates), pack, releaseNotes(o.optString("notes")))
     }.getOrNull()
 
     private fun release(
         version: String, build: Int, url: String,
-        apk: ApkAsset? = null, resolverPack: ResolverPack? = null
+        apk: ApkAsset? = null, resolverPack: ResolverPack? = null, notes: List<String> = emptyList()
     ): ReleaseInfo? {
         if (build <= 0) return null
         val v = version.trim().takeIf { versionPattern.matches(it) } ?: return null
-        return ReleaseInfo("V" + v.trimStart('v', 'V'), build, safePageUrl(url), apk, resolverPack)
+        return ReleaseInfo("V" + v.trimStart('v', 'V'), build, safePageUrl(url), apk, resolverPack, notes)
     }
 
     /** Only this repository's release pages may be opened; anything else falls back to the releases page. */
@@ -179,7 +207,8 @@ object AppUpdateChecker {
             if (newer || (old != null && info.version == old.version && info.build == old.build &&
                     (info.apk != null && old.apk == null || info.resolverPack != null && old.resolverPack == null))) {
                 best = if (old != null && info.version == old.version && info.build == old.build)
-                    info.copy(apk = info.apk ?: old.apk, resolverPack = info.resolverPack ?: old.resolverPack) else info
+                    info.copy(apk = info.apk ?: old.apk, resolverPack = info.resolverPack ?: old.resolverPack,
+                        notes = info.notes.ifEmpty { old.notes }) else info
             }
             // GitHub release metadata is complete: do not spend time contacting mirrors.
             if (best?.apk != null && best.resolverPack != null) break
