@@ -1688,7 +1688,8 @@ class RayVpnService : VpnService() {
                     smart = smart, autoFailover = configured.autoFailoverEnabled,
                     exact = exactSession,
                     exitLocked = com.example.vpn.safety.OperatingModePolicy.of(configured.operationalMode).lockExit,
-                    force = force, alreadyEscalated = exclude.isNotEmpty())) {
+                    force = force, alreadyEscalated = exclude.isNotEmpty(),
+                    fallback = configured.powerButtonFallback)) {
                 val alternate = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
                     .firstOrNull { it.id != requestedProfile.id && it.id !in exclude &&
                         !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) &&

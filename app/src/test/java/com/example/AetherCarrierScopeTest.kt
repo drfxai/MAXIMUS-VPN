@@ -166,4 +166,24 @@ class AetherCarrierScopeTest {
         assertFalse(permitted(aether = false))
     }
 
+
+    @Test fun warpBlockedEverywhereRechecksOnceInsteadOfTheWholeChain() {
+        val all = listOf("wireguard", "h3", "h2")
+        val failed = setOf("wireguard", "wireguard-mtu", "wireguard-noize", "h3", "h2", "wiw")
+        assertTrue(ConnectionEngineRunner.quickRecheckOnly(all, preferred = null, recentlyFailed = failed))
+        assertFalse("a method verified here keeps the normal chain",
+            ConnectionEngineRunner.quickRecheckOnly(all, preferred = "wireguard", recentlyFailed = failed))
+        assertFalse("an untried method still gets its full turn",
+            ConnectionEngineRunner.quickRecheckOnly(all, preferred = null, recentlyFailed = setOf("wireguard", "h3")))
+        assertFalse(ConnectionEngineRunner.quickRecheckOnly(emptyList(), preferred = null, recentlyFailed = failed))
+    }
+
+    @Test fun powerButtonFallbackHandsOverEvenWithFailoverOff() {
+        assertTrue(ConnectionEngineRunner.mayRecoverAether(aether = true, smart = false, autoFailover = false,
+            exact = false, exitLocked = false, force = false, alreadyEscalated = false, fallback = true))
+        assertFalse(ConnectionEngineRunner.mayRecoverAether(aether = true, smart = false, autoFailover = false,
+            exact = true, exitLocked = false, force = false, alreadyEscalated = false, fallback = true))
+        assertFalse(ConnectionEngineRunner.mayRecoverAether(aether = true, smart = false, autoFailover = false,
+            exact = false, exitLocked = true, force = false, alreadyEscalated = false, fallback = true))
+    }
 }
