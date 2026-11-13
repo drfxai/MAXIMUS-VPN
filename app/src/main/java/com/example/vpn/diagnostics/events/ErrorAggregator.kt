@@ -29,7 +29,16 @@ object ErrorAggregator {
     /** Failure groups, most frequent first; each set is bounded so one noisy error cannot grow a report. */
     fun aggregate(events: List<DiagEvent>, maxIds: Int = 10): List<Group> =
         events.filter(::isFailure)
-            .groupBy { it.name to it.failureStage }
+            // Aether's H2/H3/WireGuard failures have different causes. Collapsing all of
+            // them into "builtin.connection" hides the actionable transport and stage.
+            .groupBy { e ->
+                val name = if (e.name == "builtin.connection") {
+                    val engine = e.attributes["engine.name"].orEmpty().take(32).ifBlank { "unknown" }
+                    val method = e.attributes["method"].orEmpty().take(32).ifBlank { "unknown" }
+                    "builtin.connection/$engine/$method"
+                } else e.name
+                name to e.failureStage
+            }
             .map { (key, list) ->
                 Group(
                     name = key.first,
@@ -40,7 +49,7 @@ object ErrorAggregator {
                     profiles = list.mapNotNull { it.profileRef }.distinct().take(maxIds).toSet(),
                     networks = list.mapNotNull { it.network }.distinct().take(maxIds).toSet(),
                     sessions = list.mapNotNull { it.sessionId }.distinct().take(maxIds).toSet(),
-                    sample = list.last().exception ?: list.last().attributes["message"]
+                    sample = list.last().exception ?: list.last().attributes["message"] ?: list.last().attributes["reason"]
                 )
             }
             .sortedWith(compareByDescending<Group> { it.count }.thenByDescending { it.lastAt })
