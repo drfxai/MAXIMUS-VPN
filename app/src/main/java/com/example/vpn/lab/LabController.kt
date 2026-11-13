@@ -698,6 +698,46 @@ class LabController(
             // not only when the time limit is reached: otherwise recovery runs on for up to its full window
             // and the connect lock it holds blocks the disconnect behind it.
             val attemptPolicy = com.example.vpn.smart.RecoveryAttemptPolicy()
+            fun recordEngine(pk: FullAnalysis.Pick, r: EngineProbe.Result) {
+                attemptPolicy.record(r.engineId, r.failure)
+                XrayLogManager.i("SMART", "Recovery ${r.engineId}: ${r.failure ?: r.stage.title}")
+                if (r.notTested) planner.notTested(pk.profile.id, r.failure ?: "not measured")
+                else {
+                    planner.record(pk.profile.id, r.outcomes, r.latencyMs, System.currentTimeMillis(), r.failure ?: r.stage.title, r.spanMs)
+                    book.recordPath(com.example.vpn.connectivity.EvidenceSource.RECOVERY, com.example.vpn.connectivity.MeasurementType.ENGINE_REQUEST,
+                        com.example.vpn.connectivity.PathRef.of(pk.profile), pk.family.name, r.stage.carriesTraffic, r.latencyMs,
+                        if (r.stage.carriesTraffic) null else r.stage.name, detail = r.engineId)
+                }
+            }
+            // Quick parallel round: the first candidate of each engine type at once (bounded, Tor excluded),
+            // the first that carries a request wins and the rest are stopped. Unfinished checks stay fresh for
+            // the serial search below; definitive failures are recorded so it does not repeat them.
+            val parallel = com.example.vpn.smart.ParallelEngineRound.concurrency(device.metered, lowBattery)
+            val round = if (rememberedOnly) emptyList() else com.example.vpn.smart.ParallelEngineRound.pick(
+                pool.filter { Sidecars.isEngineProfile(it.profile) }
+                    .sortedByDescending { pk -> planner.score(AdaptivePlanner.Candidate(pk.profile.id, pk.profile.name, pk.family)) }
+                    .map { pk -> com.example.vpn.smart.ParallelEngineRound.Entry(pk.profile.id,
+                        com.example.vpn.sidecar.ChainRunner.readChain(pk.profile)?.hops?.joinToString("+", prefix = "chain:") { it.engineId }
+                            ?: engineIds[pk.profile.id] ?: pk.profile.id,
+                        tor = pk.family in PathFamily.TOR_FAMILIES || engineIds[pk.profile.id] == TorSidecar.ID) },
+                exclude = recent.keys + parallelExcluded(cap, pool), limit = parallel)
+            if (round.isNotEmpty() && currentCoroutineContext().isActive &&
+                deadlineMs - System.currentTimeMillis() > com.example.vpn.smart.ParallelEngineRound.WINDOW_MS) {
+                onProgress("Checking ${round.size} recovery engines at once")
+                XrayLogManager.i("SMART", "Recovery: parallel check of ${round.joinToString { it.engineKey }}")
+                var outcome: com.example.vpn.smart.ParallelEngineRound.Outcome<EngineProbe.Result>? = null
+                withTimeoutOrNull(com.example.vpn.smart.ParallelEngineRound.WINDOW_MS + 15_000L) {
+                    engineWindow {
+                        outcome = com.example.vpn.smart.ParallelEngineRound.race<EngineProbe.Result>(round.map { e ->
+                            val pk = byId.getValue(e.id)
+                            e.id to { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2, mode = mode, keep = true) }
+                        }, passed = { it.outcomes.lastOrNull() == true }, timeoutMs = com.example.vpn.smart.ParallelEngineRound.WINDOW_MS)
+                        EngineProbe.Result("parallel", ConnectionStage.NOT_TESTED, null, null, true)
+                    }
+                }
+                outcome?.finished?.forEach { (id, r) -> byId[id]?.let { recordEngine(it, r) } }
+                outcome?.winner?.let { (id, _) -> XrayLogManager.i("SMART", "Recovery: ${byId[id]?.profile?.name?.let(com.example.core.SecretRedactor::redact)} won the parallel check") }
+            }
             loop@ while (currentCoroutineContext().isActive && System.currentTimeMillis() < deadlineMs) {
                 when (val d = planner.decide(System.currentTimeMillis())) {
                     is AdaptivePlanner.Decision.Stop -> break@loop
@@ -726,15 +766,7 @@ class LabController(
                                 engineWindow { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2, mode = mode, keep = true) }
                             } ?: EngineProbe.Result(engine?.id ?: "chain", ConnectionStage.NOT_TESTED, null,
                                 "engine startup or traffic verification timed out after ${windowMs / 1000}s", false)
-                            attemptPolicy.record(r.engineId, r.failure)
-                            XrayLogManager.i("SMART", "Recovery ${r.engineId}: ${r.failure ?: r.stage.title}")
-                            if (r.notTested) planner.notTested(pk.profile.id, r.failure ?: "not measured")
-                            else {
-                                planner.record(pk.profile.id, r.outcomes, r.latencyMs, System.currentTimeMillis(), r.failure ?: r.stage.title, r.spanMs)
-                                book.recordPath(com.example.vpn.connectivity.EvidenceSource.RECOVERY, com.example.vpn.connectivity.MeasurementType.ENGINE_REQUEST,
-                                    com.example.vpn.connectivity.PathRef.of(pk.profile), pk.family.name, r.stage.carriesTraffic, r.latencyMs,
-                                    if (r.stage.carriesTraffic) null else r.stage.name, detail = r.engineId)
-                            }
+                            recordEngine(pk, r)
                         } else when (val o = com.example.vpn.Abandonable.run { RealDelayProbe.measure(listOf(pk.profile), budget.probeTimeoutSec).first() }) {
                             is RealDelayProbe.Outcome.Delay -> planner.record(pk.profile.id, listOf(true), o.latencyMs, System.currentTimeMillis())
                             is RealDelayProbe.Outcome.Failed -> planner.record(pk.profile.id, listOf(false), null, System.currentTimeMillis(), o.reason)
@@ -768,6 +800,9 @@ class LabController(
             testLock.unlock()
         }
     }
+
+    /** Candidates kept out of the parallel round; they still run in the serial search. */
+    private fun parallelExcluded(cap: NetworkCapabilityProfile?, pool: List<FullAnalysis.Pick>): Set<String> = emptySet()
 
     /** The family of a saved config from its fields: Tor by its bridge transport, Mihomo by its proxy type. */
     private fun familyOf(p: VlessProfile): PathFamily {
