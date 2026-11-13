@@ -5,6 +5,7 @@ import com.example.data.model.ConnectionStatus
 import com.example.vpn.diagnostics.FailureStage
 import com.example.vpn.diagnostics.events.DiagEvent
 import com.example.vpn.diagnostics.events.EventLog
+import com.example.vpn.diagnostics.events.ErrorAggregator
 import com.example.vpn.diagnostics.events.Severity
 import com.example.vpn.diagnostics.events.TestRegistry
 import com.example.vpn.diagnostics.report.DiagnosticReportBuilder
@@ -124,6 +125,21 @@ class DiagnosticReportTest {
         } finally {
             EventLog.resetForTest()
         }
+    }
+
+    @Test fun carrierErrorsRemainSeparateWithTheirCauses() {
+        fun attempt(method: String, reason: String) = DiagEvent(
+            timestamp = 1_000L, severity = Severity.INFO, name = "builtin.connection", result = "FAIL",
+            attributes = mapOf("engine.name" to "aether", "method" to method,
+                "stage" to "https", "reason" to reason))
+        val groups = ErrorAggregator.aggregate(listOf(
+            attempt("h2", "gateway scan timed out"),
+            attempt("h3", "gateway scan timed out"),
+            attempt("wireguard", "SOCKS timeout")))
+        assertEquals(3, groups.size)
+        assertTrue(groups.any { it.name == "builtin.connection/aether/h2" && it.sample == "gateway scan timed out" })
+        assertTrue(groups.any { it.name == "builtin.connection/aether/h3" })
+        assertTrue(groups.any { it.name == "builtin.connection/aether/wireguard" && it.sample == "SOCKS timeout" })
     }
 
 }
