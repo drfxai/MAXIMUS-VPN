@@ -21,9 +21,21 @@ object ConnectionEngineRunner {
      */
     fun mayRecoverAether(
         aether: Boolean, smart: Boolean, autoFailover: Boolean,
-        exact: Boolean, exitLocked: Boolean, force: Boolean, alreadyEscalated: Boolean
-    ): Boolean = aether && (smart || autoFailover) && !exact && !exitLocked &&
+        exact: Boolean, exitLocked: Boolean, force: Boolean, alreadyEscalated: Boolean,
+        /** "Power button fallback" (default on): a non-exact session may hand over even with failover off. */
+        fallback: Boolean = false
+    ): Boolean = aether && (smart || autoFailover || fallback) && !exact && !exitLocked &&
         !force && !alreadyEscalated
+
+    /**
+     * Every automatic method failed on this same network in the last half hour and none was ever verified
+     * here: the Irancell pattern where WARP handshakes pass and the data is dropped for every carrier. Run one
+     * quick recheck of the first method (has the block lifted?) without follow-ups, instead of repeating the
+     * whole 5-6 minute chain, so Smart Connect / the power-button fallback reaches Psiphon, Tor or saved
+     * servers in about a minute.
+     */
+    fun quickRecheckOnly(methods: List<String>, preferred: String?, recentlyFailed: Set<String>): Boolean =
+        preferred == null && methods.isNotEmpty() && methods.all { it in recentlyFailed }
 
     /**
      * Readiness windows for automatic Aether carriers. Every attempt on the same link gets the same window:
@@ -247,12 +259,17 @@ object ConnectionEngineRunner {
         val rank = order(choices.map(::method), preferred, preferWireGuard, recentlyFailed)
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
         val failedRegistrationKinds = mutableSetOf<String>()
-        val queue = ArrayDeque(ordered)
+        val recheckOnly = engine.id == AetherSidecar.ID && automatic &&
+            quickRecheckOnly(ordered.map(::method), preferred, recentlyFailed)
+        val queue = ArrayDeque(if (recheckOnly) ordered.take(1) else ordered)
+        if (recheckOnly) ordered.drop(1).forEach {
+            record(method(it), "queue", "SKIP", "failed on this network in the last 30 min; one quick recheck of ${method(ordered.first())} only")
+        }
         val reverseRelay = engine.id == AetherSidecar.ID &&
             AetherSettings.read(ProfileExtras.read(profile)).let { it.tor == "reverse" || it.psiphon == "reverse" }
-        var warpInWarpQueued = false
-        var noizeQueued = preferred == WIREGUARD_NOIZE
-        var mtuQueued = preferred == WIREGUARD_MTU
+        var warpInWarpQueued = recheckOnly
+        var noizeQueued = recheckOnly || preferred == WIREGUARD_NOIZE
+        var mtuQueued = recheckOnly || preferred == WIREGUARD_MTU
         while (queue.isNotEmpty()) {
             val candidate = queue.removeFirst()
             checkCancellation()
