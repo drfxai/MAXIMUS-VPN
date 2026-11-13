@@ -12,6 +12,17 @@ class FailureStageTextTest {
         assertEquals(FailureStage.HTTP_STATUS_INVALID, FailureStage.fromText("Sync failed for 'MAXIMUS': HTTP 503: subscription service unavailable"))
     }
 
+    @Test fun aetherGatewayScanDeadlineIsClassifiedAsTimeout() {
+        val reason = "Aether gateway scan did not reach a serving tunnel within 180s; traffic is unverified."
+        assertEquals(FailureStage.TIMEOUT, FailureStage.fromText(reason))
+        assertEquals(
+            FailureStage.TIMEOUT,
+            FailureStage.of(IllegalStateException("h2: $reason · h3: $reason · wireguard: $reason"))
+        )
+        // A generic unverified tunnel without a measured deadline is not itself proof of timeout.
+        assertEquals(FailureStage.UNKNOWN, FailureStage.fromText("Aether tunnel is unverified"))
+    }
+
     @Test fun realTunFailuresStillMatch() {
         assertEquals(FailureStage.TUN_ESTABLISH_FAILED, FailureStage.fromText("Could not establish the VPN interface"))
         assertEquals(FailureStage.TUN_ESTABLISH_FAILED, FailureStage.fromText("failed to establish tun device"))

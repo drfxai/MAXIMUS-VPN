@@ -84,7 +84,8 @@ enum class FailureStage {
                 "network changed" in t || "network lost" in t -> NETWORK_CHANGED
                 "unknownhost" in t || "unable to resolve" in t || "no address associated" in t ||
                     "cannot resolve" in t || "dns" in t && "fail" in t -> DNS_RESOLUTION_FAILED
-                "timed out" in t || "timeout" in t || "deadline" in t -> TIMEOUT
+                "timed out" in t || "timeout" in t || "deadline" in t ||
+                    "aether gateway scan did not reach a serving tunnel within" in t -> TIMEOUT
                 // "tun" as a word: "tunnel" alone ("does not establish a tunnel failure") is not the TUN interface.
                 "establish" in t && (TUN_WORD.containsMatchIn(t) || "interface" in t) -> TUN_ESTABLISH_FAILED
                 "engine" in t && ("start" in t || "did not" in t) -> ENGINE_START_FAILED
