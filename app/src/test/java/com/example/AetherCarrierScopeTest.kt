@@ -28,6 +28,17 @@ class AetherCarrierScopeTest {
         assertTrue(userPinnedIpv6.all { ProfileExtras.read(it).optString("family") == "ipv6" })
     }
 
+    @Test fun blockedLinkAutomaticScanDoesNotBlockOtherCarriersForThreeMinutes() {
+        val budget: (String, Boolean, Boolean, String, Long) -> Long = ConnectionEngineRunner::readinessBudgetMs
+        assertEquals(65_000L, budget("aether", true, true, "h2", 180_000L))
+        assertEquals(65_000L, budget("aether", true, true, "h3", 180_000L))
+        assertEquals(75_000L, budget("aether", true, true, "wireguard", 180_000L))
+        assertEquals(180_000L, budget("aether", false, true, "h2", 180_000L))
+        assertEquals(180_000L, budget("aether", true, false, "h2", 180_000L))
+        assertEquals(180_000L, budget("serverless", true, true, "fragA", 180_000L))
+        assertEquals(30_000L, budget("aether", true, true, "h2", 30_000L))
+    }
+
     @Test fun aetherSmartFallbackRespectsExactAndTradeBoundaries() {
         fun permitted(smart: Boolean = true, auto: Boolean = false, exact: Boolean = false,
                       locked: Boolean = false, forced: Boolean = false, retried: Boolean = false,
