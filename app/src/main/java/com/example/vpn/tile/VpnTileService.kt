@@ -80,7 +80,7 @@ class VpnTileService : TileService() {
                     }
 
                     if (targetProfile != null) {
-                        VpnController.startVpn(applicationContext, targetProfile, exact = true)
+                        VpnController.startVpn(applicationContext, targetProfile, exact = com.example.vpn.safety.PowerButtonPolicy.exact(settings))
                     } else {
                         val intent = Intent(this@VpnTileService, MainActivity::class.java).apply {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK

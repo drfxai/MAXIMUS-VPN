@@ -121,6 +121,9 @@ fun ServersScreen(
 
     var showSortMenu by remember { mutableStateOf(false) }
     var confirmDeleteFree by remember { mutableStateOf(false) }
+    var confirmRemoveDead by remember { mutableStateOf(false) }
+    // Recomputed when a Ping All result arrives; only subscription/free nodes that really failed here.
+    val unreachable = remember(testingStates, serverList) { serverViewModel.unreachableAfterTest() }
 
     Box(modifier = modifier.fillMaxSize().testTag("servers_screen")) {
         Column(
@@ -294,6 +297,51 @@ fun ServersScreen(
                     }
                 }
                 }
+            }
+
+            if (!isTestingAll && unreachable.isNotEmpty()) {
+                TextButton(
+                    onClick = { confirmRemoveDead = true },
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier.height(32.dp).testTag("remove_unreachable_button")
+                ) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = AppTheme.colors.statusWarning, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Remove ${unreachable.size} unreachable", color = AppTheme.colors.statusWarning, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (confirmRemoveDead) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { confirmRemoveDead = false },
+                    containerColor = AppTheme.colors.surfaceElevated,
+                    icon = { Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = AppTheme.colors.statusWarning) },
+                    title = { Text("Remove ${unreachable.size} unreachable nodes?", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Text(
+                            "These subscription or free nodes carried no real request on this network in the last Ping All. " +
+                                "Favourites, the selected node and configs you added yourself are kept. A subscription refresh can bring them back.",
+                            color = AppTheme.colors.textSecondary
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                confirmRemoveDead = false
+                                serverViewModel.removeUnreachable { n ->
+                                    android.widget.Toast.makeText(context, "Removed $n unreachable nodes", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.statusWarning),
+                            modifier = Modifier.testTag("remove_unreachable_confirm")
+                        ) { Text("Remove", color = Color.Black, fontWeight = FontWeight.Bold) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmRemoveDead = false }) { Text("Cancel", color = AppTheme.colors.primary) }
+                    }
+                )
             }
 
             if (confirmDeleteFree) {

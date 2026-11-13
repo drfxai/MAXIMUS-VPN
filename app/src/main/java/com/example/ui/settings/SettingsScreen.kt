@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
@@ -476,6 +477,16 @@ fun SettingsScreen(
                     subtitle = "Automatically switches to the next best node if packet loss > 30% or latency > 800ms",
                     checked = settings.autoFailoverEnabled,
                     onCheckedChange = { viewModel.setAutoFailover(it) }
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                SettingToggleItem(
+                    icon = Icons.Default.PowerSettingsNew,
+                    title = "Power button fallback",
+                    subtitle = "Starts your selected config first; only if it carries no traffic here, failover and recovery engines (MASQUE, Psiphon, Tor) take over. Off: the selected config only",
+                    checked = settings.powerButtonFallback,
+                    onCheckedChange = { viewModel.setPowerButtonFallback(it) }
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))

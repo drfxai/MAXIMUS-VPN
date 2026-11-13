@@ -456,6 +456,8 @@ fun HomeScreen(
                 }
             }
         }
+        // Android's own kill switch: suggested only while connected and only when it is measured off.
+        LeakProtectionCard(connected = connectionState.isConnected)
         if (connectionState.isConnected && (directRoute || (connectedProfile?.let {
             !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) &&
                 (it.security.isBlank() || it.security.equals("none", ignoreCase = true)) } == true))) {

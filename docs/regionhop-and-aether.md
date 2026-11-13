@@ -47,3 +47,17 @@ rejection tests, RegionHop HTTP control tests and an ephemeral systemd panel
 installation. The latter uses a prerequisite executable fixture, not a full
 3X-UI deployment or real Psiphon country connectivity. Physical Irancell traffic
 and personal VPS deployment require device/server validation.
+
+## Aether on Cloudflare-filtered mobile networks (cf=0)
+
+Connect, the Connections page test and the LAB engine probe share one reading of the current link
+(`ConnectionEngineRunner.linkHints`). When the LAB measured Cloudflare TLS failing while UDP answers,
+WireGuard is tried first and every automatic carrier gets a fixed window (WireGuard and H3 75 s, H2 60 s)
+on the first try and on every retry; elsewhere a recently failed carrier keeps a 90 s floor instead of
+shrinking. A WireGuard handshake that passes while no HTTPS comes back is retried once with Aether's `gfw`
+junk-packet profile and a fresh endpoint/port scan before WARP-in-WARP; a verified result is remembered
+per network. When both WARP account hosts fail TLS through Direct OOB and a carrier has no saved
+identity, that carrier fails immediately instead of waiting out a registration that cannot finish.
+When every carrier fails and no saved server exists, the session continues into the recovery engines
+(MASQUE, Psiphon, Tor bridges, chains) and ends cleanly if none carries a real request. None of this can
+make a network deliver WARP data that its operator drops after the handshake.

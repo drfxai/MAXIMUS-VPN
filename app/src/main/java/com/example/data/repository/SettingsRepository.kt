@@ -86,6 +86,7 @@ class SettingsRepository(context: Context) {
             customBypassRules = prefs.getString("bypass_rules", "localhost,127.0.0.1,*.local,*.lan") ?: "",
             scoringProfile = scoringProfile,
             autoFailoverEnabled = prefs.getBoolean("auto_failover", true),
+            powerButtonFallback = prefs.getBoolean("power_button_fallback", true),
             failoverThresholdMs = prefs.getLong("failover_threshold", 800L),
             failoverPacketLossThreshold = prefs.getFloat("failover_loss", 30f).toDouble(),
             benchmarkConcurrency = prefs.getInt("benchmark_concurrency", 6),
@@ -121,6 +122,7 @@ class SettingsRepository(context: Context) {
             .putString("bypass_rules", settings.customBypassRules)
             .putString("scoring_profile", settings.scoringProfile.name)
             .putBoolean("auto_failover", settings.autoFailoverEnabled)
+            .putBoolean("power_button_fallback", settings.powerButtonFallback)
             .putLong("failover_threshold", settings.failoverThresholdMs)
             .putFloat("failover_loss", settings.failoverPacketLossThreshold.toFloat())
             .putInt("benchmark_concurrency", settings.benchmarkConcurrency)
