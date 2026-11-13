@@ -4,6 +4,7 @@ import com.example.data.model.ConnectionState
 import com.example.data.model.ConnectionStatus
 import com.example.vpn.diagnostics.FailureStage
 import com.example.vpn.diagnostics.events.DiagEvent
+import com.example.vpn.diagnostics.events.EventLog
 import com.example.vpn.diagnostics.events.Severity
 import com.example.vpn.diagnostics.events.TestRegistry
 import com.example.vpn.diagnostics.report.DiagnosticReportBuilder
@@ -108,4 +109,21 @@ class DiagnosticReportTest {
         assertFalse(text.contains("secretvalue"))
         JSONObject(text) // still valid JSON
     }
+    @Test fun failedSessionEndUsesElapsedTimeInsteadOfZeroConnectedDuration() {
+        EventLog.resetForTest()
+        val opened = 1_000_000L
+        try {
+            EventLog.record(DiagEvent(timestamp = opened, severity = Severity.INFO,
+                name = "session.start", sessionId = "failed-session"))
+            val ended = EventLog.record(DiagEvent(timestamp = opened + 480_000L, severity = Severity.INFO,
+                name = "session.end", sessionId = "failed-session", durationMs = 0))
+            assertEquals(480_000L, ended.durationMs)
+            val orphan = EventLog.record(DiagEvent(timestamp = opened + 500_000L, severity = Severity.INFO,
+                name = "session.end", sessionId = "another-session", durationMs = 0))
+            assertEquals(null, orphan.durationMs)
+        } finally {
+            EventLog.resetForTest()
+        }
+    }
+
 }
