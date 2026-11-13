@@ -14,9 +14,9 @@ object ConnectionEngineRunner {
     class NoVerifiedPath(attempts: List<String>, val lastCheck: AccessProbe.Result?) :
         IllegalStateException(attempts.joinToString(" · "))
 
-    fun candidates(profile: VlessProfile): List<VlessProfile> {
+    fun candidates(profile: VlessProfile, ipv4Only: Boolean = false): List<VlessProfile> {
         val e = ProfileExtras.read(profile)
-        return when {
+        val variants = when {
             AetherSidecar.handles(profile) && e.optString("carrier", "auto") == "auto" -> (if (AetherSettings.read(e).let { it.tor in listOf("reverse", "only") || it.psiphon in listOf("reverse", "only") }) listOf("h2") else listOf("h2", "h3", "wireguard")).map {
                 profile.copy(extraSettings = org.json.JSONObject(e.toString()).put("carrier", it).toString())
             }
@@ -25,6 +25,15 @@ object ConnectionEngineRunner {
             }
             else -> listOf(profile)
         }
+        // "auto" may probe IPv6 indefinitely on an IPv4-only mobile network. Restrict only
+        // when this session measured the *same physical link* with IPv4 and no IPv6.
+        // User-selected ipv6/ipv4 settings remain authoritative.
+        return if (ipv4Only && AetherSidecar.handles(profile) && e.optString("family", "auto") == "auto") {
+            variants.map { candidate ->
+                val options = org.json.JSONObject(candidate.extraSettings).put("family", "ipv4")
+                candidate.copy(extraSettings = options.toString())
+            }
+        } else variants
     }
     fun start(
         engine: SidecarEngine,
@@ -32,6 +41,8 @@ object ConnectionEngineRunner {
         settings: AppSettings,
         context: SidecarContext,
         checkDns: Boolean = false,
+        ipv4Only: Boolean = false,
+        preferWireGuard: Boolean = false,
         onProgress: (String) -> Unit = {},
         cancelled: () -> Boolean = { false }
     ): Started {
@@ -66,9 +77,18 @@ object ConnectionEngineRunner {
             if (engine.id == AetherSidecar.ID) it.optString("carrier") else it.optString("variant")
         }
         val cacheScope = scope()
-        val choices = candidates(profile)
+        val choices = candidates(profile, ipv4Only = ipv4Only)
         val preferred = BuiltinMethodMemory.preferred(cacheScope, choices.map(::method))
-        val ordered = choices.sortedBy { if (method(it) == preferred) 0 else 1 }
+        // Keep a previously HTTPS-verified method first. Without such evidence, try WG
+        // before long MASQUE gateway scans when fresh physical-link probes show that
+        // ordinary Cloudflare TLS is unreachable but UDP is answering.
+        val ordered = choices.sortedBy {
+            when {
+                method(it) == preferred -> 0
+                preferWireGuard && method(it) == "wireguard" -> 1
+                else -> 2
+            }
+        }
         val failedRegistrationKinds = mutableSetOf<String>()
         for (candidate in ordered) {
             checkCancellation()
