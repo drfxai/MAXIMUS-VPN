@@ -99,6 +99,7 @@ fun LaunchPopups() {
             error = installError,
             onDismiss = {
                 installJob?.cancel()
+                InAppUpdater.cancelCurrentDownload()
                 installing = false
                 installerRelease = null
             },
