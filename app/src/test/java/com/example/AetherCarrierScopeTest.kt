@@ -37,6 +37,25 @@ class AetherCarrierScopeTest {
         assertEquals(180_000L, budget("aether", true, false, "h2", 180_000L))
         assertEquals(180_000L, budget("serverless", true, true, "fragA", 180_000L))
         assertEquals(30_000L, budget("aether", true, true, "h2", 30_000L))
+        // A carrier that failed here recently gets the short window even after the network reading expired.
+        assertEquals(40_000L, ConnectionEngineRunner.readinessBudgetMs("aether", true, false, "h2", 180_000L, failedHere = true))
+        assertEquals(65_000L, ConnectionEngineRunner.readinessBudgetMs("aether", true, false, "h3", 180_000L, failedHere = true))
+        assertEquals(75_000L, ConnectionEngineRunner.readinessBudgetMs("aether", true, false, "wireguard", 180_000L, failedHere = true))
+        assertEquals(180_000L, ConnectionEngineRunner.readinessBudgetMs("aether", false, false, "h2", 180_000L, failedHere = true))
+        assertEquals(90_000L, ConnectionEngineRunner.readinessBudgetMs("aether", true, false, "wiw", 180_000L))
+    }
+
+    @Test fun warpInWarpFollowsOnlyABlockedWireGuardHandshake() {
+        fun follow(carrier: String = "wireguard", handshake: Boolean = true, queued: Boolean = false,
+                   reverse: Boolean = false, automatic: Boolean = true, engine: String = "aether") =
+            ConnectionEngineRunner.warpInWarpFollowUp(engine, automatic, carrier, handshake, queued, reverse)
+        assertTrue(follow())
+        assertFalse(follow(carrier = "h3"))
+        assertFalse(follow(handshake = false))
+        assertFalse(follow(queued = true))
+        assertFalse(follow(reverse = true))
+        assertFalse(follow(automatic = false))
+        assertFalse(follow(engine = "serverless"))
     }
 
     @Test fun filteredLinkTriesUdpCarriersFirstAndRecentFailuresLast() {
@@ -45,6 +64,8 @@ class AetherCarrierScopeTest {
         assertEquals(listOf("h2", "h3", "wireguard"), ConnectionEngineRunner.order(all, null, false, emptySet()))
         assertEquals(listOf("h2", "h3", "wireguard"), ConnectionEngineRunner.order(all, null, false, setOf("wireguard")))
         assertEquals(listOf("h3", "h2", "wireguard"), ConnectionEngineRunner.order(all, null, true, setOf("wireguard")))
+        // Every carrier failed here: WireGuard (fastest answer) first, H2 last.
+        assertEquals(listOf("wireguard", "h3", "h2"), ConnectionEngineRunner.order(all, null, false, all.toSet()))
         // A method verified here stays first even if it also failed once since.
         assertEquals("h2", ConnectionEngineRunner.order(all, "h2", true, setOf("h2")).first())
         // Nothing is ever dropped.
