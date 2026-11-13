@@ -14,6 +14,17 @@ object ConnectionEngineRunner {
     class NoVerifiedPath(attempts: List<String>, val lastCheck: AccessProbe.Result?) :
         IllegalStateException(attempts.joinToString(" · "))
 
+    /**
+     * A built-in transport can fail after the Smart Connect path search has finished:
+     * unlike a saved proxy, its success is only measurable after process startup.
+     * Escalate once to a saved server search, never across exact/Trade/forced boundaries.
+     */
+    fun mayRecoverAether(
+        aether: Boolean, smart: Boolean, autoFailover: Boolean,
+        exact: Boolean, exitLocked: Boolean, force: Boolean, alreadyEscalated: Boolean
+    ): Boolean = aether && (smart || autoFailover) && !exact && !exitLocked &&
+        !force && !alreadyEscalated
+
     fun candidates(profile: VlessProfile, ipv4Only: Boolean = false): List<VlessProfile> {
         val e = ProfileExtras.read(profile)
         val variants = when {
