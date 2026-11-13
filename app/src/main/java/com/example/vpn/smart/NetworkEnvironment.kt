@@ -24,6 +24,10 @@ object NetworkEnvironment {
          * address, the port, the handshake or the name could be the cause).
          */
         TLS_PATH_FAILURE,
+        /** Several independent international TLS reference handshakes failed on this physical link. */
+        INTERNATIONAL_TLS_PATH_FAILURE,
+        /** A measured Cloudflare TLS path failed; this does not prove why it failed. */
+        CLOUDFLARE_TLS_PATH_FAILURE,
         /** A controlled comparison (the same address, a filtered and a neutral server name) cut the filtered name. */
         SNI_INTERFERENCE_SUSPECTED,
         /** QUIC (Hysteria2) or WireGuard failed recently. */
@@ -50,7 +54,9 @@ object NetworkEnvironment {
         failedKinds: Set<String>,
         workingKinds: List<String>,
         /** True only when a controlled SNI comparison on this network cut the filtered name. */
-        sniComparisonCut: Boolean = false
+        sniComparisonCut: Boolean = false,
+        /** Fresh measurements taken on the same physical link, never a stale or VPN-routed profile. */
+        evidence: NetworkCapabilityProfile? = null
     ): Report {
         val signals = mutableSetOf<Signal>()
         if (!validated) signals += Signal.NOT_VALIDATED
@@ -60,17 +66,30 @@ object NetworkEnvironment {
         if (failedKinds.any { it in setOf("REALITY", "TLS") }) signals += Signal.TLS_PATH_FAILURE
         if (sniComparisonCut) signals += Signal.SNI_INTERFERENCE_SUSPECTED
         if (failedKinds.any { it in setOf("QUIC", "WireGuard") }) signals += Signal.UDP_FILTERED
+        val internationalFailed = (evidence?.internationalTried ?: 0) >= 2 &&
+            evidence?.internationalReachable == false
+        val cloudflareFailed = evidence?.cloudflareReachable == false &&
+            (evidence.cloudflareIpv4Tls == false || evidence.cloudflareIpv6Tls == false)
+        if (internationalFailed) signals += Signal.INTERNATIONAL_TLS_PATH_FAILURE
+        if (cloudflareFailed) signals += Signal.CLOUDFLARE_TLS_PATH_FAILURE
         val stillWorking = workingKinds.filter { it !in failedKinds }
         if (failedKinds.isNotEmpty() && stillWorking.isEmpty()) signals += Signal.NOTHING_WORKED
-        val filters = listOf(Signal.DNS_POISONED, Signal.TLS_PATH_FAILURE, Signal.UDP_FILTERED).count { it in signals }
+        val filters = listOf(Signal.DNS_POISONED, Signal.TLS_PATH_FAILURE, Signal.UDP_FILTERED,
+            Signal.INTERNATIONAL_TLS_PATH_FAILURE, Signal.CLOUDFLARE_TLS_PATH_FAILURE).count { it in signals }
         val level = when {
             Signal.NOTHING_WORKED in signals && (Signal.NOT_VALIDATED in signals || filters >= 2) -> Level.NO_VERIFIED_EGRESS
-            Signal.NOTHING_WORKED in signals || filters >= 2 -> Level.HEAVY
+            Signal.NOTHING_WORKED in signals || filters >= 2 ||
+                (internationalFailed && evidence?.domesticReachable == true) -> Level.HEAVY
             filters == 1 -> Level.FILTERED
             else -> Level.OPEN
         }
         return Report(network, level, signals)
     }
+
+    /** Reject old measurements or measurements from another physical network. */
+    internal fun freshEvidence(profile: NetworkCapabilityProfile?, networkIdentity: String, now: Long): NetworkCapabilityProfile? =
+        profile?.takeIf { it.networkIdentity == networkIdentity && it.measuredAt > 0 &&
+            now - it.measuredAt in 0..SmartConnectPlan.READING_MAX_AGE_MS }
 
     /** GOD MODE is worth suggesting when filtering is heavy and the user is in DAILY mode. */
     fun suggestsGodMode(report: Report): Boolean = report.level == Level.HEAVY || report.level == Level.NO_VERIFIED_EGRESS
@@ -91,6 +110,7 @@ object NetworkEnvironment {
         val sid = book.session()?.id
         val sniCut = book.all().lastOrNull { it.sessionId == sid && it.type == com.example.vpn.connectivity.MeasurementType.SNI_COMPARISON }?.success == false
         return classify(network, validated, metered, roaming, dnsPoisoned,
-            memory.recentFailures(network), memory.workingKinds(network), sniCut)
+            memory.recentFailures(network), memory.workingKinds(network), sniCut,
+            freshEvidence(NetworkCapabilityDetector.last, NetworkIdentity.current(context), System.currentTimeMillis()))
     }
 }
