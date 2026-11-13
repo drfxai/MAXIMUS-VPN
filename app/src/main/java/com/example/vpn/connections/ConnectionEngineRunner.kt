@@ -102,6 +102,27 @@ object ConnectionEngineRunner {
 
     internal const val NOIZE_FOLLOW_UP = "noizeFollowUp"
 
+    /** Method name of the reduced-MTU WireGuard retry, recorded so a verified result is reused next time. */
+    const val WIREGUARD_MTU = "wireguard-mtu"
+    internal const val MTU_FOLLOW_UP = "mtuFollowUp"
+
+    /**
+     * WireGuard's handshake passed (small packets) but no HTTPS came back: the signature of a path that drops
+     * full-size packets, common on mobile carriers that add their own encapsulation. Retry WireGuard once with
+     * a smaller data-plane MTU ([AetherSettings.MTU_RETRY], inside the 1180–1220 band) on the endpoint that just
+     * handshook (quick reconnect, no rescan: the endpoint was fine, the packet size was not). Only when the
+     * user left the MTU on automatic; never for a reverse relay, a manual carrier, or twice.
+     */
+    fun reducedMtuWireGuardFollowUp(engineId: String, automatic: Boolean, carrier: String, mtu: String,
+                                    alreadyQueued: Boolean, reverseRelay: Boolean): Boolean =
+        engineId == AetherSidecar.ID && automatic && carrier == "wireguard" && mtu.isBlank() &&
+            !alreadyQueued && !reverseRelay
+
+    fun reducedMtuWireGuard(candidate: VlessProfile): VlessProfile = candidate.copy(extraSettings =
+        org.json.JSONObject(candidate.extraSettings).put("carrier", "wireguard")
+            .put("mtu", AetherSettings.MTU_RETRY.toString()).put(MTU_FOLLOW_UP, true)
+            .apply { remove(NOIZE_FOLLOW_UP); remove("rescan") }.toString())
+
     /** One line telling the user what to do when Aether found nothing on a link whose Cloudflare TLS is filtered. */
     const val CLOUDFLARE_FILTERED_HINT = "Cloudflare TLS is filtered on this network: Smart Connect can try saved servers, Psiphon or Tor"
 
@@ -200,7 +221,8 @@ object ConnectionEngineRunner {
         }
         fun method(candidate: VlessProfile) = ProfileExtras.read(candidate).let {
             if (engine.id == AetherSidecar.ID) {
-                if (it.optBoolean(NOIZE_FOLLOW_UP)) WIREGUARD_NOIZE else it.optString("carrier")
+                if (it.optBoolean(MTU_FOLLOW_UP)) WIREGUARD_MTU
+                else if (it.optBoolean(NOIZE_FOLLOW_UP)) WIREGUARD_NOIZE else it.optString("carrier")
             } else it.optString("variant")
         }
         val cacheScope = scope()
@@ -211,8 +233,13 @@ object ConnectionEngineRunner {
             baseChoices.any { method(it) == "wireguard" } &&
             AetherSettings.read(ProfileExtras.read(profile)).noize == "auto")
             baseChoices.first { method(it) == "wireguard" }.let(::obfuscatedWireGuard) else null
-        val preferred = BuiltinMethodMemory.preferred(cacheScope, baseChoices.map(::method) + listOfNotNull(noizeChoice?.let(::method)))
-        val choices = if (noizeChoice != null && preferred == WIREGUARD_NOIZE) listOf(noizeChoice) + baseChoices else baseChoices
+        val mtuChoice = if (engine.id == AetherSidecar.ID && automatic &&
+            baseChoices.any { method(it) == "wireguard" } &&
+            AetherSettings.read(ProfileExtras.read(profile)).mtu.isBlank())
+            baseChoices.first { method(it) == "wireguard" }.let(::reducedMtuWireGuard) else null
+        val followUps = listOfNotNull(noizeChoice, mtuChoice)
+        val preferred = BuiltinMethodMemory.preferred(cacheScope, baseChoices.map(::method) + followUps.map(::method))
+        val choices = followUps.firstOrNull { method(it) == preferred }?.let { listOf(it) + baseChoices } ?: baseChoices
         // Keep a previously HTTPS-verified method first. Without such evidence, try WG
         // before long MASQUE gateway scans when fresh physical-link probes show that
         // ordinary Cloudflare TLS is unreachable but UDP is answering.
@@ -225,6 +252,7 @@ object ConnectionEngineRunner {
             AetherSettings.read(ProfileExtras.read(profile)).let { it.tor == "reverse" || it.psiphon == "reverse" }
         var warpInWarpQueued = false
         var noizeQueued = preferred == WIREGUARD_NOIZE
+        var mtuQueued = preferred == WIREGUARD_MTU
         while (queue.isNotEmpty()) {
             val candidate = queue.removeFirst()
             checkCancellation()
@@ -303,19 +331,29 @@ object ConnectionEngineRunner {
                 // Before WARP-in-WARP: the same WireGuard identity with the strongest junk-packet profile and a
                 // fresh endpoint/port scan. It costs one more WireGuard window and is the cheaper fix when the
                 // censor classifies the flow from its first packets.
-                if (obfuscatedWireGuardFollowUp(engine.id, automatic, carrier,
-                        AetherSettings.read(extras).noize, alreadyQueued = noizeQueued, reverseRelay = reverseRelay)) {
+                // Queue order after a plain WireGuard failure: reduced MTU first (same endpoint, quick), then
+                // junk-packet obfuscation with a fresh scan, then the other carriers, WARP-in-WARP last.
+                val obfuscate = obfuscatedWireGuardFollowUp(engine.id, automatic, carrier,
+                        AetherSettings.read(extras).noize, alreadyQueued = noizeQueued, reverseRelay = reverseRelay)
+                if (obfuscate) {
                     noizeQueued = true
                     record(WIREGUARD_NOIZE, "queue", "START",
                         "WireGuard handshake passed but no data came back; retrying with junk-packet obfuscation and a fresh endpoint scan")
                     queue.addFirst(obfuscatedWireGuard(candidate))
+                }
+                if (reducedMtuWireGuardFollowUp(engine.id, automatic, carrier, AetherSettings.read(extras).mtu,
+                        alreadyQueued = mtuQueued, reverseRelay = reverseRelay)) {
+                    mtuQueued = true
+                    record(WIREGUARD_MTU, "queue", "START",
+                        "WireGuard handshake passed but no data came back; retrying with MTU ${AetherSettings.MTU_RETRY}")
+                    queue.addFirst(reducedMtuWireGuard(candidate))
                 }
                 if (warpInWarpFollowUp(engine.id, automatic, carrier, handshakePassed = true,
                         alreadyQueued = warpInWarpQueued || choices.any { method(it) == "wiw" }, reverseRelay = reverseRelay)) {
                     warpInWarpQueued = true
                     record("wiw", "queue", "START", "WireGuard handshake passed but no data came back; trying WARP inside WARP")
                     queue.addLast(candidate.copy(extraSettings =
-                        org.json.JSONObject(candidate.extraSettings).put("carrier", "wiw").apply { remove(NOIZE_FOLLOW_UP) }.toString()))
+                        org.json.JSONObject(candidate.extraSettings).put("carrier", "wiw").apply { remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP) }.toString()))
                 }
             } catch (e: Exception) {
                 if (e is InterruptedException || e is CancellationException) throw e

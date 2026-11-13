@@ -54,9 +54,12 @@ Connect, the Connections page test and the LAB engine probe share one reading of
 (`ConnectionEngineRunner.linkHints`). When the LAB measured Cloudflare TLS failing while UDP answers,
 WireGuard is tried first and every automatic carrier gets a fixed window (WireGuard and H3 75 s, H2 60 s)
 on the first try and on every retry; elsewhere a recently failed carrier keeps a 90 s floor instead of
-shrinking. A WireGuard handshake that passes while no HTTPS comes back is retried once with Aether's `gfw`
-junk-packet profile and a fresh endpoint/port scan before WARP-in-WARP; a verified result is remembered
-per network. When both WARP account hosts fail TLS through Direct OOB and a carrier has no saved
+shrinking. A WireGuard handshake that passes while no HTTPS comes back is retried first on the same
+endpoint with a 1200-byte data-plane MTU (full-size packets dropped by the carrier), then once with Aether's
+`gfw` junk-packet profile and a fresh endpoint/port scan, then WARP-in-WARP last; a verified result is
+remembered per network. The WireGuard MTU can also be set by hand (1180–1420) in the built-in connection's
+Endpoint discovery settings. The pinned engine reads it from `AETHER_WG_MTU`, added by
+`scripts/connections/harden-aether.py`; unset keeps upstream's 1280. When both WARP account hosts fail TLS through Direct OOB and a carrier has no saved
 identity, that carrier fails immediately instead of waiting out a registration that cannot finish.
 When every carrier fails and no saved server exists, the session continues into the recovery engines
 (MASQUE, Psiphon, Tor bridges, chains) and ends cleanly if none carries a real request. None of this can

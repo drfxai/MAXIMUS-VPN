@@ -213,6 +213,10 @@ internal fun BuiltinConnectionScreen(
                     SettingField("Port", options.advanced.endpointPort, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.withEndpoint(port = value)) }
                     }
+                    SettingField("WireGuard MTU · blank for automatic (1180–1420)", options.advanced.mtu,
+                        configurable && options.transport in listOf("auto", "wireguard", "wiw")) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(mtu = value.filter { ch -> ch in '0'..'9' }.take(4))) }
+                    }
                 }
                 GroupLabel(c, "WARP registration and TLS")
                 Panel(c) {
