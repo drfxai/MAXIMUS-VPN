@@ -25,6 +25,18 @@ object ConnectionEngineRunner {
     ): Boolean = aether && (smart || autoFailover) && !exact && !exitLocked &&
         !force && !alreadyEscalated
 
+    /**
+     * Limit only automatic Aether recovery on freshly observed blocked Cloudflare TLS + usable UDP.
+     * Avoid three 180-second gateway scans before smart fallback. Manual/pinned modes retain their
+     * full startup window; a successful SOCKS port alone still never counts as verified traffic.
+     */
+    fun readinessBudgetMs(
+        engineId: String, automatic: Boolean, filteredTlsWithUdp: Boolean,
+        carrier: String, defaultMs: Long
+    ): Long = if (engineId == AetherSidecar.ID && automatic && filteredTlsWithUdp) {
+        minOf(defaultMs, if (carrier == "wireguard") 75_000L else 65_000L)
+    } else defaultMs
+
     fun candidates(profile: VlessProfile, ipv4Only: Boolean = false): List<VlessProfile> {
         val e = ProfileExtras.read(profile)
         val variants = when {
@@ -120,7 +132,9 @@ object ConnectionEngineRunner {
                 running = process
                 checkCancellation()
                 stage = "local proxy did not become ready"
-                val ready = process.awaitReady(launch.readyTimeoutMs)
+                val ready = process.awaitReady(readinessBudgetMs(
+                    engine.id, automatic, preferWireGuard, name, launch.readyTimeoutMs
+                ))
                 checkCancellation()
                 if (!ready) {
                     val reason = process.startupFailure ?: stage
