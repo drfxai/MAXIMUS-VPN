@@ -67,6 +67,7 @@ fun LaunchPopups() {
     var installing by remember { mutableStateOf(false) }
     var installJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var progress by remember { mutableStateOf(0) }
+    var downloadStatus by remember { mutableStateOf<String?>(null) }
     var verifiedFile by remember { mutableStateOf<java.io.File?>(null) }
     var installError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -93,6 +94,7 @@ fun LaunchPopups() {
             installedBuild = installedBuild,
             downloading = installing,
             progress = progress,
+            downloadStatus = downloadStatus,
             verified = verifiedFile?.isFile == true,
             error = installError,
             onDismiss = {
@@ -111,9 +113,10 @@ fun LaunchPopups() {
                     asset != null -> {
                         installing = true
                         progress = 0
+                        downloadStatus = null
                         installError = null
                         installJob = scope.launch {
-                            runCatching { InAppUpdater.download(context, asset) { progress = it } }
+                            runCatching { InAppUpdater.download(context, asset, onStatus = { downloadStatus = it }) { progress = it } }
                                 .onSuccess { verifiedFile = it }
                                 .onFailure {
                                     if (it !is kotlinx.coroutines.CancellationException)
