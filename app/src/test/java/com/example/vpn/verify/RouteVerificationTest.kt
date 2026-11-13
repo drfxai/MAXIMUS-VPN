@@ -24,6 +24,18 @@ class RouteVerificationTest {
         }
     }
 
+    @Test fun aSixteenKilobyteFreezeIsNotAnMtuStall() {
+        val frozen = evidence(down = LegResult.Failed(FailureStage.TIMEOUT, 16_050, stalled = true, reason = "TIMEOUT"))
+        assertTrue(frozen.bulkStalled)
+        assertTrue(frozen.fixedSizeFreeze)
+        val late = evidence(down = LegResult.Failed(FailureStage.TIMEOUT, 48_000, stalled = true, reason = "TIMEOUT"))
+        assertTrue(late.bulkStalled)
+        assertFalse(late.fixedSizeFreeze)
+        val notStalled = evidence(down = LegResult.Failed(FailureStage.TIMEOUT, 16_050, stalled = false, reason = "TIMEOUT"))
+        assertFalse(notStalled.fixedSizeFreeze)
+        assertFalse(evidence().fixedSizeFreeze)
+    }
+
     @Test fun aSmallRequestIsTrafficVerifiedOnly() {
         assertEquals(RouteVerification.TUNNEL_TRAFFIC_VERIFIED, connected.verification)
     }

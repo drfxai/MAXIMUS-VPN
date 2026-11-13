@@ -30,13 +30,47 @@ class AetherCarrierScopeTest {
 
     @Test fun blockedLinkAutomaticScanDoesNotBlockOtherCarriersForThreeMinutes() {
         val budget: (String, Boolean, Boolean, String, Long) -> Long = ConnectionEngineRunner::readinessBudgetMs
-        assertEquals(65_000L, budget("aether", true, true, "h2", 180_000L))
+        assertEquals(40_000L, budget("aether", true, true, "h2", 180_000L))
         assertEquals(65_000L, budget("aether", true, true, "h3", 180_000L))
         assertEquals(75_000L, budget("aether", true, true, "wireguard", 180_000L))
         assertEquals(180_000L, budget("aether", false, true, "h2", 180_000L))
         assertEquals(180_000L, budget("aether", true, false, "h2", 180_000L))
         assertEquals(180_000L, budget("serverless", true, true, "fragA", 180_000L))
         assertEquals(30_000L, budget("aether", true, true, "h2", 30_000L))
+    }
+
+    @Test fun filteredLinkTriesUdpCarriersFirstAndRecentFailuresLast() {
+        val all = listOf("h2", "h3", "wireguard")
+        assertEquals(listOf("wireguard", "h3", "h2"), ConnectionEngineRunner.order(all, null, true, emptySet()))
+        assertEquals(listOf("h2", "h3", "wireguard"), ConnectionEngineRunner.order(all, null, false, emptySet()))
+        assertEquals(listOf("h2", "h3", "wireguard"), ConnectionEngineRunner.order(all, null, false, setOf("wireguard")))
+        assertEquals(listOf("h3", "h2", "wireguard"), ConnectionEngineRunner.order(all, null, true, setOf("wireguard")))
+        // A method verified here stays first even if it also failed once since.
+        assertEquals("h2", ConnectionEngineRunner.order(all, "h2", true, setOf("h2")).first())
+        // Nothing is ever dropped.
+        assertEquals(all.toSet(), ConnectionEngineRunner.order(all, null, true, all.toSet()).toSet())
+    }
+
+    @Test fun failedMethodMemoryExpiresAndClears() {
+        val previousRead = com.example.vpn.connections.BuiltinMethodMemory.read
+        val previousWrite = com.example.vpn.connections.BuiltinMethodMemory.write
+        val values = mutableMapOf<String, String>()
+        try {
+            com.example.vpn.connections.BuiltinMethodMemory.read = { values[it] }
+            com.example.vpn.connections.BuiltinMethodMemory.write = { k, v -> if (v == null) values.remove(k) else values[k] = v }
+            val m = com.example.vpn.connections.BuiltinMethodMemory
+            m.recordFailure("net-a", "h2", 1_000)
+            m.recordFailure("net-a", "h3", 2_000)
+            assertEquals(setOf("h2", "h3"), m.recentlyFailed("net-a", 3_000))
+            assertEquals(emptySet<String>(), m.recentlyFailed("net-b", 3_000))
+            assertEquals(setOf("h3"), m.recentlyFailed("net-a", 1_000 + m.FAILED_TTL_MS))
+            m.clearFailure("net-a", "h3")
+            assertEquals(setOf("h2"), m.recentlyFailed("net-a", 3_000))
+            assertEquals(emptySet<String>(), m.recentlyFailed(null, 3_000))
+        } finally {
+            com.example.vpn.connections.BuiltinMethodMemory.read = previousRead
+            com.example.vpn.connections.BuiltinMethodMemory.write = previousWrite
+        }
     }
 
     @Test fun aetherSmartFallbackRespectsExactAndTradeBoundaries() {

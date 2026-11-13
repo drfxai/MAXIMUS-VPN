@@ -2239,7 +2239,10 @@ class RayVpnService : VpnService() {
                 activeRoute?.let { (net, id) -> networkMemory.routes.markBidirectional(net, id) }
             }
             XrayLogManager.i("VPN", "Upload/download check: ${evidence.describe()}.")
-            if (evidence.bulkStalled) {
+            if (evidence.fixedSizeFreeze) {
+                XrayLogManager.w("VPN", "The download froze after about 16 KB: this is the censor's fixed-size freeze on this " +
+                    "server's address, not an MTU problem. Another server, XHTTP or TLS fragmentation avoids it.")
+            } else if (evidence.bulkStalled) {
                 XrayLogManager.w("VPN", "Small requests pass but a bulk transfer stalled: a path MTU black hole or throttling is suspected.")
             }
             // What the download measured through this server here steers the next Smart Connect (RouteSpeedBook).
@@ -2259,7 +2262,9 @@ class RayVpnService : VpnService() {
             val mtuTest = tunMtu
             if (path == com.example.vpn.verify.ProbePath.TUN && mtuTest != null && _vpnState.value.attemptId == attemptId) {
                 val (net, used, configured) = mtuTest
-                networkMemory.mtu.onBulkCheck(net, used, configured, stalled = evidence.bulkStalled, passed = evidence.bidirectional)?.let { st ->
+                networkMemory.mtu.onBulkCheck(net, used, configured,
+                    // A ~16 KB freeze stops at the same byte whatever the MTU; it never starts an MTU trial.
+                    stalled = evidence.bulkStalled && !evidence.fixedSizeFreeze, passed = evidence.bidirectional)?.let { st ->
                     XrayLogManager.i("VPN", when (st) {
                         com.example.vpn.smart.TunMtuTrial.State.TRYING_LOW -> "The next connect on this network tests MTU ${com.example.vpn.smart.TunMtuTrial.LOW_MTU}."
                         com.example.vpn.smart.TunMtuTrial.State.LOW_HELPED -> "MTU $used fixed the bulk stall on this network; it is kept here."

@@ -82,6 +82,25 @@ class SubscriptionFetcher(
     companion object {
         const val STAGGER_MS = 2500L
         const val DEADLINE_MS = 30_000L
+        const val SIGNED_DEADLINE_MS = 75_000L
+
+        /**
+         * The failure worth showing. Sources run staggered, so the first one *recorded* is the one that
+         * failed fastest: usually a mirror that refuses at once (a redirect the guard rejects, a 404),
+         * while the real problem (every other source timing out, or a block page) comes later. Prefer, in
+         * order: a block page, a timeout or no answer, a TLS or network error, an HTTP status, anything.
+         */
+        fun mainReason(failures: List<Pair<String, String>>): String? {
+            if (failures.isEmpty()) return null
+            val reasons = failures.map { it.second }
+            fun has(vararg words: String) = reasons.firstOrNull { r -> words.any { r.contains(it, ignoreCase = true) } }
+            return has("web page instead", "blocked?")
+                ?: has("timeout", "timed out", "no answer within", "deadline")
+                ?: has("ssl", "tls", "handshake", "certificate", "reset", "refused", "unreachable", "resolve")
+                ?: reasons.firstOrNull { !it.startsWith("SSRF", ignoreCase = true) && it.startsWith("HTTP") }
+                ?: reasons.firstOrNull { !it.startsWith("SSRF", ignoreCase = true) }
+                ?: reasons.first()
+        }
 
         internal fun describeEmpty(body: String): String {
             val head = body.trimStart().take(200).lowercase()

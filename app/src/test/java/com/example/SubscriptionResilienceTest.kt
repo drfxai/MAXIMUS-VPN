@@ -32,7 +32,11 @@ class SubscriptionResilienceTest {
         val mirrors = SubscriptionSources.derivedMirrors(raw)
         assertTrue(mirrors.contains("https://cdn.jsdelivr.net/gh/someone/free-subs@main/sub/mix.txt"))
         assertTrue(mirrors.contains("https://fastly.jsdelivr.net/gh/someone/free-subs@main/sub/mix.txt"))
-        assertTrue(mirrors.contains("https://cdn.statically.io/gh/someone/free-subs/main/sub/mix.txt"))
+        assertTrue(mirrors.contains("https://cdn.statically.io/gh/someone/free-subs@main/sub/mix.txt"))
+        // The old Statically form redirects to plain HTTP; it is never generated, but still recognised.
+        assertTrue(mirrors.none { it == "https://cdn.statically.io/gh/someone/free-subs/main/sub/mix.txt" })
+        assertTrue(SubscriptionSources.derivedMirrors("https://cdn.statically.io/gh/someone/free-subs/main/sub/mix.txt").contains(raw))
+        assertTrue(SubscriptionSources.derivedMirrors("https://cdn.statically.io/gh/someone/free-subs@main/sub/mix.txt").contains(raw))
         assertTrue(mirrors.none { it == raw })
         // The same file named in other ways maps to the same mirrors.
         assertTrue(SubscriptionSources.derivedMirrors("https://github.com/someone/free-subs/blob/main/sub/mix.txt").contains(raw))
