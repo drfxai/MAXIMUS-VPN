@@ -1,1 +1,1 @@
-V1.0.4 signed update request: in-app APK installer, verified resolver pack, Clean-IP refresh, rollback, VPN-only updates, recovery fixes. Base 13f1a23c7f9bbde80fd3dc406d4b309d6d0ce219.
+V1.0.4 signed Android update: merged #191 (5f8c8f3aa58fff6ba928deba09985048b28a0cdc); Aether smart fallback, IPv4-only carrier selection, fresh network evidence, honest per-carrier diagnostics, failed-session elapsed time. Keep in-app signed APK and verified resolver pack; require test/lint/signature/package checks before publication.
