@@ -169,7 +169,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
         val original = profile()
         val profile = original.copy(extraSettings = org.json.JSONObject(original.extraSettings).put("rescan", true).toString())
         val testedEpoch = networkEpoch.get()
-        val result = identityRenewal.withLock {
+        val result = AetherIdentityRegistrar.lock.withLock {
             runInterruptible(Dispatchers.IO) {
                 val engine = Sidecars.forProfile(profile) ?: error("No engine")
                 val executable = Sidecars.executable(engine) ?: error("Engine unavailable")
