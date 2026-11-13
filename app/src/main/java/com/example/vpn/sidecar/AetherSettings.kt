@@ -22,7 +22,9 @@ data class AetherSettings(
     val exitDialMode: String = "",
     val tor: String = "off",
     val psiphon: String = "off",
-    val apiRoute: String = "auto"
+    val apiRoute: String = "auto",
+    /** WireGuard data-plane MTU (blank = engine default 1280). Only WireGuard and WARP-in-WARP use it. */
+    val mtu: String = ""
 ) {
     fun problem(carrier: String? = null): String? = when {
         apiRoute !in apiRoutes -> "Unsupported account API route"
@@ -41,6 +43,7 @@ data class AetherSettings(
         exitFinalMask.length > 32768 || (exitFinalMask.isNotBlank() && runCatching { JSONObject(exitFinalMask) }.isFailure) -> "finalMask must be a JSON object"
         exitDialMode.length > 512 || exitDialMode.any { it.isISOControl() } -> "Invalid dialMode"
         alias.length > 120 -> "Alias is too long"
+        !validMtu(mtu) -> "WireGuard MTU must be ${MTU_RANGE.first}–${MTU_RANGE.last}"
         !range(fragmentSize, 1..16384) -> "Fragment size must be 1–16384 bytes or an ascending range"
         !range(fragmentDelay, 0..1000) -> "Fragment delay must be 0–1000 ms or an ascending range"
         else -> null
@@ -63,7 +66,7 @@ data class AetherSettings(
         .put("fragmentDelay", fragmentDelay.trim()).put("ech", ech)
         .put("apiSni", apiSni).put("fingerprint", fingerprint).put("alias", alias.trim())
         .put("exitNode", exitNode).put("exitFinalMask", exitFinalMask).put("exitDialMode", exitDialMode.trim())
-        .put("tor", tor).put("psiphon", psiphon).put("apiRoute", apiRoute)
+        .put("tor", tor).put("psiphon", psiphon).put("apiRoute", apiRoute).put("mtu", mtu.trim())
 
     fun arguments(carrier: String, fragment: Boolean): List<String> {
         require(problem() == null) { problem().orEmpty() }
@@ -99,7 +102,18 @@ data class AetherSettings(
         }
     }
 
+    /** Engine environment for the WireGuard MTU, only for carriers that use it and only when set. */
+    fun environment(carrier: String): Map<String, String> =
+        if (carrier in listOf("wireguard", "wiw") && mtu.isNotBlank() && validMtu(mtu)) mapOf(MTU_ENV to mtu.trim()) else emptyMap()
+
     companion object {
+        /** Accepted WireGuard MTUs. Below 1180 IPv6 inside the tunnel breaks; above 1420 nothing is gained. */
+        val MTU_RANGE = 1180..1420
+        /** The automatic retry value: middle of the 1180–1220 band that survives Iranian mobile carriers. */
+        const val MTU_RETRY = 1200
+        const val MTU_ENV = "AETHER_WG_MTU"
+        fun validMtu(value: String): Boolean = value.isBlank() ||
+            (value.trim().all { it in '0'..'9' } && value.trim().length <= 4 && value.trim().toInt() in MTU_RANGE)
         val apiRoutes = listOf("auto", "native", "oob")
         val relayModes = listOf("off", "chain", "reverse", "only")
         val keyKinds = listOf("all", "wg", "masque", "gool-classic", "mim", "gool")
@@ -112,7 +126,8 @@ data class AetherSettings(
             json.optString("fragmentSize"), json.optString("fragmentDelay"), json.optBoolean("ech"),
             json.optString("apiSni"), json.optString("fingerprint", "chrome"), json.optString("alias"),
             json.optString("exitNode"), json.optString("exitFinalMask"), json.optString("exitDialMode"),
-            json.optString("tor", "off"), json.optString("psiphon", "off"), json.optString("apiRoute", "auto"))
+            json.optString("tor", "off"), json.optString("psiphon", "off"), json.optString("apiRoute", "auto"),
+            json.optString("mtu"))
 
         private fun range(value: String, bounds: IntRange): Boolean {
             if (value.isBlank()) return true

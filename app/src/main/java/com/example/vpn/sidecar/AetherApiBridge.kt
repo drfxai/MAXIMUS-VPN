@@ -13,6 +13,21 @@ import java.io.File
 object AetherApiBridge {
     internal const val INCOMPATIBLE_OOB = "Forced Direct OOB account access is incompatible with the selected exit or relay"
 
+    /**
+     * Fixed, non-sensitive reason: both WARP account hosts failed TLS through Direct OOB and this carrier has
+     * no saved identity, so the native engine would only wait out its whole window on the same blocked
+     * registration (seen on Irancell: TLS_HANDSHAKE_FAILED, then a 180 s "gateway scan" timeout). A carrier
+     * with a saved identity still starts: Aether reuses it when the account refresh cannot be reached.
+     */
+    const val UNREACHABLE_WITHOUT_IDENTITY =
+        "WARP API registration failed: account API unreachable (TLS) on this network and no saved identity for this carrier"
+
+    /** Whether to stop before the native engine starts: probe failed, nothing saved, automatic route only. */
+    fun failFastWithoutIdentity(apiRoute: String, apiReachable: Boolean, hasIdentity: Boolean): Boolean =
+        apiRoute == "auto" && !apiReachable && !hasIdentity
+
+    private class NoIdentity : IllegalStateException(UNREACHABLE_WITHOUT_IDENTITY)
+
     fun allowed(options: AetherSettings) = options.apiRoute != "native" &&
         !BuiltinExitNode.needed(options) && options.tor == "off" && options.psiphon == "off"
 
@@ -87,8 +102,12 @@ object AetherApiBridge {
             check(process.awaitReady(launch.readyTimeoutMs)) { "Direct API bridge did not start" }
             val endpoint = Socks5.Endpoint("127.0.0.1", context.socksPort, context.socksUser, context.socksPass)
             if (!apiTlsReachable(options, endpoint) || !process.isAlive) {
+                if (failFastWithoutIdentity(options.apiRoute, apiReachable = false, hasIdentity = hasStoredKeys(profile))) {
+                    XrayLogManager.i("BUILTIN", "aether/api · WARP API TLS unreachable via Direct OOB and no saved identity for ${keyKind(profile)}; not starting a registration that cannot finish")
+                    throw NoIdentity()
+                }
                 if (options.apiRoute == "auto") {
-                    XrayLogManager.i("BUILTIN", "aether/api · WARP API TLS unreachable via Direct OOB; trying native API route")
+                    XrayLogManager.i("BUILTIN", "aether/api · WARP API TLS unreachable via Direct OOB; saved identity is reused, trying native API route for its refresh")
                     process.stop()
                     return null
                 }
@@ -101,11 +120,13 @@ object AetherApiBridge {
                 override fun awaitReady(timeoutMs: Long) = process.awaitReady(timeoutMs)
                 override fun stop() { try { account.close() } finally { process.stop() } }
             }
-            XrayLogManager.i("BUILTIN", "aether/api · account HTTPS uses Android TLS through Direct OOB; registration still pending")
+            XrayLogManager.i("BUILTIN", "aether/api · account HTTPS reachable; account calls use Android TLS through Direct OOB" +
+                if (hasStoredKeys(profile)) " (saved identity)" else " (new identity will be registered)")
             return BuiltinExitNode.Started(owner,
                 "socks5://${context.socksUser}:${context.socksPass}@127.0.0.1:${context.socksPort}", account.address, account.token)
         } catch (e: Throwable) {
             started?.stop()
+            if (e is NoIdentity) throw IllegalStateException(UNREACHABLE_WITHOUT_IDENTITY)
             if (options.apiRoute == "auto" && e is Exception && e !is InterruptedException &&
                 e !is java.util.concurrent.CancellationException) {
                 XrayLogManager.i("BUILTIN", "aether/api · Direct OOB bootstrap unavailable; using native API route")

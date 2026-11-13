@@ -181,10 +181,12 @@ class VpnViewModel(
             }
             VpnController.stopVpn(context)
         } else {
-            // The power button connects the config selected in Nodes and only that one; Smart Connect is
-            // the separate button that searches.
+            // The power button connects the config selected in Nodes first. With "Power button fallback" on
+            // (default) a config that carries no real traffic hands over to failover and the recovery engines;
+            // off, only that config is started. Smart Connect stays the separate button that compares paths.
             val targetProfile = selectedProfile.value ?: smartRecommendation.value?.profile
-            startOrRequestPermission(context, targetProfile, exact = true) { intent ->
+            startOrRequestPermission(context, targetProfile,
+                exact = com.example.vpn.safety.PowerButtonPolicy.exact(settingsRepository.getSettings())) { intent ->
                 onRequestPermission?.invoke(intent)
             }
         }

@@ -26,11 +26,17 @@ object ConnectionEngineRunner {
         !force && !alreadyEscalated
 
     /**
-     * Limit automatic Aether recovery when this network has already said no: freshly observed blocked
-     * Cloudflare TLS with usable UDP, or this carrier failed here in the last half hour (the network
-     * reading only lasts ten minutes, the failure memory longer, so a second tap or a test does not
-     * pay three full 180-second gateway scans again). Manual/pinned modes keep their full window; a
-     * ready SOCKS port alone still never counts as verified traffic.
+     * Readiness windows for automatic Aether carriers. Every attempt on the same link gets the same window:
+     * the windows used to shrink from retry to retry (180 s, then 65 s, then 40 s), so a carrier that needed
+     * a full gateway scan could never finish on a second try, and the first try on a Cloudflare-filtered link
+     * (measured by the LAB, cf=0 with UDP answering) still paid the full 180 s per MASQUE carrier.
+     *
+     * - Cloudflare TLS filtered with UDP answering: fixed per-carrier windows ([FILTERED_BUDGET_MS]).
+     *   H2 MASQUE is TLS over TCP to Cloudflare, exactly what the probe saw fail, so it gets the shortest.
+     * - A carrier that failed here in the last half hour on a link that is not (or no longer) measured as
+     *   filtered: [RETRY_FLOOR_MS], never less, so a retry can still complete a scan.
+     * - Manual/pinned carriers and other engines keep the engine's own window.
+     * A ready SOCKS port alone still never counts as verified traffic.
      */
     fun readinessBudgetMs(
         engineId: String, automatic: Boolean, filteredTlsWithUdp: Boolean,
@@ -39,16 +45,83 @@ object ConnectionEngineRunner {
         engineId != AetherSidecar.ID || !automatic -> defaultMs
         // WARP inside WARP is only ever an automatic follow-up to a WireGuard handshake whose data was blocked.
         carrier == "wiw" -> minOf(defaultMs, WIW_BUDGET_MS)
-        // H2 MASQUE is TLS over TCP to Cloudflare: exactly what the probe saw fail. It still gets a
-        // short try (fragmentation can pass), but not the full gateway scan the UDP carriers need.
-        filteredTlsWithUdp || failedHere ->
-            minOf(defaultMs, when (carrier) { "wireguard" -> 75_000L; "h2" -> H2_BLOCKED_TLS_BUDGET_MS; else -> 65_000L })
+        filteredTlsWithUdp -> minOf(defaultMs, FILTERED_BUDGET_MS[carrier] ?: FILTERED_DEFAULT_BUDGET_MS)
+        failedHere -> minOf(defaultMs, RETRY_FLOOR_MS)
         else -> defaultMs
     }
 
+    /** Fixed windows on a measured Cloudflare-filtered link (same on the first try and on every retry). */
+    val FILTERED_BUDGET_MS = mapOf("wireguard" to 75_000L, "h3" to 75_000L, "h2" to 60_000L)
+    const val FILTERED_DEFAULT_BUDGET_MS = 75_000L
+    const val RETRY_FLOOR_MS = 90_000L
+
     const val WIW_BUDGET_MS = 90_000L
 
-    const val H2_BLOCKED_TLS_BUDGET_MS = 40_000L
+    const val H2_BLOCKED_TLS_BUDGET_MS = 60_000L
+
+    /**
+     * What the LAB measured on the *current* physical link that matters to Aether, shared by Connect, the
+     * Connections page test and the LAB engine probe (the latter two used to pass nothing, so a test on a
+     * cf=0 link spent two full 180 s MASQUE scans before WireGuard was even tried).
+     */
+    data class LinkHints(val ipv4Only: Boolean = false, val cloudflareFiltered: Boolean = false)
+
+    fun linkHints(measured: com.example.vpn.smart.NetworkCapabilityProfile?): LinkHints {
+        val m = measured ?: return LinkHints()
+        return LinkHints(
+            ipv4Only = m.ipv4Available == true && m.ipv6Available == false,
+            // Cloudflare's TLS (or Cloudflare itself) failed while UDP abroad answered: MASQUE is the carrier
+            // the probe saw fail, WireGuard is still worth a try. Only a measured failure counts, never a guess.
+            cloudflareFiltered = m.udpAvailable == true &&
+                (m.cloudflareIpv4Tls == false || m.cloudflareReachable == false)
+        )
+    }
+
+    /** Method name of the obfuscated WireGuard retry, recorded so a verified result is reused next time. */
+    const val WIREGUARD_NOIZE = "wireguard-noize"
+
+    /** The obfuscation profile used for the retry: Aether's strongest pre-handshake junk-packet profile. */
+    const val WIREGUARD_NOIZE_PROFILE = "gfw"
+
+    /**
+     * WireGuard's handshake passed but no HTTPS came back, with the default obfuscation: try WireGuard once
+     * more with Aether's GFW junk-packet profile and a fresh endpoint/port scan (no quick reconnect to the
+     * endpoint that just carried nothing) before WARP-in-WARP. Aether's own profile fallback only changes
+     * obfuscation when the *handshake* fails, so without this it never tries a stronger profile on a link
+     * that lets handshakes through and drops the data afterwards (the Irancell pattern). Never for a user's
+     * own obfuscation choice, a reverse relay, or twice.
+     */
+    fun obfuscatedWireGuardFollowUp(engineId: String, automatic: Boolean, carrier: String, noize: String,
+                                    alreadyQueued: Boolean, reverseRelay: Boolean): Boolean =
+        engineId == AetherSidecar.ID && automatic && carrier == "wireguard" && noize == "auto" &&
+            !alreadyQueued && !reverseRelay
+
+    fun obfuscatedWireGuard(candidate: VlessProfile): VlessProfile = candidate.copy(extraSettings =
+        org.json.JSONObject(candidate.extraSettings).put("carrier", "wireguard").put("noize", WIREGUARD_NOIZE_PROFILE)
+            .put("rescan", true).put(NOIZE_FOLLOW_UP, true).toString())
+
+    internal const val NOIZE_FOLLOW_UP = "noizeFollowUp"
+
+    /** Method name of the reduced-MTU WireGuard retry, recorded so a verified result is reused next time. */
+    const val WIREGUARD_MTU = "wireguard-mtu"
+    internal const val MTU_FOLLOW_UP = "mtuFollowUp"
+
+    /**
+     * WireGuard's handshake passed (small packets) but no HTTPS came back: the signature of a path that drops
+     * full-size packets, common on mobile carriers that add their own encapsulation. Retry WireGuard once with
+     * a smaller data-plane MTU ([AetherSettings.MTU_RETRY], inside the 1180–1220 band) on the endpoint that just
+     * handshook (quick reconnect, no rescan: the endpoint was fine, the packet size was not). Only when the
+     * user left the MTU on automatic; never for a reverse relay, a manual carrier, or twice.
+     */
+    fun reducedMtuWireGuardFollowUp(engineId: String, automatic: Boolean, carrier: String, mtu: String,
+                                    alreadyQueued: Boolean, reverseRelay: Boolean): Boolean =
+        engineId == AetherSidecar.ID && automatic && carrier == "wireguard" && mtu.isBlank() &&
+            !alreadyQueued && !reverseRelay
+
+    fun reducedMtuWireGuard(candidate: VlessProfile): VlessProfile = candidate.copy(extraSettings =
+        org.json.JSONObject(candidate.extraSettings).put("carrier", "wireguard")
+            .put("mtu", AetherSettings.MTU_RETRY.toString()).put(MTU_FOLLOW_UP, true)
+            .apply { remove(NOIZE_FOLLOW_UP); remove("rescan") }.toString())
 
     /** One line telling the user what to do when Aether found nothing on a link whose Cloudflare TLS is filtered. */
     const val CLOUDFLARE_FILTERED_HINT = "Cloudflare TLS is filtered on this network: Smart Connect can try saved servers, Psiphon or Tor"
@@ -147,11 +220,26 @@ object ConnectionEngineRunner {
                 .joinToString("") { "%02x".format(it) }
         }
         fun method(candidate: VlessProfile) = ProfileExtras.read(candidate).let {
-            if (engine.id == AetherSidecar.ID) it.optString("carrier") else it.optString("variant")
+            if (engine.id == AetherSidecar.ID) {
+                if (it.optBoolean(MTU_FOLLOW_UP)) WIREGUARD_MTU
+                else if (it.optBoolean(NOIZE_FOLLOW_UP)) WIREGUARD_NOIZE else it.optString("carrier")
+            } else it.optString("variant")
         }
         val cacheScope = scope()
-        val choices = candidates(profile, ipv4Only = ipv4Only)
-        val preferred = BuiltinMethodMemory.preferred(cacheScope, choices.map(::method))
+        val baseChoices = candidates(profile, ipv4Only = ipv4Only)
+        // The obfuscated WireGuard retry is not one of the declared carriers, but once it carried HTTPS on
+        // this network it is remembered and tried first next time instead of the plain carrier.
+        val noizeChoice = if (engine.id == AetherSidecar.ID && automatic &&
+            baseChoices.any { method(it) == "wireguard" } &&
+            AetherSettings.read(ProfileExtras.read(profile)).noize == "auto")
+            baseChoices.first { method(it) == "wireguard" }.let(::obfuscatedWireGuard) else null
+        val mtuChoice = if (engine.id == AetherSidecar.ID && automatic &&
+            baseChoices.any { method(it) == "wireguard" } &&
+            AetherSettings.read(ProfileExtras.read(profile)).mtu.isBlank())
+            baseChoices.first { method(it) == "wireguard" }.let(::reducedMtuWireGuard) else null
+        val followUps = listOfNotNull(noizeChoice, mtuChoice)
+        val preferred = BuiltinMethodMemory.preferred(cacheScope, baseChoices.map(::method) + followUps.map(::method))
+        val choices = followUps.firstOrNull { method(it) == preferred }?.let { listOf(it) + baseChoices } ?: baseChoices
         // Keep a previously HTTPS-verified method first. Without such evidence, try WG
         // before long MASQUE gateway scans when fresh physical-link probes show that
         // ordinary Cloudflare TLS is unreachable but UDP is answering.
@@ -163,11 +251,15 @@ object ConnectionEngineRunner {
         val reverseRelay = engine.id == AetherSidecar.ID &&
             AetherSettings.read(ProfileExtras.read(profile)).let { it.tor == "reverse" || it.psiphon == "reverse" }
         var warpInWarpQueued = false
+        var noizeQueued = preferred == WIREGUARD_NOIZE
+        var mtuQueued = preferred == WIREGUARD_MTU
         while (queue.isNotEmpty()) {
             val candidate = queue.removeFirst()
             checkCancellation()
             val extras = ProfileExtras.read(candidate)
-            val name = if (engine.id == AetherSidecar.ID) extras.optString("carrier") else extras.optString("variant")
+            val name = method(candidate)
+            // Native carrier name: budgets and follow-ups are about the transport, not the label.
+            val carrier = if (engine.id == AetherSidecar.ID) extras.optString("carrier") else name
             if (engine.id == AetherSidecar.ID && AetherApiBridge.skipAfterBootstrapFailure(candidate, failedRegistrationKinds)) {
                 record(name, "registration", "SKIP", "account API unavailable; no independent stored identity")
                 continue
@@ -184,7 +276,7 @@ object ConnectionEngineRunner {
                 checkCancellation()
                 stage = "local proxy did not become ready"
                 val ready = process.awaitReady(readinessBudgetMs(
-                    engine.id, automatic, preferWireGuard, name, launch.readyTimeoutMs,
+                    engine.id, automatic, preferWireGuard, carrier, launch.readyTimeoutMs,
                     failedHere = name in recentlyFailed
                 ))
                 checkCancellation()
@@ -236,12 +328,32 @@ object ConnectionEngineRunner {
                 attempts += "$name: $reason"
                 BuiltinMethodMemory.recordFailure(cacheScope, name)
                 if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
-                if (warpInWarpFollowUp(engine.id, automatic, name, handshakePassed = true,
+                // Before WARP-in-WARP: the same WireGuard identity with the strongest junk-packet profile and a
+                // fresh endpoint/port scan. It costs one more WireGuard window and is the cheaper fix when the
+                // censor classifies the flow from its first packets.
+                // Queue order after a plain WireGuard failure: reduced MTU first (same endpoint, quick), then
+                // junk-packet obfuscation with a fresh scan, then the other carriers, WARP-in-WARP last.
+                val obfuscate = obfuscatedWireGuardFollowUp(engine.id, automatic, carrier,
+                        AetherSettings.read(extras).noize, alreadyQueued = noizeQueued, reverseRelay = reverseRelay)
+                if (obfuscate) {
+                    noizeQueued = true
+                    record(WIREGUARD_NOIZE, "queue", "START",
+                        "WireGuard handshake passed but no data came back; retrying with junk-packet obfuscation and a fresh endpoint scan")
+                    queue.addFirst(obfuscatedWireGuard(candidate))
+                }
+                if (reducedMtuWireGuardFollowUp(engine.id, automatic, carrier, AetherSettings.read(extras).mtu,
+                        alreadyQueued = mtuQueued, reverseRelay = reverseRelay)) {
+                    mtuQueued = true
+                    record(WIREGUARD_MTU, "queue", "START",
+                        "WireGuard handshake passed but no data came back; retrying with MTU ${AetherSettings.MTU_RETRY}")
+                    queue.addFirst(reducedMtuWireGuard(candidate))
+                }
+                if (warpInWarpFollowUp(engine.id, automatic, carrier, handshakePassed = true,
                         alreadyQueued = warpInWarpQueued || choices.any { method(it) == "wiw" }, reverseRelay = reverseRelay)) {
                     warpInWarpQueued = true
                     record("wiw", "queue", "START", "WireGuard handshake passed but no data came back; trying WARP inside WARP")
                     queue.addLast(candidate.copy(extraSettings =
-                        org.json.JSONObject(candidate.extraSettings).put("carrier", "wiw").toString()))
+                        org.json.JSONObject(candidate.extraSettings).put("carrier", "wiw").apply { remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP) }.toString()))
                 }
             } catch (e: Exception) {
                 if (e is InterruptedException || e is CancellationException) throw e
@@ -249,11 +361,16 @@ object ConnectionEngineRunner {
                 // Never print arbitrary process exceptions: they may contain profile secrets.
                 // This fixed, non-sensitive preflight error is safe and actionable.
                 val reason = if (engine.id == AetherSidecar.ID &&
-                    e.message in setOf("WARP API TLS unreachable via forced Direct OOB route", AetherApiBridge.INCOMPATIBLE_OOB))
+                    e.message in setOf("WARP API TLS unreachable via forced Direct OOB route", AetherApiBridge.INCOMPATIBLE_OOB,
+                        AetherApiBridge.UNREACHABLE_WITHOUT_IDENTITY))
                     e.message ?: stage else stage
                 record(name, "startup", "FAIL", reason)
                 attempts += "$name: $reason"
                 BuiltinMethodMemory.recordFailure(cacheScope, name)
+                // No saved identity and the account API cannot be reached: every other carrier that also
+                // lacks an identity would wait out its whole window for the same registration.
+                if (engine.id == AetherSidecar.ID && reason == AetherApiBridge.UNREACHABLE_WITHOUT_IDENTITY)
+                    failedRegistrationKinds += AetherApiBridge.API_UNAVAILABLE
             } finally {
                 running?.stop()
             }

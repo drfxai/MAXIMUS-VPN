@@ -130,6 +130,8 @@ class RayVpnService : VpnService() {
 
         private fun newId(): String = java.util.UUID.randomUUID().toString().take(12)
 
+        /** Never a profile id: marks a recovery search that follows an engine's failed carrier search. */
+        internal const val ENGINE_FAILED_MARKER = "__engine-carriers-failed__"
         private val _lockdown = MutableStateFlow(com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.UNKNOWN)
         private val _environment = MutableStateFlow<com.example.vpn.smart.NetworkEnvironment.Report?>(null)
         /** How hostile the network looked at the last connect. */
@@ -878,7 +880,11 @@ class RayVpnService : VpnService() {
             var raced = false
             // What the pre-flight proved (PathGate): a real request failed on the selected path, or an
             // engine that can only be judged after it starts was chosen.
-            var provenDead = initialResolutionFailed
+            // An engine profile (Aether) that just failed its own carrier search in this attempt (see the
+            // NoVerifiedPath recovery below) counts as proven dead, so the recovery stages run for it.
+            val engineCarriersFailed = ENGINE_FAILED_MARKER in exclude &&
+                com.example.vpn.sidecar.Sidecars.isEngineProfile(requestedProfile)
+            var provenDead = initialResolutionFailed || engineCarriersFailed
             // Which stealth alternate carried the traffic, for the route recipe recorded once it is verified.
             var chosenVariant: String? = null
             activeRecovery = null
@@ -984,8 +990,9 @@ class RayVpnService : VpnService() {
                 }
             }
 
-            var firstFailed = initialResolutionFailed
-            if (raceFirst && !raced) {
+            var firstFailed = initialResolutionFailed || engineCarriersFailed
+            // The engine's carriers were all just tried and none carried traffic: not tested again here.
+            if (raceFirst && !raced && !engineCarriersFailed) {
                 // The chosen server alone first, so a working one costs a single request; only when it
                 // carries no traffic are the other servers raced (several kinds of connection per round).
                 showForegroundNotification("Finding the fastest server...")
@@ -1692,6 +1699,15 @@ class RayVpnService : VpnService() {
                     connectLocked(alternate, smart = true, exclude = exclude + requestedProfile.id)
                     return@withContext
                 }
+                // No saved server to move to (a fresh install, or only WARP configured): run the recovery
+                // engines (MASQUE, Psiphon, Tor bridges, chains) instead of stopping at Aether's failure.
+                // The search starts from this same Aether profile already marked as failed, so PathGate never
+                // restarts it blindly and the attempt ends cleanly if nothing carries a real request.
+                XrayLogManager.w("SMART", "Aether carries no verified traffic and no saved server is available; trying recovery engines.")
+                showForegroundNotification("Aether failed; trying recovery engines...")
+                connectLocked(requestedProfile, smart = smart,
+                    exclude = exclude + requestedProfile.id + ENGINE_FAILED_MARKER)
+                return@withContext
             }
             if (fallbackFromDirect(requestedProfile)) return@withContext
             if (protectionRequested) showForegroundNotification("Traffic blocked: connection failed")
@@ -1799,6 +1815,7 @@ class RayVpnService : VpnService() {
                 sidecar = kept.engine
                 XrayLogManager.i("VPN", "Engine ${engine.id} kept running from the recovery test; no second start-up")
                 watchSidecar(engine, kept.engine)
+                registerWarpThroughCarrier(engine.id, kept.engine, kept.context, kept.launch, settings)
                 return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, kept.context, kept.launch)
             }
             val executable = com.example.vpn.sidecar.Sidecars.executable(engine)
@@ -1823,10 +1840,10 @@ class RayVpnService : VpnService() {
                     com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService),
                     System.currentTimeMillis())
             else null
-            val ipv4Only = measured?.ipv4Available == true && measured?.ipv6Available == false
-            val preferWireGuard = measured?.udpAvailable == true &&
-                measured?.cloudflareIpv4Tls == false && measured?.internationalReachable == false &&
-                (measured?.internationalTried ?: 0) >= 2
+            // Same reading for Connect, the Connections page test and the LAB probe (ConnectionEngineRunner.linkHints).
+            val hints = com.example.vpn.connections.ConnectionEngineRunner.linkHints(measured)
+            val ipv4Only = hints.ipv4Only
+            val preferWireGuard = hints.cloudflareFiltered
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard,
                 cancelled = { connectionOwner?.isActive == false }) else null
@@ -1850,7 +1867,45 @@ class RayVpnService : VpnService() {
             com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
             XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
             watchSidecar(engine, process)
+            registerWarpThroughCarrier(engine.id, process, context, launch, settings)
             return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(started?.profile ?: profile, context, launch)
+    }
+
+    /**
+     * Psiphon or Tor carries this connection: once it is verified, register the WireGuard WARP identities
+     * through it when none is saved, so a later session on a Cloudflare-filtered network (cf=0) can start
+     * WireGuard straight away (AetherIdentityRegistrar). Background, once per 6 h at most, abandoned as soon as
+     * this engine stops being the connection's engine.
+     */
+    private fun registerWarpThroughCarrier(engineId: String, watched: com.example.vpn.sidecar.RunningEngine,
+                                           context: com.example.vpn.sidecar.SidecarContext,
+                                           launch: com.example.vpn.sidecar.SidecarLaunch, settings: AppSettings) {
+        if (engineId !in com.example.vpn.sidecar.AetherIdentityRegistrar.CARRIER_ENGINES) return
+        val upstream = runCatching {
+            com.example.vpn.sidecar.AetherIdentityRegistrar.upstream(context.socksPort,
+                context.socksUser.takeIf { launch.socksAuth }, context.socksPass.takeIf { launch.socksAuth })
+        }.getOrNull() ?: return
+        serviceScope.launch(Dispatchers.IO) {
+            fun current() = sidecar === watched && watched.isAlive
+            var waited = 0L
+            while (isActive && current() && _vpnState.value.status != ConnectionStatus.CONNECTED && waited < 300_000L) {
+                delay(2_000); waited += 2_000
+            }
+            if (!isActive || !current() || _vpnState.value.status != ConnectionStatus.CONNECTED) return@launch
+            delay(com.example.vpn.sidecar.AetherIdentityRegistrar.SETTLE_MS)
+            if (!current() || _vpnState.value.status != ConnectionStatus.CONNECTED) return@launch
+            try {
+                com.example.vpn.sidecar.AetherIdentityRegistrar.lock.withLock {
+                    kotlinx.coroutines.runInterruptible {
+                        com.example.vpn.sidecar.AetherIdentityRegistrar.registerThroughCarrier(engineId, upstream, settings,
+                            stillValid = { current() && _vpnState.value.status == ConnectionStatus.CONNECTED })
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                XrayLogManager.w("BUILTIN", "aether/keys · registration through $engineId could not run: ${e.javaClass.simpleName}")
+            }
+        }
     }
     /**
      * Before a CottenDNS engine starts: one plain DNS question to each of its resolvers (up to four, at once),

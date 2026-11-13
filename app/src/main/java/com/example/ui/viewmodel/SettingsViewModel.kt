@@ -64,6 +64,12 @@ class SettingsViewModel(
         settingsRepository.updateSettings(current.copy(autoFailoverEnabled = enabled))
     }
 
+    fun setPowerButtonFallback(enabled: Boolean) {
+        val current = settingsRepository.getSettings()
+        XrayLogManager.i("SETTINGS", "Power button fallback updated: $enabled")
+        settingsRepository.updateSettings(current.copy(powerButtonFallback = enabled))
+    }
+
     fun setRoutingMode(mode: RoutingMode) {
         val current = settingsRepository.getSettings()
         XrayLogManager.i("SETTINGS", "Routing mode updated: ${current.routingMode.name} -> ${mode.name}")

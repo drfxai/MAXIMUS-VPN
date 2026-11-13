@@ -312,6 +312,12 @@ data class AppSettings(
     val subscriptionUrls: String = "",
     val scoringProfile: ScoringProfile = ScoringProfile.BALANCED,
     val autoFailoverEnabled: Boolean = true,
+    /**
+     * The power button starts the config selected in Nodes first and, only when it carries no real traffic
+     * on this network, lets automatic failover and the recovery engines find another path (subject to
+     * [autoFailoverEnabled] and Trade mode). Off: the power button starts only the selected config, as saved.
+     */
+    val powerButtonFallback: Boolean = true,
     val failoverThresholdMs: Long = 800L,
     val failoverPacketLossThreshold: Double = 30.0,
     val benchmarkConcurrency: Int = 6,

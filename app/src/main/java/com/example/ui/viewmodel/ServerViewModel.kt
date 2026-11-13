@@ -446,8 +446,9 @@ class ServerViewModel(
     val testAllProgress: StateFlow<Pair<Int, Int>> = _testAllProgress.asStateFlow()
 
     /**
-     * Pings every server one at a time, so only one test core runs and the phone stays responsive; each
-     * row updates as its test finishes. [stopTestAll] ends the run.
+     * Pings every server in batches of [com.example.vpn.health.NodeHealth.BATCH] real-delay probes (the probe's
+     * own concurrency limit), about five times faster than one at a time while still bounded; each row updates
+     * as its batch finishes. Afterwards the list is shown fastest first. [stopTestAll] ends the run.
      */
     fun testAllServers() {
         if (_isTestingAll.value) return
@@ -456,25 +457,55 @@ class ServerViewModel(
         _isTestingAll.value = true
         _testAllProgress.value = 0 to currentProfiles.size
         testAllJob = viewModelScope.launch {
+            var done = 0
+            var measured = false
             try {
-                for ((i, profile) in currentProfiles.withIndex()) {
-                    _serverTestingStates.value = _serverTestingStates.value + (profile.id to ServerTestStatus.Testing)
-                    val result = ServerTester.testServer(profile, timeoutMs = 2500)
-                    _serverTestingStates.value = _serverTestingStates.value + (profile.id to result.status)
-                    val latency = when (result.status) {
-                        is ServerTestStatus.Available -> result.status.latencyMs
-                        is ServerTestStatus.Slow -> result.status.latencyMs
-                        else -> null
+                for (batch in com.example.vpn.health.NodeHealth.batches(currentProfiles)) {
+                    _serverTestingStates.value = _serverTestingStates.value + batch.associate { it.id to ServerTestStatus.Testing }
+                    val results = ServerTester.testServers(batch, timeoutMs = 3000)
+                    for (result in results) {
+                        _serverTestingStates.value = _serverTestingStates.value + (result.serverId to result.status)
+                        val latency = when (result.status) {
+                            is ServerTestStatus.Available -> result.status.latencyMs
+                            is ServerTestStatus.Slow -> result.status.latencyMs
+                            else -> null
+                        }
+                        // Not measured (the VPN is on): the last result stays.
+                        if (result.status != ServerTestStatus.Idle) {
+                            measured = true
+                            repository.updateLatency(result.serverId, latency)
+                        }
                     }
-                    // Not measured (the VPN is on): the last result stays.
-                    if (result.status != ServerTestStatus.Idle) repository.updateLatency(profile.id, latency)
-                    _testAllProgress.value = (i + 1) to currentProfiles.size
+                    done += batch.size
+                    _testAllProgress.value = done to currentProfiles.size
                 }
+                if (measured && _sortOption.value == ServerSortOption.DEFAULT) _sortOption.value = ServerSortOption.LATENCY
             } finally {
                 // A stopped run leaves no row spinning.
                 _serverTestingStates.value = _serverTestingStates.value.filterValues { it !is ServerTestStatus.Testing }
                 _isTestingAll.value = false
             }
+        }
+    }
+
+    /** Subscription/free nodes the last "Ping all" proved dead on this network (see NodeHealth.unreachable). */
+    fun unreachableAfterTest(): List<VlessProfile> = com.example.vpn.health.NodeHealth.unreachable(
+        serverList.value, _serverTestingStates.value, selectedProfileId.value)
+
+    /** Removes [unreachableAfterTest] after the user confirmed; [onDone] gets how many were removed. */
+    fun removeUnreachable(onDone: (Int) -> Unit) {
+        val dead = unreachableAfterTest()
+        viewModelScope.launch {
+            var removed = 0
+            for (profile in dead) {
+                runCatching {
+                    if (isFreeConfig(profile)) RayApplication.instance.subscriptionManager.deleteFree(profile) else repository.delete(profile.id)
+                    removed++
+                }.onFailure { XrayLogManager.w("UI", "Could not remove an unreachable node: ${it.message}") }
+            }
+            _serverTestingStates.value = _serverTestingStates.value - dead.map { it.id }.toSet()
+            XrayLogManager.i("UI", "Removed $removed unreachable subscription nodes after Ping All.")
+            onDone(removed)
         }
     }
 

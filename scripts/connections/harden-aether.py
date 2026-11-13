@@ -204,5 +204,33 @@ replace('lib.rs', 'let tunnel = upstream::Upstream::parse(&format!("socks5h://{t
 replace('lib.rs', '    let setting = format!("socks5://{socks}");', '''    let setting = if name == "tor" {
         upstream::maximus_loopback_proxy(socks)
     } else { format!("socks5://{socks}") };''')
+# WireGuard data-plane MTU chosen by the app for links whose WireGuard handshake passes but whose
+# full-size packets are dropped (common on Iranian mobile carriers). AETHER_WG_MTU accepts 1180-1420;
+# unset or out of range keeps upstream's 1280. The inner WARP-in-WARP hop always fits inside the outer.
+replace('lib.rs', 'const H2_TUNNEL_MTU: usize = 1500;', '''const H2_TUNNEL_MTU: usize = 1500;
+
+fn maximus_wg_mtu() -> usize {
+    std::env::var("AETHER_WG_MTU")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|mtu| (1180..=1420).contains(mtu))
+        .unwrap_or(TUNNEL_MTU)
+}
+
+fn maximus_wg_inner_mtu() -> usize {
+    INNER_MTU.min(maximus_wg_mtu().saturating_sub(80))
+}''')
+replace('lib.rs', '''        TUNNEL_MTU,
+        inbound_rx,
+        outbound_tx,
+    )?;''', '''        maximus_wg_mtu(),
+        inbound_rx,
+        outbound_tx,
+    )?;
+    eprintln!("MAXIMUS_AETHER_WG_MTU:{}", maximus_wg_mtu());''')
+replace('lib.rs', 'establish_wg(&primary, peer, TUNNEL_MTU, true, 5, "outer")',
+        'establish_wg(&primary, peer, maximus_wg_mtu(), true, 5, "outer")')
+replace('lib.rs', 'establish_wg(&secondary, forwarder, INNER_MTU, false, 20, "inner")',
+        'establish_wg(&secondary, forwarder, maximus_wg_inner_mtu(), false, 20, "inner")')
 (root / 'MAXIMUS_POLICY').write_text('WARP API: CA + hostname; MASQUE: mandatory upstream SPKI pins\n')
 print('Aether authenticated registration and gateway pin policy applied')

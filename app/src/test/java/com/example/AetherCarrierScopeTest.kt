@@ -30,19 +30,74 @@ class AetherCarrierScopeTest {
 
     @Test fun blockedLinkAutomaticScanDoesNotBlockOtherCarriersForThreeMinutes() {
         val budget: (String, Boolean, Boolean, String, Long) -> Long = ConnectionEngineRunner::readinessBudgetMs
-        assertEquals(40_000L, budget("aether", true, true, "h2", 180_000L))
-        assertEquals(65_000L, budget("aether", true, true, "h3", 180_000L))
+        assertEquals(60_000L, budget("aether", true, true, "h2", 180_000L))
+        assertEquals(75_000L, budget("aether", true, true, "h3", 180_000L))
         assertEquals(75_000L, budget("aether", true, true, "wireguard", 180_000L))
         assertEquals(180_000L, budget("aether", false, true, "h2", 180_000L))
         assertEquals(180_000L, budget("aether", true, false, "h2", 180_000L))
         assertEquals(180_000L, budget("serverless", true, true, "fragA", 180_000L))
         assertEquals(30_000L, budget("aether", true, true, "h2", 30_000L))
-        // A carrier that failed here recently gets the short window even after the network reading expired.
-        assertEquals(40_000L, ConnectionEngineRunner.readinessBudgetMs("aether", true, false, "h2", 180_000L, failedHere = true))
-        assertEquals(65_000L, ConnectionEngineRunner.readinessBudgetMs("aether", true, false, "h3", 180_000L, failedHere = true))
-        assertEquals(75_000L, ConnectionEngineRunner.readinessBudgetMs("aether", true, false, "wireguard", 180_000L, failedHere = true))
-        assertEquals(180_000L, ConnectionEngineRunner.readinessBudgetMs("aether", false, false, "h2", 180_000L, failedHere = true))
         assertEquals(90_000L, ConnectionEngineRunner.readinessBudgetMs("aether", true, false, "wiw", 180_000L))
+    }
+
+    @Test fun retriesNeverShrinkBelowAScanThatCanFinish() {
+        // Same window on the first try and on every retry of a filtered link (it used to go 180 → 65 → 40 s).
+        for (carrier in listOf("h2", "h3", "wireguard")) {
+            val first = ConnectionEngineRunner.readinessBudgetMs("aether", true, true, carrier, 180_000L, failedHere = false)
+            val retry = ConnectionEngineRunner.readinessBudgetMs("aether", true, true, carrier, 180_000L, failedHere = true)
+            assertEquals(first, retry)
+        }
+        // A recent failure on a link that is not measured as filtered keeps a floor that a scan can finish in.
+        for (carrier in listOf("h2", "h3", "wireguard")) {
+            assertEquals(ConnectionEngineRunner.RETRY_FLOOR_MS,
+                ConnectionEngineRunner.readinessBudgetMs("aether", true, false, carrier, 180_000L, failedHere = true))
+        }
+        assertEquals(180_000L, ConnectionEngineRunner.readinessBudgetMs("aether", false, false, "h2", 180_000L, failedHere = true))
+    }
+
+    @Test fun linkHintsComeOnlyFromMeasuredFailures() {
+        val p = com.example.vpn.smart.NetworkCapabilityProfile(transport = "cellular", ipv4Available = true, ipv6Available = false,
+            udpAvailable = true, cloudflareReachable = false, measuredAt = 1)
+        assertEquals(ConnectionEngineRunner.LinkHints(ipv4Only = true, cloudflareFiltered = true), ConnectionEngineRunner.linkHints(p))
+        assertTrue(ConnectionEngineRunner.linkHints(p.copy(cloudflareReachable = null, cloudflareIpv4Tls = false)).cloudflareFiltered)
+        // UDP not answering: WireGuard is no better than MASQUE, nothing is reordered.
+        assertFalse(ConnectionEngineRunner.linkHints(p.copy(udpAvailable = false)).cloudflareFiltered)
+        assertFalse(ConnectionEngineRunner.linkHints(p.copy(cloudflareReachable = null)).cloudflareFiltered)
+        assertFalse(ConnectionEngineRunner.linkHints(p.copy(ipv6Available = null)).ipv4Only)
+        assertEquals(ConnectionEngineRunner.LinkHints(), ConnectionEngineRunner.linkHints(null))
+    }
+
+    @Test fun obfuscatedWireGuardRetryOnlyFollowsDefaultObfuscation() {
+        fun follow(carrier: String = "wireguard", noize: String = "auto", queued: Boolean = false,
+                   reverse: Boolean = false, automatic: Boolean = true, engine: String = "aether") =
+            ConnectionEngineRunner.obfuscatedWireGuardFollowUp(engine, automatic, carrier, noize, queued, reverse)
+        assertTrue(follow())
+        assertFalse(follow(carrier = "h2"))
+        assertFalse(follow(carrier = "wiw"))
+        assertFalse(follow(noize = "gfw"))
+        assertFalse(follow(noize = "light"))
+        assertFalse(follow(queued = true))
+        assertFalse(follow(reverse = true))
+        assertFalse(follow(automatic = false))
+        assertFalse(follow(engine = "serverless"))
+        val retry = ConnectionEngineRunner.obfuscatedWireGuard(AetherSidecar.profile("auto", "ipv4"))
+        val extras = ProfileExtras.read(retry)
+        assertEquals("wireguard", extras.optString("carrier"))
+        assertEquals("gfw", extras.optString("noize"))
+        assertTrue(extras.optBoolean("rescan"))
+        assertEquals("ipv4", extras.optString("family"))
+        val args = AetherSettings.read(extras).arguments("wireguard", true)
+        assertEquals("gfw", args[args.indexOf("--noize") + 1])
+        assertNull(AetherSidecar.problem(retry))
+    }
+
+    @Test fun missingIdentityFailsFastOnlyOnTheAutomaticRouteWithBlockedApi() {
+        assertTrue(com.example.vpn.sidecar.AetherApiBridge.failFastWithoutIdentity("auto", apiReachable = false, hasIdentity = false))
+        assertFalse(com.example.vpn.sidecar.AetherApiBridge.failFastWithoutIdentity("auto", apiReachable = false, hasIdentity = true))
+        assertFalse(com.example.vpn.sidecar.AetherApiBridge.failFastWithoutIdentity("auto", apiReachable = true, hasIdentity = false))
+        assertFalse(com.example.vpn.sidecar.AetherApiBridge.failFastWithoutIdentity("native", apiReachable = false, hasIdentity = false))
+        // The fixed reason is recognised as a blocked bootstrap, so carriers without a saved identity are skipped.
+        assertTrue(com.example.vpn.sidecar.AetherApiBridge.bootstrapBlocked(com.example.vpn.sidecar.AetherApiBridge.UNREACHABLE_WITHOUT_IDENTITY))
     }
 
     @Test fun warpInWarpFollowsOnlyABlockedWireGuardHandshake() {
