@@ -26,18 +26,27 @@ object ConnectionEngineRunner {
         !force && !alreadyEscalated
 
     /**
-     * Limit only automatic Aether recovery on freshly observed blocked Cloudflare TLS + usable UDP.
-     * Avoid three 180-second gateway scans before smart fallback. Manual/pinned modes retain their
-     * full startup window; a successful SOCKS port alone still never counts as verified traffic.
+     * Limit automatic Aether recovery when this network has already said no: freshly observed blocked
+     * Cloudflare TLS with usable UDP, or this carrier failed here in the last half hour (the network
+     * reading only lasts ten minutes, the failure memory longer, so a second tap or a test does not
+     * pay three full 180-second gateway scans again). Manual/pinned modes keep their full window; a
+     * ready SOCKS port alone still never counts as verified traffic.
      */
     fun readinessBudgetMs(
         engineId: String, automatic: Boolean, filteredTlsWithUdp: Boolean,
-        carrier: String, defaultMs: Long
-    ): Long = if (engineId == AetherSidecar.ID && automatic && filteredTlsWithUdp) {
-        // H2 MASQUE is TLS over TCP to Cloudflare: exactly what the probe just saw fail. It still gets a
+        carrier: String, defaultMs: Long, failedHere: Boolean = false
+    ): Long = when {
+        engineId != AetherSidecar.ID || !automatic -> defaultMs
+        // WARP inside WARP is only ever an automatic follow-up to a WireGuard handshake whose data was blocked.
+        carrier == "wiw" -> minOf(defaultMs, WIW_BUDGET_MS)
+        // H2 MASQUE is TLS over TCP to Cloudflare: exactly what the probe saw fail. It still gets a
         // short try (fragmentation can pass), but not the full gateway scan the UDP carriers need.
-        minOf(defaultMs, when (carrier) { "wireguard" -> 75_000L; "h2" -> H2_BLOCKED_TLS_BUDGET_MS; else -> 65_000L })
-    } else defaultMs
+        filteredTlsWithUdp || failedHere ->
+            minOf(defaultMs, when (carrier) { "wireguard" -> 75_000L; "h2" -> H2_BLOCKED_TLS_BUDGET_MS; else -> 65_000L })
+        else -> defaultMs
+    }
+
+    const val WIW_BUDGET_MS = 90_000L
 
     const val H2_BLOCKED_TLS_BUDGET_MS = 40_000L
 
@@ -57,9 +66,26 @@ object ConnectionEngineRunner {
                 else -> 2
             }
         }, {
-            // Among the rest keep the declared order, but on a filtered link put H2 (TCP TLS) after H3.
-            if (preferWireGuard && it.value == "h2") methods.size else it.index
+            // Among the rest keep the declared order, but on a filtered link (measured, or H2 just failed
+            // here) put WireGuard first and H2 (TCP TLS) after H3: WireGuard answers or fails fastest.
+            val filtered = preferWireGuard || "h2" in recentlyFailed
+            when {
+                filtered && it.value == "wireguard" -> -1
+                filtered && it.value == "h2" -> methods.size
+                else -> it.index
+            }
         })).map { it.value }
+
+    /**
+     * WARP inside WARP (gool-classic), tried once, automatically, when the WireGuard handshake passed but
+     * no HTTPS came back through it: the pattern of a censor that lets WireGuard handshakes through and
+     * then blocks the data (the case Oblivion's and PattNG's "gool" exist for). Never for a reverse relay,
+     * which needs MASQUE over HTTP/2, and never twice.
+     */
+    fun warpInWarpFollowUp(engineId: String, automatic: Boolean, carrier: String, handshakePassed: Boolean,
+                           alreadyQueued: Boolean, reverseRelay: Boolean): Boolean =
+        engineId == AetherSidecar.ID && automatic && carrier == "wireguard" && handshakePassed &&
+            !alreadyQueued && !reverseRelay
 
     fun candidates(profile: VlessProfile, ipv4Only: Boolean = false): List<VlessProfile> {
         val e = ProfileExtras.read(profile)
@@ -133,7 +159,12 @@ object ConnectionEngineRunner {
         val rank = order(choices.map(::method), preferred, preferWireGuard, recentlyFailed)
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
         val failedRegistrationKinds = mutableSetOf<String>()
-        for (candidate in ordered) {
+        val queue = ArrayDeque(ordered)
+        val reverseRelay = engine.id == AetherSidecar.ID &&
+            AetherSettings.read(ProfileExtras.read(profile)).let { it.tor == "reverse" || it.psiphon == "reverse" }
+        var warpInWarpQueued = false
+        while (queue.isNotEmpty()) {
+            val candidate = queue.removeFirst()
             checkCancellation()
             val extras = ProfileExtras.read(candidate)
             val name = if (engine.id == AetherSidecar.ID) extras.optString("carrier") else extras.optString("variant")
@@ -153,7 +184,8 @@ object ConnectionEngineRunner {
                 checkCancellation()
                 stage = "local proxy did not become ready"
                 val ready = process.awaitReady(readinessBudgetMs(
-                    engine.id, automatic, preferWireGuard, name, launch.readyTimeoutMs
+                    engine.id, automatic, preferWireGuard, name, launch.readyTimeoutMs,
+                    failedHere = name in recentlyFailed
                 ))
                 checkCancellation()
                 if (!ready) {
@@ -204,6 +236,13 @@ object ConnectionEngineRunner {
                 attempts += "$name: $reason"
                 BuiltinMethodMemory.recordFailure(cacheScope, name)
                 if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
+                if (warpInWarpFollowUp(engine.id, automatic, name, handshakePassed = true,
+                        alreadyQueued = warpInWarpQueued || choices.any { method(it) == "wiw" }, reverseRelay = reverseRelay)) {
+                    warpInWarpQueued = true
+                    record("wiw", "queue", "START", "WireGuard handshake passed but no data came back; trying WARP inside WARP")
+                    queue.addLast(candidate.copy(extraSettings =
+                        org.json.JSONObject(candidate.extraSettings).put("carrier", "wiw").toString()))
+                }
             } catch (e: Exception) {
                 if (e is InterruptedException || e is CancellationException) throw e
                 checkCancellation()
