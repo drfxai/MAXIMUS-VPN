@@ -1801,10 +1801,10 @@ class RayVpnService : VpnService() {
                     com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService),
                     System.currentTimeMillis())
             else null
-            val ipv4Only = measured?.ipv4Available == true && measured.ipv6Available == false
+            val ipv4Only = measured?.ipv4Available == true && measured?.ipv6Available == false
             val preferWireGuard = measured?.udpAvailable == true &&
-                measured.cloudflareIpv4Tls == false && measured.internationalReachable == false &&
-                (measured.internationalTried ?: 0) >= 2
+                measured?.cloudflareIpv4Tls == false && measured?.internationalReachable == false &&
+                (measured?.internationalTried ?: 0) >= 2
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard,
                 cancelled = { connectionOwner?.isActive == false }) else null
