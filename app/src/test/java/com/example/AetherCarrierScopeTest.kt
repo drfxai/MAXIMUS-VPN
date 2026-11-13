@@ -186,4 +186,44 @@ class AetherCarrierScopeTest {
         assertFalse(ConnectionEngineRunner.mayRecoverAether(aether = true, smart = false, autoFailover = false,
             exact = false, exitLocked = true, force = false, alreadyEscalated = false, fallback = true))
     }
+
+    @Test fun warpDataBlockedIsRememberedForHoursAndClearedBySuccess() {
+        val store = mutableMapOf<String, String>()
+        val m = com.example.vpn.connections.BuiltinMethodMemory
+        val previousRead = m.read; val previousWrite = m.write
+        m.read = { store[it] }
+        m.write = { k, v -> if (v == null) store.remove(k) else store[k] = v }
+        try {
+            m.recordWarpDataBlocked("net-a", 1_000)
+            assertTrue(m.warpDataBlocked("net-a", 1_000 + 2 * 60 * 60 * 1000L))
+            assertFalse(m.warpDataBlocked("net-b", 2_000))
+            assertFalse(m.warpDataBlocked("net-a", 1_000 + m.BLOCKED_TTL_MS))
+            assertTrue(ConnectionEngineRunner.quickRecheckOnly(listOf("wireguard", "h3", "h2"), null, emptySet(),
+                warpDataBlocked = true))
+            assertFalse("a verified method still wins", ConnectionEngineRunner.quickRecheckOnly(
+                listOf("wireguard", "h3", "h2"), "h3", emptySet(), warpDataBlocked = true))
+            m.clearWarpDataBlocked("net-a")
+            assertFalse(m.warpDataBlocked("net-a", 2_000))
+        } finally {
+            m.read = previousRead; m.write = previousWrite
+        }
+    }
+
+    @Test fun warpThroughVerifiedSavedServerOnlyForAutomaticCarriersWithoutOwnExit() {
+        val plain = AetherSettings()
+        assertTrue(ConnectionEngineRunner.relayEligible(AetherSidecar.ID, true, plain, "fr-reality"))
+        assertFalse(ConnectionEngineRunner.relayEligible(AetherSidecar.ID, true, plain, null))
+        assertFalse(ConnectionEngineRunner.relayEligible(AetherSidecar.ID, false, plain, "fr-reality"))
+        assertFalse(ConnectionEngineRunner.relayEligible(AetherSidecar.ID, true, plain.copy(exitNode = "mine"), "fr-reality"))
+        assertFalse(ConnectionEngineRunner.relayEligible(AetherSidecar.ID, true, plain.copy(psiphon = "chain"), "fr-reality"))
+        assertFalse(ConnectionEngineRunner.relayEligible("serverless", true, plain, "fr-reality"))
+        val profile = com.example.data.model.VlessProfile(id = "aw", name = "AW", address = "", port = 0, uuid = "",
+            extraSettings = org.json.JSONObject().put("carrier", "wireguard").put("noizeFollowUp", true).put("rescan", true).toString())
+        val relayed = org.json.JSONObject(ConnectionEngineRunner.relayed(profile, "h2", "fr-reality").extraSettings)
+        assertEquals("h2", relayed.getString("carrier"))
+        assertEquals("fr-reality", relayed.getString("exitNode"))
+        assertTrue(relayed.getBoolean("relayFollowUp"))
+        assertFalse(relayed.has("noizeFollowUp"))
+        assertFalse(relayed.has("rescan"))
+    }
 }
