@@ -202,6 +202,8 @@ class ConfigRevival(
                 id == "bpb-fragment-original" -> "Fragment v2 + Go TLS"
                 id == "bpb-fragment-v1" -> "Fragment v1 + Go TLS"
                 id == NetworkFirewalls.IRANCELL_PROFILE -> "Irancell fragment + Firefox ciphers"
+                id == com.example.vpn.connectivity.IranHelloSplit.PROFILE_ID -> "Iran ClientHello split before SNI + Go TLS"
+                id == com.example.vpn.connectivity.IranHelloSplit.DEEP_PROFILE_ID -> "Irancell deep fragment (5-byte pieces)"
                 id == "bpb-fragment" -> "Fragment (no empty record) + Go TLS"
                 id.startsWith("fragment-tlshello") -> "ClientHello fragments"
                 id.startsWith("fingerprint-") -> "${id.removePrefix("fingerprint-").replaceFirstChar { it.uppercase() }} fingerprint"

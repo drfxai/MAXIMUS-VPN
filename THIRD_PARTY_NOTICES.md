@@ -551,6 +551,23 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 - Reproduction and complete corresponding source: `scripts/engines/matrix-transport.sh`, `scripts/transport/harden-source.py`, and `MatrixTransport-source.tar.gz` accompanying releases that contain this executable.
 - Upstream copyright, license and trademark notices are preserved in the source archive. No affiliation or endorsement is implied. No upstream logo or branding is used.
 
+## UAC SNI Spoofer Android — Irancell/MCI connection logic (2026-11-14)
+
+- Upstream: https://github.com/Floxu1/UAC-SNI-Spoofer-Android at commit `200de3b` (2.1.2). Copied and adapted with
+  the authorization of the MAXIMUS VPN repository owner; the upstream Android app source carries no separate license
+  file (its `core/aether` is AGPL-3.0-only, see above). No upstream branding, artwork, servers or credentials are used.
+- Adapted logic (rewritten in Kotlin for MAXIMUS's own engines):
+  - Iran ClientHello split (`MciConfig.IRAN_HELLO_FINALMASK`, `TLS_FINGERPRINT`/`TLS_CIPHER_SUITES`) and the Irancell
+    deep fragment (`IRANCELL_EDGE` maxSplit 100) → `app/src/main/java/com/example/vpn/connectivity/IranHelloSplit.kt`,
+    recovery profiles in `RecoveryProfile.kt`, operator order in `NetworkFirewalls.kt`.
+  - Saved clean HTTP/2 gateways (`PowCoreConfig.cleanH2File`, core `remember/forget_clean_h2`) →
+    `app/src/main/java/com/example/vpn/connections/CleanH2PeerMemory.kt` (per network instead of global).
+  - Screen-on warm-up (`UacVpnService.maybePrewarm`) and clean-HTTP/2 speed pick →
+    `app/src/main/java/com/example/vpn/connections/AetherPrewarm.kt` and `AetherPrewarmMonitor.kt`.
+  - MCI outer plan (MASQUE HTTP/2 with the full ClientHello first; split-hello HTTP/2 as a separate recipe) →
+    `ConnectionEngineRunner.MCI_LADDER` / `operatorVariants`.
+- No affiliation or endorsement is implied.
+
 ## Public WebTunnel bridge metadata
 
 - Bootstrap bridge lines from the user-supplied UAC-SNI-Spoofer-Android source archive, revision b784ebd149336f4463906509738d354dd9850e23, app/src/main/assets/tor/bridges-webtunnel.txt.

@@ -58,6 +58,9 @@ object AetherSidecar : SidecarEngine {
         }
         command += when (e.optString("family", "auto")) { "ipv4" -> "-4"; "ipv6" -> "-6"; else -> "--dual" }
         command += advanced.arguments(carrier, e.optBoolean("fragment", true))
+        // A gateway that carried verified HTTP/2 on this network before (CleanH2PeerMemory): dial it directly,
+        // skipping the scan (--peer), and send the HTTP/2 transport to the same address (--h2-peer).
+        cleanH2Peer(e, carrier, advanced)?.let { command += listOf("--peer", it, "--h2-peer", it) }
         if (advanced.tor != "off") {
             command += when (advanced.tor) { "chain" -> "--tor"; "reverse" -> "--tor-reverse"; else -> "--tor-only" }
             if (advanced.tor != "only") command += listOf("--tor-bind",
@@ -70,6 +73,7 @@ object AetherSidecar : SidecarEngine {
             "MAXIMUS_SOCKS_PASS" to context.socksPass, "AETHER_TLS_VERIFY" to "1", "RUST_LOG" to "warn",
             "LD_LIBRARY_PATH" to context.executable.parentFile!!.absolutePath)
         environment += advanced.environment(carrier)
+        if (sniSplit(e, carrier)) environment[com.example.vpn.connectivity.IranHelloSplit.AETHER_SNI_SPLIT_ENV] = "1"
         if (advanced.psiphon != "off") {
             val binary = Sidecars.ENGINES.first { it.id == PsiphonSidecar.ID }.let(Sidecars::executable)
                 ?: error("The Psiphon runtime is missing")
@@ -113,6 +117,39 @@ object AetherSidecar : SidecarEngine {
             try { api?.running?.stop() } finally { exit?.running?.stop() }
             throw e
         }
+    }
+
+    /** Extras key: the remembered clean HTTP/2 gateway to dial (set only by the session runner). */
+    const val CLEAN_H2_PEER = "cleanH2Peer"
+    /** Extras key: split the first HTTP/2 TLS write inside the server name (Iranian carriers). */
+    const val SNI_SPLIT = "sniSplit"
+
+    internal fun cleanH2Peer(e: JSONObject, carrier: String, advanced: AetherSettings): String? =
+        e.optString(CLEAN_H2_PEER).takeIf { carrier == "h2" && advanced.endpoint.isBlank() && advanced.exitNode.isBlank() &&
+            com.example.vpn.connections.CleanH2PeerMemory.validPeer(it) }
+
+    /** The SNI split only means something with --fragment, on a carrier that speaks TLS over TCP. */
+    internal fun sniSplit(e: JSONObject, carrier: String): Boolean =
+        e.optBoolean(SNI_SPLIT) && e.optBoolean("fragment", true) && carrier in listOf("h2", "gool", "mim")
+
+    /**
+     * The MASQUE gateway Aether saved as its last HTTP/2 connection (`<identity>-lastconn.toml`, written when a
+     * scanned gateway is put to use), if it was written at or after [sinceMs]. Null for H3/WireGuard sessions,
+     * forced peers (Aether does not save those) and anything unreadable.
+     */
+    fun lastMasqueH2Peer(sinceMs: Long): String? = runCatching {
+        val root = identityDirectory?.invoke() ?: return null
+        val file = File(AetherIdentityStore.current(root), "identity-lastconn.toml")
+        if (!file.isFile || file.lastModified() + 2_000 < sinceMs) return null
+        parseLastConnection(file.readText())
+    }.getOrNull()
+
+    /** `peer = "…"` of a lastconn file whose `carrier = "masque-h2"`. Pure. */
+    fun parseLastConnection(text: String): String? {
+        fun value(key: String) = text.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("$key ") || it.startsWith("$key=") }
+            ?.substringAfter('=')?.trim()?.removeSurrounding("\"")
+        if (value("carrier") != "masque-h2") return null
+        return value("peer")?.takeIf(com.example.vpn.connections.CleanH2PeerMemory::validPeer)
     }
 
     fun trustedRoots(dir: File): File {
