@@ -569,6 +569,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   - First-verified race (`auto/EchKeyResolver.race`: first verified result wins, the rest are cancelled, one
     deadline) → `app/src/main/java/com/example/vpn/connections/FirstVerifiedRace.kt`, used for the Irancell
     MASQUE H3 + WireGuard race in `ConnectionEngineRunner`.
+  - Per-network last-good memory with a TTL (`AdaptiveProfileStore` best/backup routes) and cooling-down entries
+    tested last (`MciRouteSelector`) → `app/src/main/java/com/example/vpn/smart/FreezeBook.kt` (keyed by carrier,
+    3-day TTL, servers frozen at ~16 KB deferred).
+  - Deep-fragment rescue (`AdaptiveCandidatePlanner` "deep-fragment rescue": ClientHello split up to 100 pieces,
+    5 ms apart) → `FreezeFailover.DEEP_FRAGMENT_MASK` in `app/src/main/java/com/example/vpn/smart/FreezeFailover.kt`,
+    the same-server retry after the ~16 KB freeze (ideas re-implemented; no upstream code copied verbatim).
 - No affiliation or endorsement is implied.
 
 ## Public WebTunnel bridge metadata

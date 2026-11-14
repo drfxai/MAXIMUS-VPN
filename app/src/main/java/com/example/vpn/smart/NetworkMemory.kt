@@ -24,7 +24,9 @@ class NetworkMemory(
     loadMtu: () -> String? = { null },
     saveMtu: (String) -> Unit = {},
     loadSpeeds: () -> String? = { null },
-    saveSpeeds: (String) -> Unit = {}
+    saveSpeeds: (String) -> Unit = {},
+    loadFreezes: () -> String? = { null },
+    saveFreezes: (String) -> Unit = {}
 ) {
     /** The exact routes that carried verified traffic, per network (see [RouteRecipe]). */
     val routes = RouteBook(loadRoutes, saveRoutes)
@@ -34,6 +36,9 @@ class NetworkMemory(
 
     /** What the download check after each connect measured through each server, per network (see [RouteSpeedBook]). */
     val speeds = RouteSpeedBook(loadSpeeds, saveSpeeds)
+
+    /** Last-known-good and ~16 KB-frozen servers per network, for Smart Connect's order (see [FreezeBook]). */
+    val freezes = FreezeBook(loadFreezes, saveFreezes)
 
     private class Entry(
         val variants: ConcurrentHashMap<String, String> = ConcurrentHashMap(),
@@ -86,7 +91,7 @@ class NetworkMemory(
         persist()
     }
 
-    /** Forgets everything learned about every network: kinds, alternates, latencies, routes and speeds. */
+    /** Forgets everything learned about every network: kinds, alternates, latencies, routes, speeds and freezes. */
     @Synchronized
     fun clear() {
         entries.clear()
@@ -94,6 +99,7 @@ class NetworkMemory(
         routes.clear()
         mtu.clear()
         speeds.clear()
+        freezes.clear()
     }
 
     @Synchronized
