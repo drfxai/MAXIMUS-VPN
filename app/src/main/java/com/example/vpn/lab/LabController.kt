@@ -801,8 +801,13 @@ class LabController(
         }
     }
 
-    /** Candidates kept out of the parallel round; they still run in the serial search. */
-    private fun parallelExcluded(cap: NetworkCapabilityProfile?, pool: List<FullAnalysis.Pick>): Set<String> = emptySet()
+    /**
+     * Candidates kept out of the parallel round; they still run in the serial search. Cloudflare blocked here (cf=0):
+     * WARP MASQUE, Matrix Transport and Aether wait for the end instead of taking a slot in the first round.
+     */
+    private fun parallelExcluded(cap: NetworkCapabilityProfile?, pool: List<FullAnalysis.Pick>): Set<String> =
+        pool.filter { ExperimentPlanner.cloudflareDeferred(cap, it.family, Sidecars.forProfile(it.profile)?.id) }
+            .map { it.profile.id }.toSet()
 
     /** The family of a saved config from its fields: Tor by its bridge transport, Mihomo by its proxy type. */
     private fun familyOf(p: VlessProfile): PathFamily {

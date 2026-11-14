@@ -153,4 +153,88 @@ class SmartConnectPlanTest {
         assertEquals(measured, NetworkCapabilityProfile.fromJson(measured.toJson()))
     }
 
+    // ------------------------------------------------------------ Cloudflare blocked (cf=0)
+
+    private val irancellCf0 = NetworkCapabilityProfile(transport = "cellular", carrierCode = "43235", udpAvailable = true,
+        cloudflareReachable = false, measuredAt = 1_000)
+
+    @Test fun cloudflareBlockedMovesCleanIpWarpAndMasqueToTheEndWithoutDroppingThem() {
+        val plan = SmartConnectPlan.of(SmartConnectPlan.Input(godMode = true, lockExit = false, force = false, mayMove = true,
+            reading = null, cloudflareBlocked = true))
+        assertTrue(plan.cloudflareLast)
+        assertEquals(listOf(EmergencyTransport.PSIPHON, EmergencyTransport.TOR, EmergencyTransport.CLEAN_IP,
+            EmergencyTransport.WARP, EmergencyTransport.MASQUE), plan.transports)
+        listOf(EmergencyTransport.CLEAN_IP, EmergencyTransport.WARP, EmergencyTransport.MASQUE).forEach {
+            assertTrue(it.name, plan.allows(it))
+            assertTrue(it.name, plan.deferred(it))
+            assertFalse(it.name, plan.early(it))
+        }
+        assertTrue(plan.early(EmergencyTransport.PSIPHON))
+        assertFalse(plan.deferred(EmergencyTransport.TOR))
+    }
+
+    @Test fun cloudflareBlockedInDailyModeDefersCleanIpAndWarp() {
+        val plan = SmartConnectPlan.of(SmartConnectPlan.Input(godMode = false, lockExit = false, force = false, mayMove = true,
+            reading = null, cloudflareBlocked = true))
+        assertEquals(listOf(EmergencyTransport.CLEAN_IP, EmergencyTransport.WARP), plan.transports)
+        assertTrue(plan.deferred(EmergencyTransport.CLEAN_IP) && plan.deferred(EmergencyTransport.WARP))
+        assertFalse(plan.early(EmergencyTransport.CLEAN_IP) || plan.early(EmergencyTransport.WARP))
+        // A transport the plan left out is neither early nor deferred.
+        assertFalse(plan.deferred(EmergencyTransport.MASQUE) || plan.early(EmergencyTransport.MASQUE))
+    }
+
+    @Test fun aMeasuredOrUnmeasuredCloudflareKeepsTheUsualOrder() {
+        listOf(true, false).forEach { god ->
+            val plan = SmartConnectPlan.of(input(god = god))
+            assertFalse(plan.cloudflareLast)
+            EmergencyTransport.values().forEach {
+                assertEquals(it.name, plan.allows(it), plan.early(it))
+                assertFalse(it.name, plan.deferred(it))
+            }
+        }
+        // A UDP block still skips WARP and MASQUE on a cf=0 network; only what is allowed is moved.
+        val udp = SmartConnectPlan.of(SmartConnectPlan.Input(godMode = true, lockExit = false, force = false, mayMove = true,
+            reading = reading(NetworkState.FILTERED, NetworkState.UDP_BLOCKED_SUSPECTED), cloudflareBlocked = true))
+        assertEquals(listOf(EmergencyTransport.PSIPHON, EmergencyTransport.TOR, EmergencyTransport.CLEAN_IP), udp.transports)
+    }
+
+    @Test fun onlyCloudflareBasedTransportsAreMarked() {
+        assertEquals(setOf(EmergencyTransport.CLEAN_IP, EmergencyTransport.WARP, EmergencyTransport.MASQUE),
+            EmergencyTransport.values().filter { it.cloudflare }.toSet())
+    }
+
+    @Test fun cloudflareCountsAsBlockedOnlyWhenMeasuredBlockedFreshOnThisNetwork() {
+        assertTrue(SmartConnectPlan.cloudflareBlocked(irancellCf0, "cell:43235", now = 2_000))
+        // cf=1 or not measured: never blocked.
+        assertFalse(SmartConnectPlan.cloudflareBlocked(irancellCf0.copy(cloudflareReachable = true), "cell:43235", now = 2_000))
+        assertFalse(SmartConnectPlan.cloudflareBlocked(irancellCf0.copy(cloudflareReachable = null), "cell:43235", now = 2_000))
+        assertFalse(SmartConnectPlan.cloudflareBlocked(null, "cell:43235", now = 2_000))
+        // Another carrier, another kind of network, or a stale reading says nothing about this one.
+        assertFalse(SmartConnectPlan.cloudflareBlocked(irancellCf0, "cell:43211", now = 2_000))
+        assertFalse(SmartConnectPlan.cloudflareBlocked(irancellCf0, "wifi", now = 2_000))
+        assertFalse(SmartConnectPlan.cloudflareBlocked(irancellCf0, "cell:43235", now = 1_000 + SmartConnectPlan.READING_MAX_AGE_MS))
+    }
+
+    private fun deferAether(cf: Boolean = true, aether: Boolean = true, smart: Boolean = true, force: Boolean = false,
+                            lockExit: Boolean = false, verifiedHere: Boolean = false, alreadyLast: Boolean = false) =
+        SmartConnectPlan.deferAether(cf, aether, smart, force, lockExit, verifiedHere, alreadyLast)
+
+    @Test fun smartConnectHoldsAnAutomaticAetherLeadBackOnlyWhenCloudflareIsBlocked() {
+        // The field case: Irancell cf=0, Smart Connect led with Aether and lost ~2m20s before saved servers ran.
+        assertTrue(deferAether())
+        // cf=1 (or unmeasured): Aether keeps its place.
+        assertFalse(deferAether(cf = false))
+        // Not Aether: nothing to hold back.
+        assertFalse(deferAether(aether = false))
+        // The user picked Aether (power button, Aether page): started as chosen.
+        assertFalse(deferAether(smart = false))
+        // Connect anyway, Trade mode or the power button's exact config.
+        assertFalse(deferAether(force = true))
+        assertFalse(deferAether(lockExit = true))
+        // Aether carried traffic on this network before.
+        assertFalse(deferAether(verifiedHere = true))
+        // The deferred run itself, or a search after Aether already failed: never deferred again.
+        assertFalse(deferAether(alreadyLast = true))
+    }
+
 }

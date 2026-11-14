@@ -139,6 +139,12 @@ class RayVpnService : VpnService() {
          * search skips them and the selected server and goes on with the later stages (E-G).
          */
         internal const val XRAY_EXHAUSTED_MARKER = "__xray-bulk-exhausted__"
+        /**
+         * Never a profile id: the run of an automatic Aether lead that Smart Connect held back on a cf=0 network
+         * ([com.example.vpn.smart.SmartConnectPlan.deferAether]) now that nothing else carried traffic; the saved
+         * servers and recovery engines it waited for are not searched again.
+         */
+        internal const val AETHER_LAST_MARKER = "__aether-last__"
         private val _lockdown = MutableStateFlow(com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.UNKNOWN)
         private val _environment = MutableStateFlow<com.example.vpn.smart.NetworkEnvironment.Report?>(null)
         /** How hostile the network looked at the last connect. */
@@ -839,6 +845,47 @@ class RayVpnService : VpnService() {
                 .getOrElse { com.example.vpn.smart.NetworkKey.current(this@RayVpnService) }
             activeRoute = null
 
+            // cf=0: WARP needs Cloudflare, so an automatic Aether lead is not started first. The saved servers and the
+            // recovery engines go first and Aether runs at the very end (the PathGate step below). Not when the user
+            // picked Aether (power button, Aether page), nor when Aether carried traffic on this network before.
+            val cloudflareBlocked = runCatching {
+                com.example.vpn.smart.SmartConnectPlan.cloudflareBlocked(
+                    com.example.vpn.smart.NetworkCapabilityDetector.last, routeNetwork, System.currentTimeMillis())
+            }.getOrDefault(false)
+            val aetherLast = AETHER_LAST_MARKER in exclude
+            var deferredAether: VlessProfile? = null
+            // No saved server to lead with: Aether is held back like a failed engine, so the recovery engines run first.
+            var aetherHeldBack = false
+            if (com.example.vpn.smart.SmartConnectPlan.deferAether(cloudflareBlocked,
+                    aether = com.example.vpn.sidecar.AetherSidecar.handles(requestedProfile), smart = smart, force = force,
+                    lockExit = lockExit, verifiedHere = aetherVerifiedOn(routeNetwork, requestedProfile, settings),
+                    alreadyLast = aetherLast || ENGINE_FAILED_MARKER in exclude || XRAY_EXHAUSTED_MARKER in exclude)) {
+                deferredAether = requestedProfile
+                val alternate = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                    .firstOrNull { it.id != requestedProfile.id && it.id !in exclude &&
+                        !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) &&
+                        com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) }
+                    ?.let { alt ->
+                        if (settings.preferredEngine == EngineType.SING_BOX && com.example.vpn.sidecar.SingBoxSidecar.conversionProblem(alt) == null &&
+                            com.example.vpn.sidecar.Sidecars.isBundled(com.example.vpn.sidecar.SingBoxSidecar)) com.example.vpn.sidecar.SingBoxSidecar.select(alt)
+                        else alt
+                    }
+                com.example.vpn.diagnostics.events.EventLog.event("smart.aether.deferred", attributes = mapOf(
+                    "reason" to "cloudflare blocked (cf=0)", "lead" to if (alternate != null) "saved server" else "recovery engines"))
+                if (alternate != null) {
+                    requestedProfile = alternate
+                    profile = alternate
+                    activeProfile = alternate
+                    mutateState { if (it.attemptId == attemptId) it.copy(activeProfile = alternate, attemptedProfileId = alternate.id) else it }
+                    XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0): Aether (WARP) waits for the end of the search; " +
+                        "saved servers go first.")
+                } else {
+                    aetherHeldBack = true
+                    XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0) and no saved server is available: " +
+                        "recovery engines go first, Aether (WARP) last.")
+                }
+            }
+
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
             var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
             var initialResolutionFailed = false
@@ -921,7 +968,8 @@ class RayVpnService : VpnService() {
                 godMode = policy.mode == com.example.data.model.OperationalMode.GOD_MODE,
                 lockExit = lockExit, exact = exact && !policy.lockExit, force = force, mayMove = raceFirst || settings.autoFailoverEnabled,
                 reading = com.example.vpn.smart.SmartConnectPlan.freshReading(
-                    com.example.vpn.smart.NetworkCapabilityDetector.last, routeNetwork, System.currentTimeMillis())
+                    com.example.vpn.smart.NetworkCapabilityDetector.last, routeNetwork, System.currentTimeMillis()),
+                cloudflareBlocked = cloudflareBlocked
             ))
             val tracker = com.example.vpn.smart.SearchTracker(attemptId, plan) { p ->
                 mutateState { if (it.attemptId == attemptId) it.copy(search = p) else it }
@@ -929,12 +977,14 @@ class RayVpnService : VpnService() {
             search = tracker
             plan.reading?.let { XrayLogManager.i("SMART", "Measured network: ${it.summary()}.") }
             plan.transportsSkipped.forEach { (t, why) -> XrayLogManager.i("SMART", "${t.title} not tried directly: $why.") }
+            if (plan.cloudflareLast) XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0): clean IP, WARP, MASQUE " +
+                "and Matrix move to the end of the search.")
             var raced = false
             // What the pre-flight proved (PathGate): a real request failed on the selected path, or an
             // engine that can only be judged after it starts was chosen.
             // An engine profile (Aether) that just failed its own carrier search in this attempt (see the
             // NoVerifiedPath recovery below) counts as proven dead, so the recovery stages run for it.
-            val engineCarriersFailed = ENGINE_FAILED_MARKER in exclude &&
+            val engineCarriersFailed = (ENGINE_FAILED_MARKER in exclude || aetherHeldBack) &&
                 com.example.vpn.sidecar.Sidecars.isEngineProfile(requestedProfile)
             // A stall or freeze failover used up the saved servers: they all carry small requests here, so testing
             // them again would only pick one that stalls; the search goes straight on to stages E-G.
@@ -945,7 +995,16 @@ class RayVpnService : VpnService() {
                     tracker.skip(it, "Saved servers stalled or froze on bulk downloads in this session")
                 }
             }
+            // The run of Aether held back to the end: everything before it was already searched.
+            if (aetherLast) {
+                listOf(com.example.vpn.smart.SearchStage.REMEMBERED_ROUTE, com.example.vpn.smart.SearchStage.SELECTED,
+                    com.example.vpn.smart.SearchStage.SAME_SERVER, com.example.vpn.smart.SearchStage.OTHER_SERVERS).forEach {
+                    tracker.skip(it, "Searched before Aether: Cloudflare is blocked on this network")
+                }
+            }
             var provenDead = initialResolutionFailed || engineCarriersFailed || xrayExhausted
+            // The clean Cloudflare address scan was held back to the end of the search (cf=0).
+            var cleanIpDeferred = false
             // Which stealth alternate carried the traffic, for the route recipe recorded once it is verified.
             var chosenVariant: String? = null
             activeRecovery = null
@@ -977,7 +1036,7 @@ class RayVpnService : VpnService() {
             // Stage A: the exact route that carried verified traffic on this network before. The chosen
             // config's own route first; with Smart Connect, then the best other remembered route. Each has
             // to carry a real request here now; a failure counts against it and the normal search goes on.
-            if (!lockExit && !force && !xrayExhausted) {
+            if (!lockExit && !force && !xrayExhausted && !aetherLast) {
                 // Smart Connect replays only a route whose upload and download went through here and whose
                 // download did not stall since; anything weaker competes in the comparison instead.
                 val remembered = networkMemory.routes.forNetwork(routeNetwork).filter {
@@ -1031,7 +1090,7 @@ class RayVpnService : VpnService() {
             // Recheck the exact successful engine recipe before scanning unrelated servers or registering WARP.
             // Not when the user pressed Smart Connect: engine routes (Tor, DNS tunnels, Psiphon) are much slower
             // than a saved server that works, so they wait for the recovery stage after the comparison.
-            if (!raced && raceFirst && !lockExit && !force && !compare) {
+            if (!raced && raceFirst && !lockExit && !force && !compare && !aetherLast) {
                 val early = withTimeoutOrNull(com.example.vpn.smart.RecoveryAttemptPolicy.TOR_WINDOW_MS + 10_000L) {
                     com.example.RayApplication.instance.lab.fastRecovery(
                         exclude = exclude, deadlineMs = System.currentTimeMillis() + 90_000L,
@@ -1053,7 +1112,7 @@ class RayVpnService : VpnService() {
 
             var firstFailed = initialResolutionFailed || engineCarriersFailed || xrayExhausted
             // The engine's carriers were all just tried and none carried traffic: not tested again here.
-            if (raceFirst && !raced && !engineCarriersFailed && !xrayExhausted) {
+            if (raceFirst && !raced && !engineCarriersFailed && !xrayExhausted && !aetherLast) {
                 // The chosen server alone first, so a working one costs a single request; only when it
                 // carries no traffic are the other servers raced (several kinds of connection per round).
                 showForegroundNotification("Finding the fastest server...")
@@ -1118,7 +1177,7 @@ class RayVpnService : VpnService() {
             // 3a. A recovery candidate that carried traffic for this config on this network before (FIX BPB
             // or earlier recovery): a derived copy, the saved config itself is unchanged. One request decides;
             // a failure counts towards its rollback and the normal path search continues.
-            if (!raced && !lockExit && !xrayExhausted) {
+            if (!raced && !lockExit && !xrayExhausted && !aetherLast) {
                 val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile) }.getOrNull()
                 if (recovery != null) {
                     showForegroundNotification("Trying the recovered settings...")
@@ -1144,7 +1203,7 @@ class RayVpnService : VpnService() {
             // 3b. Find a path that carries traffic before the core starts: the saved profile, its stealth
             // alternates (split handshake, other fingerprint, ECH, UDP junk) or another kind on the same
             // server. The probe's sockets bypass the traffic-blocking interface (RealDelayProbe.socketProtector).
-            if (!raced && !lockExit && !xrayExhausted && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
+            if (!raced && !lockExit && !xrayExhausted && !aetherLast && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
                 showForegroundNotification("Finding a working route...")
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.SAFE_VARIANTS)
                 // Without Smart Connect the finder's first test is the selected server itself (stage B).
@@ -1189,9 +1248,11 @@ class RayVpnService : VpnService() {
                 if (choice.nothingWorked && !raced) tracker.start(com.example.vpn.smart.SearchStage.EMERGENCY)
                 // Nothing worked, and the server sits behind Cloudflare: its address may be blocked
                 // while other Cloudflare addresses are not. Scan for one and try the same server there.
-                if (choice.nothingWorked && !raced && plan.allows(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) {
+                if (choice.nothingWorked && !raced && plan.early(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) {
                     cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
                 }
+                // cf=0: the clean-address scan waits for the end of the search (after the recovery engines).
+                if (choice.nothingWorked && !raced && plan.deferred(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) cleanIpDeferred = true
                 // Sidecar engines must carry requests before selection. The shared recovery pool below
                 // tests MASQUE, Psiphon, saved Tor bridges and chains serially in DAILY and GOD MODE;
                 // choosing several untested engines here used to overwrite the earlier choices with Tor.
@@ -1229,7 +1290,7 @@ class RayVpnService : VpnService() {
             coroutineContext.ensureActive()
 
             if (!raced && provenDead && !force && !lockExit && (raceFirst || settings.autoFailoverEnabled) &&
-                plan.allows(com.example.vpn.smart.EmergencyTransport.WARP)) {
+                plan.early(com.example.vpn.smart.EmergencyTransport.WARP)) {
                 tracker.start(com.example.vpn.smart.SearchStage.EMERGENCY)
                 warpPath(timeouts.alternateSec)?.let { adopt(it) }
                 tracker.finish(com.example.vpn.smart.SearchStage.EMERGENCY, verified = raced)
@@ -1278,6 +1339,17 @@ class RayVpnService : VpnService() {
                     recoveryExhausted = outcome?.exhausted == true
                     XrayLogManager.w("SMART", "Recovery found no path: ${outcome.why}.")
                 }
+            }
+
+            // cf=0: the Cloudflare-based emergency transports held back above run now, after the recovery engines.
+            coroutineContext.ensureActive()
+            if (!raced && provenDead && !force && !lockExit && (raceFirst || settings.autoFailoverEnabled) &&
+                (cleanIpDeferred || plan.deferred(com.example.vpn.smart.EmergencyTransport.WARP))) {
+                tracker.start(com.example.vpn.smart.SearchStage.EMERGENCY)
+                showForegroundNotification("Trying Cloudflare-based methods last...")
+                if (cleanIpDeferred) cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
+                if (!raced && plan.deferred(com.example.vpn.smart.EmergencyTransport.WARP)) warpPath(timeouts.alternateSec)?.let { adopt(it) }
+                tracker.finish(com.example.vpn.smart.SearchStage.EMERGENCY, verified = raced)
             }
 
             // Last resort for the agent: when every saved server and recovery engine failed, revive the
@@ -1364,6 +1436,18 @@ class RayVpnService : VpnService() {
             val gate = com.example.vpn.smart.PathGate.decide(verified = raced, provenDead = provenDead,
                 engineAdopted = false, forced = force || exact)
             if (!com.example.vpn.smart.PathGate.mayStart(gate)) {
+                // cf=0: nothing else carried traffic, so the Aether lead held back at the start runs now, last.
+                val lastAether = deferredAether
+                if (lastAether != null) {
+                    coroutineContext.ensureActive()
+                    XrayLogManager.w("SMART", "No saved server or recovery engine carried traffic; trying Aether (WARP) last, " +
+                        "as Cloudflare is blocked on this network.")
+                    showForegroundNotification("Trying Aether (WARP) last...")
+                    tracker.end()
+                    disconnectResources()
+                    connectLocked(lastAether, smart = true, exclude = exclude + AETHER_LAST_MARKER)
+                    return@withContext
+                }
                 val name = com.example.core.SecretRedactor.redact(requestedProfile.name)
                 XrayLogManager.w("SMART", "No verified path: '$name' carried no real traffic on this network and no alternative did. " +
                     "The tunnel was not started with it.")
@@ -1920,6 +2004,16 @@ class RayVpnService : VpnService() {
             }
         }
     }
+
+    /**
+     * Aether carried a real request on [network] before: in this session's engine ledger, as a remembered route,
+     * or as an automatic method verified here within the last hours ([com.example.vpn.connections.BuiltinMethodMemory]).
+     */
+    private fun aetherVerifiedOn(network: String, aether: VlessProfile, settings: AppSettings): Boolean =
+        com.example.vpn.engine.registry.EngineLedger.shared.verifiedHere(com.example.vpn.sidecar.AetherSidecar.ID, network) ||
+            runCatching { networkMemory.routes.forNetwork(network).any { it.profileId == aether.id } }.getOrDefault(false) ||
+            runCatching { com.example.vpn.connections.ConnectionEngineRunner.aetherVerifiedHere(network, aether, settings.dnsServer) }
+                .getOrDefault(false)
 
     /** Explicit session consent only; stays in the service when the Connections page is closed. */
     private fun fallbackFromDirect(profile: VlessProfile): Boolean {
