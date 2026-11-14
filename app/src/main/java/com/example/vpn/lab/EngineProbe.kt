@@ -187,7 +187,9 @@ object EngineProbe {
             val ready = started != null || process.awaitReady(launch.readyTimeoutMs)
             if (!ready) return judge(engine.id, false, null).copy(failure = process.startupFailure
                 ?: "engine startup or traffic readiness failed")
-            val chained = SidecarChain.probeProfile(started?.profile ?: profile, ctx, launch)
+            // A raced carrier may have won on its own loopback port.
+            val engineCtx = started?.context ?: ctx
+            val chained = SidecarChain.probeProfile(started?.profile ?: profile, engineCtx, launch)
             val began = System.currentTimeMillis()
             val first = if (started != null) judge(engine.id, true, RealDelayProbe.Outcome.Delay(checkNotNull(started.check.latencyMs)))
                 else judge(engine.id, true, RealDelayProbe.measure(chained, timeoutSec))
@@ -196,7 +198,7 @@ object EngineProbe {
                 RealDelayProbe.measure(chained, timeoutSec) to (System.currentTimeMillis() - began)
             })
             if (keep && result.outcomes.lastOrNull() == true && process.isAlive) {
-                EngineHandoff.park(EngineHandoff.Parked(profile.id, engine.id, mode, process, ctx, launch, System.currentTimeMillis()))
+                EngineHandoff.park(EngineHandoff.Parked(profile.id, engine.id, mode, process, engineCtx, launch, System.currentTimeMillis()))
                 kept = true
             }
             return result
