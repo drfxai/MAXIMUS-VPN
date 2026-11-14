@@ -23,6 +23,7 @@ import com.example.panels.servers.SmartOperation
 import com.example.panels.servers.SmartOperationStore
 import com.example.panels.servers.SmartBundlePlanner
 import com.example.panels.servers.SmartManagerPlanner
+import com.example.panels.servers.SmartManagerState
 import com.example.panels.servers.SmartNodeStore
 import com.example.panels.servers.ManagedNodeRecord
 import com.example.panels.servers.PrivatePsiphonServerScripts
@@ -330,7 +331,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Local audited history: UNCERTAIN requires fresh inspection and manual reconciliation. */
     fun operationsFor(serverId: String): List<SmartOperation> =
-        runCatching { operations.all().filter { it.serverId == serverId }.takeLast(10).reversed() }
+        runCatching { SmartManagerState.operationsFor(operations.all(), serverId) }
             .getOrDefault(emptyList())
 
     fun reconcileUncertainOperation(serverId: String, operationId: String) = serverAction(
@@ -340,7 +341,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         require(op != null && op.serverId == serverId && op.status == SmartOperation.Status.UNCERTAIN)
         val fresh = withContext(Dispatchers.IO) { manager.check(s) }
         check(fresh.facts?.socketInspectionAvailable == true) { "Cannot safely inspect this VPS yet." }
-        save(fresh)
+        saveInspection(s, fresh)
         withContext(Dispatchers.IO) { operations.transition(op.id, SmartOperation.Status.RECONCILED) }
         emit(ServersEvent.Message("Operation acknowledged after SSH inspection; check installed services and profiles before retrying."))
     }
@@ -367,6 +368,11 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun emit(e: ServersEvent) { _events.tryEmit(e) }
+
+    /** Saves a read-only inspection onto the server as it is now, never over a newer tool record. */
+    private fun saveInspection(snapshot: ManagedServer, checked: ManagedServer) {
+        SmartManagerState.mergeInspection(server(checked.id), snapshot, checked)?.let { save(it) }
+    }
 
     // ------------------------------------------------------------ list and reachability
 
@@ -486,9 +492,12 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(checking = it.checking + id, error = "") }
         viewModelScope.launch {
             val r = runCatching { withContext(Dispatchers.IO) { manager.check(s) } }
-            r.onSuccess { save(it) }
+            r.onSuccess { saveInspection(s, it) }
             _state.update { st ->
-                st.copy(checking = st.checking - id, error = r.exceptionOrNull()?.message.orEmpty(),
+                st.copy(checking = st.checking - id,
+                    error = r.exceptionOrNull()?.let {
+                        com.example.panels.servers.ServerLogSanitizer.redact(it.message ?: "SSH inspection failed")
+                    }.orEmpty(),
                     reach = if (r.isSuccess) st.reach else st.reach + (id to null))
             }
         }
@@ -829,7 +838,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             // Keep phone/engine evidence separate from a read-only server snapshot.
             try {
                 val checked = withContext(Dispatchers.IO) { manager.check(s) }
-                save(checked)
+                saveInspection(s, checked)
                 val lines = withContext(Dispatchers.IO) { manager.logs(checked, toolId) }
                 _state.update { it.copy(logsServerId = s.id, logs = "${toolTitle(toolId)} server diagnostics (phone test failed)" to lines) }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -966,7 +975,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
      * A completed VPS service does not imply the phone's tunnel traffic has been tested.
      */
     fun installApprovedBundle(serverId: String, selected: Set<String>, domain: String, label: String) {
-        if (bundleJob?.isActive == true || _state.value.busy.isNotBlank() ||
+        if (bundleJob?.isActive == true || psiphonJob?.isActive == true || _state.value.busy.isNotBlank() ||
             _state.value.route is ServersRoute.Wizard) return
         val initial = server(serverId) ?: return emit(ServersEvent.Message("Select a saved VPS."))
         val frozenDomain = DnsDelegation.normalizeBase(domain)
@@ -1099,12 +1108,15 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val r = runCatching { withContext(Dispatchers.IO) { manager.check(s) } }
             r.onSuccess { checked ->
-                save(checked)
-                _state.update { st -> st.copy(wizard = st.wizard?.copy(checks = InstallChecks.forTool(w.tool, checked, checked.facts!!))) }
+                saveInspection(s, checked)
+                // A slow inspection must not paint its checks onto a server picked after it.
+                _state.update { st -> st.copy(wizard = st.wizard?.takeIf { it.serverId == id && it.tool.id == w.tool.id }
+                    ?.copy(checks = InstallChecks.forTool(w.tool, checked, checked.facts!!)) ?: st.wizard) }
             }.onFailure { e ->
-                _state.update { st -> st.copy(wizard = st.wizard?.copy(
-                    checks = listOf(com.example.panels.servers.CheckItem("Signed in over SSH", false, e.message.orEmpty())),
-                    error = "")) }
+                _state.update { st -> st.copy(wizard = st.wizard?.takeIf { it.serverId == id && it.tool.id == w.tool.id }
+                    ?.copy(checks = listOf(com.example.panels.servers.CheckItem("Signed in over SSH", false,
+                        com.example.panels.servers.ServerLogSanitizer.redact(e.message.orEmpty()))), error = "")
+                    ?: st.wizard) }
             }
         }
     }
