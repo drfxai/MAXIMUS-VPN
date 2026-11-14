@@ -77,7 +77,7 @@ object ConnectionEngineRunner {
      * Connections page test and the LAB engine probe (the latter two used to pass nothing, so a test on a
      * cf=0 link spent two full 180 s MASQUE scans before WireGuard was even tried).
      */
-    data class LinkHints(val ipv4Only: Boolean = false, val cloudflareFiltered: Boolean = false)
+    data class LinkHints(val ipv4Only: Boolean = false, val cloudflareFiltered: Boolean = false, val metered: Boolean = false)
 
     fun linkHints(measured: com.example.vpn.smart.NetworkCapabilityProfile?): LinkHints {
         val m = measured ?: return LinkHints()
@@ -86,7 +86,8 @@ object ConnectionEngineRunner {
             // Cloudflare's TLS (or Cloudflare itself) failed while UDP abroad answered: MASQUE is the carrier
             // the probe saw fail, WireGuard is still worth a try. Only a measured failure counts, never a guess.
             cloudflareFiltered = m.udpAvailable == true &&
-                (m.cloudflareIpv4Tls == false || m.cloudflareReachable == false)
+                (m.cloudflareIpv4Tls == false || m.cloudflareReachable == false),
+            metered = m.meteredNetwork == true
         )
     }
 
@@ -131,9 +132,45 @@ object ConnectionEngineRunner {
         engineId == AetherSidecar.ID && automatic && !relayExitNode.isNullOrBlank() && options.exitNode.isBlank() &&
             options.tor == "off" && options.psiphon == "off"
 
-    fun relayed(candidate: VlessProfile, carrier: String, exitNode: String): VlessProfile = candidate.copy(extraSettings =
-        org.json.JSONObject(candidate.extraSettings).put("carrier", carrier).put("exitNode", exitNode)
-            .put(RELAY_FOLLOW_UP, true).apply { remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP); remove("rescan") }.toString())
+    fun relayed(candidate: VlessProfile, carrier: String, exitNode: String,
+                route: BuiltinExitNode.Route = BuiltinExitNode.Route()): VlessProfile = candidate.copy(extraSettings =
+        route.write(org.json.JSONObject(candidate.extraSettings).put("carrier", carrier).put("exitNode", exitNode)
+            .put(RELAY_FOLLOW_UP, true).apply { remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP); remove("rescan") }).toString())
+
+    /**
+     * Whole-ladder budget for automatic Aether on a metered link that is Irancell or measured Cloudflare-filtered:
+     * once it is spent no further direct carrier starts (WARP through a verified saved server still may, it is
+     * one quick attempt) and the session falls back to saved servers / Psiphon / Tor instead of spending
+     * minutes of mobile data on gateway scans that the carrier filters anyway.
+     */
+    const val HEAVY_LADDER_BUDGET_MS = 120_000L
+    /** Below this much budget left a direct carrier is not started at all. */
+    const val LADDER_MIN_ATTEMPT_MS = 20_000L
+
+    fun ladderBudgetMs(engineId: String, automatic: Boolean, metered: Boolean, irancell: Boolean,
+                       cloudflareFiltered: Boolean): Long? =
+        if (engineId == AetherSidecar.ID && automatic && metered && (irancell || cloudflareFiltered)) HEAVY_LADDER_BUDGET_MS else null
+
+    /**
+     * WireGuard's handshake passed and no data came back on Irancell or a measured Cloudflare-filtered link: the
+     * carrier is dropping WARP data (seen on every WARP carrier there). Record that at once and go straight to
+     * WARP through a verified saved server, with at most one cheap follow-up (the MTU retry on the same endpoint),
+     * instead of the obfuscated rescan, H2, H2-split and WARP-in-WARP full scans that all fail the same way.
+     */
+    fun warpDataBlockedFastPath(engineId: String, automatic: Boolean, carrier: String, irancell: Boolean,
+                                cloudflareFiltered: Boolean, reverseRelay: Boolean): Boolean =
+        engineId == AetherSidecar.ID && automatic && carrier == "wireguard" && (irancell || cloudflareFiltered) && !reverseRelay
+
+    /** The reason recorded for an exception while starting a carrier: fixed, non-secret strings only. */
+    internal fun startFailureReason(engineId: String, e: Throwable, stage: String): String {
+        val message = e.message
+        return when {
+            e is BuiltinExitNode.ExitNodeFailure && message in BuiltinExitNode.REASONS -> message!!
+            engineId == AetherSidecar.ID && message in setOf("WARP API TLS unreachable via forced Direct OOB route",
+                AetherApiBridge.INCOMPATIBLE_OOB, AetherApiBridge.UNREACHABLE_WITHOUT_IDENTITY) -> message!!
+            else -> stage
+        }
+    }
 
     /** Method name of the reduced-MTU WireGuard retry, recorded so a verified result is reused next time. */
     const val WIREGUARD_MTU = "wireguard-mtu"
@@ -324,6 +361,10 @@ object ConnectionEngineRunner {
         preferWireGuard: Boolean = false,
         /** Profile id of a saved server verified on this network, for WARP-through-relay (see [relayed]). */
         relayExitNode: String? = null,
+        /** How that saved server carried the verified traffic here (pinned address, stealth alternate). */
+        relayExitRoute: BuiltinExitNode.Route = BuiltinExitNode.Route(),
+        /** The physical link is metered (mobile data): the whole automatic ladder gets [HEAVY_LADDER_BUDGET_MS]. */
+        metered: Boolean = false,
         onProgress: (String) -> Unit = {},
         cancelled: () -> Boolean = { false }
     ): Started {
@@ -384,7 +425,7 @@ object ConnectionEngineRunner {
             baseChoices.first { method(it) == "wireguard" }.let(::reducedMtuWireGuard) else null
         val relays = if (relayEligible(engine.id, automatic, AetherSettings.read(ProfileExtras.read(profile)), relayExitNode))
             listOf("wireguard", "h2").filter { c -> baseChoices.any { method(it) == c } }
-                .map { c -> relayed(baseChoices.first { method(it) == c }, c, relayExitNode!!) } else emptyList()
+                .map { c -> relayed(baseChoices.first { method(it) == c }, c, relayExitNode!!, relayExitRoute) } else emptyList()
         val followUps = listOfNotNull(noizeChoice, mtuChoice) + relays
         val preferred = BuiltinMethodMemory.preferred(cacheScope, baseChoices.map(::method) + followUps.map(::method))
         val choices = followUps.firstOrNull { method(it) == preferred }?.let { listOf(it) + baseChoices } ?: baseChoices
@@ -430,7 +471,28 @@ object ConnectionEngineRunner {
         var warpInWarpQueued = recheckOnly
         var noizeQueued = recheckOnly || preferred == WIREGUARD_NOIZE
         var mtuQueued = recheckOnly || preferred == WIREGUARD_MTU
+        val ladderBudget = ladderBudgetMs(engine.id, automatic, metered, onIrancell, preferWireGuard)
+        val ladderStartedAt = System.currentTimeMillis()
+        var ladderStopped = false
+        var warpBlockFastPath = false
+        fun queueRelays(reason: String) {
+            if (relayQueued || relays.isEmpty()) return
+            relayQueued = true
+            relays.forEach { record(method(it), "queue", "START", reason) }
+            queue.addAll(relays)
+        }
         while (true) {
+            if (ladderBudget != null && !ladderStopped && queue.isNotEmpty() &&
+                !ProfileExtras.read(queue.first()).optBoolean(RELAY_FOLLOW_UP) &&
+                ladderBudget - (System.currentTimeMillis() - ladderStartedAt) < LADDER_MIN_ATTEMPT_MS) {
+                ladderStopped = true
+                val dropped = queue.filterNot { ProfileExtras.read(it).optBoolean(RELAY_FOLLOW_UP) }
+                queue.removeAll(dropped)
+                record("ladder", "budget", "STOP", "${ladderBudget / 1000}s Aether budget on this metered filtered link used; skipping " +
+                    dropped.joinToString(", ") { method(it) } + "; falling back to saved servers")
+                queueRelays("Aether budget used; trying WARP through a verified saved server once")
+                warpInWarpQueued = true; noizeQueued = true; mtuQueued = true
+            }
             if (queue.isEmpty()) {
                 // Every direct carrier failed: WARP through the saved server that works on this network.
                 if (relayQueued || relays.isEmpty()) break
@@ -460,11 +522,15 @@ object ConnectionEngineRunner {
                 running = process
                 checkCancellation()
                 stage = "local proxy did not become ready"
-                val ready = process.awaitReady(if (name == CLEAN_H2) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
+                val window = if (name == CLEAN_H2) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
                     else readinessBudgetMs(
                     engine.id, automatic, preferWireGuard, carrier, launch.readyTimeoutMs,
                     failedHere = name in recentlyFailed
-                ))
+                )
+                // On a metered filtered link a direct carrier never runs past what is left of the ladder budget.
+                val left = ladderBudget?.takeIf { !extras.optBoolean(RELAY_FOLLOW_UP) }
+                    ?.let { maxOf(LADDER_MIN_ATTEMPT_MS, it - (System.currentTimeMillis() - ladderStartedAt)) }
+                val ready = process.awaitReady(if (left != null) minOf(window, left) else window)
                 checkCancellation()
                 if (!ready) {
                     val reason = process.startupFailure ?: stage
@@ -519,6 +585,25 @@ object ConnectionEngineRunner {
                 if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
                 // A relayed carrier has no direct follow-ups of its own.
                 if (extras.optBoolean(RELAY_FOLLOW_UP)) continue
+                // Irancell / Cloudflare-filtered: handshake without data is the WARP data block. Remember it now (the
+                // next connect goes straight to the relay) and skip the full scans that fail the same way.
+                if (!warpBlockFastPath && warpDataBlockedFastPath(engine.id, automatic, carrier, onIrancell, preferWireGuard, reverseRelay)) {
+                    warpBlockFastPath = true
+                    BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
+                    val dropped = queue.filterNot { ProfileExtras.read(it).optBoolean(RELAY_FOLLOW_UP) }
+                    queue.removeAll(dropped)
+                    val mtu = if (reducedMtuWireGuardFollowUp(engine.id, automatic, carrier, AetherSettings.read(extras).mtu,
+                            alreadyQueued = mtuQueued, reverseRelay = reverseRelay)) reducedMtuWireGuard(candidate) else null
+                    noizeQueued = true; warpInWarpQueued = true; mtuQueued = true
+                    record(name, "queue", "FAST", "WireGuard handshake passed but no data came back on this " +
+                        (if (onIrancell) "Irancell" else "Cloudflare-filtered") + " link: WARP data marked blocked here; " +
+                        (if (relays.isNotEmpty()) "trying WARP through a verified saved server" else "no verified saved server for a relay") +
+                        (if (mtu != null) ", then one MTU ${AetherSettings.MTU_RETRY} retry" else "") +
+                        (if (dropped.isNotEmpty()) "; skipping " + dropped.joinToString(", ") { method(it) } else ""))
+                    queueRelays("direct WARP carried no data here; trying WARP through a verified saved server")
+                    mtu?.let { queue.addLast(it) }
+                    continue
+                }
                 // Before WARP-in-WARP: the same WireGuard identity with the strongest junk-packet profile and a
                 // fresh endpoint/port scan. It costs one more WireGuard window and is the cheaper fix when the
                 // censor classifies the flow from its first packets.
@@ -550,11 +635,8 @@ object ConnectionEngineRunner {
                 if (e is InterruptedException || e is CancellationException) throw e
                 checkCancellation()
                 // Never print arbitrary process exceptions: they may contain profile secrets.
-                // This fixed, non-sensitive preflight error is safe and actionable.
-                val reason = if (engine.id == AetherSidecar.ID &&
-                    e.message in setOf("WARP API TLS unreachable via forced Direct OOB route", AetherApiBridge.INCOMPATIBLE_OOB,
-                        AetherApiBridge.UNREACHABLE_WITHOUT_IDENTITY))
-                    e.message ?: stage else stage
+                // Only fixed, non-sensitive reasons (preflight and exit-node failures) are shown as they are.
+                val reason = startFailureReason(engine.id, e, stage)
                 record(name, "startup", "FAIL", reason)
                 attempts += "$name: $reason"
                 failed(name, candidate)
