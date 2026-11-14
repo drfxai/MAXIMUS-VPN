@@ -1,69 +1,28 @@
 package com.example.ui.settings
 
 import android.widget.Toast
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Article
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.WifiTethering
-import androidx.compose.material.icons.filled.CurrencyBitcoin
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.LocalCafe
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Restore
-import androidx.compose.material.icons.filled.Route
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -72,30 +31,25 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
-import com.example.R
 import com.example.data.model.AppSettings
 import com.example.data.model.EngineType
 import com.example.data.model.RoutingMode
 import com.example.data.model.ScoringProfile
-import com.example.ui.components.ThemeToggleSwitch
 import com.example.ui.popups.CommunityLinks
 import com.example.ui.popups.GitHubLogo
 import com.example.ui.popups.TelegramLogo
@@ -103,15 +57,19 @@ import com.example.ui.popups.YouTubeLogo
 import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.SettingsViewModel
 import com.example.update.AppUpdateChecker
+import com.example.update.CleanIpMaintenance
 import com.example.update.InAppUpdater
 import com.example.update.ResolverPackUpdater
-import com.example.update.CleanIpMaintenance
 import com.example.update.UpdateNetworkPolicy
 import com.example.vpn.diagnostics.DnsPathTest
 import com.example.vpn.safety.DnsResolvers
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+/**
+ * Settings: a short hub of categories, each opening its own page inside the Settings tab. Every
+ * preference is still written through [SettingsViewModel] exactly as before; only the layout changed.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
@@ -121,8 +79,6 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val dnsRequester = remember { BringIntoViewRequester() }
-    val resolverRequester = remember { BringIntoViewRequester() }
     val settingsClipboard = LocalClipboardManager.current
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val localProxy by com.example.vpn.share.LocalProxyService.state.collectAsStateWithLifecycle()
@@ -133,7 +89,6 @@ fun SettingsScreen(
     var showLearnedNetworks by remember { mutableStateOf(false) }
     val learnedNetworks by viewModel.learnedNetworks.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { viewModel.refreshLearnedNetworks() }
-    var dnsDropdownExpanded by remember { mutableStateOf(false) }
     var customDns by remember { mutableStateOf<String?>(null) }
     var dnsTestRunning by remember { mutableStateOf(false) }
     var dnsTestResult by remember(settings.dnsServer) { mutableStateOf<String?>(null) }
@@ -271,1122 +226,253 @@ fun SettingsScreen(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 14.dp)
-            .testTag("settings_screen")
-    ) {
-        // Screen Header with Title & Theme Toggle
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Maximus VPN Settings", color = AppTheme.colors.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("Routing, DNS, AI Co-Pilot, and Security preferences", color = AppTheme.colors.textSecondary, fontSize = 12.sp)
-            }
 
-            ThemeToggleSwitch(
-                isDark = settings.darkTheme,
-                onThemeChange = { isDark ->
-                    viewModel.setDarkTheme(isDark)
-                }
+    val actions = remember(viewModel) { ViewModelSettingsActions(viewModel) }
+    var pageName by rememberSaveable { mutableStateOf<String?>(null) }
+    val page = pageName?.let { name -> SettingsPage.values().firstOrNull { it.name == name } }
+    BackHandler(enabled = page != null) { pageName = null }
+    val open: (SettingsPage) -> Unit = { pageName = it.name }
+    val back: () -> Unit = { pageName = null }
+
+    val updateUi = UpdateUi(
+        checking = updateChecking,
+        checked = updateChecked,
+        hasUpdate = updateRelease != null,
+        latestVersion = updateRelease?.version
+    )
+    val checkForUpdates: () -> Unit = {
+        scope.launch {
+            if (!updateChecking) {
+                performUpdateCheck()
+                if (updateRelease != null) showUpdateDialog = true
+                else Toast.makeText(context, "No newer release available (or update check unavailable).", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val versionName = BuildConfig.VERSION_NAME
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+
+    AnimatedContent(
+        targetState = page,
+        modifier = modifier.fillMaxSize(),
+        transitionSpec = {
+            val forward = targetState != null
+            val sign = (if (forward) 1 else -1) * (if (rtl) -1 else 1)
+            (slideInHorizontally(tween(260)) { full -> sign * full / 5 } + fadeIn(tween(220)))
+                .togetherWith(slideOutHorizontally(tween(260)) { full -> -sign * full / 8 } + fadeOut(tween(160)))
+        },
+        label = "settingsPage"
+    ) { current ->
+        when (current) {
+            null -> SettingsHub(
+                settings = settings,
+                versionName = versionName,
+                update = updateUi,
+                onOpen = open,
+                onOpenAiAgent = onNavigateToAiAgent,
+                onUpdateChip = checkForUpdates
             )
-        }
 
-        Spacer(modifier = Modifier.height(14.dp))
-        // Quick access to the configuration sections that used to be far below the fold.
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Card(
-                modifier = Modifier.weight(1f).clickable { scope.launch { dnsRequester.bringIntoView() } },
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Dns, contentDescription = null, tint = AppTheme.colors.primary)
-                    Text("DNS & DoH", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text("Providers • diagnostics", color = AppTheme.colors.textSecondary, fontSize = 10.sp)
-                }
-            }
-            Card(
-                modifier = Modifier.weight(1f).clickable { scope.launch { resolverRequester.bringIntoView() } },
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = AppTheme.colors.primary)
-                    Text("Resolvers", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text("Update • rollback", color = AppTheme.colors.textSecondary, fontSize = 10.sp)
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(18.dp))
+            SettingsPage.CONNECTION -> ConnectionSettingsPage(
+                settings = settings,
+                actions = actions,
+                learnedSummary = when (val routes = learnedNetworks.sumOf { it.routes }) {
+                    0 -> "Nothing learned yet"
+                    else -> "${if (routes == 1) "1 route" else "$routes routes"} on " +
+                        if (learnedNetworks.size == 1) "1 network" else "${learnedNetworks.size} networks"
+                },
+                localProxy = LocalProxyUi(
+                    running = localProxy.running,
+                    starting = localProxy.starting,
+                    port = localProxy.port,
+                    user = localProxy.user,
+                    password = localProxy.password,
+                    error = localProxy.error,
+                    canStart = settings.selectedProfileId != null
+                ),
+                onOpenLearnedNetworks = { viewModel.refreshLearnedNetworks(); showLearnedNetworks = true },
+                onToggleLocalProxy = {
+                    val intent = android.content.Intent(context, com.example.vpn.share.LocalProxyService::class.java)
+                    if (localProxy.running || localProxy.starting) context.stopService(intent)
+                    else androidx.core.content.ContextCompat.startForegroundService(context, intent)
+                },
+                onBack = back
+            )
 
-        // SECTION: GEMINI AI AGENT
-        SectionHeader("AUTONOMOUS AI AGENT & CO-PILOT")
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onNavigateToAiAgent() },
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.primary.copy(alpha = 0.5f)),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(androidx.compose.foundation.shape.CircleShape)
-                            .background(AppTheme.colors.primary.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome,
-                            contentDescription = "AI Agent",
-                            tint = AppTheme.colors.primary,
-                            modifier = Modifier.size(22.dp)
+            SettingsPage.ROUTING_DNS -> RoutingDnsSettingsPage(
+                settings = settings,
+                actions = actions,
+                dnsTestRunning = dnsTestRunning,
+                dnsTestResult = dnsTestResult,
+                onCustomDns = { customDns = settings.dnsServer },
+                onTestVpnDns = {
+                    dnsTestRunning = true
+                    dnsTestResult = null
+                    scope.launch {
+                        try {
+                            val result = DnsPathTest.run(context)
+                            dnsTestResult = if (result.completed) {
+                                "VPN DNS responded in ${result.latencyMs} ms."
+                            } else {
+                                "No VPN DNS result. Connect Maximus and try again, or check Diagnostics."
+                            }
+                        } finally {
+                            dnsTestRunning = false
+                        }
+                    }
+                },
+                onTestResolver = {
+                    dnsTestRunning = true
+                    dnsTestResult = null
+                    scope.launch {
+                        try {
+                            dnsTestResult = DnsPathTest.testResolver(context, settings.dnsServer).summary
+                        } finally {
+                            dnsTestRunning = false
+                        }
+                    }
+                },
+                onOpenResolverData = { open(SettingsPage.UPDATES) },
+                onBack = back
+            )
+
+            SettingsPage.ANTI_CENSORSHIP -> AntiCensorshipSettingsPage(settings = settings, actions = actions, onBack = back)
+
+            SettingsPage.PRIVACY -> PrivacySettingsPage(
+                settings = settings,
+                actions = actions,
+                onOpenAndroidVpnSettings = {
+                    // The packet guard works inside the tunnel. Only Android's own lockdown also covers the moment
+                    // Android stops or restarts the app, so the user is taken straight to that setting.
+                    runCatching {
+                        context.startActivity(
+                            android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                         )
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Maximus Gemini AI Agent",
-                            color = AppTheme.colors.textPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Autonomous log diagnosis, usage mode tuning, voice & smart token tracker",
-                            color = AppTheme.colors.textSecondary,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
+                },
+                onBack = back
+            )
 
-                Button(
-                    onClick = onNavigateToAiAgent,
-                    colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text("OPEN", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: APPEARANCE & THEME
-        SectionHeader("APPEARANCE & THEME")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(AppTheme.colors.surfaceElevated)
-                                .border(1.dp, AppTheme.colors.borderSubtle, RoundedCornerShape(10.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (settings.darkTheme) Icons.Default.DarkMode else Icons.Default.WbSunny,
-                                contentDescription = null,
-                                tint = if (settings.darkTheme) AppTheme.colors.primary else Color(0xFFD97706),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = if (settings.darkTheme) "Dark Theme Active" else "Light Theme Active",
-                                color = AppTheme.colors.textPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Swipe or tap the Sun/Moon switch to change appearance",
-                                color = AppTheme.colors.textSecondary,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-
-                    ThemeToggleSwitch(
-                        isDark = settings.darkTheme,
-                        onThemeChange = { isDark ->
-                            viewModel.setDarkTheme(isDark)
-                        }
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: SMART CONNECT & SCORING PROFILES
-        SectionHeader("SMART CONNECT & SCORING WEIGHTS")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                ScoringProfile.values().forEach { profile ->
-                    RoutingOptionItem(
-                        title = "${profile.title} Mode",
-                        subtitle = profile.description,
-                        isSelected = settings.scoringProfile == profile,
-                        onSelect = { viewModel.setScoringProfile(profile) }
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                SettingToggleItem(
-                    icon = Icons.Default.AutoAwesome,
-                    title = "Automated Failover Watchdog",
-                    subtitle = "Automatically switches to the next best node if packet loss > 30% or latency > 800ms",
-                    checked = settings.autoFailoverEnabled,
-                    onCheckedChange = { viewModel.setAutoFailover(it) }
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                SettingToggleItem(
-                    icon = Icons.Default.PowerSettingsNew,
-                    title = "Power button fallback",
-                    subtitle = "Starts your selected config first; only if it carries no traffic here, failover and recovery engines (MASQUE, Psiphon, Tor) take over. Off: the selected config only",
-                    checked = settings.powerButtonFallback,
-                    onCheckedChange = { viewModel.setPowerButtonFallback(it) }
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // What Smart Connect remembers per network, and the way to forget it.
-                SettingsRow(
-                    title = "Learned network data",
-                    subtitle = when (val routes = learnedNetworks.sumOf { it.routes }) {
-                        0 -> "Nothing learned yet"
-                        else -> "${if (routes == 1) "1 route" else "$routes routes"} on " +
-                            if (learnedNetworks.size == 1) "1 network" else "${learnedNetworks.size} networks"
-                    },
-                    leading = { SettingsIconBox(Icons.Default.Route, AppTheme.colors.primary) },
-                    onClick = { viewModel.refreshLearnedNetworks(); showLearnedNetworks = true }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: CORE PROXY ENGINE SELECTION
-        SectionHeader("PROXY CORE ENGINE")
-        Text("Local proxy mode", color = AppTheme.colors.primary, fontWeight = FontWeight.Bold)
-        Text("Uses the selected server for apps configured with SOCKS5. Device-wide VPN and Kill Switch are inactive in this mode.",
-            fontSize = 12.sp, color = AppTheme.colors.textSecondary)
-        localProxy.error?.let { Text(it, color = AppTheme.colors.statusWarning, fontSize = 12.sp) }
-        if (localProxy.running) {
-            androidx.compose.foundation.text.selection.SelectionContainer {
-                Text("SOCKS5 127.0.0.1:${localProxy.port}\nUsername: ${localProxy.user}\nPassword: ${localProxy.password}",
-                    fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = AppTheme.colors.primary)
-            }
-        }
-        Button(onClick = {
-            val intent = android.content.Intent(context, com.example.vpn.share.LocalProxyService::class.java)
-            if (localProxy.running || localProxy.starting) context.stopService(intent)
-            else androidx.core.content.ContextCompat.startForegroundService(context, intent)
-        }, enabled = localProxy.running || localProxy.starting || settings.selectedProfileId != null) {
-            Text(if (localProxy.starting) "Cancel proxy startup" else if (localProxy.running) "Stop local proxy" else "Start selected server as local proxy")
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                RoutingOptionItem(
-                    title = "Auto (Protocol Smart Select)",
-                    subtitle = "Automatically selects the best engine (Xray for VLESS/XTLS Reality, Mihomo for YAML & proxy groups)",
-                    isSelected = settings.preferredEngine == EngineType.AUTO,
-                    onSelect = { viewModel.setPreferredEngine(EngineType.AUTO) }
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                RoutingOptionItem(
-                    title = "sing-box 1.14.4",
-                    subtitle = "VLESS, VMess, Trojan and Shadowsocks; incompatible custom settings stay on Xray",
-                    isSelected = settings.preferredEngine == EngineType.SING_BOX,
-                    onSelect = { viewModel.setPreferredEngine(EngineType.SING_BOX) }
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                RoutingOptionItem(
-                    title = "Mihomo / Clash Meta Core",
-                    subtitle = "High-performance rule matching, URL-test latency failover & proxy groups",
-                    isSelected = settings.preferredEngine == EngineType.MIHOMO,
-                    onSelect = { viewModel.setPreferredEngine(EngineType.MIHOMO) }
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                RoutingOptionItem(
-                    title = "Xray-Core",
-                    subtitle = "Full VLESS + XTLS Vision + Reality kernel with direct TCP/gRPC routing",
-                    isSelected = settings.preferredEngine == EngineType.XRAY,
-                    onSelect = { viewModel.setPreferredEngine(EngineType.XRAY) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: ROUTING MODE
-        SectionHeader("ROUTING RULES")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                RoutingOptionItem(
-                    title = "Bypass LAN & Direct Local",
-                    subtitle = "Routes LAN & private IPs directly; tunnels everything else",
-                    isSelected = settings.routingMode == RoutingMode.RULE_BYPASS_LAN,
-                    onSelect = { viewModel.setRoutingMode(RoutingMode.RULE_BYPASS_LAN) }
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                RoutingOptionItem(
-                    title = "Global Proxy (All Traffic)",
-                    subtitle = "Routes all traffic strictly through the VLESS tunnel",
-                    isSelected = settings.routingMode == RoutingMode.GLOBAL,
-                    onSelect = { viewModel.setRoutingMode(RoutingMode.GLOBAL) }
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                RoutingOptionItem(
-                    title = "Custom Bypass List",
-                    subtitle = "Bypasses specified custom domain & IP patterns",
-                    isSelected = settings.routingMode == RoutingMode.BYPASS_SELECTED,
-                    onSelect = { viewModel.setRoutingMode(RoutingMode.BYPASS_SELECTED) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: DNS CONFIGURATION
-        Box(Modifier.bringIntoViewRequester(dnsRequester)) {
-            SectionHeader("DNS & DOH CONFIGURATION")
-        }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text("Upstream DNS / DoH Provider", color = AppTheme.colors.textSecondary, fontSize = 13.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                ExposedDropdownMenuBox(
-                    expanded = dnsDropdownExpanded,
-                    onExpandedChange = { dnsDropdownExpanded = !dnsDropdownExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = getDnsLabel(settings.dnsServer),
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dnsDropdownExpanded) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = AppTheme.colors.surfaceElevated,
-                            unfocusedContainerColor = AppTheme.colors.surfaceElevated,
-                            focusedBorderColor = AppTheme.colors.primary,
-                            unfocusedBorderColor = AppTheme.colors.borderSubtle,
-                            focusedTextColor = AppTheme.colors.textPrimary,
-                            unfocusedTextColor = AppTheme.colors.textPrimary
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    )
-                    ExposedDropdownMenu(
-                        expanded = dnsDropdownExpanded,
-                        onDismissRequest = { dnsDropdownExpanded = false },
-                        modifier = Modifier
-                            .background(AppTheme.colors.surfaceCard)
-                            .border(1.dp, AppTheme.colors.borderSubtle)
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Use default DNS", color = AppTheme.colors.textPrimary) },
-                            onClick = {
-                                viewModel.setDnsServer(AppSettings().dnsServer)
-                                dnsDropdownExpanded = false
-                            }
-                        )
-                        listOf(
-                            "https://1.1.1.1/dns-query" to "Cloudflare DoH (Encrypted)",
-                            "https://8.8.8.8/dns-query" to "Google DoH (Encrypted)",
-                            "https://9.9.9.9/dns-query" to "Quad9 DoH (Secure)",
-                            "1.1.1.1" to "Cloudflare UDP (1.1.1.1)",
-                            "8.8.8.8" to "Google DNS UDP (8.8.8.8)",
-                            "9.9.9.9" to "Quad9 Secure UDP (9.9.9.9)"
-                        ).forEach { (ip, label) ->
-                            DropdownMenuItem(
-                                text = { Text(label, color = AppTheme.colors.textPrimary) },
-                                onClick = {
-                                    viewModel.setDnsServer(ip)
-                                    dnsDropdownExpanded = false
-                                }
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text("Custom DNS…", color = AppTheme.colors.textPrimary) },
-                            onClick = {
-                                customDns = settings.dnsServer
-                                dnsDropdownExpanded = false
-                            }
-                        )
-                    }
-                }
-                Text(
-                    "DNS changes apply the next time you connect.",
-                    color = AppTheme.colors.textSecondary,
-                    fontSize = 12.sp
-                )
-                TextButton(
-                    enabled = !dnsTestRunning,
-                    onClick = {
-                        dnsTestRunning = true
-                        dnsTestResult = null
-                        scope.launch {
-                            try {
-                                val result = DnsPathTest.run(context)
-                                dnsTestResult = if (result.completed) {
-                                    "VPN DNS responded in ${result.latencyMs} ms."
-                                } else {
-                                    "No VPN DNS result. Connect Maximus and try again, or check Diagnostics."
-                                }
-                            } finally {
-                                dnsTestRunning = false
-                            }
-                        }
-                    }
-                ) { Text(if (dnsTestRunning) "Testing VPN DNS…" else "Test current VPN DNS") }
-                TextButton(
-                    enabled = !dnsTestRunning,
-                    onClick = {
-                        dnsTestRunning = true
-                        dnsTestResult = null
-                        scope.launch {
-                            try {
-                                dnsTestResult = DnsPathTest.testResolver(context, settings.dnsServer).summary
-                            } finally {
-                                dnsTestRunning = false
-                            }
-                        }
-                    }
-                ) { Text("Test selected resolver") }
-                dnsTestResult?.let { Text(it, color = AppTheme.colors.textSecondary, fontSize = 12.sp) }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: DPI DESYNC & ANTI-CENSORSHIP
-        SectionHeader("DPI DESYNC & BYPASS ENGINE")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                SettingToggleItem(
-                    icon = Icons.Default.AutoAwesome,
-                    title = "Enable Desync Packet Mutation",
-                    subtitle = "Splits, disorders, and injects fake SNI to bypass deep packet inspection filters",
-                    checked = settings.defaultDesyncConfig.enabled,
-                    onCheckedChange = { isEnabled ->
-                        viewModel.updateSettings(settings.copy(defaultDesyncConfig = settings.defaultDesyncConfig.copy(enabled = isEnabled)))
-                    }
-                )
-
-                if (settings.defaultDesyncConfig.enabled) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "DESYNC PRESET PROFILE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AppTheme.colors.primary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(
-                            com.example.data.model.DesyncProfile.LIGHT to "Light",
-                            com.example.data.model.DesyncProfile.BALANCED to "Balanced",
-                            com.example.data.model.DesyncProfile.SEVERE to "Severe",
-                            com.example.data.model.DesyncProfile.ADAPTIVE to "Adaptive"
-                        ).forEach { (profile, label) ->
-                            val isSel = settings.defaultDesyncConfig.profile == profile
-                            Button(
-                                onClick = {
-                                    val method = when (profile) {
-                                        com.example.data.model.DesyncProfile.LIGHT -> com.example.data.model.DesyncMethod.SPLIT
-                                        com.example.data.model.DesyncProfile.BALANCED -> com.example.data.model.DesyncMethod.DISORDER
-                                        com.example.data.model.DesyncProfile.SEVERE -> com.example.data.model.DesyncMethod.DISORDER_OOB
-                                        com.example.data.model.DesyncProfile.ADAPTIVE -> com.example.data.model.DesyncMethod.FAKE_SNI
-                                        else -> settings.defaultDesyncConfig.method
-                                    }
-                                    viewModel.updateSettings(
-                                        settings.copy(
-                                            defaultDesyncConfig = settings.defaultDesyncConfig.copy(
-                                                profile = profile,
-                                                method = method
-                                            )
-                                        )
-                                    )
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isSel) AppTheme.colors.primary else AppTheme.colors.surfaceElevated
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = label,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSel) Color.White else AppTheme.colors.textPrimary
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "MULTI-DOMAIN FAKE SNI POOL",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AppTheme.colors.primary
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = settings.defaultDesyncConfig.fakeSniPool,
-                        onValueChange = { newPool: String ->
-                            viewModel.updateSettings(settings.copy(defaultDesyncConfig = settings.defaultDesyncConfig.copy(fakeSniPool = newPool)))
-                        },
-                        placeholder = { Text("www.google.com, www.microsoft.com, speedtest.net", fontSize = 12.sp) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = AppTheme.colors.surfaceElevated,
-                            unfocusedContainerColor = AppTheme.colors.surfaceElevated,
-                            focusedBorderColor = AppTheme.colors.primary,
-                            unfocusedBorderColor = AppTheme.colors.borderSubtle,
-                            focusedTextColor = AppTheme.colors.textPrimary,
-                            unfocusedTextColor = AppTheme.colors.textPrimary
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: FREE CONFIGS
-        SectionHeader("FREE CONFIGS")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                SettingToggleItem(
-                    icon = Icons.Default.CloudDownload,
-                    title = "Free configs",
-                    subtitle = "On: downloads the free public server list and shows it in Servers and Free Configs. Off: nothing is downloaded, tested or shown.",
-                    checked = settings.freeConfigsEnabled,
-                    onCheckedChange = { viewModel.setFreeConfigs(it) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: SHARE OVER HOTSPOT
-        SectionHeader("SHARE OVER HOTSPOT")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                SettingToggleItem(
-                    icon = Icons.Default.WifiTethering,
-                    title = "Share VPN over hotspot",
-                    subtitle = "Opens a password-protected proxy on your hotspot so other devices route through this tunnel. Off by default; works only while connected.",
-                    checked = settings.hotspotShareEnabled,
-                    onCheckedChange = { viewModel.setHotspotShare(it) }
-                )
-                if (settings.hotspotShareEnabled) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    val share = remember(
-                        settings.hotspotShareUser,
-                        settings.hotspotSharePassword,
-                        settings.hotspotSharePort,
-                        settings.hotspotShareEnabled
-                    ) { com.example.vpn.share.HotspotShare.clientInstructions(settings) }
-                    val copy: (String, String) -> Unit = { value, label ->
+            SettingsPage.SHARING -> {
+                val share = remember(
+                    settings.hotspotShareUser,
+                    settings.hotspotSharePassword,
+                    settings.hotspotSharePort,
+                    settings.hotspotShareEnabled
+                ) { com.example.vpn.share.HotspotShare.clientInstructions(settings) }
+                SharingSettingsPage(
+                    settings = settings,
+                    actions = actions,
+                    share = share?.let { HotspotShareUi(it.socksEndpoint, it.httpEndpoint, it.user, it.password) },
+                    onCopy = { value, label ->
                         settingsClipboard.setText(androidx.compose.ui.text.AnnotatedString(value))
                         Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
-                    }
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        color = AppTheme.colors.surfaceElevated,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            if (share == null) {
-                                Text(
-                                    "Turn on your phone's hotspot, then connect the VPN. The address to use on other devices will appear here.",
-                                    color = AppTheme.colors.textSecondary,
-                                    fontSize = 11.5.sp
-                                )
+                    },
+                    onBack = back
+                )
+            }
+
+            SettingsPage.APPEARANCE -> AppearanceSettingsPage(settings = settings, actions = actions, onBack = back)
+
+            SettingsPage.UPDATES -> UpdatesSettingsPage(
+                versionName = versionName,
+                update = updateUi,
+                data = UpdatesDataUi(
+                    resolverBusy = resolverBusy,
+                    resolverProgress = resolverProgress,
+                    resolverInstalled = ResolverPackUpdater.installed(context),
+                    resolverStatus = resolverStatus,
+                    cleanIpBusy = cleanIpBusy,
+                    cleanIpStatus = cleanIpStatus,
+                    vpnOnlyUpdates = vpnOnlyUpdates
+                ),
+                onCheckForUpdates = checkForUpdates,
+                onCoreManager = { showCoreInventory = true },
+                onUpdateResolvers = {
+                    if (!resolverBusy) {
+                        resolverBusy = true
+                        resolverStatus = null
+                        scope.launch {
+                            val latest = latestPublished ?: runCatching { UpdateNetworkPolicy.requireAllowed(context); AppUpdateChecker.fetchLatest() }.getOrNull()
+                            latestPublished = latest
+                            val pack = latest?.resolverPack
+                            if (pack == null) {
+                                resolverStatus = "No verified resolver data pack is available in the official release."
                             } else {
-                                Text(
-                                    "On the other device, set this phone as a SOCKS5 (or HTTP) proxy:",
-                                    color = AppTheme.colors.textSecondary,
-                                    fontSize = 11.5.sp
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                HotspotCopyRow("SOCKS5 proxy", share.socksEndpoint) { copy(share.socksEndpoint, "SOCKS5 address") }
-                                HotspotCopyRow("HTTP proxy", share.httpEndpoint) { copy(share.httpEndpoint, "HTTP address") }
-                                HotspotCopyRow("Username", share.user) { copy(share.user, "Username") }
-                                HotspotCopyRow("Password", share.password) { copy(share.password, "Password") }
+                                runCatching { ResolverPackUpdater.refresh(context, pack) { resolverProgress = it } }
+                                    .onSuccess { resolverStatus = "Updated and validated $it resolver lists." }
+                                    .onFailure { resolverStatus = it.message ?: "Resolver database update failed." }
                             }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                "Only devices on your hotspot can connect, and only with these credentials. Changing them or the switch takes effect on the next connect.",
-                                color = AppTheme.colors.textMuted,
-                                fontSize = 10.5.sp
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            androidx.compose.material3.OutlinedButton(
-                                onClick = { viewModel.regenerateHotspotCredentials() },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Generate new password", fontSize = 12.sp)
-                            }
+                            resolverBusy = false
                         }
                     }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: SECURITY & NETWORK TOGGLES
-        SectionHeader("SECURITY & TUNNELING")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                SettingToggleItem(
-                    icon = Icons.Default.Lock,
-                    title = "In-Tunnel Packet Guard",
-                    subtitle = "For system-wide blocking during disconnects, enable Android Always-on VPN and Block connections without VPN",
-                    checked = settings.killSwitchEnabled,
-                    onCheckedChange = { viewModel.setKillSwitch(it) }
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                // The packet guard works inside the tunnel. Only Android's own lockdown also covers the moment
-                // Android stops or restarts the app, so the user is taken straight to that setting.
-                androidx.compose.material3.OutlinedButton(
-                    onClick = {
-                        runCatching {
-                            context.startActivity(
-                                android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)
-                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Open Android VPN settings (Always-on, Block connections without VPN)", fontSize = 12.sp)
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                SettingToggleItem(
-                    icon = Icons.Default.Route,
-                    title = "Route IPv6 through VPN",
-                    subtitle = "Native Xray routes IPv6 when enabled; IPv6 is blocked on the IPv4-only Kotlin compatibility tunnel",
-                    checked = settings.ipv6Enabled,
-                    onCheckedChange = { viewModel.setIpv6(it) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                SettingToggleItem(
-                    icon = Icons.Default.Refresh,
-                    title = "Auto-Reconnect on Network Switch",
-                    subtitle = "Automatically re-establishes tunnel on WiFi/Cellular transition",
-                    checked = settings.autoReconnect,
-                    onCheckedChange = { viewModel.setAutoReconnect(it) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: ADVANCED & DIAGNOSTICS
-        SectionHeader("ENGINE DIAGNOSTICS")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                // Live Diagnostics and Logs Button
-                Button(
-                    onClick = onNavigateToDiagnostics,
-                    modifier = Modifier.fillMaxWidth().testTag("view_diagnostics_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surfaceElevated),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.Speed, contentDescription = null, tint = AppTheme.colors.primary, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("View Live Logs & Telemetry", color = AppTheme.colors.primary, fontWeight = FontWeight.Bold)
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Xray JSON Preview Button
-                Button(
-                    onClick = {
+                },
+                onRollbackResolvers = {
+                    resolverStatus = if (ResolverPackUpdater.rollback(context))
+                        "Previous resolver pack restored." else "No previous verified pack available."
+                },
+                onRefreshCleanIps = {
+                    if (!cleanIpBusy) {
+                        cleanIpBusy = true
+                        cleanIpStatus = null
                         scope.launch {
-                            previewJson = viewModel.getPreviewConfigJson()
-                            showConfigPreview = true
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().testTag("view_xray_config_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surfaceElevated),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.Code, contentDescription = null, tint = AppTheme.colors.primary, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("View Raw Engine JSON Config", color = AppTheme.colors.primary, fontWeight = FontWeight.Bold)
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Reset Settings Button
-                Button(
-                    onClick = { showResetConfirm = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (AppTheme.colors.isDark) Color(0xFF241416) else Color(0xFFFEF2F2)
-                    ),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.Restore, contentDescription = null, tint = AppTheme.colors.statusError, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Reset All Settings to Defaults", color = AppTheme.colors.statusError, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: DEVELOPER & ABOUT
-        SectionHeader("ABOUT & DEVELOPER")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF030818))
-                            .border(1.dp, AppTheme.colors.borderMedium, RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.ic_maximus_logo),
-                            contentDescription = "Maximus App Logo",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(10.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                "Maximus VPN",
-                                color = AppTheme.colors.textPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(AppTheme.colors.primary.copy(alpha = 0.15f))
-                                    .border(1.dp, AppTheme.colors.primary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    "v${BuildConfig.VERSION_NAME}",
-                                    color = AppTheme.colors.primary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            runCatching { CleanIpMaintenance.refresh(context) { done, total ->
+                                cleanIpStatus = "Tested $done / $total Cloudflare candidates…"
+                            } }.onSuccess {
+                                cleanIpStatus = "${it.validated} of ${it.tested} addresses verified against the selected origin."
+                            }.onFailure {
+                                cleanIpStatus = it.message ?: "Clean-IP scan failed."
                             }
+                            cleanIpBusy = false
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            "Enterprise VLESS & Universal Proxy Client",
-                            color = AppTheme.colors.textSecondary,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp
-                        )
                     }
-                }
+                },
+                onVpnOnlyUpdates = { value ->
+                    UpdateNetworkPolicy.setVpnOnly(context, value)
+                    vpnOnlyUpdates = value
+                },
+                onChangelog = { uriHandler.openUri(AppUpdateChecker.RELEASES_URL) },
+                onBack = back
+            )
 
-                Spacer(modifier = Modifier.height(14.dp))
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(AppTheme.colors.borderSubtle))
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Developer / Organization", color = AppTheme.colors.textSecondary, fontSize = 12.sp)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .border(1.dp, AppTheme.colors.primary.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                        ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.ic_drfx_logo),
-                                contentDescription = "DrFXAi Logo",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                        Text("DrFXAi", color = AppTheme.colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            SettingsPage.DIAGNOSTICS -> DiagnosticsSettingsPage(
+                onViewLogs = onNavigateToDiagnostics,
+                onViewConfig = {
+                    scope.launch {
+                        previewJson = viewModel.getPreviewConfigJson()
+                        showConfigPreview = true
                     }
-                }
+                },
+                onReset = { showResetConfirm = true },
+                onBack = back
+            )
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Core Proxy Engines", color = AppTheme.colors.textSecondary, fontSize = 12.sp)
-                    Text("${com.example.vpn.lab.CoreCapabilityRegistry.CORE} • Mihomo ${com.example.vpn.sidecar.MihomoSidecar.VERSION}", color = AppTheme.colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text("Universal Protocols Supported", color = AppTheme.colors.textSecondary, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "VLESS • VMess • Trojan • Shadowsocks • Hysteria2 • TUIC • SOCKS5 • HTTP",
-                        color = AppTheme.colors.textPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        lineHeight = 16.sp
-                    )
-                }
-            }
+            SettingsPage.ABOUT -> AboutSettingsPage(
+                versionName = versionName,
+                coreSummary = "${com.example.vpn.lab.CoreCapabilityRegistry.CORE} · Mihomo ${com.example.vpn.sidecar.MihomoSidecar.VERSION}",
+                cryptoSubtitle = if (com.example.ui.popups.SupportLinks.CRYPTO.isNotEmpty()) "USDT · Tron (TRC20)" else "Help support development",
+                onTelegram = { uriHandler.openUri(CommunityLinks.TELEGRAM) },
+                onYouTube = { uriHandler.openUri(CommunityLinks.YOUTUBE) },
+                onGitHub = { uriHandler.openUri(CommunityLinks.GITHUB) },
+                onCrypto = {
+                    if (com.example.ui.popups.SupportLinks.CRYPTO.isEmpty()) {
+                        Toast.makeText(context, "Crypto support details coming soon.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        showCryptoSupport = true
+                    }
+                },
+                onCoffee = {
+                    val url = com.example.ui.popups.SupportLinks.COFFEE
+                    if (url.isBlank()) Toast.makeText(context, "Coming soon.", Toast.LENGTH_SHORT).show()
+                    else uriHandler.openUri(url)
+                },
+                telegramLogo = { TelegramLogo(size = 20.dp) },
+                youTubeLogo = { YouTubeLogo(size = 20.dp) },
+                gitHubLogo = { GitHubLogo(size = 20.dp) },
+                onBack = back
+            )
         }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: APP UPDATE
-        Box(Modifier.bringIntoViewRequester(resolverRequester)) {
-            SectionHeader("APP UPDATE & RESOLVER DATABASES")
-        }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(4.dp)) {
-                SettingsRow(
-                    title = "Check for updates",
-                    subtitle = "Get the latest version of Maximus VPN",
-                    leading = { SettingsIconBox(Icons.Default.SystemUpdate, AppTheme.colors.primary) },
-                    trailing = {
-                        if (updateChecking) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = AppTheme.colors.primary
-                            )
-                        } else {
-                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = AppTheme.colors.textMuted.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
-                        }
-                    },
-                    onClick = {
-                        scope.launch {
-                            if (!updateChecking) {
-                                performUpdateCheck()
-                                if (updateRelease != null) showUpdateDialog = true
-                                else Toast.makeText(context, "No newer release available (or update check unavailable).", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = "Core manager",
-                    subtitle = "Bundled engines, runtime availability and update policy",
-                    leading = { SettingsIconBox(Icons.Default.Refresh, AppTheme.colors.primary) },
-                    onClick = { showCoreInventory = true }
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = "Update resolver databases",
-                    subtitle = if (resolverBusy) "Downloading verified data… ${resolverProgress.coerceAtLeast(0)}%"
-                        else if (ResolverPackUpdater.installed(context)) "Verified update installed • rollback available"
-                        else "Six resolver lists • SHA-256 checked • original assets retained",
-                    leading = { SettingsIconBox(Icons.Default.CloudDownload, AppTheme.colors.primary) },
-                    onClick = {
-                        if (!resolverBusy) {
-                            resolverBusy = true
-                            resolverStatus = null
-                            scope.launch {
-                                val latest = latestPublished ?: runCatching { UpdateNetworkPolicy.requireAllowed(context); AppUpdateChecker.fetchLatest() }.getOrNull()
-                                latestPublished = latest
-                                val pack = latest?.resolverPack
-                                if (pack == null) {
-                                    resolverStatus = "No verified resolver data pack is available in the official release."
-                                } else {
-                                    runCatching { ResolverPackUpdater.refresh(context, pack) { resolverProgress = it } }
-                                        .onSuccess { resolverStatus = "Updated and validated $it resolver lists." }
-                                        .onFailure { resolverStatus = it.message ?: "Resolver database update failed." }
-                                }
-                                resolverBusy = false
-                            }
-                        }
-                    }
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = "Refresh verified Clean IPs",
-                    subtitle = if (cleanIpBusy) "Testing the selected CDN node…" else
-                        "Retest endpoints for the selected node on this network",
-                    leading = { SettingsIconBox(Icons.Default.Speed, AppTheme.colors.primary) },
-                    onClick = {
-                        if (!cleanIpBusy) {
-                            cleanIpBusy = true
-                            cleanIpStatus = null
-                            scope.launch {
-                                runCatching { CleanIpMaintenance.refresh(context) { done, total ->
-                                    cleanIpStatus = "Tested $done / $total Cloudflare candidates…"
-                                } }.onSuccess {
-                                    cleanIpStatus = "${it.validated} of ${it.tested} addresses verified against the selected origin."
-                                }.onFailure {
-                                    cleanIpStatus = it.message ?: "Clean-IP scan failed."
-                                }
-                                cleanIpBusy = false
-                            }
-                        }
-                    }
-                )
-                cleanIpStatus?.let {
-                    Text(it, color = AppTheme.colors.textSecondary, modifier = Modifier.padding(12.dp))
-                }
-                if (ResolverPackUpdater.installed(context)) {
-                    SettingsRowDivider()
-                    SettingsRow(
-                        title = "Rollback resolver databases",
-                        subtitle = "Restore the previously verified list set",
-                        leading = { SettingsIconBox(Icons.Default.Restore, AppTheme.colors.textSecondary) },
-                        onClick = {
-                            resolverStatus = if (ResolverPackUpdater.rollback(context))
-                                "Previous resolver pack restored." else "No previous verified pack available."
-                        }
-                    )
-                }
-                resolverStatus?.let {
-                    Text(it, color = AppTheme.colors.textSecondary, modifier = Modifier.padding(12.dp))
-                }
-                SettingsRowDivider()
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("VPN-only updates", color = AppTheme.colors.textPrimary, fontSize = 14.sp)
-                        Text("No direct fallback when the VPN is disconnected", color = AppTheme.colors.textSecondary, fontSize = 11.sp)
-                    }
-                    Switch(
-                        checked = vpnOnlyUpdates,
-                        onCheckedChange = { value ->
-                            UpdateNetworkPolicy.setVpnOnly(context, value)
-                            vpnOnlyUpdates = value
-                        }
-                    )
-                }
-                SettingsRowDivider()
-                SettingsRow(
-                    title = "View changelog",
-                    subtitle = "See what's new in recent versions",
-                    leading = { SettingsIconBox(Icons.Default.Article, AppTheme.colors.textSecondary) },
-                    onClick = { uriHandler.openUri(AppUpdateChecker.RELEASES_URL) }
-                )
-                SettingsRowDivider()
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    SettingsIconBox(Icons.Default.Info, AppTheme.colors.textSecondary)
-                    Spacer(modifier = Modifier.width(13.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Current version", color = AppTheme.colors.textPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("v${BuildConfig.VERSION_NAME} · stable channel", color = AppTheme.colors.textMuted, fontSize = 11.5.sp)
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    UpdateStatusChip(checking = updateChecking, checked = updateChecked, hasUpdate = updateRelease != null)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: COMMUNITY & LINKS
-        SectionHeader("COMMUNITY & LINKS")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(4.dp)) {
-                SettingsRow(
-                    title = "Telegram channel",
-                    subtitle = "News, updates and community",
-                    leading = { SettingsLogoTile { TelegramLogo(size = 19.dp) } },
-                    trailing = { Icon(Icons.Default.OpenInNew, contentDescription = null, tint = AppTheme.colors.textMuted.copy(alpha = 0.7f), modifier = Modifier.size(15.dp)) },
-                    onClick = { uriHandler.openUri(CommunityLinks.TELEGRAM) }
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = "YouTube channel",
-                    subtitle = "Tutorials, guides and more",
-                    leading = { SettingsLogoTile { YouTubeLogo(size = 19.dp) } },
-                    trailing = { Icon(Icons.Default.OpenInNew, contentDescription = null, tint = AppTheme.colors.textMuted.copy(alpha = 0.7f), modifier = Modifier.size(15.dp)) },
-                    onClick = { uriHandler.openUri(CommunityLinks.YOUTUBE) }
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = "GitHub repository",
-                    subtitle = "Source code, issues and contributions",
-                    leading = { SettingsLogoTile { GitHubLogo(size = 19.dp) } },
-                    trailing = { Icon(Icons.Default.OpenInNew, contentDescription = null, tint = AppTheme.colors.textMuted.copy(alpha = 0.7f), modifier = Modifier.size(15.dp)) },
-                    onClick = { uriHandler.openUri(CommunityLinks.GITHUB) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // SECTION: SUPPORT MAXIMUS
-        SectionHeader("SUPPORT MAXIMUS")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(4.dp)) {
-                SettingsRow(
-                    title = "Support with crypto",
-                    subtitle = if (com.example.ui.popups.SupportLinks.CRYPTO.isNotEmpty()) "USDT · Tron (TRC20)" else "Help support development",
-                    leading = { SettingsIconBox(Icons.Default.CurrencyBitcoin, Color(0xFFE0A94A)) },
-                    onClick = {
-                        if (com.example.ui.popups.SupportLinks.CRYPTO.isEmpty()) {
-                            Toast.makeText(context, "Crypto support details coming soon.", Toast.LENGTH_SHORT).show()
-                        } else {
-                            showCryptoSupport = true
-                        }
-                    }
-                )
-                SettingsRowDivider()
-                SettingsRow(
-                    title = "Buy a coffee",
-                    subtitle = "Support the developer",
-                    leading = { SettingsIconBox(Icons.Default.LocalCafe, AppTheme.colors.textSecondary) },
-                    onClick = {
-                        val url = com.example.ui.popups.SupportLinks.COFFEE
-                        if (url.isBlank()) Toast.makeText(context, "Coming soon.", Toast.LENGTH_SHORT).show()
-                        else uriHandler.openUri(url)
-                    }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
     }
 
     if (showConfigPreview) {
@@ -1473,224 +559,22 @@ fun SettingsScreen(
     }
 }
 
-@Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        color = AppTheme.colors.textMuted,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(bottom = 6.dp)
-    )
 }
 
-/** A calm, uniform graphite tile for the bottom Settings rows, so the list reads as one family. */
-@Composable
-private fun SettingsIconBox(icon: ImageVector, tint: Color) {
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(AppTheme.colors.surfaceElevated)
-            .border(1.dp, AppTheme.colors.borderSubtle, RoundedCornerShape(9.dp)),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
-    }
-}
-
-/** The same tile, framing a community brand logo. */
-@Composable
-private fun SettingsLogoTile(logo: @Composable () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(AppTheme.colors.surfaceElevated)
-            .border(1.dp, AppTheme.colors.borderSubtle, RoundedCornerShape(9.dp)),
-        contentAlignment = Alignment.Center
-    ) {
-        logo()
-    }
-}
-
-/** A tappable settings row: a leading tile/logo, a title and subtitle, and a trailing indicator. */
-@Composable
-private fun SettingsRow(
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-    leading: @Composable () -> Unit,
-    trailing: @Composable () -> Unit = {
-        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = AppTheme.colors.textMuted, modifier = Modifier.size(20.dp))
-    }
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        leading()
-        Spacer(modifier = Modifier.width(13.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = AppTheme.colors.textPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(subtitle, color = AppTheme.colors.textMuted, fontSize = 11.5.sp, lineHeight = 15.sp)
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        trailing()
-    }
-}
-
-/** Hairline divider inset to line up under the row text. */
-@Composable
-private fun SettingsRowDivider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 60.dp, end = 10.dp)
-            .height(1.dp)
-            .background(AppTheme.colors.borderSubtle)
-    )
-}
-
-/** The small status pill on the current-version row. */
-@Composable
-private fun UpdateStatusChip(checking: Boolean, checked: Boolean, hasUpdate: Boolean) {
-    val (label, color) = when {
-        checking -> "Checking…" to AppTheme.colors.textSecondary
-        hasUpdate -> "Update ready" to AppTheme.colors.statusWarning
-        checked -> "Up to date" to AppTheme.colors.statusConnected
-        else -> return
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(color))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun RoutingOptionItem(
-    title: String,
-    subtitle: String,
-    isSelected: Boolean,
-    onSelect: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onSelect)
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        RadioButton(
-            selected = isSelected,
-            onClick = onSelect,
-            colors = RadioButtonDefaults.colors(
-                selectedColor = AppTheme.colors.primary,
-                unselectedColor = AppTheme.colors.textMuted
-            )
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = AppTheme.colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = AppTheme.colors.textSecondary, fontSize = 11.sp)
-        }
-    }
-}
-
-@Composable
-private fun HotspotCopyRow(label: String, value: String, onCopy: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onCopy)
-            .padding(vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            label,
-            color = AppTheme.colors.textMuted,
-            fontSize = 11.sp,
-            modifier = Modifier.width(96.dp)
-        )
-        Text(
-            value,
-            color = AppTheme.colors.textPrimary,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f)
-        )
-        Icon(
-            Icons.Default.ContentCopy,
-            contentDescription = "Copy $label",
-            tint = AppTheme.colors.primary,
-            modifier = Modifier.size(15.dp)
-        )
-    }
-}
-
-@Composable
-private fun SettingToggleItem(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(AppTheme.colors.surfaceElevated)
-                    .border(1.dp, AppTheme.colors.borderSubtle, RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = null, tint = AppTheme.colors.primary, modifier = Modifier.size(18.dp))
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(title, color = AppTheme.colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, color = AppTheme.colors.textSecondary, fontSize = 11.sp)
-            }
-        }
-
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = AppTheme.colors.onPrimary,
-                checkedTrackColor = AppTheme.colors.primary,
-                uncheckedThumbColor = AppTheme.colors.textMuted,
-                uncheckedTrackColor = AppTheme.colors.surfaceElevated
-            )
-        )
-    }
-}
-
-private fun getDnsLabel(dns: String): String {
-    return when (dns) {
-        "1.1.1.1" -> "Cloudflare UDP (1.1.1.1)"
-        "8.8.8.8" -> "Google DNS UDP (8.8.8.8)"
-        "9.9.9.9" -> "Quad9 Secure UDP (9.9.9.9)"
-        "https://1.1.1.1/dns-query" -> "Cloudflare DoH (Encrypted)"
-        "https://8.8.8.8/dns-query", "https://dns.google/dns-query" -> "Google DoH (Encrypted)"
-        "https://9.9.9.9/dns-query", "https://dns.quad9.net/dns-query" -> "Quad9 DoH (Secure)"
-        else -> "Custom DNS"
-    }
+/** Wires the pages to the view model one-to-one, so preference keys and side effects are unchanged. */
+private class ViewModelSettingsActions(private val vm: SettingsViewModel) : SettingsActions {
+    override fun setDarkTheme(dark: Boolean) = vm.setDarkTheme(dark)
+    override fun setScoringProfile(profile: ScoringProfile) = vm.setScoringProfile(profile)
+    override fun setAutoFailover(enabled: Boolean) = vm.setAutoFailover(enabled)
+    override fun setPowerButtonFallback(enabled: Boolean) = vm.setPowerButtonFallback(enabled)
+    override fun setPreferredEngine(engine: EngineType) = vm.setPreferredEngine(engine)
+    override fun setRoutingMode(mode: RoutingMode) = vm.setRoutingMode(mode)
+    override fun setDnsServer(dns: String) = vm.setDnsServer(dns)
+    override fun setFreeConfigs(enabled: Boolean) = vm.setFreeConfigs(enabled)
+    override fun setKillSwitch(enabled: Boolean) = vm.setKillSwitch(enabled)
+    override fun setHotspotShare(enabled: Boolean) = vm.setHotspotShare(enabled)
+    override fun regenerateHotspotCredentials() = vm.regenerateHotspotCredentials()
+    override fun setIpv6(enabled: Boolean) = vm.setIpv6(enabled)
+    override fun setAutoReconnect(enabled: Boolean) = vm.setAutoReconnect(enabled)
+    override fun updateSettings(settings: AppSettings) = vm.updateSettings(settings)
 }
