@@ -191,6 +191,7 @@ class UacPortTest {
         for (rp in listOf(split, deep)) {
             val d = rp.derive(p)!!
             assertTrue(rp.key, RecoverySecurityGate.check(p, d).passed)
+            assertTrue(rp.key, com.example.vpn.lab.CandidateMutationPolicy.check(p, d).allowed)
             assertEquals("ALPN is untouched, so xhttp/gRPC keep h2", p.alpn, d.alpn)
         }
         assertEquals("unsafe", split.derive(p)!!.fingerprint)
