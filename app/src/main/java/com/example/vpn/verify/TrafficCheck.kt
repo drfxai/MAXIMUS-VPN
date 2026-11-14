@@ -46,11 +46,30 @@ class TrafficCheck(
     private val hostnameVerifier: HostnameVerifier = HttpsURLConnection.getDefaultHostnameVerifier(),
     private val clock: () -> Long = System::currentTimeMillis,
     private val smallFallbacks: List<Target> = if (small == SMALL) SMALL_FALLBACKS else emptyList(),
-    private val onTlsVerified: () -> Unit = {}
+    private val onTlsVerified: () -> Unit = {},
+    /** Upload sizes tried in order on each reference; the first that is not confirmed ends that reference. */
+    private val uploadGrades: List<Int> = UPLOAD_GRADES,
+    /**
+     * The route exits through a Cloudflare Worker (BPB): it cannot reach Cloudflare-hosted references, so
+     * those are skipped instead of spending a timeout on them.
+     */
+    private val cloudflareWorkerExit: Boolean = false,
+    /** Total time the graded upload may spend before it starts no further transfer; default 3 steps. */
+    private val uploadBudgetMs: Long = stepTimeoutMs * 3L
 ) {
-    data class Target(val host: String, val port: Int, val path: String, val expectBytes: Int = 0) {
+    /**
+     * [echoes]: the reference sends the request body back (the end-of-payload marker proves receipt); a
+     * reference that does not echo proves receipt by answering 2xx only after the whole body arrived.
+     * [cloudflare]: hosted on Cloudflare, so unreachable through a Cloudflare Worker exit.
+     */
+    data class Target(val host: String, val port: Int, val path: String, val expectBytes: Int = 0,
+                      val echoes: Boolean = true, val cloudflare: Boolean = false) {
         override fun toString(): String = host
     }
+
+    /** What the last [upload] measured, grade by grade on every reference it tried; null before. */
+    @Volatile var lastUploadProbe: UploadProbe? = null
+        private set
 
     /** One small request (HTTP 204 expected); returns its round-trip time. Throws on any failure. */
     fun smallRequest(): Long {
@@ -69,13 +88,48 @@ class TrafficCheck(
         throw failure ?: IOException("No probe reference")
     }
 
-    fun download(): LegResult = firstPassing(downloads) { t -> downloadFrom(t) }
+    fun download(): LegResult = firstPassing(downloads.filterNot { cloudflareWorkerExit && it.cloudflare }) { t -> downloadFrom(t) }
 
-    fun upload(): LegResult = firstPassing(uploads) { t -> uploadTo(t) }
+    /**
+     * Graded upload: [uploadGrades] (16 KB, 64 KB, 256 KB) in turn on each reference, stopping a reference at
+     * its first unconfirmed grade and the whole check at the first reference that confirms every grade (or
+     * when [uploadBudgetMs] is spent). The leg passes once at least [UPLOAD_PASS_BYTES] were confirmed, so a
+     * route whose 64 KB went through but whose 256 KB stalled reads as partial, not as a plain failure; the
+     * per-grade detail, bytes written over time and where it stalled are kept in [lastUploadProbe].
+     */
+    fun upload(): LegResult {
+        val started = clock()
+        val attempts = mutableListOf<UploadProbe.HostAttempt>()
+        val skipped = mutableListOf<String>()
+        val notTested = mutableListOf<String>()
+        for (t in uploads) {
+            if (cloudflareWorkerExit && t.cloudflare) { skipped += t.host; continue }
+            if (attempts.isNotEmpty() && clock() - started >= uploadBudgetMs) { skipped += t.host; continue }
+            val grades = mutableListOf<UploadProbe.Grade>()
+            var reason: String? = null
+            for (size in uploadGrades) {
+                if (grades.isNotEmpty() && clock() - started >= uploadBudgetMs) break
+                val (grade, why) = uploadGrade(t, size)
+                grades += grade
+                if (why != null) reason = why
+                if (grade.outcome != UploadProbe.Outcome.OK) break
+            }
+            val attempt = UploadProbe.HostAttempt(t.host, grades)
+            if (grades.firstOrNull()?.outcome == UploadProbe.Outcome.NOT_TESTED) notTested += reason ?: "${t.host}: not tested"
+            attempts += attempt
+            if (attempt.complete(uploadGrades)) break
+        }
+        val probe = UploadProbe(attempts, skipped, uploadGrades)
+        lastUploadProbe = probe
+        return probe.toLeg(notTested)
+    }
 
     /** Download then upload, as one piece of evidence for [attemptId] on [networkGeneration]. */
-    fun both(attemptId: String?, networkGeneration: Int, path: ProbePath): TrafficEvidence =
-        TrafficEvidence(attemptId, networkGeneration, path, download(), upload(), clock())
+    fun both(attemptId: String?, networkGeneration: Int, path: ProbePath): TrafficEvidence {
+        val down = download()
+        val up = upload()
+        return TrafficEvidence(attemptId, networkGeneration, path, down, up, clock(), lastUploadProbe)
+    }
 
     internal fun downloadFrom(t: Target): LegResult {
         val started = clock()
@@ -92,24 +146,43 @@ class TrafficCheck(
         }
     }
 
-    internal fun uploadTo(t: Target): LegResult {
+    /** One upload of [size] bytes to [t]: the grade, plus a reason when it was not confirmed. */
+    internal fun uploadGrade(t: Target, size: Int): Pair<UploadProbe.Grade, String?> {
         val marker = token(32)
-        val payload = (token(UPLOAD_BYTES - marker.length) + marker).toByteArray(Charsets.US_ASCII)
+        val payload = (token((size - marker.length).coerceAtLeast(0)) + marker).toByteArray(Charsets.US_ASCII)
         val started = clock()
+        val timeline = mutableListOf<UploadProbe.Sample>()
+        var nextMark = TIMELINE_STEP
+        val progress: (Int) -> Unit = { written ->
+            if (written >= nextMark || written == payload.size) {
+                timeline += UploadProbe.Sample(clock() - started, written)
+                while (nextMark <= written) nextMark += TIMELINE_STEP
+            }
+        }
+        fun grade(outcome: UploadProbe.Outcome, sent: Int) =
+            UploadProbe.Grade(size, outcome, sent, clock() - started, timeline.toList())
+        val path = if (t.echoes) t.path else t.path + (if ('?' in t.path) "&" else "?") + "bytes=$size"
+        val target = t.copy(path = path)
         return try {
-            val r = exchange(t, "POST", payload, keepBody = true)
+            val r = exchange(target, "POST", payload, keepBody = t.echoes, progress = progress)
             when {
-                r.status !in 200..299 -> LegResult.NotTested("$t answered HTTP ${r.status}")
+                r.status !in 200..299 -> grade(UploadProbe.Outcome.NOT_TESTED, payload.size) to "$t answered HTTP ${r.status}"
+                // A reference that does not echo answers only after it read the whole Content-Length.
+                !t.echoes -> grade(UploadProbe.Outcome.OK, payload.size) to null
                 // The marker sits at the very end of the payload: echoed back, every byte before it arrived.
                 r.body?.toString(Charsets.US_ASCII.name())?.contains(marker) == true ->
-                    LegResult.Passed(payload.size, clock() - started)
-                else -> LegResult.NotTested("$t did not echo the upload")
+                    grade(UploadProbe.Outcome.OK, payload.size) to null
+                else -> grade(UploadProbe.Outcome.NOT_TESTED, payload.size) to "$t did not echo the upload"
             }
         } catch (e: TransferException) {
-            val result = failed(e, t)
-            // Socket writes count local buffering, not remote receipt or a path-MTU measurement.
-            if (result is LegResult.Failed) result.copy(stalled = false,
-                reason = "${result.reason}; ${e.moved} bytes written locally, remote receipt unconfirmed") else result
+            if (e.cause is Socks5.Socks5Exception) return grade(UploadProbe.Outcome.NOT_TESTED, 0) to "$t: ${e.cause?.message}"
+            val stage = if (e.timedOut) FailureStage.TIMEOUT else FailureStage.of(e.cause ?: e)
+            // Part of the body went and then nothing more before the deadline: where it stalled. Socket writes
+            // count local buffering, so the count is "written locally", not remote receipt.
+            val outcome = if (e.timedOut && e.moved > 0) UploadProbe.Outcome.STALLED else UploadProbe.Outcome.FAILED
+            if (e.moved > 0 && timeline.lastOrNull()?.bytes != e.moved) timeline += UploadProbe.Sample(clock() - started, e.moved)
+            UploadProbe.Grade(size, outcome, e.moved, clock() - started, timeline.toList(), stage) to
+                "$t: ${e.cause?.javaClass?.simpleName ?: "error"}"
         }
     }
 
@@ -152,7 +225,8 @@ class TrafficCheck(
      * One HTTP/1.1 request over a fresh connection, bounded by [stepTimeoutMs] in total: a socket write has
      * no timeout of its own, so a watchdog closes the socket at the deadline.
      */
-    internal fun exchange(t: Target, method: String, payload: ByteArray?, keepBody: Boolean, extraHeaders: Map<String, String> = emptyMap()): Response {
+    internal fun exchange(t: Target, method: String, payload: ByteArray?, keepBody: Boolean, extraHeaders: Map<String, String> = emptyMap(),
+                          progress: ((Int) -> Unit)? = null): Response {
         require(method in setOf("GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"))
         require(extraHeaders.all { (key, value) -> key.matches(Regex("[A-Za-z0-9-]+")) &&
             value.length <= 8192 && value.none { it == '\r' || it == '\n' } &&
@@ -192,6 +266,7 @@ class TrafficCheck(
                     out.write(payload, off, n)
                     off += n
                     moved = off
+                    progress?.invoke(off)
                 }
             }
             out.flush()
@@ -235,7 +310,14 @@ class TrafficCheck(
 
     companion object {
         const val DOWNLOAD_BYTES = 65_536
-        const val UPLOAD_BYTES = 24_576
+        /** The largest upload grade; the whole graded check moved this many bytes when it fully passed. */
+        const val UPLOAD_BYTES = 262_144
+        /** Graded upload sizes: small enough to pass a throttled leg, large enough to show where it stalls. */
+        val UPLOAD_GRADES = listOf(16_384, 65_536, UPLOAD_BYTES)
+        /** Confirmed bytes from which the upload leg counts as passed (more than the old single 24 KB upload). */
+        const val UPLOAD_PASS_BYTES = 65_536
+        /** Bytes between two upload timeline samples. */
+        const val TIMELINE_STEP = 16_384
         const val STEP_TIMEOUT_MS = 10_000
         private const val MAX_STEP_TIMEOUT_MS = 30_000
 
@@ -255,22 +337,25 @@ class TrafficCheck(
         const val SLOW_STEP_FLOOR_MS = 20_000
         private const val CHUNK = 4096
         private const val MAX_HEAD = 16 * 1024
-        private const val MAX_BODY = 256 * 1024
+        // A 256 KB upload grade is echoed back inside JSON, so the body cap sits above it.
+        private const val MAX_BODY = 640 * 1024
         private const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
         val SMALL = Target("www.gstatic.com", 443, "/generate_204")
         val SMALL_FALLBACKS = listOf(Target("www.apple.com", 443, "/library/test/success.html"))
         // httpbingo.org (Fly.io, not Cloudflare) is the second reference for both legs: speed.cloudflare.com is
         // unreachable through a Cloudflare CDN/Worker exit, and httpbin.org alone often times out on slow paths.
+        // The upload leads with speed.cloudflare.com/__up (no echo, so the graded sizes cost no download), which
+        // is skipped when the exit is a Cloudflare Worker; httpbingo.org then httpbin.org echo the body.
         val DOWNLOADS = listOf(
             Target("httpbin.org", 443, "/bytes/$DOWNLOAD_BYTES", DOWNLOAD_BYTES),
             Target("httpbingo.org", 443, "/bytes/$DOWNLOAD_BYTES", DOWNLOAD_BYTES),
-            Target("speed.cloudflare.com", 443, "/__down?bytes=$DOWNLOAD_BYTES", DOWNLOAD_BYTES)
+            Target("speed.cloudflare.com", 443, "/__down?bytes=$DOWNLOAD_BYTES", DOWNLOAD_BYTES, cloudflare = true)
         )
         val UPLOADS = listOf(
-            Target("httpbin.org", 443, "/anything"),
-            Target("httpbingo.org", 443, "/anything"),
-            Target("postman-echo.com", 443, "/post")
+            Target("speed.cloudflare.com", 443, "/__up", echoes = false, cloudflare = true),
+            Target("httpbingo.org", 443, "/post"),
+            Target("httpbin.org", 443, "/post")
         )
 
         private val WATCHDOG: ScheduledExecutorService by lazy {

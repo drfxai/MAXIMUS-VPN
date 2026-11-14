@@ -76,7 +76,8 @@ class TrafficCheckTest {
         server.start()
         val r = check(timeoutMs = 1_000).upload()
         assertTrue(r.toString(), r is LegResult.Failed && !r.stalled)
-        assertEquals(TrafficCheck.UPLOAD_BYTES, (r as LegResult.Failed).bytes)
+        // The first grade (16 KB) went out and was never confirmed: the graded check stops there.
+        assertEquals(TrafficCheck.UPLOAD_GRADES.first(), (r as LegResult.Failed).bytes)
         assertTrue(r.reason.contains("remote receipt unconfirmed"))
     }
 
@@ -87,6 +88,99 @@ class TrafficCheckTest {
         assertTrue(evidence.describe(), evidence.bidirectional)
         assertEquals(4096, (evidence.download as LegResult.Passed).bytes)
         assertEquals(TrafficCheck.UPLOAD_BYTES, (evidence.upload as LegResult.Passed).bytes)
+    }
+
+    private fun graded(
+        uploads: List<TrafficCheck.Target>, workerExit: Boolean = false, timeoutMs: Int = 3_000
+    ) = TrafficCheck(direct, tls = false, uploads = uploads, small = target("/204"), stepTimeoutMs = timeoutMs,
+        random = Random(7), cloudflareWorkerExit = workerExit)
+
+    @Test fun everyUploadGradeIsTriedAndAllPassingIsAFullPass() {
+        server.dispatcher = echo()
+        server.start()
+        val probe = graded(listOf(target("/echo")))
+        val r = probe.upload()
+        assertTrue(r.toString(), r is LegResult.Passed && r.bytes == TrafficCheck.UPLOAD_BYTES)
+        val attempt = probe.lastUploadProbe!!.attempts.single()
+        assertEquals(TrafficCheck.UPLOAD_GRADES, attempt.grades.map { it.size })
+        assertTrue(attempt.grades.all { it.outcome == UploadProbe.Outcome.OK })
+        assertEquals(3, server.requestCount)
+        // Bytes written over time: one sample per 16 KB, ending at the full size.
+        assertEquals(TrafficCheck.UPLOAD_BYTES, attempt.grades.last().timeline.last().bytes)
+        assertEquals(TrafficCheck.UPLOAD_BYTES / TrafficCheck.TIMELINE_STEP, attempt.grades.last().timeline.size)
+    }
+
+    @Test fun a256KbStallAfter64KbIsPartialNotASingleFail() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.bodySize > 100_000) MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+                else MockResponse().setBody("{\"data\":\"" + request.body.readUtf8() + "\"}")
+        }
+        server.start()
+        val probe = graded(listOf(target("/echo")), timeoutMs = 1_000)
+        val r = probe.upload()
+        val p = probe.lastUploadProbe!!
+        // 64 KB confirmed is more than the old single 24 KB upload: the leg passes, marked partial.
+        assertTrue(r.toString(), r is LegResult.Passed && r.bytes == 65_536)
+        assertTrue(p.partial)
+        assertEquals(65_536, p.confirmedBytes)
+        val miss = p.best!!.firstMiss!!
+        assertEquals(262_144, miss.size)
+        assertEquals(UploadProbe.Outcome.STALLED, miss.outcome)
+        assertEquals(miss.sentBytes, p.stallBytes)
+        assertTrue(p.describe(), p.describe().contains("partial: 64 KB ok") && p.describe().contains("256 KB stalled after"))
+        val evidence = TrafficEvidence("a", 0, ProbePath.TUN, LegResult.Passed(4096, 10), r, 0L, p)
+        assertTrue(evidence.describe(), evidence.describe().contains("verified (64 KB") && evidence.describe().contains("partial"))
+        assertEquals(p.stallBytes, evidence.stallBytes)
+    }
+
+    @Test fun aCloudflareReferenceIsSkippedBehindAWorkerExit() {
+        server.dispatcher = echo()
+        server.start()
+        val cf = TrafficCheck.Target("127.0.0.1", server.port, "/cf", echoes = false, cloudflare = true)
+        val probe = graded(listOf(cf, target("/echo")), workerExit = true)
+        assertTrue(probe.upload() is LegResult.Passed)
+        val paths = List(server.requestCount) { server.takeRequest(1, TimeUnit.SECONDS)!!.path }
+        assertTrue(paths.toString(), paths.none { it!!.startsWith("/cf") })
+        assertEquals(listOf("127.0.0.1"), probe.lastUploadProbe!!.skipped)
+    }
+
+    @Test fun aNonEchoingReferenceIsAskedForEachGradeSizeAndConfirmsBy2xx() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.path!!.startsWith("/__up?bytes=")) MockResponse().setResponseCode(200) else MockResponse().setResponseCode(404)
+        }
+        server.start()
+        val up = TrafficCheck.Target("127.0.0.1", server.port, "/__up", echoes = false, cloudflare = true)
+        val probe = graded(listOf(up))
+        val r = probe.upload()
+        assertTrue(r.toString(), r is LegResult.Passed && r.bytes == TrafficCheck.UPLOAD_BYTES)
+        val paths = List(3) { server.takeRequest(1, TimeUnit.SECONDS)!!.path }
+        assertEquals(TrafficCheck.UPLOAD_GRADES.map { "/__up?bytes=$it" }, paths)
+    }
+
+    @Test fun aReferenceThatRefusesTheUploadFallsBackToTheNext() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
+                "/first" -> MockResponse().setResponseCode(503)
+                else -> MockResponse().setBody("{\"data\":\"" + request.body.readUtf8() + "\"}")
+            }
+        }
+        server.start()
+        val probe = graded(listOf(target("/first"), target("/second")))
+        assertTrue(probe.upload() is LegResult.Passed)
+        val p = probe.lastUploadProbe!!
+        assertEquals(2, p.attempts.size)
+        assertEquals(UploadProbe.Outcome.NOT_TESTED, p.attempts.first().grades.single().outcome)
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test fun theDefaultUploadReferencesLeadWithCloudflareThenNonCloudflareEchoes() {
+        assertEquals(listOf("speed.cloudflare.com", "httpbingo.org", "httpbin.org"), TrafficCheck.UPLOADS.map { it.host })
+        assertTrue(TrafficCheck.UPLOADS.first().cloudflare && !TrafficCheck.UPLOADS.first().echoes)
+        assertEquals("/__up", TrafficCheck.UPLOADS.first().path)
+        assertTrue(TrafficCheck.UPLOADS.drop(1).none { it.cloudflare })
+        assertEquals(listOf(16_384, 65_536, 262_144), TrafficCheck.UPLOAD_GRADES)
     }
 
     @Test fun aChunkedDownloadIsCountedExactly() {

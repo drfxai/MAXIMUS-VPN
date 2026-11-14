@@ -122,9 +122,9 @@ object SmartConnectRows {
         }
     }
 
-    /** "64 KB · 1.9 Mbit/s", "24 KB echoed · 0.8 Mbit/s", or what stopped the leg. */
+    /** "64 KB · 1.9 Mbit/s", "64 KB confirmed · 0.8 Mbit/s", or what stopped the leg. */
     fun legValue(leg: LegResult, upload: Boolean): String = when (leg) {
-        is LegResult.Passed -> "${leg.bytes / 1024} KB${if (upload) " echoed" else ""} · ${rate(leg.bytesPerSecond)}"
+        is LegResult.Passed -> "${leg.bytes / 1024} KB${if (upload) " confirmed" else ""} · ${rate(leg.bytesPerSecond)}"
         is LegResult.Failed -> if (leg.stalled) "Stalled after ${leg.bytes / 1024} KB" else "Failed"
         is LegResult.NotTested -> "Not tested"
     }

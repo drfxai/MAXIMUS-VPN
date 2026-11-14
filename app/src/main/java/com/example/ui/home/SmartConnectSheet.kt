@@ -214,7 +214,7 @@ private fun Connected(c: LabColors, state: ConnectionState, search: SearchProgre
     GroupLabel(c, "How it was found")
     Stages(c, SmartConnectRows.stageRows(search, limits, summary = true))
     Footnote(c, "\"Both directions verified\" means a ${TrafficCheck.DOWNLOAD_BYTES / 1024} KB download and a " +
-        "${TrafficCheck.UPLOAD_BYTES / 1024} KB upload went through the tunnel. A single small request shows as \"Traffic verified\".")
+        "graded upload of at least ${TrafficCheck.UPLOAD_PASS_BYTES / 1024} KB (up to ${TrafficCheck.UPLOAD_BYTES / 1024} KB) went through the tunnel. A single small request shows as \"Traffic verified\".")
 }
 
 @Composable

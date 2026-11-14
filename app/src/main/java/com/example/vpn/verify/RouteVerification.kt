@@ -96,7 +96,9 @@ data class TrafficEvidence(
     val path: ProbePath,
     val download: LegResult,
     val upload: LegResult,
-    val checkedAt: Long
+    val checkedAt: Long,
+    /** The graded upload's per-size detail (bytes over time, where it stalled); null when not measured that way. */
+    val uploadProbe: UploadProbe? = null
 ) {
     val bidirectional: Boolean get() = download is LegResult.Passed && upload is LegResult.Passed
 
@@ -115,13 +117,56 @@ data class TrafficEvidence(
     fun appliesTo(state: ConnectionState): Boolean =
         attemptId != null && attemptId == state.attemptId && networkGeneration == state.networkGeneration
 
+    /**
+     * Where a bulk transfer stopped: bytes the download received before it stalled, else bytes the graded
+     * upload had written when its first unconfirmed size stalled; null when nothing stalled.
+     */
+    val stallBytes: Int? get() =
+        (download as? LegResult.Failed)?.takeIf { it.stalled }?.bytes ?: uploadProbe?.stallBytes
+
     /** One line for the log and the diagnostics report. */
-    fun describe(): String = "download ${leg(download)}, upload ${leg(upload, upload = true)} (${path.title})"
+    fun describe(): String = "download ${leg(download)}, upload ${leg(upload, upload = true)} (${path.title})" +
+        (uploadProbe?.let { "; ${it.describe()}" } ?: "")
+
+    /**
+     * The bulk test line of the diagnostics report: the server (host or address prefix, see [serverPrefix]), the
+     * stall byte count when something stalled, then [describe].
+     */
+    fun diagLine(server: String?): String = buildString {
+        append("server=").append(server?.takeIf { it.isNotBlank() } ?: "unknown")
+        append(" stall=").append(stallBytes?.let { "${it}B" } ?: "none")
+        append(" | ").append(describe())
+    }
 
     private fun leg(r: LegResult, upload: Boolean = false): String = when (r) {
-        is LegResult.Passed -> "verified (${r.bytes / 1024} KB, ${r.elapsedMs} ms, ${r.bytesPerSecond / 1024} KB/s)"
+        is LegResult.Passed -> "verified (${r.bytes / 1024} KB, ${r.elapsedMs} ms, ${r.bytesPerSecond / 1024} KB/s)" +
+            if (upload && uploadProbe?.partial == true) " partial" else ""
         is LegResult.Failed -> if (r.stalled && upload) "unconfirmed after ${r.bytes} bytes written locally (${r.stage.name}); remote receipt unknown"
             else if (r.stalled) "stalled after ${r.bytes} bytes (${r.stage.name})" else "failed (${r.stage.name}: ${r.reason})"
         is LegResult.NotTested -> "not tested (${r.reason})"
     }
 }
+
+/**
+ * A server as the diagnostics report may show it: an IPv4 address cut to its /16 ("185.12.x.x", as the report's
+ * own redaction does), an IPv6 address to its first two groups, a host name to its last two labels
+ * ("*.example.com"). Never the full address.
+ */
+fun serverPrefix(address: String?): String? {
+    val a = address?.trim()?.removePrefix("[")?.removeSuffix("]")?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
+    if (Regex("\\d{1,3}(\\.\\d{1,3}){3}").matches(a)) return a.split('.').take(2).joinToString(".") + ".x.x"
+    if (':' in a) return a.split(':').filter { it.isNotEmpty() }.take(2).joinToString(":") + ":x:x"
+    val labels = a.split('.').filter { it.isNotEmpty() }
+    return if (labels.size <= 2) labels.joinToString(".") else "*." + labels.takeLast(2).joinToString(".")
+}
+
+/**
+ * True when a profile's traffic leaves through a Cloudflare Worker or Pages deployment (BPB and the like): its
+ * address, Host header or SNI is a workers.dev / pages.dev name. Such an exit cannot reach Cloudflare-hosted
+ * sites, so the upload/download check skips speed.cloudflare.com there. A Worker on a custom domain is not
+ * recognisable here; the check then falls through to the non-Cloudflare references after one timeout.
+ */
+fun cloudflareWorkerExit(address: String?, host: String?, sni: String?): Boolean =
+    listOf(address, host, sni).any { v ->
+        v?.split(',')?.any { h -> h.trim().lowercase().trimEnd('.').let { it.endsWith(".workers.dev") || it.endsWith(".pages.dev") } } == true
+    }

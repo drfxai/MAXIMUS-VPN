@@ -86,7 +86,7 @@ class SmartConnectRowsTest {
 
     @Test fun evidenceIsShownAsMeasured() {
         assertEquals("64 KB · 1.9 Mbit/s", SmartConnectRows.legValue(LegResult.Passed(65_536, 276), upload = false))
-        assertEquals("24 KB echoed · 0.8 Mbit/s", SmartConnectRows.legValue(LegResult.Passed(24_576, 245), upload = true))
+        assertEquals("24 KB confirmed · 0.8 Mbit/s", SmartConnectRows.legValue(LegResult.Passed(24_576, 245), upload = true))
         assertEquals("Stalled after 16 KB", SmartConnectRows.legValue(LegResult.Failed(FailureStage.UNKNOWN, 16_384, stalled = true, reason = "x"), upload = false))
         assertEquals("Not tested", SmartConnectRows.legValue(LegResult.NotTested("no reference"), upload = true))
         assertEquals("40 kbit/s", SmartConnectRows.rate(5_000))
