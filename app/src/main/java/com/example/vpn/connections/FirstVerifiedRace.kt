@@ -8,9 +8,11 @@ import kotlinx.coroutines.CancellationException
 
 /**
  * Runs its entrants at the same time: the first result [run]'s `verified` accepts wins, every other entrant is
- * aborted, and the whole race has one deadline. A result that is not verified never wins; a result `decisive`
- * accepts ends the race without a winner (e.g. WireGuard handshook and carried no data on a carrier that drops
- * WARP data). Any result that arrives after the race closed is handed to [release] so nothing keeps running.
+ * aborted, and the whole race has one deadline. A result that is not verified never wins. A result `decisive`
+ * accepts (e.g. WireGuard handshook and carried no data on a carrier that drops WARP data) is recorded as
+ * [Outcome.decidedBy] and its entrant counts as a loser, but it never ends the race while another entrant is
+ * still running: the others keep their chance to win until they finish or the deadline passes. Any result that
+ * arrives after the race closed is handed to [release] so nothing keeps running.
  *
  * Pattern from UAC SNI Spoofer's `EchKeyResolver.race` (first verified result wins, cancel the rest, one stage
  * deadline), rewritten with threads because the connection runner blocks on native engine readiness.
@@ -41,7 +43,7 @@ class FirstVerifiedRace<T : Any>(private val release: (T) -> Unit) {
         /** Entrants that had not finished when the race ended (aborted). */
         val unfinished: List<String>,
         val timedOut: Boolean,
-        /** Label of the result that ended the race without a winner, if any. */
+        /** Label of the first decisive (non-winning) result, if any; the race still waited for the others. */
         val decidedBy: String? = null
     )
 
@@ -82,7 +84,8 @@ class FirstVerifiedRace<T : Any>(private val release: (T) -> Unit) {
                 finished += i
                 if (value != null && verified(value)) { winner = i to value; break }
                 if (value != null) losers[lanes[i].label] = value
-                if (value != null && decisive(value)) { decidedBy = lanes[i].label; break }
+                // Decisive but not verified: a loser. The race keeps waiting for the entrants still running.
+                if (value != null && decidedBy == null && decisive(value)) decidedBy = lanes[i].label
             }
         } finally {
             val late = synchronized(lock) {
@@ -99,6 +102,21 @@ class FirstVerifiedRace<T : Any>(private val release: (T) -> Unit) {
             unfinished = lanes.indices.filter { it !in finished }.map { lanes[it].label },
             timedOut = timedOut, decidedBy = decidedBy
         )
+    }
+
+    /**
+     * Hands the winner of [outcome] to the caller only if [check] passes after the race (e.g. the connection was
+     * not cancelled meanwhile). When [check] throws, the winner's still-running value is given to [release]
+     * first and the exception is rethrown, so a winner is never left running without an owner.
+     */
+    fun claim(outcome: Outcome<T>, check: () -> Unit): Outcome<T> {
+        try {
+            check()
+        } catch (t: Throwable) {
+            outcome.value?.let { runCatching { release(it) } }
+            throw t
+        }
+        return outcome
     }
 
     companion object {
