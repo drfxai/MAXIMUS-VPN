@@ -70,14 +70,17 @@ class SidecarProcess(
     override fun awaitReady(timeoutMs: Long): Boolean = awaitReadyWhile(timeoutMs) { true }
 
     override fun awaitReadyUnless(timeoutMs: Long, giveUp: () -> Boolean): Boolean =
-        awaitReadyWhile(timeoutMs, { true }, giveUp)
+        awaitReadyGated(timeoutMs, { true }, giveUp)
+
+    /** A helper exiting invalidates readiness immediately; do not wait for a child that cannot start. */
+    internal fun awaitReadyWhile(timeoutMs: Long, prerequisitesAlive: () -> Boolean): Boolean =
+        awaitReadyGated(timeoutMs, prerequisitesAlive) { false }
 
     /**
-     * A helper exiting invalidates readiness immediately; do not wait for a child that cannot start. [giveUp] ends
-     * the wait early (the caller decided the failure already reported is final); the reported failure is kept.
+     * [awaitReadyWhile], and [giveUp] ends the wait early (the caller decided the failure already reported is
+     * final); the reported failure is kept.
      */
-    internal fun awaitReadyWhile(timeoutMs: Long, prerequisitesAlive: () -> Boolean,
-                                 giveUp: () -> Boolean = { false }): Boolean {
+    internal fun awaitReadyGated(timeoutMs: Long, prerequisitesAlive: () -> Boolean, giveUp: () -> Boolean): Boolean {
         val started = System.nanoTime()
         while ((System.nanoTime() - started) / 1_000_000 < timeoutMs) {
             if (!prerequisitesAlive()) {
