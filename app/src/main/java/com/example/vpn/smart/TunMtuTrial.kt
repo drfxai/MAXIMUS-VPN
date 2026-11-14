@@ -34,10 +34,23 @@ class TunMtuTrial(
      * requests passed but the bulk transfer stopped part-way, [passed] when both directions went through.
      * Returns the state it moved to, or null when nothing changed. [mayStart] false (a stall too far in to be
      * an MTU black hole, see [StallFailover.classify]) never starts a trial; a trial already running still ends.
+     * [capStall]: the transfer stopped like a per-connection cap ([StallFailover.StallClass.CAP], the ~16 KB freeze
+     * included), which no MTU changes: a running trial (TRYING_LOW or LOW_HELPED) is cleared and the configured MTU
+     * comes back, without marking the low MTU as tested (returns null; [clearedByCap] says whether it cleared).
      */
     @Synchronized
-    fun onBulkCheck(network: String, mtuUsed: Int, configured: Int, stalled: Boolean, passed: Boolean, mayStart: Boolean = true): State? {
+    fun onBulkCheck(network: String, mtuUsed: Int, configured: Int, stalled: Boolean, passed: Boolean, mayStart: Boolean = true,
+                    capStall: Boolean = false): State? {
         val e = live(network)
+        if (capStall) {
+            if (e != null && e.state != State.LOW_DID_NOT_HELP) {
+                entries.remove(network)
+                persist()
+                lastClearedByCap = true
+            } else lastClearedByCap = false
+            return null
+        }
+        lastClearedByCap = false
         val next = when {
             mtuUsed == LOW_MTU && e?.state == State.TRYING_LOW && passed -> State.LOW_HELPED
             mtuUsed == LOW_MTU && e?.state == State.TRYING_LOW && stalled -> State.LOW_DID_NOT_HELP
@@ -50,6 +63,10 @@ class TunMtuTrial(
         persist()
         return next
     }
+
+    /** The last [onBulkCheck] cleared a stale trial because the stall was cap-class. */
+    @Volatile var lastClearedByCap: Boolean = false
+        private set
 
     @Synchronized
     fun state(network: String): State? = live(network)?.state
