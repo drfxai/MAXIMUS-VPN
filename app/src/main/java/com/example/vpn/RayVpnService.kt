@@ -91,7 +91,7 @@ class RayVpnService : VpnService() {
         private const val SLOW_VERIFY_STEP_MS = 25_000L
         private const val SLOW_VERIFY_CONFIG_MS = 90_000L
         /** Moves to the next working path after a stalled download, per Smart Connect. */
-        private const val MAX_STALL_SWITCHES = 2
+        private const val MAX_STALL_SWITCHES = com.example.vpn.smart.StallFailover.MAX_SWITCHES
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
         const val NOTIFICATION_ID = 1001
@@ -514,6 +514,8 @@ class RayVpnService : VpnService() {
      */
     @Volatile private var smartRunnersUp: List<com.example.vpn.smart.ServerRace.Winner> = emptyList()
     @Volatile private var stallSwitches = 0
+    /** The later Smart Connect stages already ran after a stall or freeze since the user's Connect. */
+    @Volatile private var stallEscalated = false
 
     /** The same-server retry a ~16 KB freeze started ([onFreeze]); its own transfer check decides what follows. */
     private data class FreezeRescue(val serverId: String, val variantId: String, val rescue: com.example.vpn.smart.FreezeFailover.Rescue)
@@ -793,6 +795,7 @@ class RayVpnService : VpnService() {
             if (startedByUser) {
                 smartRunnersUp = emptyList()
                 stallSwitches = 0
+                stallEscalated = false
                 freezeRescue = null
                 freezeRescued.clear()
                 freezeSwitches = 0
@@ -2580,29 +2583,95 @@ class RayVpnService : VpnService() {
     }
 
     /**
-     * Smart Connect chose [stalledId] and its download then stalled while small requests passed: move to the
-     * next path that also carried traffic in the same comparison, at most [MAX_STALL_SWITCHES] times per Smart
-     * Connect, the way failover moves (through connectJob, with the intent it began in). Never on the power
-     * button or in Trade mode, which keep the chosen config.
+     * The download through [stalled] stalled on [network] while small requests passed (outside the ~16 KB freeze
+     * window): it is kept with the servers frozen here (FreezeBook) and the session moves on, the way failover
+     * moves (through connectJob, with the intent it began in): to the next path that also carried traffic in
+     * this Smart Connect, or with none a race that leaves the stalled and frozen servers out, at most
+     * [MAX_STALL_SWITCHES] times per Connect (see [com.example.vpn.smart.StallFailover]). Never in a pinned
+     * session (power button, Trade mode). [userAsked]: the user pressed "Try another server", which is not
+     * held back by the automatic switch cap.
      */
-    private fun switchAfterStall(attemptId: String, stalledId: String) {
-        if (exactSession || _vpnState.value.attemptId != attemptId || stallSwitches >= MAX_STALL_SWITCHES) return
-        val runnersUp = smartRunnersUp.filter { it.owner.id != stalledId }
-        val next = runnersUp.firstOrNull() ?: return
-        val ticket = lifecycle.current()
-        if (!lifecycle.tryBeginSwitch()) return
-        stallSwitches++
-        smartRunnersUp = runnersUp.drop(1)
-        XrayLogManager.w("SMART", "The download stalled through this server; switching to the next one Smart Connect found working " +
-            "(${com.example.core.SecretRedactor.redact(next.owner.name)}).")
-        mutateState { com.example.data.model.ConnectionVerification.onSwitching(it) }
-        connectJob = serviceScope.launch {
-            try {
-                connect(next.owner, smart = true, exclude = setOf(stalledId), ticket = ticket)
-            } finally {
-                lifecycle.endSwitch()
+    private fun switchAfterStall(attemptId: String, network: String, stalled: VlessProfile, userAsked: Boolean = false) {
+        if (_vpnState.value.attemptId != attemptId) return
+        networkMemory.freezes.recordStalled(network, stalled.id)
+        serviceScope.launch(Dispatchers.IO) {
+            val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+            val usable = saved.filter {
+                !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) && com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it)
+            }
+            val decision = com.example.vpn.smart.StallFailover.decide(com.example.vpn.smart.StallFailover.Input(
+                stalledId = stalled.id, pinned = exitPinned(),
+                switchesSoFar = stallSwitches,
+                runnersUp = smartRunnersUp.map { it.owner.id },
+                frozen = networkMemory.freezes.frozen(network),
+                candidates = usable.map { it.id },
+                escalated = stallEscalated,
+                maxSwitches = if (userAsked) Int.MAX_VALUE else MAX_STALL_SWITCHES
+            ))
+            val byId = saved.associateBy { it.id }
+            val name = { id: String -> com.example.core.SecretRedactor.redact(byId[id]?.name ?: if (id == stalled.id) stalled.name else id) }
+            XrayLogManager.w("FAILOVER", com.example.vpn.smart.StallFailover.describe(decision, name))
+            stallEvent(decision, stalled.id, userAsked)
+            if (_vpnState.value.attemptId != attemptId) return@launch
+            when (decision) {
+                is com.example.vpn.smart.StallFailover.Decision.RunnerUp -> {
+                    val next = smartRunnersUp.firstOrNull { it.owner.id == decision.toId } ?: return@launch
+                    val exclude = networkMemory.freezes.frozen(network) + stalled.id
+                    launchSwitch("stall") { ticket ->
+                        stallSwitches++
+                        smartRunnersUp = smartRunnersUp.filter { it.owner.id != next.owner.id && it.owner.id !in exclude }
+                        connect(next.owner, smart = true, exclude = exclude, ticket = ticket)
+                    }
+                }
+                is com.example.vpn.smart.StallFailover.Decision.Race -> {
+                    val lead = com.example.vpn.smart.ServerRace.rank(usable, networkMemory.workingKinds(network),
+                        networkMemory.recentFailures(network), exclude = decision.exclude, limit = 1).firstOrNull()
+                    if (lead == null) {
+                        XrayLogManager.w("FAILOVER", "failover · stall · STAY (no saved server to race)")
+                        return@launch
+                    }
+                    launchSwitch("stall") { ticket ->
+                        stallSwitches++
+                        smartRunnersUp = smartRunnersUp.filter { it.owner.id !in decision.exclude && it.owner.id != lead.id }
+                        com.example.vpn.diagnostics.ConnectionMetrics.failoverSwitches.incrementAndGet()
+                        connect(lead, smart = true, exclude = decision.exclude, ticket = ticket)
+                    }
+                }
+                is com.example.vpn.smart.StallFailover.Decision.Escalate -> Unit
+                is com.example.vpn.smart.StallFailover.Decision.Stay -> Unit
             }
         }
+    }
+
+    /** The power button or Trade mode pinned this session's config: failover never changes it. */
+    private suspend fun exitPinned(): Boolean = exactSession || runCatching {
+        com.example.vpn.safety.OperatingModePolicy.of(settingsRepository.getSettings().operationalMode).lockExit
+    }.getOrDefault(false)
+
+    /**
+     * Starts an automatic move of the running session ([block] gets the intent ticket), unless another switch
+     * is already under way. Through connectJob, so a Connect or Disconnect cancels it.
+     */
+    private fun launchSwitch(what: String, block: suspend (Long) -> Unit): Boolean {
+        val ticket = lifecycle.current()
+        if (!lifecycle.tryBeginSwitch()) {
+            XrayLogManager.w("FAILOVER", "failover · $what · another switch is already under way")
+            return false
+        }
+        mutateState { com.example.data.model.ConnectionVerification.onSwitching(it) }
+        connectJob = serviceScope.launch {
+            try { block(ticket) } finally { lifecycle.endSwitch() }
+        }
+        return true
+    }
+
+    private fun stallEvent(d: com.example.vpn.smart.StallFailover.Decision, profileId: String, userAsked: Boolean) {
+        com.example.vpn.diagnostics.events.EventLog.event("failover.stall", attributes = mapOf(
+            "action" to com.example.vpn.smart.StallFailover.action(d),
+            "reason" to com.example.vpn.smart.StallFailover.reason(d),
+            "trigger" to if (userAsked) "user" else "transfer-check",
+            "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(profileId) ?: "none")
+        ))
     }
 
     /**
@@ -2635,7 +2704,7 @@ class RayVpnService : VpnService() {
                     freezeRescue = null
                 }
             }
-            (download as? com.example.vpn.verify.LegResult.Failed)?.stalled == true -> switchAfterStall(attemptId, running.id)
+            (download as? com.example.vpn.verify.LegResult.Failed)?.stalled == true -> switchAfterStall(attemptId, network, running)
         }
     }
 
@@ -2675,9 +2744,7 @@ class RayVpnService : VpnService() {
             !com.example.vpn.sidecar.Sidecars.isEngineProfile(p) && com.example.vpn.subscription.SubscriptionPreset.autoSelectable(p)
         }
         val freezes = networkMemory.freezes
-        val pinned = exactSession || runCatching {
-            com.example.vpn.safety.OperatingModePolicy.of(settingsRepository.getSettings().operationalMode).lockExit
-        }.getOrDefault(false)
+        val pinned = exitPinned()
         val savedServer = byId[server.id] ?: server
         val decision = com.example.vpn.smart.FreezeFailover.decide(com.example.vpn.smart.FreezeFailover.Input(
             server = savedServer, running = savedServer, pinned = pinned, rescueTried = rescueTried,

@@ -84,4 +84,13 @@ class FreezeBookTest {
         m.clear()
         assertTrue(NetworkMemory({ null }, {}, loadFreezes = { freezes }, saveFreezes = { freezes = it }).freezes.frozen(net).isEmpty())
     }
+
+    @Test fun aStalledServerIsLeftOutHereLikeAFrozenOneAndStopsBeingLastGood() {
+        val b = book()
+        b.recordGood(net, "a")
+        b.recordStalled(net, "a")
+        assertTrue("a" in b.frozen(net))
+        assertTrue(b.lastGood(net).isEmpty())
+        assertTrue("another network is unaffected", b.frozen("wifi").isEmpty())
+    }
 }
