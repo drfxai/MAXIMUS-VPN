@@ -240,7 +240,7 @@ private fun ConfirmHost(vm: ServersViewModel, confirm: Confirm?, dismiss: () -> 
         is Confirm.Uninstall -> ConfirmDialog(
             "Remove ${toolTitle(c.toolId)}?",
             if (c.toolId == ServerToolCatalog.HIDDIFY) "Permanently deletes Hiddify services, its installation directory, databases, users and keys. Export a backup first if needed. Other panels, system DNS and SSH are not removed."
-            else if (c.toolId in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN))
+            else if (c.toolId in ServerToolCatalog.DNS_TUNNELS)
                 "Permanently stops and removes this DNS tunnel, including its private keys and server configuration. Existing clients will stop working. Export a backup first. Its profile is removed from this phone; system DNS and unrelated firewall rules are preserved."
             else "It is stopped and deleted from the server, and its config is removed from this phone.",
             "Remove", { vm.uninstall(c.serverId, c.toolId) }, dismiss

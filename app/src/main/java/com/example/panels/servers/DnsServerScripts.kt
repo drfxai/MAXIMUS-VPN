@@ -8,6 +8,16 @@ object DnsServerScripts {
         "amd64" to "276412ca9aeb1d56b7e7306947ca7abaf9c668901245fb2b256163d477ad13cb",
         "arm64" to "19d7dad466835b1dff6f73ed44c2588b7fba137b7d5d8c731e7e0c05fbb96c80"
     )
+    /** MasterDnsVPN by Amin Mahmoudi (masterking32), MIT. Release archives pinned by SHA-256. */
+    const val MASTERDNS_VERSION = "v2026.10.26.100415-5f83ee9"
+    internal val MASTERDNS_SHA = mapOf(
+        "amd64" to "3f5c1ae974dcecb1b0536c0e60ac2711da42eb066d3b8470c641e498825aa0d8",
+        "arm64" to "d6dbfe018a447f15a81f6cd4911488bc39cf0002b2314b0b12b368464ce50b07"
+    )
+    const val MASTERDNS_DIR = "/etc/maximus/masterdns"
+    /** MasterDNS AES-256-GCM; the phone's MasterDNS client accepts methods 3 to 5. */
+    const val MASTERDNS_METHOD = 5
+    val MASTERDNS_STEPS = listOf("Check system", "Verify MasterDNS SHA-256", "Create key and config", "Install systemd", "Open UDP 53", "Verify server")
     val SOAR_STEPS = listOf("Check toolchain", "Build pinned Soar", "Create Ed25519 key", "Install systemd", "Open UDP 53", "Verify server")
     val COTTEN_STEPS = listOf("Check system", "Verify CottenDNS SHA-256", "Configure server", "Install systemd", "Open DNS ports", "Verify server")
 
@@ -216,5 +226,115 @@ object DnsServerScripts {
             result COTTEN_KEY "§key"
         """.replace("__PREFIX__", prefix + "_v[A-Za-z0-9._-]+"), COTTEN_STEPS, mapOf("UNIT" to unit, "PREFLIGHT" to LISTENER_PREFLIGHT))
     }
-}
 
+    fun masterDnsArchive(arch: String): String = "MasterDnsVPN_Server_Linux_${ToolScripts.arch(arch).uppercase()}.zip"
+
+    fun masterDnsUrl(arch: String): String =
+        "https://github.com/masterking32/MasterDnsVPN/releases/download/$MASTERDNS_VERSION/${masterDnsArchive(arch)}"
+
+    /**
+     * MasterDnsVPN server for [domain] from the pinned release. The key is made on the server with
+     * /dev/urandom before the first start (the server would otherwise create one itself and print
+     * it to the journal), logging stays at WARN so the key never reaches the journal, and the
+     * listener binds the server's own IPv4 address so a local resolver on 127.0.0.53 keeps running.
+     */
+    fun masterDns(domain: String, arch: String): ToolScript {
+        require(ToolScripts.DOMAIN.matches(domain)) { "Invalid tunnel domain" }
+        val a = ToolScripts.arch(arch)
+        val sha = MASTERDNS_SHA.getValue(a)
+        val prefix = "MasterDnsVPN_Server_Linux_" + a.uppercase()
+        val dir = MASTERDNS_DIR
+        val unit = ToolScripts.unit("MAXIMUS MasterDnsVPN server",
+            listOf("WorkingDirectory=$dir", "ExecStart=/usr/local/bin/maximus-masterdns-server -nowait -config $dir/server_config.toml"),
+            extra = listOf("AmbientCapabilities=CAP_NET_BIND_SERVICE", "CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "ReadOnlyPaths=$dir",
+                "StandardInput=null",
+                // Tunnel streams may only leave for the internet, never the server's own or private services.
+                "IPAddressDeny=localhost link-local multicast 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7"))
+        return ToolScripts.script("""
+            @@PREFLIGHT@@
+            step 1
+            select_dns_bind
+            require_no_dns_redirect
+            require_free_listener udp 53
+            have systemctl || exit 21
+            ensure_user
+            have curl || pkg_install curl ca-certificates
+            have unzip || pkg_install unzip
+            have sha256sum || exit 21
+            have od || exit 21
+            have timeout || exit 21
+            [ ! -f /etc/systemd/system/maximus-masterdns.service ] || { echo 'Already installed; do not replace a running server' >&2; exit 22; }
+            [ ! -e $dir ] || { echo 'Previous MasterDNS data found; refusing to overwrite it' >&2; exit 22; }
+            stage=§(mktemp -d)
+            mutated=0
+            rollback() {
+              rc=§?
+              if [ "§rc" -ne 0 ] && [ "§mutated" = 1 ]; then
+                §SUDO systemctl disable --now maximus-masterdns >/dev/null 2>&1 || true
+                §SUDO rm -f /etc/systemd/system/maximus-masterdns.service /usr/local/bin/maximus-masterdns-server
+                §SUDO rm -rf $dir
+                §SUDO systemctl daemon-reload >/dev/null 2>&1 || true
+              fi
+              rm -rf "§stage"
+            }
+            trap rollback EXIT
+            step 2
+            url=${masterDnsUrl(a)}
+            curl -fLsS --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 20 --max-time 180 -o "§stage/server.zip" "§url" || exit 31
+            printf '%s  %s\n' '$sha' "§stage/server.zip" | sha256sum -c - >/dev/null || { echo 'Archive checksum mismatch' >&2; exit 30; }
+            files=§(unzip -Z1 "§stage/server.zip") || exit 30
+            bin=§(printf '%s\n' "§files" | grep -Ex '${prefix}_v[A-Za-z0-9._-]+' | head -n 1)
+            [ -n "§bin" ] || exit 30
+            printf '%s\n' "§files" | grep -qx server_config.toml || exit 30
+            unzip -p "§stage/server.zip" "§bin" > "§stage/server"
+            unzip -p "§stage/server.zip" server_config.toml > "§stage/config"
+            chmod 0700 "§stage/server"
+            "§stage/server" -version 2>/dev/null | grep -qF '$MASTERDNS_VERSION' || { echo 'Unexpected MasterDNS server version' >&2; exit 30; }
+            step 3
+            for k in DOMAIN UDP_HOST UDP_PORT DATA_ENCRYPTION_METHOD ENCRYPTION_KEY_FILE LOG_LEVEL PROTOCOL_TYPE; do
+              grep -q "^§k[[:space:]]*=" "§stage/config" || { echo "Pinned config has no §k" >&2; exit 30; }
+            done
+            sed -i 's/^DOMAIN[[:space:]]*=.*/DOMAIN = ["$domain"]/' "§stage/config"
+            sed -i "s/^UDP_HOST[[:space:]]*=.*/UDP_HOST = \"§DNS_BIND\"/" "§stage/config"
+            sed -i 's/^UDP_PORT[[:space:]]*=.*/UDP_PORT = 53/' "§stage/config"
+            sed -i 's/^PROTOCOL_TYPE[[:space:]]*=.*/PROTOCOL_TYPE = "SOCKS5"/' "§stage/config"
+            sed -i 's/^DATA_ENCRYPTION_METHOD[[:space:]]*=.*/DATA_ENCRYPTION_METHOD = $MASTERDNS_METHOD/' "§stage/config"
+            sed -i 's|^ENCRYPTION_KEY_FILE[[:space:]]*=.*|ENCRYPTION_KEY_FILE = "$dir/encrypt_key.txt"|' "§stage/config"
+            sed -i 's/^LOG_LEVEL[[:space:]]*=.*/LOG_LEVEL = "WARN"/' "§stage/config"
+            key=§(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+            printf '%s' "§key" | grep -Eq '^[a-f0-9]{32}§' || { echo 'Could not create the MasterDNS key' >&2; exit 40; }
+            ( umask 077; printf '%s' "§key" > "§stage/encrypt_key.txt" )
+            # Dry start on a loopback port with a copy of the config: proves the config and key load
+            # without touching port 53. A server still running after 3 seconds started cleanly.
+            sed "s|^ENCRYPTION_KEY_FILE[[:space:]]*=.*|ENCRYPTION_KEY_FILE = \"§stage/encrypt_key.txt\"|" "§stage/config" > "§stage/probe.toml"
+            probed=0
+            for p in 45353 46353 47353; do
+              rc=0
+              timeout 3 "§stage/server" -nowait -config "§stage/probe.toml" -udp-host 127.0.0.1 -udp-port "§p" </dev/null >/dev/null 2>&1 || rc=§?
+              if [ "§rc" = 124 ]; then probed=1; break; fi
+            done
+            [ "§probed" = 1 ] || { echo 'MasterDNS rejected the generated configuration' >&2; exit 30; }
+            step 4
+            require_no_dns_redirect
+            require_free_listener udp 53
+            mutated=1
+            §SUDO install -d -m 0750 -o root -g maximus $dir
+            §SUDO install -m 0755 "§stage/server" /usr/local/bin/maximus-masterdns-server
+            §SUDO install -m 0640 -o root -g maximus "§stage/config" $dir/server_config.toml
+            §SUDO install -m 0640 -o root -g maximus "§stage/encrypt_key.txt" $dir/encrypt_key.txt
+            write_file /etc/systemd/system/maximus-masterdns.service 0644 <<'UNIT'
+            @@UNIT@@
+            UNIT
+            §SUDO systemctl daemon-reload
+            step 5
+            fw_allow 53 udp
+            step 6
+            §SUDO systemctl enable maximus-masterdns >/dev/null
+            §SUDO systemctl restart maximus-masterdns
+            wait_active maximus-masterdns
+            stored=§(§SUDO cat $dir/encrypt_key.txt 2>/dev/null | tr -d ' \r\n')
+            [ "§stored" = "§key" ] || { echo 'MasterDNS key on the server changed during start' >&2; exit 40; }
+            result MASTERDNS_KEY "§key"
+        """, MASTERDNS_STEPS, mapOf("UNIT" to unit, "PREFLIGHT" to LISTENER_PREFLIGHT))
+    }
+}

@@ -39,6 +39,7 @@ object ServerToolCatalog {
     const val DNSTT = "dnstt"
     const val SOAR = "soar-server"
     const val COTTEN = "cottendns-server"
+    const val MASTERDNS = "masterdns-server"
     const val HYSTERIA2 = "hysteria2"
     const val KEY_LOGIN = "key-login"
     const val FIREWALL = "firewall"
@@ -48,6 +49,9 @@ object ServerToolCatalog {
     const val SWAP = "swap"
     const val MAXIMUS_TUNNEL = "maximus-tunnel"
     const val HIDDIFY = "hiddify"
+
+    /** Every authoritative DNS tunnel server; they all need the server's public UDP 53, so only one fits. */
+    val DNS_TUNNELS: Set<String> = setOf(DNSTT, SOAR, COTTEN, MASTERDNS)
 
     private val both = setOf(ServerLocation.IRAN, ServerLocation.ABROAD)
     private val abroad = setOf(ServerLocation.ABROAD)
@@ -83,7 +87,7 @@ object ServerToolCatalog {
                 "Creates a new tunnel key pair on the server", "Adds two systemd services under a locked system user",
                 "Sends UDP 53 to the tunnel and opens it in the firewall"),
             needsDomain = true,
-            conflicts = setOf(SOAR, COTTEN)
+            conflicts = setOf(SOAR, COTTEN, MASTERDNS)
         ),
         ServerTool(
             SOAR, "Soar Server", "Last-resort authenticated DNS tunnel",
@@ -92,7 +96,7 @@ object ServerToolCatalog {
             listOf("Compiles the pinned Go module with checksum verification",
                 "Creates a unique Ed25519 key on the VPS", "Runs a locked service listening on UDP/53",
                 "Only public destinations on TCP 80/443 are allowed by the server"),
-            needsDomain = true, conflicts = setOf(DNSTT, COTTEN)
+            needsDomain = true, conflicts = setOf(DNSTT, COTTEN, MASTERDNS)
         ),
         ServerTool(
             COTTEN, "CottenDNS Server", "Normal and CottenMax beta",
@@ -100,7 +104,20 @@ object ServerToolCatalog {
             ToolGroup.TUNNELS, abroad,
             listOf("Downloads a fixed, SHA-256 verified Linux release archive", "Installs the isolated systemd server",
                 "Generates a new server encryption key", "Opens UDP/TCP 53; requires authoritative DNS delegation"),
-            needsDomain = true, conflicts = setOf(DNSTT, SOAR)
+            needsDomain = true, conflicts = setOf(DNSTT, SOAR, MASTERDNS)
+        ),
+        ServerTool(
+            MASTERDNS, "MasterDNS Server", "MasterDnsVPN on your own server",
+            "Install the official MasterDnsVPN server (MIT, by Amin Mahmoudi / masterking32), pinned to " +
+                "${DnsServerScripts.MASTERDNS_VERSION} and checked against SHA-256 values kept in the app. " +
+                "Carries traffic inside DNS queries with AES-256-GCM; the phone connects with its built-in " +
+                "MasterDNS client. Needs a delegated domain and the server's public UDP 53.",
+            ToolGroup.TUNNELS, abroad,
+            listOf("Downloads the pinned MasterDnsVPN server release and checks its SHA-256",
+                "Creates a new AES-256-GCM key on the server (kept only there and in this phone's encrypted store)",
+                "Runs a locked systemd service on your server's own IPv4 UDP 53; system DNS (systemd-resolved) is not stopped",
+                "Opens UDP 53 in the firewall; requires NS delegation of the tunnel name to this server"),
+            needsDomain = true, conflicts = setOf(DNSTT, SOAR, COTTEN)
         ),
         ServerTool(
             MAXIMUS_TUNNEL, "Maximus Tunnel", "Iran ↔ abroad, automatic",

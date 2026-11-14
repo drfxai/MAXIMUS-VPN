@@ -98,7 +98,7 @@ data class WizardUi(
     val backups: List<String> get() = DnsDelegation.parseBackups(backupDomains)
     val checksPass: Boolean get() = checks != null && checks.none { it.blocking }
     val settingsValid: Boolean get() = when (tool.id) {
-        ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> DnsDelegation.problem(baseDomain, tunnelLabel) == null &&
+        ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.MASTERDNS -> DnsDelegation.problem(baseDomain, tunnelLabel) == null &&
             DnsDelegation.backupProblem(baseDomain, backups) == null
         ServerToolCatalog.HYSTERIA2 -> port.isBlank() || port.toIntOrNull() in 1..65535
         else -> true
@@ -258,7 +258,7 @@ private fun CheckRow(c: CheckItem) {
 @Composable
 private fun SettingsStage(ui: WizardUi, actions: WizardActions) {
     when (ui.tool.id) {
-        ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> {
+        ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.MASTERDNS -> {
             SectionLabel("Delegated domain")
             SvField(ui.baseDomain, { actions.onChange(ui.copy(baseDomain = it.trim(), dnsChecks = null)) }, "Your domain",
                 placeholder = "example.com", keyboard = KeyboardType.Uri, mono = true,
@@ -361,7 +361,7 @@ private fun SummaryStage(ui: WizardUi) {
             RowDivider(0.dp)
         }
         when (ui.tool.id) {
-            ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> KeyValue("Tunnel name", DnsDelegation.tunnelDomain(ui.baseDomain, ui.tunnelLabel))
+            ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.MASTERDNS -> KeyValue("Tunnel name", DnsDelegation.tunnelDomain(ui.baseDomain, ui.tunnelLabel))
             ServerToolCatalog.HYSTERIA2 -> KeyValue("UDP port", ui.port.ifBlank { "random" })
         }
         if (ui.renew) KeyValue("Keys", "new")
@@ -499,7 +499,7 @@ private fun DoneStage(ui: WizardUi, actions: WizardActions) {
             }
         }
     }
-    if (ui.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) && ui.records.isNotEmpty()) {
+    if (ui.tool.id in ServerToolCatalog.DNS_TUNNELS && ui.records.isNotEmpty()) {
         // A delegation to another address explains a failed test before any engine or resolver does.
         ui.dnsChecks?.filter { it.status == DnsDelegation.Status.WRONG || it.status == DnsDelegation.Status.MISSING }
             ?.forEach { c -> Notice("DNS: ${c.record.name} (${c.record.type}): ${c.detail}", NoticeKind.WARN) }

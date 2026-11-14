@@ -27,7 +27,7 @@ object SmartManagerPlanner {
         fun candidate(id: String): Candidate? = candidates.firstOrNull { it.id == id }
     }
 
-    private val dnsEngines = setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)
+    private val dnsEngines = setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.MASTERDNS)
     const val PRIVATE_PSIPHON = "private-psiphon"
 
     fun inspect(server: ManagedServer, now: Long = System.currentTimeMillis()): Inspection {
@@ -36,7 +36,7 @@ object SmartManagerPlanner {
             now >= server.checkedAt && now - server.checkedAt <= INSPECTION_TTL_MS
         val existingDns = server.tools.map { it.id }.filter { it in dnsEngines }
         val supported = listOf(ServerToolCatalog.XUI, ServerToolCatalog.DNSTT,
-            ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.HIDDIFY)
+            ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.MASTERDNS, ServerToolCatalog.HIDDIFY)
         val candidates = supported.map { id ->
             val tool = requireNotNull(ServerToolCatalog.byId(id))
             val existing = server.tool(id) != null ||

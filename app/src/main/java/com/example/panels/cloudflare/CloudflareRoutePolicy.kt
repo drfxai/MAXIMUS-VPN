@@ -8,7 +8,7 @@ object CloudflareRoutePolicy {
     enum class Transport {
         CDN_HTTPS_WEBSOCKET, CDN_HTTPS_GRPC, CDN_XHTTP,
         VLESS_TCP, REALITY, HYSTERIA2_UDP, WIREGUARD_UDP,
-        DNSTT, SOAR, COTTEN, PSIPHON_OSSH
+        DNSTT, SOAR, COTTEN, MASTERDNS, PSIPHON_OSSH
     }
 
     data class Decision(val proxied: Boolean, val reason: String, val eligible: Boolean)
@@ -21,7 +21,7 @@ object CloudflareRoutePolicy {
                 if (port in SmartDomains.CDN_HTTPS_PORTS)
                     Decision(true, "HTTPS-compatible transport on Cloudflare-supported port.", true)
                 else Decision(false, "Cloudflare does not proxy this TLS port.", false)
-            Transport.DNSTT, Transport.SOAR, Transport.COTTEN ->
+            Transport.DNSTT, Transport.SOAR, Transport.COTTEN, Transport.MASTERDNS ->
                 Decision(false, "Authoritative DNS tunnel delegation must bypass Cloudflare's HTTP proxy.", true)
             Transport.PSIPHON_OSSH, Transport.REALITY, Transport.VLESS_TCP,
             Transport.HYSTERIA2_UDP, Transport.WIREGUARD_UDP ->

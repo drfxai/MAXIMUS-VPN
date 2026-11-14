@@ -58,6 +58,7 @@ object ToolScripts {
         ServerToolCatalog.DNSTT to listOf("maximus-socks", "maximus-dnstt"),
         ServerToolCatalog.SOAR to listOf("maximus-soar"),
         ServerToolCatalog.COTTEN to listOf("maximus-cotten"),
+        ServerToolCatalog.MASTERDNS to listOf("maximus-masterdns"),
         ServerToolCatalog.HYSTERIA2 to listOf("maximus-hysteria"),
         ServerToolCatalog.MAXIMUS_TUNNEL to listOf("maximus-tunnel"),
         ServerToolCatalog.FAIL2BAN to listOf("fail2ban")
@@ -674,6 +675,14 @@ object ToolScripts {
                 # Preserve pre-existing firewall allowances; no owner tag was recorded.
                 # TCP 53 firewall ownership is unknown; leave rules unchanged.
             """
+            ServerToolCatalog.MASTERDNS -> """
+                §SUDO systemctl disable --now maximus-masterdns >/dev/null 2>&1 || true
+                if §SUDO systemctl is-active --quiet maximus-masterdns; then echo 'Service still active; removal stopped' >&2; exit 40; fi
+                §SUDO rm -f /etc/systemd/system/maximus-masterdns.service /usr/local/bin/maximus-masterdns-server
+                echo 'MasterDNS configuration and key retained for explicit reviewed purge'
+                §SUDO systemctl daemon-reload
+                # Preserve pre-existing firewall allowances; no owner tag was recorded.
+            """
             ServerToolCatalog.HYSTERIA2 -> """
                 §SUDO systemctl disable --now maximus-hysteria >/dev/null 2>&1 || true
                 if §SUDO systemctl is-active --quiet maximus-hysteria; then echo 'Service still active; removal stopped' >&2; exit 40; fi
@@ -715,12 +724,15 @@ object ToolScripts {
                 "§SUDO grep -Fq 'ExecStart=/usr/local/bin/maximus-soar-server' /etc/systemd/system/maximus-soar.service || { echo 'SOAR ownership not verified; no removal' >&2; exit 40; }"
             ServerToolCatalog.COTTEN ->
                 "§SUDO grep -Fq 'ExecStart=/usr/local/bin/maximus-cotten-server' /etc/systemd/system/maximus-cotten.service || { echo 'Cotten ownership not verified; no removal' >&2; exit 40; }"
+            ServerToolCatalog.MASTERDNS ->
+                "§SUDO grep -Fq 'ExecStart=/usr/local/bin/maximus-masterdns-server' /etc/systemd/system/maximus-masterdns.service || { echo 'MasterDNS ownership not verified; no removal' >&2; exit 40; }"
             else -> ""
         }
         val purge = if (purgeData) when (toolId) {
             ServerToolCatalog.DNSTT -> "§SUDO rm -rf -- $DNSTT_DIR"
             ServerToolCatalog.SOAR -> "§SUDO rm -rf -- /etc/maximus/soar"
             ServerToolCatalog.COTTEN -> "§SUDO rm -rf -- /etc/maximus/cotten"
+            ServerToolCatalog.MASTERDNS -> "§SUDO rm -rf -- ${DnsServerScripts.MASTERDNS_DIR}"
             else -> ""
         } else ""
         return script("step 1\n" + identityGuard + "\n" + body.trimIndent() + "\n" + purge +

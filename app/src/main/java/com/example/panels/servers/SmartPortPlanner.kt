@@ -67,7 +67,7 @@ object SmartPortPlanner {
 
     /** These are only the public listener requirements confirmed by existing installers. */
     fun knownPublicBindings(toolId: String): List<Binding> = when (toolId) {
-        ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR -> listOf(
+        ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.MASTERDNS -> listOf(
             Binding(toolId, Protocol.UDP, 53))
         ServerToolCatalog.COTTEN -> listOf(
             Binding(toolId, Protocol.UDP, 53),

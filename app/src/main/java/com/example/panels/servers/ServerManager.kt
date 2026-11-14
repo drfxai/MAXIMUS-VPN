@@ -118,7 +118,7 @@ class ServerManager(
                 throw InstallPreflightException("Listener inventory unavailable; no installation started.")
             facts.blocker()?.let { throw InstallPreflightException(it) }
         }
-        if (toolId in setOf(ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT)) {
+        if (toolId in ServerToolCatalog.DNS_TUNNELS) {
             DnsDelegation.problem(options.baseDomain, options.tunnelLabel)?.let { throw InstallPreflightException(it) }
             if (toolId == ServerToolCatalog.DNSTT)
                 DnsDelegation.backupProblem(options.baseDomain, options.backupBases)?.let { throw InstallPreflightException(it) }
@@ -149,6 +149,7 @@ class ServerManager(
                 facts.blocker()?.let { error(it) }
                 val arch = facts.goArch!!
                 when (toolId) {
+                    ServerToolCatalog.MASTERDNS -> installMasterDns(shell, server, facts, arch, options, progress)
                     ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN -> {
                         DnsDelegation.problem(options.baseDomain, options.tunnelLabel)?.let { error(it) }
                         check(server.tool(toolId) == null) { "A safe in-place upgrade is not available yet; no changes were made." }
@@ -325,6 +326,33 @@ class ServerManager(
         else -> throw IllegalArgumentException("${ServerToolCatalog.byId(toolId)?.title ?: toolId} is not a panel")
     }
 
+    /**
+     * The shared MasterDnsVPN installer behind the Install tab, the server page and Smart Manager.
+     * Returns the saved server profile (the phone's MasterDNS client) and a masterdns:// share link.
+     */
+    private fun installMasterDns(shell: RemoteShell, server: ManagedServer, facts: ServerFacts, arch: String,
+                                 options: InstallOptions, progress: ActionProgress): InstallOutcome {
+        DnsDelegation.problem(options.baseDomain, options.tunnelLabel)?.let { error(it) }
+        check(server.tool(ServerToolCatalog.MASTERDNS) == null) { "A safe in-place upgrade is not available yet; no changes were made." }
+        check(53 !in (facts.publicUdpPorts ?: facts.udpPorts)) {
+            "UDP 53 is occupied by another service. Stop or move it before installing a DNS tunnel."
+        }
+        val domain = DnsDelegation.tunnelDomain(options.baseDomain, options.tunnelLabel)
+        val r = runScript(shell, DnsServerScripts.masterDns(domain, arch), progress, 20 * 60_000L)
+        val key = r["MASTERDNS_KEY"].orEmpty()
+        require(ToolProfiles.MASTERDNS_KEY_PATTERN.matches(key)) { "MasterDNS did not return a valid key" }
+        val installed = InstalledTool(ServerToolCatalog.MASTERDNS, port = 53, settings = mapOf(
+            ToolProfiles.DNSTT_DOMAIN to domain,
+            ToolProfiles.DNSTT_BASE to DnsDelegation.normalizeBase(options.baseDomain),
+            ToolProfiles.DNSTT_LABEL to options.tunnelLabel,
+            ToolProfiles.MASTERDNS_KEY to key
+        ) + ownNameServer(options))
+        val updated = postInstallCheck(shell, server.withTool(installed))
+        return InstallOutcome(updated, installed, ToolProfiles.masterDnsProfile(updated, installed),
+            ToolProfiles.masterDnsLink(updated, installed),
+            summary = "MasterDNS server installed on $domain; create the DNS records shown, then test from the phone")
+    }
+
     /** A pre-install snapshot cannot describe the service just created. A failed refresh is unknown. */
     private fun ownNameServer(options: InstallOptions): Map<String, String> =
         if (options.ownNameServer) mapOf(ToolProfiles.DNSTT_OWN_NS to "1") else emptyMap()
@@ -338,7 +366,7 @@ class ServerManager(
 
     /** Starts or stops a panel's services (3x-ui, Hiddify). */
     fun setPanelRunning(server: ManagedServer, toolId: String, run: Boolean, progress: ActionProgress): ManagedServer {
-        if (toolId in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)) {
+        if (toolId in ServerToolCatalog.DNS_TUNNELS) {
             connect(server).use { it.runTool(ToolScripts.service(toolId, if (run) "start" else "stop"), progress, 60_000L) }
         } else if (run) panel(toolId).start(server, progress) else panel(toolId).stop(server, progress)
         return check(server)

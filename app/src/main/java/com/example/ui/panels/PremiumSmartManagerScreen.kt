@@ -83,9 +83,9 @@ internal fun PremiumSmartManagerScreen(
             inspectionNow - it.updatedAt in 0..INSPECTION_TTL_MS
     }.map { it.serviceId }.toSet()
     val engineIds = listOf(SmartManagerPlanner.PRIVATE_PSIPHON, ServerToolCatalog.SOAR,
-        ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT)
-    val titles = listOf("Psiphon", "SOAR", "CottenDNS", "DNSTT")
-    val icons = listOf(Icons.Default.Security, Icons.Default.Bolt, Icons.Default.Language, Icons.Default.Layers)
+        ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT, ServerToolCatalog.MASTERDNS)
+    val titles = listOf("Psiphon", "SOAR", "CottenDNS", "DNSTT", "MasterDNS")
+    val icons = listOf(Icons.Default.Security, Icons.Default.Bolt, Icons.Default.Language, Icons.Default.Layers, Icons.Default.Dns)
     val udp53 = if (fresh && facts?.socketInspectionAvailable == true)
         facts.publicUdpPorts?.let { 53 !in it } else null
 
@@ -105,7 +105,7 @@ internal fun PremiumSmartManagerScreen(
             }
         }
         HorizontalDivider(color = StudioLine)
-        StudioHero(titles, icons)
+        StudioHero(titles.take(4), icons.take(4))
         Text(server?.displayName ?: "Connect your first VPS", color = StudioText,
             fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
         Text(when {

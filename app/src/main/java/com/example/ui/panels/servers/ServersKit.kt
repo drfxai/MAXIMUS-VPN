@@ -175,7 +175,7 @@ internal fun locationName(location: ServerLocation) = if (location == ServerLoca
 internal fun toolIcon(id: String): ImageVector = when (id) {
     ServerToolCatalog.XUI -> Icons.Rounded.Dashboard
     ServerToolCatalog.HIDDIFY -> Icons.Rounded.Layers
-    ServerToolCatalog.DNSTT -> Icons.Rounded.Dns
+    ServerToolCatalog.DNSTT, ServerToolCatalog.MASTERDNS -> Icons.Rounded.Dns
     ServerToolCatalog.MAXIMUS_TUNNEL -> Icons.Rounded.SyncAlt
     ServerToolCatalog.HYSTERIA2 -> Icons.Rounded.Bolt
     ServerToolCatalog.KEY_LOGIN -> Icons.Rounded.Key
