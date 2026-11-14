@@ -65,6 +65,30 @@ object ExperimentPlanner {
         if (!udpDead(net)) addAll(listOf(PathFamily.AMNEZIAWG, PathFamily.WIREGUARD, PathFamily.HYSTERIA2, PathFamily.TUIC))
     }
 
+    /**
+     * Families that dial Cloudflare (WARP) straight from the phone: WARP MASQUE and Matrix Transport. Psiphon over
+     * MASQUE or Matrix is not one of them: there Cloudflare is reached through Psiphon, not over this network.
+     */
+    val CLOUDFLARE_FAMILIES: Set<PathFamily> = setOf(PathFamily.MASQUE, PathFamily.MATRIX_H2, PathFamily.MATRIX_H3,
+        PathFamily.MATRIX_WG, PathFamily.MATRIX_GOOL)
+
+    /** Cloudflare measured unreachable on this network (cf=0). Unmeasured or cf=1 is never blocked. */
+    fun cloudflareBlocked(net: NetworkCapabilityProfile?): Boolean = net?.cloudflareReachable == false
+
+    /**
+     * The families that go last on this network because Cloudflare is blocked (cf=0): still tried, never skipped,
+     * but after every other family. Empty on a network where Cloudflare answered or was not measured.
+     */
+    fun cloudflareLast(net: NetworkCapabilityProfile?): Set<PathFamily> =
+        if (cloudflareBlocked(net)) CLOUDFLARE_FAMILIES else emptySet()
+
+    /**
+     * Kept out of the quick parallel recovery round on a cf=0 network: a candidate of a [CLOUDFLARE_FAMILIES] family
+     * or one carried by Aether (WARP). They still run in the serial search, where the plan puts them last.
+     */
+    fun cloudflareDeferred(net: NetworkCapabilityProfile?, family: PathFamily, engineId: String?): Boolean =
+        cloudflareBlocked(net) && (family in CLOUDFLARE_FAMILIES || engineId == com.example.vpn.sidecar.AetherSidecar.ID)
+
     /** UDP abroad measured dead: direct UDP DNS failed and no QUIC endpoint answered either. */
     fun udpDead(net: NetworkCapabilityProfile?): Boolean =
         net?.udpAvailable == false && net?.quicStatus != "QUIC_AVAILABLE" && net?.quicStatus != "QUIC_DEGRADED"
@@ -122,8 +146,13 @@ object ExperimentPlanner {
         if (NetworkState.QUIC_BLOCKED_SUSPECTED in restrictions) {
             listOf(PathFamily.MASQUE, PathFamily.PSIPHON_MASQUE, PathFamily.MATRIX_H3).forEach { skip[it] = "MASQUE HTTP/3 needs QUIC on this network" }
         }
+        val cfLast = cloudflareLast(net)
+        if (cfLast.isNotEmpty()) {
+            lowPrior += cfLast
+            reasons += "Cloudflare is blocked on this network: WARP MASQUE and Matrix Transport are tried last."
+        }
         if (reasons.isEmpty()) reasons += "No restriction measured: every family is tried, one config each first."
-        return Plan(mode, prefer.distinct(), skip, budget, reasons, lowPrior)
+        return Plan(mode, prefer.distinct().filterNot { it in cfLast }, skip, budget, reasons, lowPrior)
     }
 
     /** Null when an automatic (background) experiment may run; otherwise the reason it was not started. */

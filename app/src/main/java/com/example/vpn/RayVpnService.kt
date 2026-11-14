@@ -63,6 +63,8 @@ class RayVpnService : VpnService() {
         const val ACTION_CONNECT = "com.drfxai.maximusvpn.ACTION_CONNECT"
         const val ACTION_DISCONNECT = "com.drfxai.maximusvpn.ACTION_DISCONNECT"
         const val ACTION_RECONNECT = "com.drfxai.maximusvpn.ACTION_RECONNECT"
+        /** "Try another server" on a connection whose large downloads stall: the stall failover, asked by the user. */
+        const val ACTION_TRY_ANOTHER_SERVER = "com.drfxai.maximusvpn.ACTION_TRY_ANOTHER_SERVER"
         const val EXTRA_PROFILE_ID = "com.drfxai.maximusvpn.EXTRA_PROFILE_ID"
         const val EXTRA_SMART = "com.drfxai.maximusvpn.EXTRA_SMART"
         /** "Connect anyway": start the selected server even though its real pre-flight failed. */
@@ -91,7 +93,7 @@ class RayVpnService : VpnService() {
         private const val SLOW_VERIFY_STEP_MS = 25_000L
         private const val SLOW_VERIFY_CONFIG_MS = 90_000L
         /** Moves to the next working path after a stalled download, per Smart Connect. */
-        private const val MAX_STALL_SWITCHES = 2
+        private const val MAX_STALL_SWITCHES = com.example.vpn.smart.StallFailover.MAX_SWITCHES
 
         const val NOTIFICATION_CHANNEL_ID = "maximus_vpn_channel"
         const val NOTIFICATION_ID = 1001
@@ -132,6 +134,17 @@ class RayVpnService : VpnService() {
 
         /** Never a profile id: marks a recovery search that follows an engine's failed carrier search. */
         internal const val ENGINE_FAILED_MARKER = "__engine-carriers-failed__"
+        /**
+         * Never a profile id: the saved servers stalled or froze in this session (see [StallFailover]), so the
+         * search skips them and the selected server and goes on with the later stages (E-G).
+         */
+        internal const val XRAY_EXHAUSTED_MARKER = "__xray-bulk-exhausted__"
+        /**
+         * Never a profile id: the run of an automatic Aether lead that Smart Connect held back on a cf=0 network
+         * ([com.example.vpn.smart.SmartConnectPlan.deferAether]) now that nothing else carried traffic; the saved
+         * servers and recovery engines it waited for are not searched again.
+         */
+        internal const val AETHER_LAST_MARKER = "__aether-last__"
         private val _lockdown = MutableStateFlow(com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.UNKNOWN)
         private val _environment = MutableStateFlow<com.example.vpn.smart.NetworkEnvironment.Report?>(null)
         /** How hostile the network looked at the last connect. */
@@ -337,6 +350,17 @@ class RayVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_TRY_ANOTHER_SERVER) {
+            val s = _vpnState.value
+            val running = s.activeProfile
+            val attemptId = s.attemptId
+            if (s.isConnected && running != null && attemptId != null) {
+                XrayLogManager.i("FAILOVER", "Try another server: asked by the user.")
+                switchAfterStall(attemptId, com.example.vpn.smart.NetworkKey.current(this), running, userAsked = true)
+            }
+            // Keeps the session's restart policy: this start only acts on the running session.
+            return START_STICKY
+        }
         if (intent?.action != ACTION_DISCONNECT) {
             stopService(Intent(this, com.example.vpn.share.LocalProxyService::class.java))
         }
@@ -514,6 +538,8 @@ class RayVpnService : VpnService() {
      */
     @Volatile private var smartRunnersUp: List<com.example.vpn.smart.ServerRace.Winner> = emptyList()
     @Volatile private var stallSwitches = 0
+    /** The later Smart Connect stages already ran after a stall or freeze since the user's Connect. */
+    @Volatile private var stallEscalated = false
 
     /** The same-server retry a ~16 KB freeze started ([onFreeze]); its own transfer check decides what follows. */
     private data class FreezeRescue(val serverId: String, val variantId: String, val rescue: com.example.vpn.smart.FreezeFailover.Rescue)
@@ -793,6 +819,7 @@ class RayVpnService : VpnService() {
             if (startedByUser) {
                 smartRunnersUp = emptyList()
                 stallSwitches = 0
+                stallEscalated = false
                 freezeRescue = null
                 freezeRescued.clear()
                 freezeSwitches = 0
@@ -817,6 +844,47 @@ class RayVpnService : VpnService() {
             val routeNetwork = runCatching { com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService) }
                 .getOrElse { com.example.vpn.smart.NetworkKey.current(this@RayVpnService) }
             activeRoute = null
+
+            // cf=0: WARP needs Cloudflare, so an automatic Aether lead is not started first. The saved servers and the
+            // recovery engines go first and Aether runs at the very end (the PathGate step below). Not when the user
+            // picked Aether (power button, Aether page), nor when Aether carried traffic on this network before.
+            val cloudflareBlocked = runCatching {
+                com.example.vpn.smart.SmartConnectPlan.cloudflareBlocked(
+                    com.example.vpn.smart.NetworkCapabilityDetector.last, routeNetwork, System.currentTimeMillis())
+            }.getOrDefault(false)
+            val aetherLast = AETHER_LAST_MARKER in exclude
+            var deferredAether: VlessProfile? = null
+            // No saved server to lead with: Aether is held back like a failed engine, so the recovery engines run first.
+            var aetherHeldBack = false
+            if (com.example.vpn.smart.SmartConnectPlan.deferAether(cloudflareBlocked,
+                    aether = com.example.vpn.sidecar.AetherSidecar.handles(requestedProfile), smart = smart, force = force,
+                    lockExit = lockExit, verifiedHere = aetherVerifiedOn(routeNetwork, requestedProfile, settings),
+                    alreadyLast = aetherLast || ENGINE_FAILED_MARKER in exclude || XRAY_EXHAUSTED_MARKER in exclude)) {
+                deferredAether = requestedProfile
+                val alternate = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                    .firstOrNull { it.id != requestedProfile.id && it.id !in exclude &&
+                        !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) &&
+                        com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) }
+                    ?.let { alt ->
+                        if (settings.preferredEngine == EngineType.SING_BOX && com.example.vpn.sidecar.SingBoxSidecar.conversionProblem(alt) == null &&
+                            com.example.vpn.sidecar.Sidecars.isBundled(com.example.vpn.sidecar.SingBoxSidecar)) com.example.vpn.sidecar.SingBoxSidecar.select(alt)
+                        else alt
+                    }
+                com.example.vpn.diagnostics.events.EventLog.event("smart.aether.deferred", attributes = mapOf(
+                    "reason" to "cloudflare blocked (cf=0)", "lead" to if (alternate != null) "saved server" else "recovery engines"))
+                if (alternate != null) {
+                    requestedProfile = alternate
+                    profile = alternate
+                    activeProfile = alternate
+                    mutateState { if (it.attemptId == attemptId) it.copy(activeProfile = alternate, attemptedProfileId = alternate.id) else it }
+                    XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0): Aether (WARP) waits for the end of the search; " +
+                        "saved servers go first.")
+                } else {
+                    aetherHeldBack = true
+                    XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0) and no saved server is available: " +
+                        "recovery engines go first, Aether (WARP) last.")
+                }
+            }
 
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
             var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
@@ -900,7 +968,8 @@ class RayVpnService : VpnService() {
                 godMode = policy.mode == com.example.data.model.OperationalMode.GOD_MODE,
                 lockExit = lockExit, exact = exact && !policy.lockExit, force = force, mayMove = raceFirst || settings.autoFailoverEnabled,
                 reading = com.example.vpn.smart.SmartConnectPlan.freshReading(
-                    com.example.vpn.smart.NetworkCapabilityDetector.last, routeNetwork, System.currentTimeMillis())
+                    com.example.vpn.smart.NetworkCapabilityDetector.last, routeNetwork, System.currentTimeMillis()),
+                cloudflareBlocked = cloudflareBlocked
             ))
             val tracker = com.example.vpn.smart.SearchTracker(attemptId, plan) { p ->
                 mutateState { if (it.attemptId == attemptId) it.copy(search = p) else it }
@@ -908,14 +977,34 @@ class RayVpnService : VpnService() {
             search = tracker
             plan.reading?.let { XrayLogManager.i("SMART", "Measured network: ${it.summary()}.") }
             plan.transportsSkipped.forEach { (t, why) -> XrayLogManager.i("SMART", "${t.title} not tried directly: $why.") }
+            if (plan.cloudflareLast) XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0): clean IP, WARP, MASQUE " +
+                "and Matrix move to the end of the search.")
             var raced = false
             // What the pre-flight proved (PathGate): a real request failed on the selected path, or an
             // engine that can only be judged after it starts was chosen.
             // An engine profile (Aether) that just failed its own carrier search in this attempt (see the
             // NoVerifiedPath recovery below) counts as proven dead, so the recovery stages run for it.
-            val engineCarriersFailed = ENGINE_FAILED_MARKER in exclude &&
+            val engineCarriersFailed = (ENGINE_FAILED_MARKER in exclude || aetherHeldBack) &&
                 com.example.vpn.sidecar.Sidecars.isEngineProfile(requestedProfile)
-            var provenDead = initialResolutionFailed || engineCarriersFailed
+            // A stall or freeze failover used up the saved servers: they all carry small requests here, so testing
+            // them again would only pick one that stalls; the search goes straight on to stages E-G.
+            val xrayExhausted = XRAY_EXHAUSTED_MARKER in exclude
+            if (xrayExhausted) {
+                listOf(com.example.vpn.smart.SearchStage.REMEMBERED_ROUTE, com.example.vpn.smart.SearchStage.SELECTED,
+                    com.example.vpn.smart.SearchStage.SAME_SERVER, com.example.vpn.smart.SearchStage.OTHER_SERVERS).forEach {
+                    tracker.skip(it, "Saved servers stalled or froze on bulk downloads in this session")
+                }
+            }
+            // The run of Aether held back to the end: everything before it was already searched.
+            if (aetherLast) {
+                listOf(com.example.vpn.smart.SearchStage.REMEMBERED_ROUTE, com.example.vpn.smart.SearchStage.SELECTED,
+                    com.example.vpn.smart.SearchStage.SAME_SERVER, com.example.vpn.smart.SearchStage.OTHER_SERVERS).forEach {
+                    tracker.skip(it, "Searched before Aether: Cloudflare is blocked on this network")
+                }
+            }
+            var provenDead = initialResolutionFailed || engineCarriersFailed || xrayExhausted
+            // The clean Cloudflare address scan was held back to the end of the search (cf=0).
+            var cleanIpDeferred = false
             // Which stealth alternate carried the traffic, for the route recipe recorded once it is verified.
             var chosenVariant: String? = null
             activeRecovery = null
@@ -947,7 +1036,7 @@ class RayVpnService : VpnService() {
             // Stage A: the exact route that carried verified traffic on this network before. The chosen
             // config's own route first; with Smart Connect, then the best other remembered route. Each has
             // to carry a real request here now; a failure counts against it and the normal search goes on.
-            if (!lockExit && !force) {
+            if (!lockExit && !force && !xrayExhausted && !aetherLast) {
                 // Smart Connect replays only a route whose upload and download went through here and whose
                 // download did not stall since; anything weaker competes in the comparison instead.
                 val remembered = networkMemory.routes.forNetwork(routeNetwork).filter {
@@ -1001,7 +1090,7 @@ class RayVpnService : VpnService() {
             // Recheck the exact successful engine recipe before scanning unrelated servers or registering WARP.
             // Not when the user pressed Smart Connect: engine routes (Tor, DNS tunnels, Psiphon) are much slower
             // than a saved server that works, so they wait for the recovery stage after the comparison.
-            if (!raced && raceFirst && !lockExit && !force && !compare) {
+            if (!raced && raceFirst && !lockExit && !force && !compare && !aetherLast) {
                 val early = withTimeoutOrNull(com.example.vpn.smart.RecoveryAttemptPolicy.TOR_WINDOW_MS + 10_000L) {
                     com.example.RayApplication.instance.lab.fastRecovery(
                         exclude = exclude, deadlineMs = System.currentTimeMillis() + 90_000L,
@@ -1021,9 +1110,9 @@ class RayVpnService : VpnService() {
                 }
             }
 
-            var firstFailed = initialResolutionFailed || engineCarriersFailed
+            var firstFailed = initialResolutionFailed || engineCarriersFailed || xrayExhausted
             // The engine's carriers were all just tried and none carried traffic: not tested again here.
-            if (raceFirst && !raced && !engineCarriersFailed) {
+            if (raceFirst && !raced && !engineCarriersFailed && !xrayExhausted && !aetherLast) {
                 // The chosen server alone first, so a working one costs a single request; only when it
                 // carries no traffic are the other servers raced (several kinds of connection per round).
                 showForegroundNotification("Finding the fastest server...")
@@ -1088,7 +1177,7 @@ class RayVpnService : VpnService() {
             // 3a. A recovery candidate that carried traffic for this config on this network before (FIX BPB
             // or earlier recovery): a derived copy, the saved config itself is unchanged. One request decides;
             // a failure counts towards its rollback and the normal path search continues.
-            if (!raced && !lockExit) {
+            if (!raced && !lockExit && !xrayExhausted && !aetherLast) {
                 val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile) }.getOrNull()
                 if (recovery != null) {
                     showForegroundNotification("Trying the recovered settings...")
@@ -1114,7 +1203,7 @@ class RayVpnService : VpnService() {
             // 3b. Find a path that carries traffic before the core starts: the saved profile, its stealth
             // alternates (split handshake, other fingerprint, ECH, UDP junk) or another kind on the same
             // server. The probe's sockets bypass the traffic-blocking interface (RealDelayProbe.socketProtector).
-            if (!raced && !lockExit && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
+            if (!raced && !lockExit && !xrayExhausted && !aetherLast && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
                 showForegroundNotification("Finding a working route...")
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.SAFE_VARIANTS)
                 // Without Smart Connect the finder's first test is the selected server itself (stage B).
@@ -1159,9 +1248,11 @@ class RayVpnService : VpnService() {
                 if (choice.nothingWorked && !raced) tracker.start(com.example.vpn.smart.SearchStage.EMERGENCY)
                 // Nothing worked, and the server sits behind Cloudflare: its address may be blocked
                 // while other Cloudflare addresses are not. Scan for one and try the same server there.
-                if (choice.nothingWorked && !raced && plan.allows(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) {
+                if (choice.nothingWorked && !raced && plan.early(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) {
                     cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
                 }
+                // cf=0: the clean-address scan waits for the end of the search (after the recovery engines).
+                if (choice.nothingWorked && !raced && plan.deferred(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) cleanIpDeferred = true
                 // Sidecar engines must carry requests before selection. The shared recovery pool below
                 // tests MASQUE, Psiphon, saved Tor bridges and chains serially in DAILY and GOD MODE;
                 // choosing several untested engines here used to overwrite the earlier choices with Tor.
@@ -1199,7 +1290,7 @@ class RayVpnService : VpnService() {
             coroutineContext.ensureActive()
 
             if (!raced && provenDead && !force && !lockExit && (raceFirst || settings.autoFailoverEnabled) &&
-                plan.allows(com.example.vpn.smart.EmergencyTransport.WARP)) {
+                plan.early(com.example.vpn.smart.EmergencyTransport.WARP)) {
                 tracker.start(com.example.vpn.smart.SearchStage.EMERGENCY)
                 warpPath(timeouts.alternateSec)?.let { adopt(it) }
                 tracker.finish(com.example.vpn.smart.SearchStage.EMERGENCY, verified = raced)
@@ -1250,6 +1341,17 @@ class RayVpnService : VpnService() {
                 }
             }
 
+            // cf=0: the Cloudflare-based emergency transports held back above run now, after the recovery engines.
+            coroutineContext.ensureActive()
+            if (!raced && provenDead && !force && !lockExit && (raceFirst || settings.autoFailoverEnabled) &&
+                (cleanIpDeferred || plan.deferred(com.example.vpn.smart.EmergencyTransport.WARP))) {
+                tracker.start(com.example.vpn.smart.SearchStage.EMERGENCY)
+                showForegroundNotification("Trying Cloudflare-based methods last...")
+                if (cleanIpDeferred) cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
+                if (!raced && plan.deferred(com.example.vpn.smart.EmergencyTransport.WARP)) warpPath(timeouts.alternateSec)?.let { adopt(it) }
+                tracker.finish(com.example.vpn.smart.SearchStage.EMERGENCY, verified = raced)
+            }
+
             // Last resort for the agent: when every saved server and recovery engine failed, revive the
             // dead Cloudflare-fronted configs (ECH, fragment, fingerprint, clean IP) and connect the one
             // that comes back. Bounded in time; never in Trade (its exit is pinned). The winning recipe is
@@ -1265,6 +1367,8 @@ class RayVpnService : VpnService() {
                 val attemptJob = coroutineContext[Job]
                 val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
                     .filter { com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) }
+                    // After a stall or freeze failover, the servers that stalled are not revived again.
+                    .filter { !xrayExhausted || it.id !in exclude }
                 val report = com.example.vpn.Abandonable.run {
                     runCatching {
                         com.example.RayApplication.instance.configRevival.run(
@@ -1332,6 +1436,18 @@ class RayVpnService : VpnService() {
             val gate = com.example.vpn.smart.PathGate.decide(verified = raced, provenDead = provenDead,
                 engineAdopted = false, forced = force || exact)
             if (!com.example.vpn.smart.PathGate.mayStart(gate)) {
+                // cf=0: nothing else carried traffic, so the Aether lead held back at the start runs now, last.
+                val lastAether = deferredAether
+                if (lastAether != null) {
+                    coroutineContext.ensureActive()
+                    XrayLogManager.w("SMART", "No saved server or recovery engine carried traffic; trying Aether (WARP) last, " +
+                        "as Cloudflare is blocked on this network.")
+                    showForegroundNotification("Trying Aether (WARP) last...")
+                    tracker.end()
+                    disconnectResources()
+                    connectLocked(lastAether, smart = true, exclude = exclude + AETHER_LAST_MARKER)
+                    return@withContext
+                }
                 val name = com.example.core.SecretRedactor.redact(requestedProfile.name)
                 XrayLogManager.w("SMART", "No verified path: '$name' carried no real traffic on this network and no alternative did. " +
                     "The tunnel was not started with it.")
@@ -1888,6 +2004,16 @@ class RayVpnService : VpnService() {
             }
         }
     }
+
+    /**
+     * Aether carried a real request on [network] before: in this session's engine ledger, as a remembered route,
+     * or as an automatic method verified here within the last hours ([com.example.vpn.connections.BuiltinMethodMemory]).
+     */
+    private fun aetherVerifiedOn(network: String, aether: VlessProfile, settings: AppSettings): Boolean =
+        com.example.vpn.engine.registry.EngineLedger.shared.verifiedHere(com.example.vpn.sidecar.AetherSidecar.ID, network) ||
+            runCatching { networkMemory.routes.forNetwork(network).any { it.profileId == aether.id } }.getOrDefault(false) ||
+            runCatching { com.example.vpn.connections.ConnectionEngineRunner.aetherVerifiedHere(network, aether, settings.dnsServer) }
+                .getOrDefault(false)
 
     /** Explicit session consent only; stays in the service when the Connections page is closed. */
     private fun fallbackFromDirect(profile: VlessProfile): Boolean {
@@ -2520,7 +2646,9 @@ class RayVpnService : VpnService() {
                         com.example.vpn.smart.TunMtuTrial.State.LOW_HELPED -> "MTU $used fixed the bulk stall on this network; it is kept here."
                         com.example.vpn.smart.TunMtuTrial.State.LOW_DID_NOT_HELP -> "The bulk transfer stalled at MTU $used too: lowering MTU did not resolve this test; the cause remains unconfirmed. Returning to $configured."
                     })
-                    com.example.vpn.diagnostics.events.EventLog.event("tunnel.mtu.trial", attributes = mapOf("state" to st.name, "mtu" to used.toString()))
+                    // "mtu" stays for older readers; it is the MTU this check ran at, not the one the trial tests next.
+                    com.example.vpn.diagnostics.events.EventLog.event("tunnel.mtu.trial",
+                        attributes = com.example.vpn.smart.TunMtuTrial.eventAttributes(st, used, configured))
                 }
             }
             com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
@@ -2578,29 +2706,146 @@ class RayVpnService : VpnService() {
     }
 
     /**
-     * Smart Connect chose [stalledId] and its download then stalled while small requests passed: move to the
-     * next path that also carried traffic in the same comparison, at most [MAX_STALL_SWITCHES] times per Smart
-     * Connect, the way failover moves (through connectJob, with the intent it began in). Never on the power
-     * button or in Trade mode, which keep the chosen config.
+     * The download through [stalled] stalled on [network] while small requests passed (outside the ~16 KB freeze
+     * window): it is kept with the servers frozen here (FreezeBook) and the session moves on, the way failover
+     * moves (through connectJob, with the intent it began in): to the next path that also carried traffic in
+     * this Smart Connect, or with none a race that leaves the stalled and frozen servers out, at most
+     * [MAX_STALL_SWITCHES] times per Connect (see [com.example.vpn.smart.StallFailover]). Never in a pinned
+     * session (power button, Trade mode). [userAsked]: the user pressed "Try another server", which is not
+     * held back by the automatic switch cap.
      */
-    private fun switchAfterStall(attemptId: String, stalledId: String) {
-        if (exactSession || _vpnState.value.attemptId != attemptId || stallSwitches >= MAX_STALL_SWITCHES) return
-        val runnersUp = smartRunnersUp.filter { it.owner.id != stalledId }
-        val next = runnersUp.firstOrNull() ?: return
-        val ticket = lifecycle.current()
-        if (!lifecycle.tryBeginSwitch()) return
-        stallSwitches++
-        smartRunnersUp = runnersUp.drop(1)
-        XrayLogManager.w("SMART", "The download stalled through this server; switching to the next one Smart Connect found working " +
-            "(${com.example.core.SecretRedactor.redact(next.owner.name)}).")
-        mutateState { com.example.data.model.ConnectionVerification.onSwitching(it) }
-        connectJob = serviceScope.launch {
-            try {
-                connect(next.owner, smart = true, exclude = setOf(stalledId), ticket = ticket)
-            } finally {
-                lifecycle.endSwitch()
+    private fun switchAfterStall(attemptId: String, network: String, stalled: VlessProfile, userAsked: Boolean = false) {
+        if (_vpnState.value.attemptId != attemptId) return
+        networkMemory.freezes.recordStalled(network, stalled.id)
+        serviceScope.launch(Dispatchers.IO) {
+            val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+            val usable = saved.filter {
+                !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) && com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it)
+            }
+            val decision = com.example.vpn.smart.StallFailover.decide(com.example.vpn.smart.StallFailover.Input(
+                stalledId = stalled.id, pinned = exitPinned(),
+                switchesSoFar = stallSwitches,
+                runnersUp = smartRunnersUp.map { it.owner.id },
+                frozen = networkMemory.freezes.frozen(network),
+                candidates = usable.map { it.id },
+                // The user's "Try another server" may run the later stages again; automatic failover runs them once.
+                escalated = stallEscalated && !userAsked,
+                maxSwitches = if (userAsked) Int.MAX_VALUE else MAX_STALL_SWITCHES
+            ))
+            val byId = saved.associateBy { it.id }
+            val name = { id: String -> com.example.core.SecretRedactor.redact(byId[id]?.name ?: if (id == stalled.id) stalled.name else id) }
+            XrayLogManager.w("FAILOVER", com.example.vpn.smart.StallFailover.describe(decision, name))
+            stallEvent(decision, stalled.id, userAsked)
+            if (_vpnState.value.attemptId != attemptId) return@launch
+            when (decision) {
+                is com.example.vpn.smart.StallFailover.Decision.RunnerUp -> {
+                    val next = smartRunnersUp.firstOrNull { it.owner.id == decision.toId } ?: return@launch
+                    val exclude = networkMemory.freezes.frozen(network) + stalled.id
+                    launchSwitch("stall") { ticket ->
+                        stallSwitches++
+                        smartRunnersUp = smartRunnersUp.filter { it.owner.id != next.owner.id && it.owner.id !in exclude }
+                        connect(next.owner, smart = true, exclude = exclude, ticket = ticket)
+                    }
+                }
+                is com.example.vpn.smart.StallFailover.Decision.Race -> {
+                    val lead = com.example.vpn.smart.ServerRace.rank(usable, networkMemory.workingKinds(network),
+                        networkMemory.recentFailures(network), exclude = decision.exclude, limit = 1).firstOrNull()
+                    if (lead == null) {
+                        XrayLogManager.w("FAILOVER", "failover · stall · STAY (no saved server to race)")
+                        return@launch
+                    }
+                    launchSwitch("stall") { ticket ->
+                        stallSwitches++
+                        smartRunnersUp = smartRunnersUp.filter { it.owner.id !in decision.exclude && it.owner.id != lead.id }
+                        com.example.vpn.diagnostics.ConnectionMetrics.failoverSwitches.incrementAndGet()
+                        connect(lead, smart = true, exclude = decision.exclude, ticket = ticket)
+                    }
+                }
+                is com.example.vpn.smart.StallFailover.Decision.Escalate -> {
+                    val reason = decision.reason
+                    launchSwitch("stall") { ticket -> escalateBeyondSavedServers(network, stalled, reason, ticket) }
+                }
+                is com.example.vpn.smart.StallFailover.Decision.Stay -> Unit
             }
         }
+    }
+
+    /**
+     * A stall or freeze failover used up the saved servers in this session ([reason]): the Smart Connect search
+     * goes on with its later stages (E emergency transports, F recovery engines such as Tor, serverless, DNS
+     * tunnels and slipstream, G config revival), bounded by their own time limits, leaving every saved server
+     * out. When none of them carries traffic, the session comes back to [from], which at least carried small
+     * requests, instead of ending with no tunnel. Runs once per Connect ([stallEscalated]); the caller holds
+     * the switch.
+     */
+    private suspend fun escalateBeyondSavedServers(network: String, from: VlessProfile, reason: String, ticket: Long) {
+        stallEscalated = true
+        if (!lifecycle.isCurrent(ticket)) return
+        val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+        val savedServers = saved.filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }.map { it.id }.toSet()
+        val exclude = savedServers + networkMemory.freezes.frozen(network) + from.id + XRAY_EXHAUSTED_MARKER
+        XrayLogManager.w("SMART", "Bulk downloads stalled on every saved server tried ($reason); continuing Smart Connect " +
+            "with emergency transports, recovery engines and config revival (stages E-G).")
+        escalationEvent("start", reason, from.id)
+        showForegroundNotification("Downloads stalling; trying other methods...")
+        connect(from, smart = true, exclude = exclude, ticket = ticket)
+        if (!lifecycle.isCurrent(ticket)) return
+        if (_vpnState.value.status != ConnectionStatus.FAILED) {
+            escalationEvent("found", reason, _vpnState.value.activeProfile?.id ?: from.id)
+            return
+        }
+        XrayLogManager.w("SMART", "The later stages found no path that carries traffic; back on " +
+            "${com.example.core.SecretRedactor.redact(from.name)}, which carries small requests but stalls on large downloads.")
+        escalationEvent("restore", reason, from.id)
+        connect(from, pinned = true, ticket = ticket)
+    }
+
+    private fun escalationEvent(action: String, reason: String, profileId: String) {
+        com.example.vpn.diagnostics.events.EventLog.event("failover.escalate", attributes = mapOf(
+            "action" to action, "reason" to reason, "stages" to "E-G",
+            "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(profileId) ?: "none")
+        ))
+    }
+
+    /**
+     * The freeze failover gave up on [server] ([reason]): continue with the later stages unless the session is
+     * pinned or they already ran. Returns whether it did; the caller holds the switch.
+     */
+    private suspend fun escalateAfterFreeze(network: String, server: VlessProfile, reason: String, ticket: Long): Boolean {
+        if (!com.example.vpn.smart.StallFailover.escalatesAfterFreeze(exitPinned(), stallEscalated)) return false
+        escalateBeyondSavedServers(network, server, "freeze16k: $reason", ticket)
+        return true
+    }
+
+    /** The power button or Trade mode pinned this session's config: failover never changes it. */
+    private suspend fun exitPinned(): Boolean = exactSession || runCatching {
+        com.example.vpn.safety.OperatingModePolicy.of(settingsRepository.getSettings().operationalMode).lockExit
+    }.getOrDefault(false)
+
+    /**
+     * Starts an automatic move of the running session ([block] gets the intent ticket), unless another switch
+     * is already under way. Through connectJob, so a Connect or Disconnect cancels it.
+     */
+    private fun launchSwitch(what: String, block: suspend (Long) -> Unit): Boolean {
+        val ticket = lifecycle.current()
+        if (!lifecycle.tryBeginSwitch()) {
+            XrayLogManager.w("FAILOVER", "failover · $what · another switch is already under way")
+            return false
+        }
+        mutateState { com.example.data.model.ConnectionVerification.onSwitching(it) }
+        connectJob = serviceScope.launch {
+            try { block(ticket) } finally { lifecycle.endSwitch() }
+        }
+        return true
+    }
+
+    private fun stallEvent(d: com.example.vpn.smart.StallFailover.Decision, profileId: String, userAsked: Boolean) {
+        com.example.vpn.diagnostics.events.EventLog.event("failover.stall", attributes = mapOf(
+            "action" to com.example.vpn.smart.StallFailover.action(d),
+            "reason" to com.example.vpn.smart.StallFailover.reason(d),
+            "trigger" to if (userAsked) "user" else "transfer-check",
+            "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(profileId) ?: "none")
+        ))
     }
 
     /**
@@ -2633,7 +2878,7 @@ class RayVpnService : VpnService() {
                     freezeRescue = null
                 }
             }
-            (download as? com.example.vpn.verify.LegResult.Failed)?.stalled == true -> switchAfterStall(attemptId, running.id)
+            (download as? com.example.vpn.verify.LegResult.Failed)?.stalled == true -> switchAfterStall(attemptId, network, running)
         }
     }
 
@@ -2660,7 +2905,13 @@ class RayVpnService : VpnService() {
                         try { runFreezeSwitch(network, decision, name, ticket) } finally { lifecycle.endSwitch() }
                     }
                 }
-                is com.example.vpn.smart.FreezeFailover.Decision.Fail -> freezeEvent("fail", decision.reason, server.id)
+                is com.example.vpn.smart.FreezeFailover.Decision.Fail -> {
+                    freezeEvent("fail", decision.reason, server.id)
+                    if (com.example.vpn.smart.StallFailover.escalatesAfterFreeze(exitPinned(), stallEscalated)) {
+                        val reason = decision.reason
+                        launchSwitch("freeze16k") { ticket -> escalateBeyondSavedServers(network, server, "freeze16k: $reason", ticket) }
+                    }
+                }
             }
         }
     }
@@ -2673,9 +2924,7 @@ class RayVpnService : VpnService() {
             !com.example.vpn.sidecar.Sidecars.isEngineProfile(p) && com.example.vpn.subscription.SubscriptionPreset.autoSelectable(p)
         }
         val freezes = networkMemory.freezes
-        val pinned = exactSession || runCatching {
-            com.example.vpn.safety.OperatingModePolicy.of(settingsRepository.getSettings().operationalMode).lockExit
-        }.getOrDefault(false)
+        val pinned = exitPinned()
         val savedServer = byId[server.id] ?: server
         val decision = com.example.vpn.smart.FreezeFailover.decide(com.example.vpn.smart.FreezeFailover.Input(
             server = savedServer, running = savedServer, pinned = pinned, rescueTried = rescueTried,
@@ -2712,7 +2961,10 @@ class RayVpnService : VpnService() {
                     XrayLogManager.w("FAILOVER", com.example.vpn.smart.FreezeFailover.describe(next, nextName))
                     when (next) {
                         is com.example.vpn.smart.FreezeFailover.Decision.Switch -> runFreezeSwitch(network, next, nextName, ticket)
-                        is com.example.vpn.smart.FreezeFailover.Decision.Fail -> freezeEvent("fail", next.reason, server.id)
+                        is com.example.vpn.smart.FreezeFailover.Decision.Fail -> {
+                            freezeEvent("fail", next.reason, server.id)
+                            escalateAfterFreeze(network, server, next.reason, ticket)
+                        }
                         is com.example.vpn.smart.FreezeFailover.Decision.Retry -> Unit
                     }
                 }
@@ -2736,6 +2988,8 @@ class RayVpnService : VpnService() {
         if (lead == null) {
             XrayLogManager.w("FAILOVER", "failover · freeze16k · FAIL (no other saved server to move ${name(d.fromId)} to)")
             freezeEvent("fail", "no backup", d.fromId)
+            val from = runCatching { serverRepository.getProfileById(d.fromId) }.getOrNull() ?: _vpnState.value.activeProfile
+            if (from != null) escalateAfterFreeze(network, from, "no backup", ticket)
             return
         }
         if (!lifecycle.isCurrent(ticket)) return

@@ -92,6 +92,12 @@ data class ConnectionState(
 ) {
     val isConnected: Boolean get() = status == ConnectionStatus.CONNECTED
 
+    /**
+     * Connected, but this attempt's transfer check found bulk downloads stalling (or the ~16 KB freeze) and
+     * no switch is under way: small requests pass, large downloads do not. See [ConnectionVerification.bulkLimited].
+     */
+    val bulkLimited: Boolean get() = ConnectionVerification.bulkLimited(this)
+
     /** How strongly the route is proven (see RouteVerification); never stronger than the checks. */
     val verification: com.example.vpn.verify.RouteVerification get() = com.example.vpn.verify.RouteVerification.of(this)
 
@@ -193,6 +199,17 @@ object ConnectionVerification {
             status = ConnectionStatus.NETWORK_CHANGED, verifiedAt = null, pingMs = null, pingCheckedAt = null,
             probeFailures = 0, failureStage = null
         ) else next
+    }
+
+    /**
+     * "Connected, but limited": the latest [ConnectionState.trafficEvidence] of this attempt and network shows a
+     * bulk download that stalled or froze, while the session is CONNECTED (a SWITCHING, reconnecting or
+     * re-verifying session is not limited, it is moving). Evidence of another attempt never counts.
+     */
+    fun bulkLimited(state: ConnectionState): Boolean {
+        if (state.status != ConnectionStatus.CONNECTED) return false
+        val evidence = state.trafficEvidence?.takeIf { it.appliesTo(state) } ?: return false
+        return evidence.bulkStalled || evidence.fixedSizeFreeze
     }
 
     /** Failover begins moving a running session to a backup. The old PASS is cleared at once. */

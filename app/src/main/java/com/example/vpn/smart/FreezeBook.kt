@@ -48,6 +48,14 @@ class FreezeBook(
         trimAndPersist()
     }
 
+    /**
+     * [profileId]'s bulk download stalled on [network] outside the ~16 KB window while small requests passed:
+     * kept with the frozen servers, so failover leaves it out here and Smart Connect tests it last while
+     * [FROZEN_COOLDOWN_MS] runs.
+     */
+    @Synchronized
+    fun recordStalled(network: String, profileId: String) = recordFrozen(network, profileId)
+
     /** Last-known-good servers on [network], most recent first. */
     @Synchronized
     fun lastGood(network: String): List<String> {

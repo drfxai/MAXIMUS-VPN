@@ -84,6 +84,22 @@ class TunMtuTrial(
         const val MAX_NETWORKS = 16
         const val SCHEMA = 1
 
+        /**
+         * Attributes of the `tunnel.mtu.trial` event for [state], reached by a check that ran at [mtuUsed]:
+         * "mtu.used" is that MTU and "mtu.next" the one the next connect on this network builds with
+         * ([LOW_MTU] while trying it, [configured] once it did not help). "mtu" repeats "mtu.used" for older
+         * readers; on its own it read as if the MTU being tried were the configured one.
+         */
+        fun eventAttributes(state: State, mtuUsed: Int, configured: Int): Map<String, String> {
+            val next = when (state) {
+                State.TRYING_LOW -> LOW_MTU
+                State.LOW_HELPED -> mtuUsed
+                State.LOW_DID_NOT_HELP -> configured
+            }
+            return mapOf("state" to state.name, "mtu" to mtuUsed.toString(),
+                "mtu.used" to mtuUsed.toString(), "mtu.next" to next.toString())
+        }
+
         private fun parse(text: String?): MutableMap<String, Entry> {
             val root = runCatching { JSONObject(text ?: return mutableMapOf()) }.getOrNull() ?: return mutableMapOf()
             if (root.optInt("schema") != SCHEMA) return mutableMapOf()

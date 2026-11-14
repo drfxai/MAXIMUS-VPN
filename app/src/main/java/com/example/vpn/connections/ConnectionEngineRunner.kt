@@ -391,6 +391,27 @@ object ConnectionEngineRunner {
         record(name, "clean-h2", "SAVED", "${CleanH2PeerMemory.masked(peer)} remembered for this network" + if (split) " (split ClientHello)" else "")
     }
 
+    /**
+     * The key [BuiltinMethodMemory] keeps an automatic engine's verified method under: the network, the engine,
+     * its options (without the one-off rescan flag) and the DNS setting. Null without a network.
+     */
+    fun methodScope(network: String?, engineId: String, profile: VlessProfile, dnsServer: String): String? {
+        if (network == null) return null
+        val options = org.json.JSONObject(profile.extraSettings).apply { remove("rescan") }.toString()
+        val input = network + "|" + engineId + "|" + options + "|" + dnsServer
+        return java.security.MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * An automatic Aether profile carried HTTPS on [network] with these options within [BuiltinMethodMemory.TTL_MS]
+     * (any method). A user's own carrier choice is not remembered there, so it never counts.
+     */
+    fun aetherVerifiedHere(network: String?, profile: VlessProfile, dnsServer: String, now: Long = System.currentTimeMillis()): Boolean {
+        if (!AetherSidecar.handles(profile) || ProfileExtras.read(profile).optString("carrier", "auto") != "auto") return false
+        return BuiltinMethodMemory.verifiedRecently(methodScope(network, AetherSidecar.ID, profile, dnsServer), now)
+    }
+
     fun start(
         engine: SidecarEngine,
         profile: VlessProfile,
@@ -429,14 +450,7 @@ object ConnectionEngineRunner {
             if (engine.id == AetherSidecar.ID) it.optString("carrier", "auto") == "auto"
             else it.optString("variant", "auto") == "auto"
         }
-        fun scope(): String? {
-            if (!automatic) return null
-            val network = BuiltinMethodMemory.network() ?: return null
-            val options = org.json.JSONObject(profile.extraSettings).apply { remove("rescan") }.toString()
-            val input = network + "|" + engine.id + "|" + options + "|" + settings.dnsServer
-            return java.security.MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
-                .joinToString("") { "%02x".format(it) }
-        }
+        fun scope(): String? = if (!automatic) null else methodScope(BuiltinMethodMemory.network(), engine.id, profile, settings.dnsServer)
         fun method(candidate: VlessProfile) = ProfileExtras.read(candidate).let {
             if (engine.id == AetherSidecar.ID) {
                 if (it.optBoolean(RELAY_FOLLOW_UP)) it.optString("carrier") + "-relay"

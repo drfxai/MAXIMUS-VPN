@@ -24,23 +24,36 @@ enum class EmergencyTransport(val title: String) {
     WARP("Cloudflare WARP (WireGuard)"),
     MASQUE("WARP over MASQUE (HTTP/3)"),
     PSIPHON("Psiphon"),
-    TOR("Tor")
+    TOR("Tor");
+
+    /** Needs Cloudflare itself to answer on this network: a clean Cloudflare address, WARP and MASQUE. */
+    val cloudflare: Boolean get() = this == CLEAN_IP || this == WARP || this == MASQUE
 }
 
 /**
  * Which stages and emergency transports this connect may run, and why any are left out. Pure: the
  * service passes in what it knows, so every rule is tested without a phone. The plan never adds a stage
- * or changes their order; it only leaves out what settings forbid or the measured network rules out.
+ * or changes their order; it only leaves out what settings forbid or the measured network rules out, and on a
+ * network where Cloudflare was measured blocked (cf=0) it moves the Cloudflare-based transports to the end.
  */
 data class SmartConnectPlan(
     val skipped: Map<SearchStage, String>,
     val transports: List<EmergencyTransport>,
     val transportsSkipped: Map<EmergencyTransport, String>,
     /** The measured network state that steered the plan, or null when nothing fresh was measured. */
-    val reading: NetworkStateReading?
+    val reading: NetworkStateReading?,
+    /**
+     * Cloudflare was measured blocked on this network (cf=0): the Cloudflare-based transports (clean IP, WARP,
+     * MASQUE) still run, but at the end of the search, after the recovery engines, instead of before them.
+     */
+    val cloudflareLast: Boolean = false
 ) {
     fun allows(stage: SearchStage): Boolean = stage !in skipped
     fun allows(transport: EmergencyTransport): Boolean = transport in transports
+    /** Allowed, and runs at its usual place (before the recovery engines). */
+    fun early(transport: EmergencyTransport): Boolean = allows(transport) && !(cloudflareLast && transport.cloudflare)
+    /** Allowed, and moved to the end of the search because Cloudflare is blocked here. */
+    fun deferred(transport: EmergencyTransport): Boolean = allows(transport) && cloudflareLast && transport.cloudflare
 
     data class Input(
         /** GOD MODE: the emergency engines may be started directly. */
@@ -54,7 +67,9 @@ data class SmartConnectPlan(
         /** Smart Connect, or automatic failover, may move the session to another server. */
         val mayMove: Boolean,
         /** The measured state of this network, only when measured on it in the last few minutes. */
-        val reading: NetworkStateReading?
+        val reading: NetworkStateReading?,
+        /** Cloudflare measured unreachable on this network in the last few minutes (cf=0; see [cloudflareBlocked]). */
+        val cloudflareBlocked: Boolean = false
     )
 
     companion object {
@@ -88,9 +103,31 @@ data class SmartConnectPlan(
                     off.putIfAbsent(EmergencyTransport.MASQUE, "No QUIC endpoint answered on this network")
                 }
             }
-            val transports = EmergencyTransport.values().filter { it !in off }
-            return SmartConnectPlan(skipped, transports, off, input.reading)
+            val allowed = EmergencyTransport.values().filter { it !in off }
+            // cf=0: never dropped (a WARP identity may still pass, the block may lift), only moved last.
+            val transports = if (input.cloudflareBlocked) allowed.filterNot { it.cloudflare } + allowed.filter { it.cloudflare }
+                else allowed
+            return SmartConnectPlan(skipped, transports, off, input.reading, cloudflareLast = input.cloudflareBlocked)
         }
+
+        /**
+         * Cloudflare was measured blocked (cf=0: the CLOUDFLARE_TLS_PATH_FAILURE signal's evidence) on this same
+         * network, under the same freshness and same-network rules as [freshReading]. A measured cf=1, or no
+         * fresh measurement, is never "blocked".
+         */
+        fun cloudflareBlocked(measured: NetworkCapabilityProfile?, networkKey: String, now: Long): Boolean =
+            measured?.cloudflareReachable == false && freshReading(measured, networkKey, now) != null
+
+        /**
+         * Whether Smart Connect holds an Aether lead back until the end of the search: Cloudflare is blocked here
+         * (cf=0), the session is an automatic search ([smart]: the Smart Connect button or failover, not the user
+         * picking Aether with the power button or on the Aether page), it may move to another path (not forced, not
+         * Trade or the power button's exact config), Aether was not verified on this network before, and this is
+         * not already the deferred run at the end ([alreadyLast]) or a search after Aether's own failure.
+         */
+        fun deferAether(cloudflareBlocked: Boolean, aether: Boolean, smart: Boolean, force: Boolean, lockExit: Boolean,
+                        verifiedHere: Boolean, alreadyLast: Boolean): Boolean =
+            cloudflareBlocked && aether && smart && !force && !lockExit && !verifiedHere && !alreadyLast
 
         /** Measurements older than this may describe another network and are not used. */
         const val READING_MAX_AGE_MS = 10 * 60_000L

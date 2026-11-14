@@ -61,6 +61,18 @@ object VpnController {
     }
 
     /**
+     * The connection carries small requests but large downloads stall: move to another server the way the
+     * stall failover does (never in a pinned session).
+     */
+    fun tryAnotherServer(context: Context) {
+        val intent = Intent(context, RayVpnService::class.java).apply {
+            action = RayVpnService.ACTION_TRY_ANOTHER_SERVER
+        }
+        // Only offered while connected, so the service is already in the foreground; never start it from here.
+        runCatching { context.startService(intent) }
+    }
+
+    /**
      * Reconnects the active VPN tunnel.
      */
     fun reconnectVpn(context: Context) {

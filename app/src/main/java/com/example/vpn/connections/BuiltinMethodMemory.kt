@@ -22,6 +22,17 @@ object BuiltinMethodMemory {
     fun forget(scope: String?) { if (scope != null) write(scope, null) }
 
     /**
+     * Some method carried HTTPS on [scope] (same network, engine and options) within [TTL_MS]. Read-only: unlike
+     * [preferred] it never clears the entry, so asking does not change what the engine tries first.
+     */
+    fun verifiedRecently(scope: String?, now: Long = System.currentTimeMillis()): Boolean {
+        if (scope == null) return false
+        val saved = read(scope)?.split('|') ?: return false
+        val at = saved.getOrNull(1)?.toLongOrNull() ?: return false
+        return saved.firstOrNull().orEmpty().isNotBlank() && now - at in 0 until TTL_MS
+    }
+
+    /**
      * Methods that failed on this scope (same network, engine and options) in the last [FAILED_TTL_MS].
      * Only an ordering hint: a recently failed method is tried last, never skipped, so one bad minute on
      * a network cannot lock a method out (PattNG keeps the endpoint its scan found in the same spirit).
