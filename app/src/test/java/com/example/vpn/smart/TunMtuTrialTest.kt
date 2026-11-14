@@ -72,4 +72,13 @@ class TunMtuTrialTest {
         assertEquals(TunMtuTrial.LOW_MTU.toString(), TunMtuTrial.eventAttributes(State.LOW_HELPED, TunMtuTrial.LOW_MTU, 1500)["mtu.next"])
         assertEquals("1500", TunMtuTrial.eventAttributes(State.LOW_DID_NOT_HELP, TunMtuTrial.LOW_MTU, 1500)["mtu.next"])
     }
+
+    @Test fun aCapStallNeverStartsATrialButEndsOneAlreadyRunning() {
+        val t = trial()
+        assertNull(t.onBulkCheck(net, 1400, 1400, stalled = true, passed = false, mayStart = false))
+        assertEquals(1400, t.mtuFor(net, 1400))
+        t.onBulkCheck(net, 1400, 1400, stalled = true, passed = false)
+        assertEquals(State.LOW_DID_NOT_HELP,
+            t.onBulkCheck(net, TunMtuTrial.LOW_MTU, 1400, stalled = true, passed = false, mayStart = false))
+    }
 }

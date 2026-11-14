@@ -32,16 +32,17 @@ class TunMtuTrial(
     /**
      * A bulk check through the tunnel built with [mtuUsed] on [network] ended: [stalled] when small
      * requests passed but the bulk transfer stopped part-way, [passed] when both directions went through.
-     * Returns the state it moved to, or null when nothing changed.
+     * Returns the state it moved to, or null when nothing changed. [mayStart] false (a stall too far in to be
+     * an MTU black hole, see [StallFailover.classify]) never starts a trial; a trial already running still ends.
      */
     @Synchronized
-    fun onBulkCheck(network: String, mtuUsed: Int, configured: Int, stalled: Boolean, passed: Boolean): State? {
+    fun onBulkCheck(network: String, mtuUsed: Int, configured: Int, stalled: Boolean, passed: Boolean, mayStart: Boolean = true): State? {
         val e = live(network)
         val next = when {
             mtuUsed == LOW_MTU && e?.state == State.TRYING_LOW && passed -> State.LOW_HELPED
             mtuUsed == LOW_MTU && e?.state == State.TRYING_LOW && stalled -> State.LOW_DID_NOT_HELP
             mtuUsed == LOW_MTU && e?.state == State.LOW_HELPED && stalled -> State.LOW_DID_NOT_HELP
-            mtuUsed == configured && configured > LOW_MTU && stalled && e == null -> State.TRYING_LOW
+            mtuUsed == configured && configured > LOW_MTU && stalled && mayStart && e == null -> State.TRYING_LOW
             else -> null
         } ?: return null
         entries[network] = Entry(next, clock())

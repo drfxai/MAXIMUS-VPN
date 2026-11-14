@@ -11,7 +11,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The ~16 KB freeze: same server with deep fragmentation first, then a verified backup, never a pinned config. */
+/** The ~16 KB freeze: a TLS server with deep fragmentation first (never REALITY or ECH), then a verified backup off its network, never a pinned config. */
 class FreezeFailoverTest {
     private val fr = VlessProfile(id = "fr14", name = "FR · VLESS 14", address = "1.2.3.4", port = 443, uuid = "u1",
         transport = "tcp", security = "reality", publicKey = "pbk", fingerprint = "chrome", createdAt = 0L)
@@ -28,17 +28,47 @@ class FreezeFailoverTest {
         engine: Boolean = false
     ) = FreezeFailover.Input(server, server, pinned, rescueTried, switches, runnersUp, lastGood, frozen, saved, engine)
 
-    @Test fun firstFreezeRetriesTheSameServerWithDeepFragmentation() {
-        val d = FreezeFailover.decide(input(runnersUp = listOf(de)))
+    private val frTls = fr.copy(security = "tls", publicKey = "", sni = "fr.example")
+
+    @Test fun firstFreezeRetriesATlsServerWithDeepFragmentation() {
+        val d = FreezeFailover.decide(input(server = frTls, runnersUp = listOf(de)))
         assertTrue(d is Decision.Retry)
         d as Decision.Retry
         assertEquals("fr14", d.serverId)
         assertEquals("fr14", d.variant.id)
         assertEquals(FreezeFailover.Rescue.DEEP_FRAGMENT, d.rescue)
         assertEquals(FreezeFailover.DEEP_FRAGMENT_MASK, d.variant.finalMask)
-        // Only the mask changes: REALITY key, fingerprint and address stay as saved.
-        assertEquals(fr.copy(finalMask = FreezeFailover.DEEP_FRAGMENT_MASK), d.variant)
+        // Only the mask changes: SNI, fingerprint and address stay as saved.
+        assertEquals(frTls.copy(finalMask = FreezeFailover.DEEP_FRAGMENT_MASK), d.variant)
         assertEquals("failover · freeze16k · FRAGMENT FR · VLESS 14", FreezeFailover.describe(d) { "FR · VLESS 14" })
+    }
+
+    @Test fun aRealityServerSkipsTheDeepFragmentRescueAndMovesOn() {
+        // Field log: the FRAGMENT rescue on a REALITY server carried no traffic and cost ~27 s.
+        assertEquals(Decision.Switch("fr14", de), FreezeFailover.decide(input(runnersUp = listOf(de))))
+        // Its saved XHTTP form is still the next step when there is one.
+        val xhttp = p("frx", transport = "xhttp", address = "1.2.3.4", uuid = "u1")
+        assertEquals(Decision.Retry("fr14", xhttp, FreezeFailover.Rescue.XHTTP),
+            FreezeFailover.decide(input(runnersUp = listOf(de), saved = listOf(fr, xhttp))))
+    }
+
+    @Test fun anEchServerSkipsTheDeepFragmentRescue() {
+        val ech = frTls.copy(echConfigList = "cloudflare-ech.com+udp://1.1.1.1")
+        assertFalse(FreezeFailover.canDeepFragment(ech))
+        assertEquals(Decision.Switch("fr14", de), FreezeFailover.decide(input(server = ech, runnersUp = listOf(de))))
+    }
+
+    @Test fun theSwitchLeavesServersOnTheFrozenServersNetworkOut() {
+        val sameNet = p("same", address = "1.2.3.99")
+        val other = p("other", address = "5.6.7.8")
+        val networks = mapOf("same" to HostPrefix.keys("1.2.3.99"), "other" to HostPrefix.keys("5.6.7.8"))
+        val d = FreezeFailover.decide(input(rescueTried = true, runnersUp = listOf(sameNet, other)).copy(
+            serverKeys = HostPrefix.keys("1.2.3.4"), networks = networks))
+        assertEquals(Decision.Switch("fr14", other, setOf("same")), d)
+        val race = FreezeFailover.decide(input(rescueTried = true, runnersUp = listOf(sameNet)).copy(
+            serverKeys = HostPrefix.keys("1.2.3.4"), networks = networks))
+        assertEquals(Decision.Switch("fr14", null, setOf("same")), race)
+        assertTrue(FreezeFailover.describe(race) { it }.endsWith("(same-network servers left out: 1)"))
     }
 
     @Test fun theDeepMaskIsUacsRescueAndPassesTheSecurityGate() {
@@ -95,14 +125,15 @@ class FreezeFailoverTest {
     }
 
     @Test fun onlyTcpTlsOrRealityLinksTakeTheMask() {
-        assertTrue(FreezeFailover.canDeepFragment(fr))
+        assertTrue(FreezeFailover.canDeepFragment(frTls))
+        assertFalse(FreezeFailover.canDeepFragment(fr))
         assertTrue(FreezeFailover.canDeepFragment(p("ws", transport = "ws")))
         assertFalse(FreezeFailover.canDeepFragment(p("plain", security = "none")))
         assertFalse(FreezeFailover.canDeepFragment(p("quic", transport = "quic")))
         assertFalse(FreezeFailover.canDeepFragment(p("h3", transport = "xhttp").copy(alpn = "h3")))
-        assertFalse(FreezeFailover.canDeepFragment(fr.copy(profileType = ProfileType.XRAY_JSON)))
-        assertFalse(FreezeFailover.canDeepFragment(fr.copy(protocolType = ProtocolType.HYSTERIA2)))
-        assertFalse(FreezeFailover.canDeepFragment(FreezeFailover.deepFragment(fr)))
+        assertFalse(FreezeFailover.canDeepFragment(frTls.copy(profileType = ProfileType.XRAY_JSON)))
+        assertFalse(FreezeFailover.canDeepFragment(frTls.copy(protocolType = ProtocolType.HYSTERIA2)))
+        assertFalse(FreezeFailover.canDeepFragment(FreezeFailover.deepFragment(frTls)))
     }
 
     @Test fun anEngineProgramGoesStraightToTheSwitch() {
