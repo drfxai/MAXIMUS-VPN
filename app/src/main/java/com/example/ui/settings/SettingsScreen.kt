@@ -559,8 +559,6 @@ fun SettingsScreen(
     }
 }
 
-}
-
 /** Wires the pages to the view model one-to-one, so preference keys and side effects are unchanged. */
 private class ViewModelSettingsActions(private val vm: SettingsViewModel) : SettingsActions {
     override fun setDarkTheme(dark: Boolean) = vm.setDarkTheme(dark)
