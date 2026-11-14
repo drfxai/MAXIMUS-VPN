@@ -114,10 +114,6 @@ data class TrafficEvidence(
     val fixedSizeFreeze: Boolean get() =
         (download as? LegResult.Failed)?.let { it.stalled && it.bytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES } == true
 
-    /** Bytes that came (download) or went (upload) before a bulk stall, download first; null without a stall. */
-    val stallBytes: Int? get() =
-        (download as? LegResult.Failed)?.takeIf { it.stalled }?.bytes ?: (upload as? LegResult.Failed)?.takeIf { it.stalled }?.bytes
-
     fun appliesTo(state: ConnectionState): Boolean =
         attemptId != null && attemptId == state.attemptId && networkGeneration == state.networkGeneration
 
