@@ -78,7 +78,9 @@ class RayApplication : Application() {
             loadMtu = { prefs.getString("mtu", null) },
             saveMtu = { prefs.edit().putString("mtu", it).apply() },
             loadSpeeds = { prefs.getString("speeds", null) },
-            saveSpeeds = { prefs.edit().putString("speeds", it).apply() }
+            saveSpeeds = { prefs.edit().putString("speeds", it).apply() },
+            loadFreezes = { prefs.getString("freezes", null) },
+            saveFreezes = { prefs.edit().putString("freezes", it).apply() }
         )
     }
 
