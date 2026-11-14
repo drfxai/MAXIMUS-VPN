@@ -13,11 +13,40 @@ package com.example.vpn.smart
  *    goes on into its later stages (emergency transports, recovery engines, config revival), once per Connect.
  * 4. A pinned session (power button, Trade mode) is never moved ([Decision.Stay]).
  *
+ * How many bytes came before the stall decides its class ([classify]): at most [MTU_STALL_MAX_BYTES] is a path
+ * MTU black hole (the first full-size segment never arrives; the MTU 1280 trial is for that), more is a
+ * per-connection cap on the server's address range (a censor that freezes a flow after N packets). For a cap
+ * the MTU trial is skipped, and every server on the stalled server's network ([HostPrefix]) is left out of the
+ * runner-up and the race as well: the cap follows the address range, not the config.
+ *
  * Pure: the service supplies the state and carries the decision out.
  */
 object StallFailover {
     /** Moves after a stalled download, per user Connect. */
     const val MAX_SWITCHES = 2
+
+    /** A stall at or below this many bytes is an MTU black hole; above it, a per-connection cap. */
+    const val MTU_STALL_MAX_BYTES = 1500
+
+    enum class StallClass(val key: String) { MTU("mtu"), CAP("cap") }
+
+    /** [bytes] that came before the stall; null when unknown (the user's "Try another server"). */
+    fun classify(bytes: Int?): StallClass? = when {
+        bytes == null || bytes < 0 -> null
+        bytes <= MTU_STALL_MAX_BYTES -> StallClass.MTU
+        else -> StallClass.CAP
+    }
+
+    /** Whether a stall of [bytes] may start the MTU 1280 trial: only an MTU-class stall does. */
+    fun mtuTrialFor(bytes: Int?): Boolean = classify(bytes) == StallClass.MTU
+
+    /**
+     * Ids among [networks] on the same network as the stalled server ([stalledKeys]), [stalledId] excluded:
+     * the servers a per-connection cap is likely to hit too.
+     */
+    fun sameNetwork(stalledId: String, stalledKeys: Set<String>, networks: Map<String, Set<String>>): Set<String> =
+        if (stalledKeys.isEmpty()) emptySet()
+        else networks.filter { (id, keys) -> id != stalledId && keys.any { it in stalledKeys } }.keys
 
     sealed class Decision {
         /** Switch to [toId], a server that also carried traffic in this Smart Connect. */
@@ -44,16 +73,24 @@ object StallFailover {
         val candidates: List<String> = emptyList(),
         /** The later stages already ran after a stall or freeze in this session. */
         val escalated: Boolean = false,
-        val maxSwitches: Int = MAX_SWITCHES
+        val maxSwitches: Int = MAX_SWITCHES,
+        /** Bytes that came before the stall; null when unknown. */
+        val stallBytes: Int? = null,
+        /** [HostPrefix.keys] of the stalled server. */
+        val stalledKeys: Set<String> = emptySet(),
+        /** [HostPrefix.keys] of the runners-up and candidates, by id. */
+        val networks: Map<String, Set<String>> = emptyMap()
     )
 
     fun decide(i: Input): Decision {
         if (i.pinned) return Decision.Stay("the config is pinned (power button or Trade mode)")
         if (i.switchesSoFar >= i.maxSwitches) return exhausted(i, "${i.maxSwitches} stall switches already made in this session")
-        val excluded = i.frozen + i.stalledId
+        val sameNet = if (classify(i.stallBytes) == StallClass.CAP) sameNetwork(i.stalledId, i.stalledKeys, i.networks) else emptySet()
+        val excluded = i.frozen + i.stalledId + sameNet
         i.runnersUp.firstOrNull { it !in excluded }?.let { return Decision.RunnerUp(it) }
         if (i.candidates.any { it !in excluded }) return Decision.Race(excluded)
-        return exhausted(i, "no saved server left that has not stalled or frozen on this network")
+        return exhausted(i, if (sameNet.isEmpty()) "no saved server left that has not stalled or frozen on this network"
+            else "no saved server left off the stalled server's network that has not stalled or frozen here")
     }
 
     private fun exhausted(i: Input, reason: String): Decision =
@@ -79,6 +116,14 @@ object StallFailover {
         is Decision.Race -> "no runner-up; ${d.exclude.size} stalled or frozen server(s) left out"
         is Decision.Escalate -> d.reason
         is Decision.Stay -> d.reason
+    }
+
+    /** The `failover · stall · bytes=<n> class=<mtu|cap> prefix=<p>` line logged before the decision. */
+    fun stallLine(bytes: Int?, stalledKeys: Set<String>, sameNetworkLeftOut: Int = 0): String {
+        val cls = classify(bytes)
+        return "failover · stall · bytes=${bytes ?: "?"} class=${cls?.key ?: "unknown"} prefix=${HostPrefix.label(stalledKeys)}" +
+            (if (cls == StallClass.CAP && sameNetworkLeftOut > 0) " (same-network servers left out: $sameNetworkLeftOut)" else "") +
+            (if (cls == StallClass.CAP) " · MTU trial skipped" else "")
     }
 
     /** One `failover · stall · …` log line. */

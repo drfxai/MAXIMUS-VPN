@@ -493,9 +493,11 @@ object XrayConfigBuilder {
                 put("realitySettings", realityObj)
             }
 
-            // Final mask (for example TLS ClientHello fragmentation), stored as raw JSON.
-            if (profile.finalMask.isNotBlank()) {
-                val mask = runCatching { JSONObject(profile.finalMask) }.getOrElse {
+            // Final mask (for example TLS ClientHello fragmentation), stored as raw JSON. REALITY gets at most a
+            // "1-3" fragment and ECH none (FragmentPolicy), whatever set the mask.
+            val finalMask = com.example.vpn.smart.FragmentPolicy.apply(profile.finalMask, profile.security, profile.echConfigList)
+            if (finalMask.isNotBlank()) {
+                val mask = runCatching { JSONObject(finalMask) }.getOrElse {
                     throw IllegalArgumentException("The profile's finalMask is not valid JSON")
                 }
                 put("finalmask", mask)
@@ -637,8 +639,9 @@ object XrayConfigBuilder {
     }
 
     private fun putFinalMask(stream: JSONObject, profile: VlessProfile) {
-        if (profile.finalMask.isBlank()) return
-        stream.put("finalmask", runCatching { JSONObject(profile.finalMask) }.getOrElse {
+        val finalMask = com.example.vpn.smart.FragmentPolicy.apply(profile.finalMask, profile.security, profile.echConfigList)
+        if (finalMask.isBlank()) return
+        stream.put("finalmask", runCatching { JSONObject(finalMask) }.getOrElse {
             throw IllegalArgumentException("The profile's finalMask is not valid JSON")
         })
     }

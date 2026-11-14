@@ -11,10 +11,14 @@ import com.example.data.model.VlessProfile
  *
  * 1. Retry the same server once with a deep ClientHello fragmentation ([DEEP_FRAGMENT_MASK]), or, when its
  *    transport cannot take a TCP fragment mask, with a saved XHTTP form of the same server; the transfer check
- *    runs again on the retry.
+ *    runs again on the retry. Never for REALITY (tlshello and tiny splits stop REALITY: the field rescue carried
+ *    no traffic and cost ~27 s) and never with ECH (fragment breaks ECH): those go straight to the XHTTP form or
+ *    the switch. See [FragmentPolicy].
  * 2. Still frozen (or the retry carried nothing): switch to the next verified backup (the servers that also
  *    carried traffic in this Smart Connect, then the last-known-good servers on this network), or, with none,
- *    a Smart Connect race that leaves the frozen servers out. The traffic-blocking interface stays up meanwhile.
+ *    a Smart Connect race that leaves the frozen servers out. A freeze is a per-connection cap on the server's
+ *    address range, so servers on the same network ([HostPrefix]) are left out too. The traffic-blocking
+ *    interface stays up meanwhile.
  * 3. At most [MAX_SWITCHES] switches per user Connect; then the session stays as it is ([Decision.Fail]).
  *
  * Pure: the service supplies the state and carries the decision out. Deep fragment parameters follow UAC SNI
@@ -39,8 +43,11 @@ object FreezeFailover {
          * config of the same address and user id.
          */
         data class Retry(val serverId: String, val variant: VlessProfile, val rescue: Rescue) : Decision()
-        /** Move off [fromId]: to [to] (a verified backup) or, when null, a race without the frozen servers. */
-        data class Switch(val fromId: String, val to: VlessProfile?) : Decision()
+        /**
+         * Move off [fromId]: to [to] (a verified backup) or, when null, a race without the frozen servers and
+         * [sameNetwork] (servers on the frozen server's network).
+         */
+        data class Switch(val fromId: String, val to: VlessProfile?, val sameNetwork: Set<String> = emptySet()) : Decision()
         data class Fail(val reason: String) : Decision()
     }
 
@@ -63,7 +70,11 @@ object FreezeFailover {
         /** Every saved server, to find an XHTTP form of [server]. */
         val saved: List<VlessProfile> = emptyList(),
         /** [running] is carried by an engine program (Aether, Psiphon, chains), which takes no Xray mask. */
-        val engineProgram: Boolean = false
+        val engineProgram: Boolean = false,
+        /** [HostPrefix.keys] of [server]. */
+        val serverKeys: Set<String> = emptySet(),
+        /** [HostPrefix.keys] of the other servers, by id. */
+        val networks: Map<String, Set<String>> = emptyMap()
     )
 
     fun decide(i: Input): Decision {
@@ -73,8 +84,9 @@ object FreezeFailover {
             if (!i.engineProgram) xhttpForm(i.server, i.saved, i.frozen)?.let { return Decision.Retry(i.server.id, it, Rescue.XHTTP) }
         }
         if (i.switchesSoFar >= MAX_SWITCHES) return Decision.Fail("$MAX_SWITCHES freeze switches already made in this session")
-        val next = backups(i.server.id, i.runnersUp, i.lastGood, i.frozen).firstOrNull()
-        return Decision.Switch(i.server.id, next)
+        val sameNet = StallFailover.sameNetwork(i.server.id, i.serverKeys, i.networks)
+        val next = backups(i.server.id, i.runnersUp, i.lastGood, i.frozen + sameNet).firstOrNull()
+        return Decision.Switch(i.server.id, next, sameNet)
     }
 
     /** Verified backups in order: this Smart Connect's runners-up, then last-good here; never frozen, never [currentId]. */
@@ -82,14 +94,14 @@ object FreezeFailover {
         (runnersUp + lastGood).filter { it.id != currentId && it.id !in frozen }.distinctBy { it.id }
 
     /**
-     * A TCP-carried TLS or REALITY config of Xray's link formats takes the TCP fragment mask. UDP transports
-     * (QUIC, Hysteria, TUIC, WireGuard), raw Xray JSON and engine programs do not; neither does a config that
-     * already runs this mask.
+     * A TCP-carried TLS config of Xray's link formats takes the TCP fragment mask. REALITY and ECH configs never
+     * do ([FragmentPolicy]); nor do UDP transports (QUIC, Hysteria, TUIC, WireGuard), raw Xray JSON, engine
+     * programs, or a config that already runs this mask.
      */
     fun canDeepFragment(p: VlessProfile): Boolean =
         p.profileType == ProfileType.VLESS &&
             p.protocolType in setOf(ProtocolType.VLESS, ProtocolType.VMESS, ProtocolType.TROJAN) &&
-            p.security.lowercase() in setOf("tls", "reality") &&
+            p.security.equals("tls", ignoreCase = true) && p.echConfigList.isBlank() &&
             p.transport.lowercase() in TCP_TRANSPORTS && !p.alpn.lowercase().split(',').map { it.trim() }.contains("h3") &&
             p.finalMask != DEEP_FRAGMENT_MASK
 
@@ -113,7 +125,8 @@ object FreezeFailover {
     fun describe(d: Decision, name: (String) -> String): String = when (d) {
         is Decision.Retry -> "failover · freeze16k · ${d.rescue.label} ${name(d.serverId)}"
         is Decision.Switch -> "failover · freeze16k · SWITCH ${name(d.fromId)} -> " +
-            (d.to?.let { name(it.id) } ?: "Smart Connect race (frozen servers left out)")
+            (d.to?.let { name(it.id) } ?: "Smart Connect race (frozen servers left out)") +
+            (if (d.sameNetwork.isNotEmpty()) " (same-network servers left out: ${d.sameNetwork.size})" else "")
         is Decision.Fail -> "failover · freeze16k · FAIL (${d.reason})"
     }
 

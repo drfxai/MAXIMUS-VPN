@@ -2037,6 +2037,18 @@ class RayVpnService : VpnService() {
     }
 
     /**
+     * The address each server name last resolved to in this service (resolveEndpoint), lower-case name to IP. Only
+     * what connects already looked up: no extra DNS query is made for the network comparison ([serverNetworkKeys]).
+     */
+    private val resolvedHosts = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** [com.example.vpn.smart.HostPrefix.keys] of [p]: its IP prefix, or its name plus the prefix it last resolved to. */
+    private fun serverNetworkKeys(p: VlessProfile): Set<String> {
+        val host = p.address.trim().removePrefix("[").removeSuffix("]").lowercase()
+        return com.example.vpn.smart.HostPrefix.keys(host, resolvedHosts[host])
+    }
+
+    /**
      * Resolves a hostname endpoint (for example a workers.dev BPB address) on a physical network,
      * bypassing this VPN, and returns a copy that connects to the IP while keeping the hostname for
      * TLS SNI and the HTTP Host header.
@@ -2085,6 +2097,7 @@ class RayVpnService : VpnService() {
                     // Without TLS the login (UUID, password) would go to whoever holds that address.
                     check(usesTls) { "the network's DNS points the server at a filtering address" }
                 }
+                resolvedHosts[hostName.lowercase()] = resolved.address
                 return com.example.vpn.smart.RouteRecipe.pinEndpoint(profile, resolved.address)
             } catch (e: Exception) {
                 lastError = e
@@ -2640,7 +2653,9 @@ class RayVpnService : VpnService() {
                 val (net, used, configured) = mtuTest
                 networkMemory.mtu.onBulkCheck(net, used, configured,
                     // A ~16 KB freeze stops at the same byte whatever the MTU; it never starts an MTU trial.
-                    stalled = evidence.bulkStalled && !evidence.fixedSizeFreeze, passed = evidence.bidirectional)?.let { st ->
+                    stalled = evidence.bulkStalled && !evidence.fixedSizeFreeze, passed = evidence.bidirectional,
+                    // Only a stall within the first ~1.5 KB looks like an MTU black hole; a later one is a per-connection cap.
+                    mayStart = com.example.vpn.smart.StallFailover.mtuTrialFor(evidence.stallBytes))?.let { st ->
                     XrayLogManager.i("VPN", when (st) {
                         com.example.vpn.smart.TunMtuTrial.State.TRYING_LOW -> "The next connect on this network tests MTU ${com.example.vpn.smart.TunMtuTrial.LOW_MTU}."
                         com.example.vpn.smart.TunMtuTrial.State.LOW_HELPED -> "MTU $used fixed the bulk stall on this network; it is kept here."
@@ -2714,7 +2729,8 @@ class RayVpnService : VpnService() {
      * session (power button, Trade mode). [userAsked]: the user pressed "Try another server", which is not
      * held back by the automatic switch cap.
      */
-    private fun switchAfterStall(attemptId: String, network: String, stalled: VlessProfile, userAsked: Boolean = false) {
+    private fun switchAfterStall(attemptId: String, network: String, stalled: VlessProfile, userAsked: Boolean = false,
+                                 stallBytes: Int? = null) {
         if (_vpnState.value.attemptId != attemptId) return
         networkMemory.freezes.recordStalled(network, stalled.id)
         serviceScope.launch(Dispatchers.IO) {
@@ -2722,6 +2738,8 @@ class RayVpnService : VpnService() {
             val usable = saved.filter {
                 !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) && com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it)
             }
+            val stalledKeys = serverNetworkKeys(stalled) + (saved.firstOrNull { it.id == stalled.id }?.let { serverNetworkKeys(it) }.orEmpty())
+            val networks = (usable + smartRunnersUp.map { it.owner }).associate { it.id to serverNetworkKeys(it) }
             val decision = com.example.vpn.smart.StallFailover.decide(com.example.vpn.smart.StallFailover.Input(
                 stalledId = stalled.id, pinned = exitPinned(),
                 switchesSoFar = stallSwitches,
@@ -2730,10 +2748,16 @@ class RayVpnService : VpnService() {
                 candidates = usable.map { it.id },
                 // The user's "Try another server" may run the later stages again; automatic failover runs them once.
                 escalated = stallEscalated && !userAsked,
-                maxSwitches = if (userAsked) Int.MAX_VALUE else MAX_STALL_SWITCHES
+                maxSwitches = if (userAsked) Int.MAX_VALUE else MAX_STALL_SWITCHES,
+                stallBytes = stallBytes, stalledKeys = stalledKeys, networks = networks
             ))
             val byId = saved.associateBy { it.id }
             val name = { id: String -> com.example.core.SecretRedactor.redact(byId[id]?.name ?: if (id == stalled.id) stalled.name else id) }
+            if (stallBytes != null) {
+                val sameNet = if (com.example.vpn.smart.StallFailover.classify(stallBytes) == com.example.vpn.smart.StallFailover.StallClass.CAP)
+                    com.example.vpn.smart.StallFailover.sameNetwork(stalled.id, stalledKeys, networks).size else 0
+                XrayLogManager.w("FAILOVER", com.example.vpn.smart.StallFailover.stallLine(stallBytes, stalledKeys, sameNet))
+            }
             XrayLogManager.w("FAILOVER", com.example.vpn.smart.StallFailover.describe(decision, name))
             stallEvent(decision, stalled.id, userAsked)
             if (_vpnState.value.attemptId != attemptId) return@launch
@@ -2878,7 +2902,8 @@ class RayVpnService : VpnService() {
                     freezeRescue = null
                 }
             }
-            (download as? com.example.vpn.verify.LegResult.Failed)?.stalled == true -> switchAfterStall(attemptId, network, running)
+            (download as? com.example.vpn.verify.LegResult.Failed)?.stalled == true ->
+                switchAfterStall(attemptId, network, running, stallBytes = (download as? com.example.vpn.verify.LegResult.Failed)?.bytes)
         }
     }
 
@@ -2932,7 +2957,9 @@ class RayVpnService : VpnService() {
             runnersUp = smartRunnersUp.map { it.owner }.filter(usable),
             lastGood = freezes.lastGood(network).mapNotNull { byId[it] }.filter(usable),
             frozen = freezes.frozen(network), saved = saved.filter(usable),
-            engineProgram = com.example.vpn.sidecar.Sidecars.isEngineProfile(server)
+            engineProgram = com.example.vpn.sidecar.Sidecars.isEngineProfile(server),
+            serverKeys = serverNetworkKeys(server) + serverNetworkKeys(savedServer),
+            networks = (saved.filter(usable) + smartRunnersUp.map { it.owner }).associate { it.id to serverNetworkKeys(it) }
         ))
         val name = { id: String -> com.example.core.SecretRedactor.redact(byId[id]?.name ?: if (id == server.id) server.name else id) }
         return decision to name
@@ -2980,7 +3007,7 @@ class RayVpnService : VpnService() {
      */
     private suspend fun runFreezeSwitch(network: String, d: com.example.vpn.smart.FreezeFailover.Decision.Switch,
                                         name: (String) -> String, ticket: Long) {
-        val frozen = networkMemory.freezes.frozen(network) + d.fromId
+        val frozen = networkMemory.freezes.frozen(network) + d.fromId + d.sameNetwork
         val lead = d.to ?: runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
             .filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }
             .let { com.example.vpn.smart.ServerRace.rank(it, networkMemory.workingKinds(network), networkMemory.recentFailures(network),
