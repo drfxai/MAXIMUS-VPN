@@ -76,8 +76,8 @@ object BuiltinExitNode {
      */
     fun selected(options: AetherSettings, settings: AppSettings, route: Route = Route()): JSONObject? {
         if (options.exitNode.isBlank()) return null
-        val saved = try { loadProfile?.invoke(options.exitNode) } catch (e: Exception) { throw ExitNodeFailure(PROFILE_UNAVAILABLE, e) }
-            ?: throw ExitNodeFailure(PROFILE_UNAVAILABLE)
+        val loaded = try { loadProfile?.invoke(options.exitNode) } catch (e: Exception) { throw ExitNodeFailure(PROFILE_UNAVAILABLE, e) }
+        val saved = loaded ?: throw ExitNodeFailure(PROFILE_UNAVAILABLE)
         if (!eligible(saved)) throw ExitNodeFailure(PROFILE_UNSUPPORTED)
         val pinned = route.endpoint?.trim()?.removePrefix("[")?.removeSuffix("]")
             ?.takeIf { ProxyDnsTransport.isLiteralAddress(it) }
