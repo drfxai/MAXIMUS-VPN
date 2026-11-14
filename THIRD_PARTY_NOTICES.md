@@ -597,6 +597,44 @@ has been copied. The CLI and Android UI have different licenses and are separate
 projects. A source adapter and build recipe do not establish native/runtime or
 carrier verification; see docs/UPSTREAM_INTEGRATION_2026-10-22.fa.md.
 
+## MasterDnsVPN server installer (2026-11-15)
+
+The Install Center's "MasterDNS Server" tool downloads the unmodified official
+MasterDnsVPN Linux server release `v2026.10.26.100415-5f83ee9` from
+https://github.com/masterking32/MasterDnsVPN/releases onto the user's own server
+and refuses it unless its SHA-256 matches the value pinned in
+`DnsServerScripts.kt`. The binary is not bundled in the app. The installer
+script, configuration edits, systemd unit and profile/link generation are
+original MAXIMUS code; upstream `server_linux_install.sh` is not used. The
+phone connects with the CottenDNS client in its MasterDNS mode (see the
+CottenDNS section above).
+
+MasterDnsVPN is distributed under the MIT License:
+
+```
+MIT License
+
+Copyright (c) 2026 Amin Mahmoudi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Optional Linux server spoof carrier
 
 MAXIMUS can install ParsaKSH/spoof-tunnel v3.1.0-beta.0 on explicitly selected managed servers.

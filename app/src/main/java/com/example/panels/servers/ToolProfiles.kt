@@ -14,6 +14,9 @@ import java.net.URLEncoder
 object ToolProfiles {
     const val SOAR_PUBKEY = "soarPubkey"
     const val COTTEN_KEY = "cottenKey"
+    const val MASTERDNS_KEY = "masterDnsKey"
+    /** The 16-byte hexadecimal key the MasterDNS installer creates. */
+    internal val MASTERDNS_KEY_PATTERN = Regex("[0-9a-f]{32}")
     private val fallbackDns = listOf("1.1.1.1", "8.8.8.8")
 
     fun soarProfile(server: ManagedServer, tool: InstalledTool): VlessProfile =
@@ -27,6 +30,42 @@ object ToolProfiles {
             resolvers = fallbackDns,
             mode = "legacy"
         ), "CottenDNS · ${server.displayName}")
+
+    /** The phone's built-in MasterDNS client (CottenDNS engine in MasterDNS mode), AES-256-GCM. */
+    fun masterDnsProfile(server: ManagedServer, tool: InstalledTool): VlessProfile =
+        CottenDnsSidecar.profile(masterDnsSettings(tool), "MasterDNS · ${server.displayName}")
+
+    internal fun masterDnsSettings(tool: InstalledTool): CottenDnsSidecar.Settings = CottenDnsSidecar.Settings(
+        domain = tool.settings[DNSTT_DOMAIN].orEmpty(),
+        key = tool.settings[MASTERDNS_KEY].orEmpty(),
+        resolvers = fallbackDns,
+        mode = "masterdns",
+        method = DnsServerScripts.MASTERDNS_METHOD
+    )
+
+    /** A WhiteDNS v1 `masterdns://` link; the app's importer and WhiteDNS-compatible clients read it. */
+    fun masterDnsLink(server: ManagedServer, tool: InstalledTool): String {
+        val s = CottenDnsSidecar.validate(masterDnsSettings(tool))
+        require(MASTERDNS_KEY_PATTERN.matches(s.key)) { "Invalid MasterDNS key" }
+        return whiteLink("masterdns", JSONObject().put("engine", "masterdns")
+            .put("id", server.id).put("name", "MasterDNS · ${server.displayName}")
+            .put("resolvers", JSONArray(s.resolvers.map { it.removeSuffix(":53") }))
+            .put("server", JSONObject().put("domain", s.domain).put("encryption_key", s.key)
+                .put("encryption_method", s.method)))
+    }
+
+    /**
+     * The fields a stand-alone MasterDnsVPN client_config.toml needs for this server, for people
+     * who connect from a computer. The resolver list goes in its own client_resolvers.txt.
+     */
+    fun masterDnsClientConfig(tool: InstalledTool): String {
+        val s = CottenDnsSidecar.validate(masterDnsSettings(tool))
+        return listOf(
+            "DOMAINS = [\"${s.domain}\"]",
+            "DATA_ENCRYPTION_METHOD = ${s.method}",
+            "ENCRYPTION_KEY = \"${s.key}\""
+        ).joinToString("\n", postfix = "\n")
+    }
 
     private fun whiteLink(engine: String, profile: JSONObject): String {
         val root = JSONObject().put("schema", "whitedns.profile").put("version", 1).put("profile", profile)

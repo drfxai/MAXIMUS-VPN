@@ -9,7 +9,7 @@ package com.example.panels.servers
  * 3X-UI on a VPS abroad; all other combinations stay in the individual wizards.
  */
 object SmartBundlePlanner {
-    private val dnsEngines = setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)
+    private val dnsEngines = setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.MASTERDNS)
 
     data class Plan(val order: List<String>, val blockers: List<String>) {
         val eligible: Boolean get() = blockers.isEmpty() && order.size == 2

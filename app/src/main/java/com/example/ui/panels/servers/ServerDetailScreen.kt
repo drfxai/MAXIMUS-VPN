@@ -213,6 +213,20 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
             }
         }
 
+        // MasterDNS on this server: the same installer as the Install tab and Smart Manager.
+        if (!ui.needsSignIn && ui.row.location == com.example.panels.servers.ServerLocation.ABROAD &&
+            ui.tools.none { it.id in ServerToolCatalog.DNS_TUNNELS }) {
+            SectionLabel("DNS tunnel")
+            GroupCard {
+                ListRow(
+                    "Install MasterDNS",
+                    subtitle = "MasterDnsVPN server on this VPS · needs a domain you can delegate",
+                    leading = { ToolBadge(ServerToolCatalog.MASTERDNS, 32.dp) },
+                    trailing = { TextAction("Install", { actions.onInstall(ServerToolCatalog.MASTERDNS) }, enabled = idle) }
+                )
+            }
+        }
+
         if (ui.tools.any { it.id == ServerToolCatalog.XUI }) {
             SectionLabel("Optional after 3X-UI")
             GroupCard { ListRow("RegionHop · Psiphon locations", subtitle = "Manage country exits over private SSH",
@@ -223,7 +237,7 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
             SectionLabel("Remove incomplete installation")
             GroupCard {
                 listOf(ServerToolCatalog.SOAR to "Soar", ServerToolCatalog.COTTEN to "CottenDNS",
-                    ServerToolCatalog.DNSTT to "DNSTT").filter { candidate -> ui.tools.none { it.id == candidate.first } }
+                    ServerToolCatalog.MASTERDNS to "MasterDNS", ServerToolCatalog.DNSTT to "DNSTT").filter { candidate -> ui.tools.none { it.id == candidate.first } }
                     .forEach { (id, title) ->
                         ListRow(title, subtitle = "Delete leftover server files and services",
                             trailing = { TextAction("Clean up", { actions.onUninstall(id) }, Sv.Red, enabled = idle) })

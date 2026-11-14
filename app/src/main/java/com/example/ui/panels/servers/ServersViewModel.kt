@@ -545,6 +545,10 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 link = runCatching {
                     if (id == ServerToolCatalog.SOAR) ToolProfiles.soarLink(s, t) else ToolProfiles.cottenLink(s, t)
                 }.getOrNull(), testResult = test?.second, testOk = test?.first)
+            ServerToolCatalog.MASTERDNS -> ToolRowUi(id, title, status, running,
+                t.settings[ToolProfiles.DNSTT_DOMAIN].orEmpty(),
+                canTest = true, canRestart = true, canLogs = true, canStart = !running, canStop = running,
+                link = runCatching { ToolProfiles.masterDnsLink(s, t) }.getOrNull(), testResult = test?.second, testOk = test?.first)
             ServerToolCatalog.DNSTT -> ToolRowUi(id, title, status, running, t.settings[ToolProfiles.DNSTT_DOMAIN].orEmpty(),
                 canTest = true, canRestart = true, canLogs = true, canRotateKey = true,
                 link = runCatching { ToolProfiles.dnsttLink(s, t) }.getOrNull(), testResult = test?.second, testOk = test?.first)
@@ -825,7 +829,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val result = withDelegation(s, toolId, testProfile(profile))
         recordManagedTest(s, toolId, result.first)
         _state.update { it.copy(tests = it.tests + ("${s.id}/$toolId" to result)) }
-        if (!result.first && toolId in setOf(ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.DNSTT)) {
+        if (!result.first && toolId in ServerToolCatalog.DNS_TUNNELS) {
             // Keep phone/engine evidence separate from a read-only server snapshot.
             try {
                 val checked = withContext(Dispatchers.IO) { manager.check(s) }
@@ -849,6 +853,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             ServerToolCatalog.DNSTT -> ToolProfiles.dnsttProfile(s, t)
             ServerToolCatalog.SOAR -> ToolProfiles.soarProfile(s, t)
             ServerToolCatalog.COTTEN -> ToolProfiles.cottenProfile(s, t)
+            ServerToolCatalog.MASTERDNS -> ToolProfiles.masterDnsProfile(s, t)
             ServerToolCatalog.HYSTERIA2 -> ToolProfiles.hysteriaProfile(s, t)
             else -> null
         }
@@ -859,7 +864,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
      * another address explains the failure on its own, before any engine, resolver or server setting.
      */
     private suspend fun withDelegation(s: ManagedServer, toolId: String, result: Pair<Boolean, String>): Pair<Boolean, String> {
-        if (result.first || toolId !in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)) return result
+        if (result.first || toolId !in ServerToolCatalog.DNS_TUNNELS) return result
         val t = s.tool(toolId) ?: return result
         val base = t.settings[ToolProfiles.DNSTT_BASE] ?: return result
         val label = t.settings[ToolProfiles.DNSTT_LABEL] ?: return result
@@ -1073,7 +1078,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             ).withRecords(s))
         }
         // Reuse the user's already authorized Cloudflare domain automatically, when reachable.
-        if (w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) &&
+        if (w.tool.id in ServerToolCatalog.DNS_TUNNELS &&
             existing?.settings?.get(ToolProfiles.DNSTT_BASE).orEmpty().isBlank()) {
             viewModelScope.launch {
                 val suggested = withContext(Dispatchers.IO) {
@@ -1110,7 +1115,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun WizardUi.withRecords(s: ManagedServer?): WizardUi =
-        if (tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) &&
+        if (tool.id in ServerToolCatalog.DNS_TUNNELS &&
             s != null && DnsDelegation.problem(baseDomain, tunnelLabel) == null)
             copy(records = DnsDelegation.records(baseDomain, tunnelLabel, s.host,
                 backups.takeIf { tool.id == ServerToolCatalog.DNSTT && DnsDelegation.backupProblem(baseDomain, it) == null }.orEmpty(),
@@ -1141,7 +1146,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         if (prev == null) close() else _state.update { it.copy(wizard = w.copy(stage = prev)) }
     }
 
-    private fun hasSettings(w: WizardUi) = w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.HYSTERIA2)
+    private fun hasSettings(w: WizardUi) = w.tool.id in ServerToolCatalog.DNS_TUNNELS + ServerToolCatalog.HYSTERIA2
 
     fun wizardNext() {
         val w = _state.value.wizard ?: return
@@ -1184,7 +1189,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun provisionDns() {
         val w = _state.value.wizard ?: return
-        if (w.tool.id !in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN) || w.records.isEmpty() ||
+        if (w.tool.id !in ServerToolCatalog.DNS_TUNNELS || w.records.isEmpty() ||
             w.dnsProvisioning || w.dnsChecking) return
         _state.update { it.copy(wizard = w.copy(dnsProvisioning = true, dnsProvisionResult = "")) }
         viewModelScope.launch {
@@ -1253,6 +1258,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             ServerToolCatalog.DNSTT -> ToolScripts.DNSTT_STEPS
             ServerToolCatalog.SOAR -> com.example.panels.servers.DnsServerScripts.SOAR_STEPS
             ServerToolCatalog.COTTEN -> com.example.panels.servers.DnsServerScripts.COTTEN_STEPS
+            ServerToolCatalog.MASTERDNS -> com.example.panels.servers.DnsServerScripts.MASTERDNS_STEPS
             ServerToolCatalog.HYSTERIA2 -> ToolScripts.HYSTERIA_STEPS
             ServerToolCatalog.XUI -> manager.xuiSteps
             ServerToolCatalog.HIDDIFY -> HiddifyScripts.INSTALL_STEPS
@@ -1303,13 +1309,13 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                     st.copy(wizard = st.wizard?.copy(
                         stage = WizardStage.DONE, currentStep = steps.size + 1, summary = out.summary,
                         link = out.link, profileName = out.profile?.name, serverId = saved.id,
-                        records = if (w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN))
+                        records = if (w.tool.id in ServerToolCatalog.DNS_TUNNELS)
                             DnsDelegation.records(w.baseDomain, w.tunnelLabel, saved.host,
                                 if (w.tool.id == ServerToolCatalog.DNSTT) w.backups else emptyList(), w.ownNameServer) else emptyList()
                     ))
                 }
                 // The delegation decides whether any query reaches the new server: show it on the result.
-                if (w.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)) checkDns()
+                if (w.tool.id in ServerToolCatalog.DNS_TUNNELS) checkDns()
                 emit(ServersEvent.Success)
             } catch (e: Exception) {
                 // We cannot infer whether remote side effects happened from a thrown exception.
