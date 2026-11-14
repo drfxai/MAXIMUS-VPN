@@ -12,7 +12,7 @@ object DnsGatewayCompatibility {
         val eligibleForPrototype: Boolean get() = blockers.isEmpty()
     }
 
-    private val dnsEngines = setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN)
+    private val dnsEngines = ServerToolCatalog.DNS_TUNNELS
     private val zonePattern = Regex("^[a-z0-9-]+(\\.[a-z0-9-]+)+$")
     private val loopbackTarget = Regex("^127\\.0\\.0\\.1:(?:[1-9][0-9]{0,4})$")
 
