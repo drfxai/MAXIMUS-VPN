@@ -63,6 +63,8 @@ class RayVpnService : VpnService() {
         const val ACTION_CONNECT = "com.drfxai.maximusvpn.ACTION_CONNECT"
         const val ACTION_DISCONNECT = "com.drfxai.maximusvpn.ACTION_DISCONNECT"
         const val ACTION_RECONNECT = "com.drfxai.maximusvpn.ACTION_RECONNECT"
+        /** "Try another server" on a connection whose large downloads stall: the stall failover, asked by the user. */
+        const val ACTION_TRY_ANOTHER_SERVER = "com.drfxai.maximusvpn.ACTION_TRY_ANOTHER_SERVER"
         const val EXTRA_PROFILE_ID = "com.drfxai.maximusvpn.EXTRA_PROFILE_ID"
         const val EXTRA_SMART = "com.drfxai.maximusvpn.EXTRA_SMART"
         /** "Connect anyway": start the selected server even though its real pre-flight failed. */
@@ -342,6 +344,17 @@ class RayVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_TRY_ANOTHER_SERVER) {
+            val s = _vpnState.value
+            val running = s.activeProfile
+            val attemptId = s.attemptId
+            if (s.isConnected && running != null && attemptId != null) {
+                XrayLogManager.i("FAILOVER", "Try another server: asked by the user.")
+                switchAfterStall(attemptId, com.example.vpn.smart.NetworkKey.current(this), running, userAsked = true)
+            }
+            // Keeps the session's restart policy: this start only acts on the running session.
+            return START_STICKY
+        }
         if (intent?.action != ACTION_DISCONNECT) {
             stopService(Intent(this, com.example.vpn.share.LocalProxyService::class.java))
         }

@@ -59,6 +59,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -453,6 +454,18 @@ fun HomeScreen(
                         "Android VPN upload and download verified"
                         else "Engine traffic checked · full-device route not verified",
                         color = AppTheme.colors.textSecondary, fontSize = 12.sp)
+                    if (connectionState.bulkLimited) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D),
+                                modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.connection_limited_bulk), color = AppTheme.colors.textPrimary,
+                                fontSize = 12.sp, modifier = Modifier.weight(1f).testTag("connection_limited_bulk"))
+                            TextButton(onClick = { com.example.vpn.VpnController.tryAnotherServer(context) }) {
+                                Text(stringResource(R.string.connection_try_another_server), fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             }
         }

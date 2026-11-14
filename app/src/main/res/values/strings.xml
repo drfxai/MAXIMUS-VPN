@@ -4,4 +4,6 @@
     <string name="vpn_service_label">Maximus VLESS Engine</string>
     <string name="notification_channel_name">Maximus VPN Status</string>
     <string name="notification_channel_desc">Shows ongoing Maximus VPN connection status and controls</string>
+    <string name="connection_limited_bulk">Connected, but large downloads are stalling</string>
+    <string name="connection_try_another_server">Try another server</string>
 </resources>
