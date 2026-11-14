@@ -2520,7 +2520,9 @@ class RayVpnService : VpnService() {
                         com.example.vpn.smart.TunMtuTrial.State.LOW_HELPED -> "MTU $used fixed the bulk stall on this network; it is kept here."
                         com.example.vpn.smart.TunMtuTrial.State.LOW_DID_NOT_HELP -> "The bulk transfer stalled at MTU $used too: lowering MTU did not resolve this test; the cause remains unconfirmed. Returning to $configured."
                     })
-                    com.example.vpn.diagnostics.events.EventLog.event("tunnel.mtu.trial", attributes = mapOf("state" to st.name, "mtu" to used.toString()))
+                    // "mtu" stays for older readers; it is the MTU this check ran at, not the one the trial tests next.
+                    com.example.vpn.diagnostics.events.EventLog.event("tunnel.mtu.trial",
+                        attributes = com.example.vpn.smart.TunMtuTrial.eventAttributes(st, used, configured))
                 }
             }
             com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(

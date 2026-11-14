@@ -63,4 +63,13 @@ class TunMtuTrialTest {
         m.clear()
         assertEquals(1400, trial().mtuFor(net, 1400))
     }
+    @Test fun theTrialEventNamesTheMtuUsedAndTheOneTriedNext() {
+        val trying = TunMtuTrial.eventAttributes(State.TRYING_LOW, 1500, 1500)
+        assertEquals("1500", trying["mtu.used"])
+        assertEquals(TunMtuTrial.LOW_MTU.toString(), trying["mtu.next"])
+        assertEquals("the old key keeps its meaning", "1500", trying["mtu"])
+        assertEquals("TRYING_LOW", trying["state"])
+        assertEquals(TunMtuTrial.LOW_MTU.toString(), TunMtuTrial.eventAttributes(State.LOW_HELPED, TunMtuTrial.LOW_MTU, 1500)["mtu.next"])
+        assertEquals("1500", TunMtuTrial.eventAttributes(State.LOW_DID_NOT_HELP, TunMtuTrial.LOW_MTU, 1500)["mtu.next"])
+    }
 }
