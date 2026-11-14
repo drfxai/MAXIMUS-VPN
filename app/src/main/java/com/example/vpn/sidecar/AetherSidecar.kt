@@ -91,8 +91,9 @@ object AetherSidecar : SidecarEngine {
             socksAuth = advanced.psiphon !in listOf("chain", "only"), environment = environment, logOutput = false)
     }
     override fun startPrepared(profile: VlessProfile, settings: AppSettings, launch: SidecarLaunch, context: SidecarContext): RunningEngine? {
-        val options = AetherSettings.read(ProfileExtras.read(profile))
-        val exit = BuiltinExitNode.start(options, settings, context)
+        val extras = ProfileExtras.read(profile)
+        val options = AetherSettings.read(extras)
+        val exit = BuiltinExitNode.start(options, settings, context, BuiltinExitNode.Route.read(extras))
         var api: BuiltinExitNode.Started? = null
         try {
             api = AetherApiBridge.start(profile, settings, context)

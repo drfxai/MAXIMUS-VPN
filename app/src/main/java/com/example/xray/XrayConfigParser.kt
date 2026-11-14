@@ -322,6 +322,37 @@ object XrayConfigParser {
         }
     }
 
+    /**
+     * The checks [sanitizeForExecution] applies to an imported config's outbounds, for one outbound the app
+     * built itself (the Aether/Direct exit hop): a proxy protocol, no disabled certificate check, and only
+     * literal server addresses (the name was resolved privately beforehand). Throws on the first violation.
+     */
+    fun requireExecutableOutbound(outbound: JSONObject) {
+        require(outbound.optString("protocol") in PROXY_PROTOCOLS) { "The exit outbound must be a proxy" }
+        fun check(value: Any?) {
+            when (value) {
+                is JSONObject -> value.keys().forEach { key ->
+                    require(!(key.equals("allowInsecure", true) && value.optBoolean(key))) {
+                        "The exit outbound disables TLS certificate verification"
+                    }
+                    if (key == "address" && value.opt(key) is String) require(
+                        com.example.vpn.tunnel.ProxyDnsTransport.isLiteralAddress(value.optString(key))) {
+                        "The exit outbound needs a literal server address"
+                    }
+                    if (key == "endpoint" && value.opt(key) is String) {
+                        val host = value.optString(key).substringBeforeLast(':').removePrefix("[").removeSuffix("]")
+                        require(com.example.vpn.tunnel.ProxyDnsTransport.isLiteralAddress(host)) {
+                            "The exit outbound needs a literal server address"
+                        }
+                    }
+                    check(value.opt(key))
+                }
+                is JSONArray -> (0 until value.length()).forEach { check(value.opt(it)) }
+            }
+        }
+        check(outbound)
+    }
+
     /** GOD MODE: routing rules that send matching traffic around the proxy are removed. */
     private fun dropDirectRules(root: JSONObject) {
         val outbounds = root.optJSONArray("outbounds") ?: return

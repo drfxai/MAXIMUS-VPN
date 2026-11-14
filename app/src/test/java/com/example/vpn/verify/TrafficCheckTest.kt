@@ -49,7 +49,9 @@ class TrafficCheckTest {
     @Test fun slowRoutesGetMoreTimePerTransfer() {
         assertEquals(TrafficCheck.STEP_TIMEOUT_MS, TrafficCheck.stepTimeoutFor(null))
         assertEquals(TrafficCheck.STEP_TIMEOUT_MS, TrafficCheck.stepTimeoutFor(300))
-        assertEquals(18_000, TrafficCheck.stepTimeoutFor(3_000))
+        assertEquals(TrafficCheck.SLOW_STEP_FLOOR_MS, TrafficCheck.stepTimeoutFor(3_000))
+        assertEquals(TrafficCheck.SLOW_STEP_FLOOR_MS, TrafficCheck.stepTimeoutFor(1_920))
+        assertEquals(24_000, TrafficCheck.stepTimeoutFor(4_000))
         assertEquals(30_000, TrafficCheck.stepTimeoutFor(9_000))
     }
 

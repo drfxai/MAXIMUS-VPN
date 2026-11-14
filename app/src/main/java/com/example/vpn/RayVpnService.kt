@@ -1847,14 +1847,21 @@ class RayVpnService : VpnService() {
             val preferWireGuard = hints.cloudflareFiltered
             // A saved server that carried verified traffic on this same network: Aether can carry WARP through it
             // when the carrier drops WARP's own data (ConnectionEngineRunner.relayed).
-            val relayExitNode = if (engine.id == com.example.vpn.sidecar.AetherSidecar.ID) runCatching {
+            // The exit hop dials it the way it verified: the recipe's pinned address (e.g. a clean CDN address) and
+            // its stealth alternate, never a fresh lookup of the name that may land on a filtered address.
+            val relayRoute = if (engine.id == com.example.vpn.sidecar.AetherSidecar.ID) runCatching {
                 networkMemory.routes.forNetwork(com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService))
-                    .firstOrNull { r -> r.variantKey == null && r.recoveryKey == null &&
+                    .firstOrNull { r -> r.recoveryKey == null &&
                         com.example.vpn.sidecar.BuiltinExitNode.loadProfile?.invoke(r.profileId)
-                            ?.let(com.example.vpn.sidecar.BuiltinExitNode::eligible) == true }?.profileId
+                            ?.takeIf { it.effectiveFingerprint == r.profileFingerprint }
+                            ?.let(com.example.vpn.sidecar.BuiltinExitNode::eligible) == true }
             }.getOrNull() else null
+            val relayExitNode = relayRoute?.profileId
+            val relayExitRoute = com.example.vpn.sidecar.BuiltinExitNode.Route(relayRoute?.endpoint, relayRoute?.variantKey)
+            val metered = hints.metered || runCatching { connectivityManager?.isActiveNetworkMetered }.getOrNull() == true
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,
+                relayExitRoute = relayExitRoute, metered = metered,
                 cancelled = { connectionOwner?.isActive == false }) else null
             val launch = started?.launch ?: engine.prepare(profile, settings, context)
             if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)

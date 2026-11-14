@@ -230,10 +230,12 @@ class SubscriptionManager(
         response
     }
 
+    // Refreshes often run through a freshly connected, slow tunnel (a CDN-fronted saved server on a filtered mobile
+    // link): a list of a few hundred KB needs more than 25 s there. A dead address still fails within 15 s.
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .callTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
         .dns(resilientDns)
         // A system HTTP proxy would resolve the host itself and skip the address checks above.
         .proxy(java.net.Proxy.NO_PROXY)

@@ -246,7 +246,13 @@ class TrafficCheck(
          * Never shorter than 10 s nor longer than 30 s.
          */
         fun stepTimeoutFor(requestMs: Long?): Int =
-            ((requestMs ?: 0L) * 6).coerceIn(STEP_TIMEOUT_MS.toLong(), MAX_STEP_TIMEOUT_MS.toLong()).toInt()
+            ((requestMs ?: 0L) * 6).coerceIn(
+                // A route whose verified small request already took over a second and a half is slow: give
+                // each 64 KB / 24 KB transfer at least 20 s instead of timing out every reference at ~11 s.
+                if ((requestMs ?: 0L) >= SLOW_REQUEST_MS) SLOW_STEP_FLOOR_MS.toLong() else STEP_TIMEOUT_MS.toLong(),
+                MAX_STEP_TIMEOUT_MS.toLong()).toInt()
+        const val SLOW_REQUEST_MS = 1_500L
+        const val SLOW_STEP_FLOOR_MS = 20_000
         private const val CHUNK = 4096
         private const val MAX_HEAD = 16 * 1024
         private const val MAX_BODY = 256 * 1024
@@ -254,12 +260,16 @@ class TrafficCheck(
 
         val SMALL = Target("www.gstatic.com", 443, "/generate_204")
         val SMALL_FALLBACKS = listOf(Target("www.apple.com", 443, "/library/test/success.html"))
+        // httpbingo.org (Fly.io, not Cloudflare) is the second reference for both legs: speed.cloudflare.com is
+        // unreachable through a Cloudflare CDN/Worker exit, and httpbin.org alone often times out on slow paths.
         val DOWNLOADS = listOf(
             Target("httpbin.org", 443, "/bytes/$DOWNLOAD_BYTES", DOWNLOAD_BYTES),
+            Target("httpbingo.org", 443, "/bytes/$DOWNLOAD_BYTES", DOWNLOAD_BYTES),
             Target("speed.cloudflare.com", 443, "/__down?bytes=$DOWNLOAD_BYTES", DOWNLOAD_BYTES)
         )
         val UPLOADS = listOf(
             Target("httpbin.org", 443, "/anything"),
+            Target("httpbingo.org", 443, "/anything"),
             Target("postman-echo.com", 443, "/post")
         )
 

@@ -30,6 +30,30 @@ object AetherPrewarm {
     enum class Skip { VPN_ACTIVE, POWER_SAVE, NO_NETWORK, NOTHING_REMEMBERED, TOO_SOON }
 
     private val lastRun = mutableMapOf<String, Long>()
+    private val lastSkipLog = mutableMapOf<String, Long>()
+
+    /** Why a prewarm was skipped, as written to the log (fixed text, no addresses). */
+    fun skipText(skip: Skip): String = when (skip) {
+        Skip.VPN_ACTIVE -> "VPN up or connecting"
+        Skip.POWER_SAVE -> "battery saver on"
+        Skip.NO_NETWORK -> "no network identity"
+        Skip.NOTHING_REMEMBERED -> "no clean H2 gateway remembered on this network yet (nothing sent)"
+        Skip.TOO_SOON -> "ran recently on this network"
+    }
+
+    /**
+     * Whether a skip is worth one log line: only the ones that explain a missing prewarm (nothing remembered,
+     * battery saver, no network), at most once per [METERED_GAP_MS] per network and reason. VPN-up and
+     * too-soon skips are routine and stay silent.
+     */
+    @Synchronized
+    internal fun shouldLogSkip(network: String?, skip: Skip, now: Long): Boolean {
+        if (skip == Skip.VPN_ACTIVE || skip == Skip.TOO_SOON) return false
+        val key = "${network.orEmpty()}|$skip"
+        if (lastSkipLog[key]?.let { now - it in 0 until METERED_GAP_MS } == true) return false
+        lastSkipLog[key] = now
+        return true
+    }
 
     /** Why a prewarm would not run now, or null when it should. Pure apart from the per-network gap. */
     @Synchronized
@@ -47,7 +71,7 @@ object AetherPrewarm {
     internal fun markRun(network: String, now: Long) { lastRun[network] = now }
 
     @Synchronized
-    internal fun resetForTest() = lastRun.clear()
+    internal fun resetForTest() { lastRun.clear(); lastSkipLog.clear() }
 
     data class Outcome(val network: String, val probed: Int, val answered: Int, val bestMs: Long?, val best: String?)
 
@@ -57,9 +81,17 @@ object AetherPrewarm {
      */
     fun run(network: String?, reason: String, vpnActive: Boolean, powerSave: Boolean, metered: Boolean,
             now: Long = System.currentTimeMillis(), connect: (String) -> Long? = ::tcpConnectMs,
-            log: (String) -> Unit = { com.example.xray.XrayLogManager.i("BUILTIN", it) }): Outcome? {
+            log: (String) -> Unit = { com.example.xray.XrayLogManager.i("BUILTIN", it) },
+            event: (String, Map<String, String>) -> Unit = { result, attributes -> runCatching {
+                com.example.vpn.diagnostics.events.EventLog.event("aether.prewarm", attributes = attributes, result = result) } }): Outcome? {
         val peers = CleanH2PeerMemory.peers(network, now).take(MAX_PEERS)
-        skip(network, vpnActive, powerSave, metered, peers.size, now)?.let { return null }
+        skip(network, vpnActive, powerSave, metered, peers.size, now)?.let { skip ->
+            if (shouldLogSkip(network, skip, now)) {
+                log("aether/prewarm · ${network ?: "unknown network"} · $reason · skipped: ${skipText(skip)}" + (if (metered) " · metered link" else ""))
+                event("SKIP", mapOf("reason" to reason, "skip" to skip.name.lowercase(), "metered" to metered.toString()))
+            }
+            return null
+        }
         markRun(network!!, now)
         val pool = Executors.newFixedThreadPool(peers.size)
         val rtt = try {
@@ -74,6 +106,8 @@ object AetherPrewarm {
         log("aether/prewarm · $network · $reason · $answered/${peers.size} clean H2 peer(s) answer" +
             (best?.let { " · best ${CleanH2PeerMemory.masked(it.address)} ${it.rttMs} ms; next connect tries it first" }
                 ?: " · none answered; next connect scans as usual") + (if (metered) " · metered link" else ""))
+        event(if (answered > 0) "PASS" else "FAIL", mapOf("reason" to reason, "probed" to peers.size.toString(),
+            "answered" to answered.toString(), "best.ms" to (best?.rttMs?.toString() ?: ""), "metered" to metered.toString()))
         return Outcome(network, peers.size, answered, best?.rttMs, best?.address)
     }
 

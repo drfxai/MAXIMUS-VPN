@@ -23,17 +23,88 @@ object BuiltinExitNode {
     fun needed(options: AetherSettings) = options.exitNode.isNotBlank() ||
         options.exitFinalMask.isNotBlank() || options.exitDialMode.isNotBlank()
 
-    fun selected(options: AetherSettings, settings: AppSettings): JSONObject? {
-        if (options.exitNode.isBlank()) return null
-        val saved = loadProfile?.invoke(options.exitNode) ?: error("Selected exit-node is no longer available")
-        require(eligible(saved)) { "The exit-node must be a supported individual proxy" }
-        val profile = if (ProxyDnsTransport.isLiteralAddress(saved.address)) saved else {
-            val resolved = com.example.vpn.EndpointResolver.resolve(saved.address, system = { emptyList() },
-                open = { it.openConnection() as java.net.HttpURLConnection }, private = true)
-            com.example.vpn.smart.RouteRecipe.pinEndpoint(saved, resolved.address)
+    /**
+     * A failure of the exit hop, with a fixed, non-secret reason (never an address, host name, key or a
+     * library message) so it can be shown and written to a diagnostic report as it is.
+     */
+    class ExitNodeFailure(reason: String, cause: Throwable? = null) : IllegalStateException(reason, cause)
+
+    const val RUNTIME_MISSING = "exit-node runtime missing"
+    const val PROFILE_UNAVAILABLE = "exit-node profile unavailable"
+    const val PROFILE_UNSUPPORTED = "exit-node profile unsupported"
+    const val ADDRESS_UNRESOLVED = "exit-node address could not be resolved"
+    const val ROUTE_UNAVAILABLE = "exit-node verified route no longer applies"
+    const val CONFIG_REJECTED = "exit-node configuration rejected"
+    const val PROCESS_FAILED = "exit-node runtime could not start"
+    /** Every reason above: safe to show and log verbatim. */
+    val REASONS = setOf(RUNTIME_MISSING, PROFILE_UNAVAILABLE, PROFILE_UNSUPPORTED, ADDRESS_UNRESOLVED,
+        ROUTE_UNAVAILABLE, CONFIG_REJECTED, PROCESS_FAILED)
+
+    /**
+     * How the exit hop dials the saved server: the address that carried verified traffic on this network
+     * (a [com.example.vpn.smart.RouteRecipe]'s pinned endpoint, e.g. a clean CDN address) and the stealth
+     * alternate that carried it, so the hop dials exactly the way that verified instead of re-resolving the
+     * name (and landing on a filtered address) or dropping the alternate.
+     */
+    data class Route(val endpoint: String? = null, val variantKey: String? = null) {
+        fun write(json: JSONObject): JSONObject = json.apply {
+            if (!endpoint.isNullOrBlank()) put(EXIT_ENDPOINT, endpoint) else remove(EXIT_ENDPOINT)
+            if (!variantKey.isNullOrBlank()) put(EXIT_VARIANT, variantKey) else remove(EXIT_VARIANT)
         }
-        val root = JSONObject(XrayConfigParser.sanitizeForExecution(XrayConfigBuilder.buildJson(profile, settings), settings))
-        return root.getJSONArray("outbounds").getJSONObject(0).apply { put("tag", "builtin-exit") }
+        companion object {
+            fun read(json: JSONObject) = Route(json.optString(EXIT_ENDPOINT).ifBlank { null }, json.optString(EXIT_VARIANT).ifBlank { null })
+        }
+    }
+
+    /** Extras keys (set only by the session runner for WARP-through-relay): see [Route]. */
+    const val EXIT_ENDPOINT = "exitEndpoint"
+    const val EXIT_VARIANT = "exitVariant"
+
+    /** Resolves a saved server's host name outside the VPN; replaced in tests. */
+    @Volatile var resolveAddress: (String) -> String = { host ->
+        com.example.vpn.EndpointResolver.resolve(host, system = { emptyList() },
+            open = { it.openConnection() as java.net.HttpURLConnection }, private = true).address
+    }
+
+    /**
+     * The saved server [options] names, as the exit hop's single Xray outbound. Built from the app's own
+     * builder and checked with [XrayConfigParser.requireExecutableOutbound]. It is deliberately not passed
+     * through [XrayConfigParser.sanitizeForExecution] (that is for imported whole configs): the builder
+     * already adds the private DNS outbound, and sanitizing adds it a second time, which its own guard
+     * rejects. That made every saved-server exit node (WARP through a verified saved server, Direct's exit
+     * node) fail before its process started.
+     */
+    fun selected(options: AetherSettings, settings: AppSettings, route: Route = Route()): JSONObject? {
+        if (options.exitNode.isBlank()) return null
+        val saved = try { loadProfile?.invoke(options.exitNode) } catch (e: Exception) { throw ExitNodeFailure(PROFILE_UNAVAILABLE, e) }
+            ?: throw ExitNodeFailure(PROFILE_UNAVAILABLE)
+        if (!eligible(saved)) throw ExitNodeFailure(PROFILE_UNSUPPORTED)
+        val pinned = route.endpoint?.trim()?.removePrefix("[")?.removeSuffix("]")
+            ?.takeIf { ProxyDnsTransport.isLiteralAddress(it) }
+        val base = when {
+            ProxyDnsTransport.isLiteralAddress(saved.address.trim().removePrefix("[").removeSuffix("]")) -> saved
+            pinned != null -> com.example.vpn.smart.RouteRecipe.pinEndpoint(saved, pinned)
+            else -> {
+                val address = try { resolveAddress(saved.address.trim()) } catch (e: Exception) {
+                    if (e is InterruptedException) throw e
+                    throw ExitNodeFailure(ADDRESS_UNRESOLVED, e)
+                }
+                if (!ProxyDnsTransport.isLiteralAddress(address)) throw ExitNodeFailure(ADDRESS_UNRESOLVED)
+                com.example.vpn.smart.RouteRecipe.pinEndpoint(saved, address)
+            }
+        }
+        val profile = route.variantKey?.let { key ->
+            com.example.vpn.stealth.StealthVariants.of(base).firstOrNull { it.key == key }?.profile
+                ?: throw ExitNodeFailure(ROUTE_UNAVAILABLE)
+        } ?: base
+        return try {
+            val root = JSONObject(XrayConfigBuilder.buildJson(profile, settings))
+            val outbound = root.getJSONArray("outbounds").getJSONObject(0)
+            XrayConfigParser.requireExecutableOutbound(outbound)
+            outbound.apply { put("tag", "builtin-exit") }
+        } catch (e: Exception) {
+            throw ExitNodeFailure(CONFIG_REJECTED, e)
+        }
     }
 
     fun freedom(options: AetherSettings): JSONObject = JSONObject().apply {
@@ -48,13 +119,13 @@ object BuiltinExitNode {
 
     data class Started(val running: RunningEngine, val upstream: String, val apiHttp: String? = null, val apiToken: String? = null)
 
-    fun start(options: AetherSettings, settings: AppSettings, parent: SidecarContext): Started? {
+    fun start(options: AetherSettings, settings: AppSettings, parent: SidecarContext, route: Route = Route()): Started? {
         if (!needed(options)) return null
-        val executable = Sidecars.executable(ServerlessSidecar) ?: error("The exit-node Xray runtime is missing")
+        val executable = Sidecars.executable(ServerlessSidecar) ?: throw ExitNodeFailure(RUNTIME_MISSING)
         val context = parent.copy(workDir = File(parent.workDir, "exit").apply { mkdirs() },
             executable = executable, socksPort = Sidecars.freeLoopbackPort(),
             socksUser = Sidecars.randomToken(9), socksPass = Sidecars.randomToken())
-        val outbound = selected(options, settings) ?: freedom(options)
+        val outbound = selected(options, settings, route) ?: freedom(options)
         val inlet = JSONObject().put("listen", "127.0.0.1").put("port", context.socksPort).put("protocol", "socks")
             .put("settings", JSONObject().put("auth", "password").put("udp", true).put("accounts",
                 JSONArray().put(JSONObject().put("user", context.socksUser).put("pass", context.socksPass))))
@@ -67,9 +138,11 @@ object BuiltinExitNode {
         XrayConfigBuilder.stripSocketMarks(root)
         val file = File(context.workDir, "exit.json").apply { writeText(root.toString()) }
         val launch = SidecarLaunch(listOf(executable.absolutePath, "run", "-c", file.absolutePath), logOutput = false)
-        val process = SidecarProcess.start("builtin-exit", launch, context.workDir, context.socksPort)
+        val process = try { SidecarProcess.start("builtin-exit", launch, context.workDir, context.socksPort) } catch (e: java.io.IOException) {
+            throw ExitNodeFailure(PROCESS_FAILED, e)
+        }
         try {
-            check(process.awaitReady(15_000)) { "The selected exit-node runtime could not start" }
+            if (!process.awaitReady(15_000)) throw ExitNodeFailure(PROCESS_FAILED)
             return Started(process, "socks5://${context.socksUser}:${context.socksPass}@127.0.0.1:${context.socksPort}")
         } catch (e: Throwable) {
             process.stop()

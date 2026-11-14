@@ -52,6 +52,9 @@ object AetherPrewarmMonitor {
         val metered = cm?.isActiveNetworkMetered ?: true
         val network = runCatching { com.example.vpn.smart.NetworkIdentity.current(app) }.getOrNull()
         AetherPrewarm.run(network, reason, vpnActive = vpnActive, powerSave = powerSave, metered = metered)
+    }.onFailure {
+        // Only the exception type: never a message that could carry an address.
+        com.example.xray.XrayLogManager.w("BUILTIN", "aether/prewarm · $reason · could not run: ${it.javaClass.simpleName}")
     }
 
     private val TOKEN = Any()
