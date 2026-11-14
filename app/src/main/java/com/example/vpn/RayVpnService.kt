@@ -592,24 +592,34 @@ class RayVpnService : VpnService() {
         val ordered = com.example.vpn.connectivity.TransportCapabilityEngine.order(ranked, transportCapabilities(network))
         // Servers that failed a real request on this network moments ago are not raced again (ConnectivityBrain).
         val book = com.example.vpn.connectivity.ConnectivityBrain.book
-        val fresh = ordered.filter { book.eligibility(com.example.vpn.connectivity.PathRef.of(it)).automatic }
-        if (fresh.size < ordered.size) XrayLogManager.i("SMART", "Skipped ${ordered.size - fresh.size} servers that failed here moments ago.")
+        val freezes = networkMemory.freezes
+        val frozenHere = freezes.frozen(network)
+        // Never down to nothing: the oldest-skipped come back (unfrozen first) when fewer than a few are left (PoolRefill).
+        val refill = com.example.vpn.smart.PoolRefill.refill(ordered,
+            failedAt = { book.recentFailureAt(com.example.vpn.connectivity.PathRef.of(it)) }, frozen = { it.id in frozenHere })
+        val fresh = refill.candidates
+        if (refill.skipped > 0) XrayLogManager.i("SMART", com.example.vpn.smart.PoolRefill.describe(refill))
         // Last-known-good servers on this network (they passed the upload/download check here) are tested first,
         // and servers that showed the ~16 KB freeze here go to the back while they cool down (FreezeBook).
-        val freezes = networkMemory.freezes
         val lastGoodIds = freezes.lastGood(network).filter { it !in exclude }
         val eligibleLastGood = if (lastGoodIds.isEmpty()) emptyList() else com.example.vpn.smart.ServerRace.rank(
             all.filter { it.id in lastGoodIds }, exclude = exclude + seed.map { it.owner.id }, limit = lastGoodIds.size
         ).filter { book.eligibility(com.example.vpn.connectivity.PathRef.of(it)).automatic }
-        val freezeOrder = com.example.vpn.smart.FreezeBook.order(fresh, lastGoodIds, freezes.frozen(network), eligibleLastGood)
+        val freezeOrder = com.example.vpn.smart.FreezeBook.order(fresh, lastGoodIds, frozenHere, eligibleLastGood)
         XrayLogManager.i("SMART", freezeOrder.describe())
-        val candidates = freezeOrder.profiles
+        // A server frozen here does not compete (a stealth form of it meets the same per-connection cap); it is
+        // the last resort only when nothing else is left (FrozenGuard).
+        val guard = com.example.vpn.smart.FrozenGuard.split(seed, freezeOrder.profiles, frozenHere, { it.owner.id }, { it.id })
+        if (guard.leftOut > 0) XrayLogManager.i("SMART", "Left out ${guard.leftOut} server(s) frozen on this network; used only if nothing else works.")
+        val candidates = guard.candidates
+        val raceSeed = guard.seed
         if (ordered.size < ranked.size) {
             XrayLogManager.i("SMART", "Skipped ${ranked.size - ordered.size} servers whose transport this network does not carry.")
         }
         // Servers left out because their saved form just failed are still tried in disguise.
-        val dead = if (retryDisguised) all.filter { it.id in exclude } else emptyList()
-        if (candidates.isEmpty() && dead.isEmpty()) return seed.firstOrNull()
+        // A frozen one is not retried in disguise while other candidates remain (FrozenGuard).
+        val dead = if (retryDisguised) all.filter { it.id in exclude && (it.id !in frozenHere || candidates.isEmpty()) } else emptyList()
+        if (candidates.isEmpty() && dead.isEmpty()) return raceSeed.firstOrNull() ?: guard.lastResortSeed.firstOrNull()
         XrayLogManager.i("SMART", "Testing ${candidates.size} other servers on ${com.example.vpn.smart.NetworkKey.describe(network)}" +
             if (compare) "; comparing the working ones before choosing." else ".")
         val resolve = { p: VlessProfile -> if (p.profileType != ProfileType.XRAY_JSON && !isLiteralIp(p.address)) resolveEndpoint(p) else p }
@@ -622,8 +632,12 @@ class RayVpnService : VpnService() {
                 networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(it))
             }, disguiseOnly = dead, shouldStop = { raceJob?.isActive == false },
                 contenders = if (compare) com.example.vpn.smart.ContenderPick.CONTENDERS else 1,
-                seed = seed, preferred = proven, penaltyMs = penalty)
+                seed = raceSeed, preferred = proven, penaltyMs = penalty)
         }?.let { return it }
+        guard.lastResortSeed.firstOrNull()?.let {
+            XrayLogManager.w("SMART", "Only the selected server answered, and it froze on this network before; using it as the last resort.")
+            return it
+        }
         if (compare) return null
         val best = candidates.firstOrNull() ?: return null
         val choice = com.example.vpn.Abandonable.run { runCatching { finder.choose(best, resolve, all, firstFailed = true) }.getOrNull() } ?: return null
@@ -948,6 +962,16 @@ class RayVpnService : VpnService() {
             // probe time limits. The probe's sockets bypass the traffic-blocking interface.
             val network = com.example.vpn.smart.NetworkKey.current(this@RayVpnService)
             val timeouts = networkMemory.timeouts(network)
+            // Smart Connect: a server that froze on this network (~16 KB cap) is neither retried as selected nor in a
+            // stealth form while another saved server has not frozen here (FrozenGuard).
+            suspend fun frozenHold(p: VlessProfile): Boolean {
+                if (!raceFirst) return false
+                val frozen = networkMemory.freezes.frozen(network)
+                if (p.id !in frozen) return false
+                val others = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                    .filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }.map { it.id }
+                return !com.example.vpn.smart.FrozenGuard.stealthAllowed(p.id, frozen, others)
+            }
             runCatching { com.example.vpn.smart.NetworkEnvironment.observe(this@RayVpnService, networkMemory, dnsPoisoned || dnsTamperedOn(network)) }
                 .onSuccess { report ->
                     _environment.value = report
@@ -1120,8 +1144,10 @@ class RayVpnService : VpnService() {
                 tracker.start(com.example.vpn.smart.SearchStage.SELECTED)
                 val first = finder.firstPath(requestedProfile, profile)
                 chosenVariant = first.variantKey
-                val skip = recentlyFailed(first.profile)
-                if (skip) XrayLogManager.i("SMART", "Selected server skipped: it failed a real request on this network moments ago.")
+                val frozenFirst = frozenHold(requestedProfile)
+                val skip = recentlyFailed(first.profile) || frozenFirst
+                if (frozenFirst) XrayLogManager.i("SMART", com.example.vpn.smart.FrozenGuard.skipLine(com.example.core.SecretRedactor.redact(requestedProfile.name)))
+                else if (skip) XrayLogManager.i("SMART", "Selected server skipped: it failed a real request on this network moments ago.")
                 when (val outcome = if (initialResolutionFailed) com.example.xray.RealDelayProbe.Outcome.Failed("selected server DNS resolution failed", request = false)
                     else if (skip) com.example.xray.RealDelayProbe.Outcome.Failed("failed moments ago on this network", request = false)
                     else com.example.vpn.Abandonable.run { probe(first.profile, timeouts.firstSec) }) {
@@ -1156,7 +1182,8 @@ class RayVpnService : VpnService() {
                     is com.example.xray.RealDelayProbe.Outcome.Failed -> {
                         firstFailed = true
                         provenDead = true
-                        networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(first.profile))
+                        // A frozen server that was not tested says nothing about its kind of connection here.
+                        if (!frozenFirst) networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(first.profile))
                         // A skipped retest is a result too: it failed a real request here moments ago.
                         if (skip) tracker.count(carried = false)
                         tracker.finish(com.example.vpn.smart.SearchStage.SELECTED, verified = false)
@@ -1203,7 +1230,13 @@ class RayVpnService : VpnService() {
             // 3b. Find a path that carries traffic before the core starts: the saved profile, its stealth
             // alternates (split handshake, other fingerprint, ECH, UDP junk) or another kind on the same
             // server. The probe's sockets bypass the traffic-blocking interface (RealDelayProbe.socketProtector).
-            if (!raced && !lockExit && !xrayExhausted && !aetherLast && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
+            val frozenStealth = !raced && !lockExit && frozenHold(requestedProfile)
+            if (frozenStealth) {
+                // TLS fingerprint, split handshake or ECH do not beat a per-connection byte cap: no stealth form of it.
+                XrayLogManager.i("STEALTH", com.example.vpn.smart.FrozenGuard.skipLine(com.example.core.SecretRedactor.redact(requestedProfile.name)))
+                provenDead = true
+            }
+            if (!raced && !lockExit && !xrayExhausted && !aetherLast && !frozenStealth && com.example.vpn.stealth.StealthVariants.of(profile).isNotEmpty()) {
                 showForegroundNotification("Finding a working route...")
                 ladder.advance(com.example.vpn.connectivity.RecoveryStage.SAFE_VARIANTS)
                 // Without Smart Connect the finder's first test is the selected server itself (stage B).
@@ -2667,7 +2700,10 @@ class RayVpnService : VpnService() {
                     // A ~16 KB freeze stops at the same byte whatever the MTU; it never starts an MTU trial.
                     stalled = evidence.bulkStalled && !evidence.fixedSizeFreeze, passed = evidence.bidirectional,
                     // Only a stall within the first ~1.5 KB looks like an MTU black hole; a later one is a per-connection cap.
-                    mayStart = com.example.vpn.smart.StallFailover.mtuTrialFor(evidence.stallBytes))?.let { st ->
+                    mayStart = com.example.vpn.smart.StallFailover.mtuTrialFor(evidence.stallBytes),
+                    // A cap-class stall (16050 B and the like) ends a running low-MTU trial: MTU is not the cause.
+                    capStall = com.example.vpn.smart.StallFailover.capStall(evidence.bulkStalled, evidence.fixedSizeFreeze, evidence.stallBytes)
+                )?.let { st ->
                     XrayLogManager.i("VPN", when (st) {
                         com.example.vpn.smart.TunMtuTrial.State.TRYING_LOW -> "The next connect on this network tests MTU ${com.example.vpn.smart.TunMtuTrial.LOW_MTU}."
                         com.example.vpn.smart.TunMtuTrial.State.LOW_HELPED -> "MTU $used fixed the bulk stall on this network; it is kept here."
@@ -2677,6 +2713,8 @@ class RayVpnService : VpnService() {
                     com.example.vpn.diagnostics.events.EventLog.event("tunnel.mtu.trial",
                         attributes = com.example.vpn.smart.TunMtuTrial.eventAttributes(st, used, configured))
                 }
+                if (networkMemory.mtu.lastClearedByCap) XrayLogManager.i("VPN", "The stall at ${evidence.stallBytes} B is a " +
+                    "per-connection cap, not MTU: the low-MTU trial on this network is cleared; MTU $configured comes back.")
             }
             com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
                 "result" to if (evidence.bidirectional) "verified" else if (evidence.bulkStalled) "stalled" else "partial",

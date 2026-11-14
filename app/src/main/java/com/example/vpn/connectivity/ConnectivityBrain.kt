@@ -256,6 +256,13 @@ class EvidenceBook(private val clock: () -> Long = System::currentTimeMillis) {
         return if (history.lastOrNull()?.success == true) PathEligibility.STALE_VERIFIED else PathEligibility.UNTESTED
     }
 
+    /** When [profileRef]'s failure that makes it RECENTLY_FAILED happened; null when it is not held back now. */
+    fun recentFailureAt(profileRef: String): Long? {
+        val now = clock()
+        val last = pathEvidence(profileRef).lastOrNull() ?: return null
+        return last.at.takeIf { !last.success && now - last.at <= RECENT_FAIL_MS }
+    }
+
     /** True when [profileRef] passed a real request so recently that repeating it now would only cost time. */
     fun reusablePass(profileRef: String): NetworkEvidence? {
         val now = clock()
@@ -351,8 +358,12 @@ class EvidenceBook(private val clock: () -> Long = System::currentTimeMillis) {
         const val FRESH_MS = 10 * 60_000L
         /** Older than fresh, younger than this: still this session's evidence, shown as aging. */
         const val AGING_MS = 30 * 60_000L
-        /** A failure younger than this keeps the path from being started automatically. */
-        const val RECENT_FAIL_MS = 10 * 60_000L
+        /**
+         * A failure younger than this keeps the path from being started automatically. Short (90 s): on Irancell a
+         * 10-minute hold skipped 28 of 30 saved servers on the next Connect and left nothing to test. A later pass
+         * clears it at once (eligibility reads the newest result).
+         */
+        const val RECENT_FAIL_MS = 90_000L
         /** A pass younger than this is not repeated before connecting; the tunnel's own check follows anyway. */
         const val REUSE_PASS_MS = 60_000L
         /** Two passes at least this far apart make a path stable (same as the LAB's window). */

@@ -37,6 +37,12 @@ object StallFailover {
         else -> StallClass.CAP
     }
 
+    /**
+     * Whether a transfer check that [stalled] (or showed the ~16 KB [froze]) stopped like a per-connection cap: such a
+     * stall clears a running MTU trial ([TunMtuTrial.onBulkCheck] capStall), since lowering the MTU cannot move it.
+     */
+    fun capStall(stalled: Boolean, froze: Boolean, bytes: Int?): Boolean = (stalled || froze) && classify(bytes) == StallClass.CAP
+
     /** Whether a stall of [bytes] may start the MTU 1280 trial: only an MTU-class stall does. */
     fun mtuTrialFor(bytes: Int?): Boolean = classify(bytes) == StallClass.MTU
 

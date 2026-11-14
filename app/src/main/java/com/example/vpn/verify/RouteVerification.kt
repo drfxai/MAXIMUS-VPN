@@ -111,8 +111,25 @@ data class TrafficEvidence(
      * censor that lets a new TLS session to a flagged address carry its first ~16 KB and then freezes it.
      * Lowering the MTU does not change where it stops, so this is not treated as an MTU problem.
      */
-    val fixedSizeFreeze: Boolean get() =
-        (download as? LegResult.Failed)?.let { it.stalled && it.bytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES } == true
+    val fixedSizeFreeze: Boolean get() {
+        val down = download as? LegResult.Failed
+        if (down != null && down.stalled && down.bytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES) return true
+        // The same signature upstream: the graded upload stopped at ~16 KB on every reference it reached, and the
+        // download also stopped inside the window (even when it ended as a timeout rather than a stall).
+        return uploadFreeze && down != null && down.bytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES
+    }
+
+    /**
+     * The graded upload stalled inside the freeze window (16384 B, the first grade) on every reference that was
+     * measured, with none confirming more: the per-connection ~16 KB cap seen upstream.
+     */
+    val uploadFreeze: Boolean get() {
+        val measured = uploadProbe?.attempts.orEmpty().filter { a -> a.grades.any { it.outcome != UploadProbe.Outcome.NOT_TESTED } }
+        return measured.isNotEmpty() && measured.all { a ->
+            a.firstMiss?.let { it.outcome == UploadProbe.Outcome.STALLED && it.sentBytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES } == true &&
+                a.confirmedBytes < FREEZE_MIN_BYTES
+        }
+    }
 
     fun appliesTo(state: ConnectionState): Boolean =
         attemptId != null && attemptId == state.attemptId && networkGeneration == state.networkGeneration
