@@ -751,7 +751,7 @@ object ToolScripts {
 
     /** The last [lines] journal lines of [toolId]'s units. */
     fun logs(toolId: String, lines: Int = 40): ToolScript {
-        val units = requireNotNull(UNITS[toolId]) { "No logs for $toolId" }
+        val units = requireNotNull(SmartManagerState.unitsFor(toolId)) { "No logs for $toolId" }
         require(lines in 1..200)
         return script(
             "step 1\n§SUDO systemctl show ${units.joinToString(" ")} -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus 2>&1 || true\n" +

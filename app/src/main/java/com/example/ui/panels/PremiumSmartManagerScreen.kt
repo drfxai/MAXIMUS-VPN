@@ -32,6 +32,7 @@ import com.example.panels.cloudflare.SmartDomainsStore
 import com.example.panels.cloudflare.TokenTemplate
 import com.example.panels.servers.ServerToolCatalog
 import com.example.panels.servers.SmartManagerPlanner
+import com.example.panels.servers.SmartManagerState
 import com.example.panels.servers.SmartBundlePlanner
 import com.example.panels.servers.SmartServerHealth
 import com.example.ui.panels.servers.ServersState
@@ -69,7 +70,12 @@ internal fun PremiumSmartManagerScreen(
     val fresh = server != null && facts != null &&
         inspectionNow - server.checkedAt in 0..INSPECTION_TTL_MS
     val candidates = inspection?.candidates.orEmpty()
-    val nodes = server?.let { vm.managedNodesFor(it.id) }.orEmpty()
+    // The ledger is Keystore-encrypted: never decrypt it on the main thread on every 5 s tick.
+    val nodes by produceState(emptyList<com.example.panels.servers.ManagedNodeRecord>(),
+        server?.id, server?.checkedAt, state.tests, state.busy, state.bundle, state.psiphonInstall) {
+        val id = server?.id
+        value = if (id == null) emptyList() else withContext(Dispatchers.IO) { vm.managedNodesFor(id) }
+    }
     val network = com.example.vpn.smart.NetworkKey.current(LocalContext.current)
     val verifiedServices = nodes.filter {
         fresh && it.networkKey == network &&
@@ -128,14 +134,9 @@ internal fun PremiumSmartManagerScreen(
                     val candidate = inspection?.candidate(id)
                     val psiphon = index == 0
                     val installed = if (psiphon) facts?.psiphonInstalled == true else server.tool(id) != null
-                    val unit = when (id) {
-                        ServerToolCatalog.SOAR -> "maximus-soar"
-                        ServerToolCatalog.COTTEN -> "maximus-cotten"
-                        ServerToolCatalog.MASTERDNS -> "maximus-masterdns"
-                        ServerToolCatalog.DNSTT -> "maximus-dnstt"
-                        else -> "maximus-psiphon"
-                    }
-                    val running = facts?.active(unit) == true
+                    // DNSTT runs as two units (socks + dnstt); every one must be active.
+                    val running = SmartManagerState.allUnitsActive(facts,
+                        if (psiphon) com.example.panels.servers.PrivatePsiphonServerScripts.TOOL_ID else id)
                     val verified = running && id in verifiedServices
                     val (status, tint, action) = when {
                         !fresh -> Triple("Inspect first", StudioMuted, "Inspect")
@@ -224,13 +225,27 @@ internal fun PremiumSmartManagerScreen(
             }
             5 -> {
                 MxCard("Service logs", "Selected VPS · Read-only SSH", StudioBlue) {
-                    server.tools.forEach { tool ->
+                    val loggable = server.tools.filter { SmartManagerState.hasLogs(it.id) }
+                    loggable.forEach { tool ->
                         MxAction(ServerToolCatalog.byId(tool.id)?.title ?: tool.id, { vm.logs(server.id, tool.id) },
                             enabled = state.busy.isBlank())
                     }
-                    if (server.tools.isEmpty()) Text("No managed services yet.", color = StudioMuted)
-                    vm.operationsFor(server.id).forEach { operation ->
+                    if (loggable.isEmpty()) Text("No managed services yet.", color = StudioMuted)
+                    val operations by produceState(emptyList<com.example.panels.servers.SmartOperation>(),
+                        server.id, state.busy, state.bundle, state.psiphonInstall, state.wizard?.stage) {
+                        value = withContext(Dispatchers.IO) { vm.operationsFor(server.id) }
+                    }
+                    operations.forEach { operation ->
                         Text("${operation.toolId} · ${operation.status.name.lowercase()}", color = StudioMuted, fontSize = 11.sp)
+                        // An interrupted install blocks every later install on this VPS until reconciled.
+                        if (operation.status == com.example.panels.servers.SmartOperation.Status.UNCERTAIN) {
+                            Text("Interrupted: remote effects unknown. Reinspect before another installation.",
+                                color = Mx.Red, fontSize = 11.sp)
+                            MxAction("Reinspect & acknowledge", {
+                                vm.reconcileUncertainOperation(server.id, operation.id)
+                            }, enabled = state.busy.isBlank() && state.bundle?.running != true &&
+                                state.psiphonInstall?.running != true)
+                        }
                     }
                     state.logsFor(server.id)?.takeIf { state.busy.isBlank() && state.error.isBlank() }?.let { (title, lines) ->
                         Text(title, color = StudioText, fontWeight = FontWeight.Bold)
@@ -472,10 +487,13 @@ private fun MxChecks(
             if (server?.hostKeySha256.isNullOrBlank()) Mx.Orange else Mx.Green)
         MxInfoRow("Port conflicts", if (facts?.socketInspectionAvailable == true && fresh) "Scanned" else "Needs scan",
             if (facts?.socketInspectionAvailable == true && fresh) Mx.Green else Mx.Orange)
-        MxInfoRow("DNS safety", if (facts?.socketInspectionAvailable == true && fresh)
-            "Port 53: ${if (53 in facts.udpPorts || 53 in facts.tcpPorts) "occupied" else "available"}"
-            else "Pending", if (facts?.socketInspectionAvailable == true && fresh &&
-                53 !in facts.udpPorts && 53 !in facts.tcpPorts) Mx.Green else Mx.Orange)
+        // Public listeners only: the local systemd-resolved stub (127.0.0.53) is not a conflict.
+        val port53 = SmartManagerState.publicPort53Occupied(facts)
+        MxInfoRow("DNS safety", when (port53) {
+            null -> "Pending"
+            true -> "Port 53: occupied"
+            false -> "Port 53: available"
+        }, if (port53 == false) Mx.Green else Mx.Orange)
         MxInfoRow("Firewall", facts?.firewall ?: "Not inspected", Mx.Cyan)
         MxInfoRow("Resource fit", if (facts == null) "Pending" else
             if (facts.blocker() == null) "Preliminary" else "Blocked",
