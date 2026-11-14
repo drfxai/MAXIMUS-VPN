@@ -160,6 +160,13 @@ object RecoveryProfiles {
         // The Irancell recipe the community reports: the empty-record fragment with Firefox's cipher list.
         p(NetworkFirewalls.IRANCELL_PROFILE, RecoveryProfile.Strategy.FRAGMENT,
             bpb(com.example.panels.BpbFix.FINAL_MASK_ORIGINAL) + ("cipherSuites" to com.example.panels.BpbFix.FIREFOX_CIPHER_SUITES), 0.45),
+        // UAC SNI Spoofer's Iran ClientHello split: the first record ends right before the server name (Go TLS
+        // stack + fixed cipher list). No ALPN pin, so it also fits xhttp/gRPC/h2 configs. See [IranHelloSplit].
+        p(IranHelloSplit.PROFILE_ID, RecoveryProfile.Strategy.FRAGMENT, mapOf(
+            "finalMask" to IranHelloSplit.MASK, "fingerprint" to IranHelloSplit.FINGERPRINT,
+            "cipherSuites" to IranHelloSplit.CIPHER_SUITES), 0.5),
+        // UAC's Irancell "deep" fragment: 5-byte ClientHello pieces, up to 100 splits.
+        p(IranHelloSplit.DEEP_PROFILE_ID, RecoveryProfile.Strategy.FRAGMENT, mapOf("finalMask" to IranHelloSplit.DEEP_MASK), 0.4),
         p("alpn-http11", RecoveryProfile.Strategy.ALPN, mapOf("alpn" to "http/1.1"), 0.25,
             transports = setOf("ws", "httpupgrade")),
         p("endpoint-ipv4", RecoveryProfile.Strategy.ALT_ENDPOINT_V4, mapOf("address" to RecoveryProfile.ENDPOINT), 0.55, family = "ipv4"),

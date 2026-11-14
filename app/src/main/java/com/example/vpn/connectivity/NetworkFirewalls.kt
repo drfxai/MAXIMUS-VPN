@@ -8,13 +8,15 @@ package com.example.vpn.connectivity
  * What the community reports (2026-10): fragmenting the TLS ClientHello still works on Irancell,
  * with an empty first record, the Go TLS stack and Firefox's cipher list; on Hamrah-e-Aval it is
  * blocked outright (IPv6 too), and on Hamrah-e-Aval and Rightel ECH with a Chrome fingerprint works.
+ * UAC SNI Spoofer (2026-11) adds the exception that a ClientHello split right before the SNI, on Go's TLS
+ * stack with a fixed cipher list, still connects on Hamrah-e-Aval ([IranHelloSplit]); it is tried first there.
  * The preference only orders and skips recipes; every recipe still passes the security gate and a
  * real request, and the ledger's own results on this network outweigh it once there are some.
  */
 object NetworkFirewalls {
     enum class Firewall(val title: String, val note: String) {
         IRANCELL("Irancell", "Fragment recipes first"),
-        MCI("Hamrah-e-Aval", "ECH first; fragment is blocked on this network, so it is skipped"),
+        MCI("Hamrah-e-Aval", "Iran ClientHello split first, then ECH; other fragment recipes are skipped"),
         RIGHTEL("Rightel", "ECH first, fragment last"),
         OTHER("Other network", "Every recipe, in the usual order")
     }
@@ -38,10 +40,17 @@ object NetworkFirewalls {
         return when (firewall) {
             Firewall.IRANCELL -> when {
                 profile.profileId == IRANCELL_PROFILE -> 0.5
+                // UAC's first Irancell route is its deep fragment (maxSplit 100).
+                profile.profileId == IranHelloSplit.DEEP_PROFILE_ID -> 0.3
+                // UAC tries the split ClientHello on Irancell after ECH: right behind the first Cloudflare ECH
+                // recipe (0.55), ahead of the backup ECH resolvers, so it stays inside revival's 10 recipes.
+                profile.profileId == IranHelloSplit.PROFILE_ID -> 0.04
                 fragment -> 0.2
                 else -> 0.0
             }
             Firewall.MCI -> when {
+                // UAC SNI Spoofer's main Hamrah-e-Aval recipe: the one fragment that still passes there.
+                profile.profileId == IranHelloSplit.PROFILE_ID -> 0.5
                 fragment -> null
                 ech -> 0.4
                 else -> 0.0

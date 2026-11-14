@@ -5,6 +5,7 @@ import com.example.panels.BpbFix
 import com.example.vpn.connectivity.BpbRecoveryEngine
 import com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult
 import com.example.vpn.connectivity.EchKeyCheck
+import com.example.vpn.connectivity.IranHelloSplit
 import com.example.vpn.connectivity.NetworkFirewalls
 import com.example.vpn.connectivity.RecoveryLedger
 import com.example.vpn.connectivity.RecoveryProfiles
@@ -142,12 +143,27 @@ class ConfigRevivalTest {
         return batches.drop(before + 1).flatten()
     }
 
-    @Test fun hamrahEAvalSkipsFragmentAndTriesEchFirst() {
+    @Test fun hamrahEAvalTriesTheIranHelloSplitFirstThenEchAndSkipsOtherFragments() {
         val dead = cf("m", "m.example.workers.dev")
         val sent = tried(revival(), dead, "cell:43211")
         assertTrue(sent.isNotEmpty())
-        assertTrue("no fragment recipe on Hamrah-e-Aval", sent.none { it.finalMask.isNotBlank() })
-        assertTrue(sent.first().echConfigList.startsWith("cloudflare-ech.com+"))
+        // UAC SNI Spoofer's split right before the SNI is the one fragment tried on Hamrah-e-Aval, and it goes first.
+        assertEquals(IranHelloSplit.MASK, sent.first().finalMask)
+        assertEquals("unsafe", sent.first().fingerprint)
+        assertEquals(IranHelloSplit.CIPHER_SUITES, sent.first().cipherSuites)
+        assertTrue("no other fragment recipe on Hamrah-e-Aval", sent.all { it.finalMask.isBlank() || it.finalMask == IranHelloSplit.MASK })
+        assertTrue(sent[1].echConfigList.startsWith("cloudflare-ech.com+"))
+    }
+
+    @Test fun irancellTriesTheIranHelloSplitRightAfterCloudflareEch() {
+        val sent = tried(revival(), cf("s", "s.example.workers.dev"), "cell:43235")
+        val split = sent.indexOfFirst { it.finalMask == IranHelloSplit.MASK && it.alpn.isBlank() }
+        val ech = sent.indexOfFirst { it.echConfigList == "cloudflare-ech.com+" + RecoveryProfiles.CLOUDFLARE_ECH_DOH[0] }
+        assertTrue("the split is tried on Irancell", split >= 0)
+        assertTrue("after the first Cloudflare ECH recipe", ech in 0 until split)
+        // UAC's Irancell deep fragment is tried before ECH, with the other fragment recipes.
+        val deep = sent.indexOfFirst { it.finalMask == IranHelloSplit.DEEP_MASK }
+        assertTrue(deep in 0 until ech)
     }
 
     @Test fun irancellTriesItsOwnFragmentRecipeFirst() {
@@ -158,7 +174,7 @@ class ConfigRevivalTest {
         assertEquals("unsafe", first.fingerprint)
         // The user's choice wins over the detected network.
         val chosen = tried(revival(), cf("j", "j.example.workers.dev"), "cell:43235", NetworkFirewalls.Firewall.MCI)
-        assertTrue(chosen.none { it.finalMask.isNotBlank() })
+        assertTrue(chosen.all { it.finalMask.isBlank() || it.finalMask == IranHelloSplit.MASK })
         assertEquals(NetworkFirewalls.Firewall.OTHER, NetworkFirewalls.detect("wifi"))
         assertEquals(NetworkFirewalls.Firewall.RIGHTEL, NetworkFirewalls.detect("cell:43220"))
     }
