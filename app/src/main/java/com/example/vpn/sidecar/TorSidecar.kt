@@ -48,6 +48,7 @@ class TorSidecar(
         // poison-resistant resolution as ordinary proxy profiles, while retaining its URL and SNI.
         val bridges = if (context.upstreamSocks != null) saved else WebTunnelEndpoints.resolve(saved,
             privateDns = com.example.vpn.safety.OperatingModePolicy.of(context.mode).privateServerLookup)
+        bridges.forEach { EngineSignals.publish("tor-bridge", it) }
         val pt = PluggableTransports.start(context.executable, transportsOf(bridges), File(context.workDir, "pt_state"), context.upstreamSocks)
         val tor = try {
             start(torrcWithPorts(bridges, context.socksPort, pt.methods, context.upstreamSocks), context.socksPort)

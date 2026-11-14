@@ -36,6 +36,7 @@ object TorInApp {
                     var aborted = false
                     progress.newLines().forEach {
                         com.example.xray.XrayLogManager.i("TOR", it)
+                        EngineSignals.publish("tor", it)
                         deadline.saw(it, System.currentTimeMillis())
                         // Tor writes "...; aborting" just before it exits: stop waiting for it.
                         if (it.contains("aborting")) aborted = true
