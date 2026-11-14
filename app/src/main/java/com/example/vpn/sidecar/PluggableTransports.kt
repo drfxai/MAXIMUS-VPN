@@ -93,6 +93,7 @@ class PluggableTransports private constructor(
         private const val EOF = "\u0000eof"
 
         private fun logLine(line: String, logs: BridgeLogAggregator) {
+            EngineSignals.publish("lyrebird", line)
             // Only the protocol's status and log lines are worth showing; they can name bridge addresses.
             val text = when {
                 line.startsWith("LOG ") -> line.substringAfter("MESSAGE=", line).trim('"')

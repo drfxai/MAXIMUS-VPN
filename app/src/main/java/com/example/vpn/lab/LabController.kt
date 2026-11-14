@@ -625,7 +625,11 @@ class LabController(
     )
 
     /** Outcome of a fast recovery: the path, or why none (with what was tested). */
-    data class FastRecoveryOutcome(val result: FastRecoveryResult?, val tested: Int, val exhausted: Boolean, val why: String)
+    data class FastRecoveryOutcome(
+        val result: FastRecoveryResult?, val tested: Int, val exhausted: Boolean, val why: String,
+        /** The single capped Irancell WARP attempt ran in this search (see RecoveryEngineCaps.irancellWarpFirst). */
+        val irancellWarpTried: Boolean = false
+    )
 
     private val testLock = kotlinx.coroutines.sync.Mutex()
 
@@ -648,9 +652,16 @@ class LabController(
         mode: com.example.data.model.OperationalMode = com.example.data.model.AppSettings().operationalMode,
         resolveForRecovery: (VlessProfile) -> VlessProfile = { it },
         rememberedOnly: Boolean = false,
+        /**
+         * The automatic Aether lead Smart Connect held back because Cloudflare is blocked here (cf=0). On Irancell its
+         * single capped WARP attempt (IrancellWarp: MASQUE over HTTP/2, 15 s) runs before the other recovery engines.
+         */
+        heldBackAether: VlessProfile? = null,
         onProgress: (String) -> Unit = {}
     ): FastRecoveryOutcome {
         if (!testLock.tryLock()) return FastRecoveryOutcome(null, 0, false, "the LAB is running an analysis")
+        val summary = com.example.vpn.smart.RecoveryEngineCaps.EscalationSummary()
+        var summaryOutcome = "stopped"
         try {
             val book = com.example.vpn.connectivity.ConnectivityBrain.book
             com.example.vpn.connectivity.ConnectivityBrain.refreshSession()
@@ -669,7 +680,13 @@ class LabController(
                     com.example.vpn.smart.FakeSniRecovery.candidates(saved, resolveForRecovery)
                 }
             }.orEmpty()
-            val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(saved) + fakeSni
+            val cloudflareBlocked = ExperimentPlanner.cloudflareBlocked(cap)
+            val caps = com.example.vpn.smart.RecoveryEngineCaps.Budget(
+                com.example.vpn.smart.RecoveryEngineCaps.constrained(device.metered, cloudflareBlocked))
+            val bridgeBook = com.example.vpn.smart.WebTunnelFailureBook.shared
+            // WebTunnel bridges reset or misanswered repeatedly on this network in the last 6 h are left out.
+            val seeds = bridgeBook.usable(currentIdentity, com.example.vpn.smart.RecoveryEngineCatalog.webTunnelSeeds())
+            val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(saved, seedBridges = seeds) + fakeSni
             val poolProfiles = if (rememberedOnly) com.example.vpn.smart.EngineRouteHints.preferred(context, currentIdentity, builtIn) else saved + builtIn
             val all = poolProfiles.distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
                 .filter { it.id !in exclude && com.example.vpn.connectivity.PathRef.of(it) !in exclude }
@@ -709,6 +726,36 @@ class LabController(
                         if (r.stage.carriesTraffic) null else r.stage.name, detail = r.engineId)
                 }
             }
+            // Irancell, cf=0: the single capped WARP attempt (MASQUE over HTTP/2) before Tor and the other engines. cf=0 is a
+            // plain-TLS probe to Cloudflare; Aether's MASQUE-H2 has its own name/edge fallbacks and ClientHello split.
+            var irancellWarpTried = false
+            val irancellWarp = heldBackAether?.takeIf {
+                !rememberedOnly && com.example.vpn.sidecar.AetherSidecar.handles(it) &&
+                    com.example.vpn.smart.RecoveryEngineCaps.irancellWarpFirst(
+                        irancell = com.example.vpn.connections.ConnectionEngineRunner.irancell(com.example.vpn.connections.BuiltinMethodMemory.network()),
+                        cloudflareBlocked = cloudflareBlocked, aetherHeldBack = true)
+            }
+            if (irancellWarp != null && currentCoroutineContext().isActive) {
+                irancellWarpTried = true
+                onProgress("Irancell: one short WARP (MASQUE HTTP/2) attempt before Tor")
+                XrayLogManager.i("SMART", "Recovery: Irancell with Cloudflare blocked (cf=0): one capped WARP attempt " +
+                    "(MASQUE over HTTP/2, ${com.example.vpn.connections.IrancellWarp.BUDGET_MS / 1000}s) before Tor and the other engines.")
+                val began = System.currentTimeMillis()
+                val windowMs = com.example.vpn.smart.RecoveryEngineCaps.IRANCELL_WARP_WINDOW_MS
+                val r = withTimeoutOrNull(windowMs) {
+                    engineWindow { EngineProbe.testProfile(context, irancellWarp, ENGINE_TIMEOUT_SEC, requests = 2, mode = mode, keep = true) }
+                } ?: EngineProbe.Result(com.example.vpn.sidecar.AetherSidecar.ID, ConnectionStage.NOT_TESTED, null,
+                    "WARP attempt stopped at its ${windowMs / 1000}s cap", false)
+                attemptPolicy.record(r.engineId, r.failure)
+                XrayLogManager.i("SMART", "Recovery irancell-warp: ${r.failure ?: r.stage.title}")
+                summary.add("irancell-warp", System.currentTimeMillis() - began,
+                    if (r.outcomes.lastOrNull() == true) "carried traffic" else "failed (${r.failure ?: r.stage.title})")
+                if (r.outcomes.lastOrNull() == true) {
+                    summaryOutcome = "connected via irancell-warp"
+                    return FastRecoveryOutcome(FastRecoveryResult(irancellWarp, familyOf(irancellWarp), r.latencyMs, PathStatus.VERIFIED,
+                        true, 1), 1, false, "", irancellWarpTried = true)
+                }
+            }
             // Quick parallel round: the first candidate of each engine type at once (bounded, Tor excluded),
             // the first that carries a request wins and the rest are stopped. Unfinished checks stay fresh for
             // the serial search below; definitive failures are recorded so it does not repeat them.
@@ -720,12 +767,15 @@ class LabController(
                         com.example.vpn.sidecar.ChainRunner.readChain(pk.profile)?.hops?.joinToString("+", prefix = "chain:") { it.engineId }
                             ?: engineIds[pk.profile.id] ?: pk.profile.id,
                         tor = pk.family in PathFamily.TOR_FAMILIES || engineIds[pk.profile.id] == TorSidecar.ID) },
-                exclude = recent.keys + parallelExcluded(cap, pool), limit = parallel)
+                // Capped engines (ByeDPI on metered / cf=0 networks) run in the serial search, where their caps hold.
+                exclude = recent.keys + parallelExcluded(cap, pool) + (if (caps.constrained) pool.filter {
+                    caps.left(engineIds[it.profile.id]) != null }.map { it.profile.id } else emptyList()), limit = parallel)
             if (round.isNotEmpty() && currentCoroutineContext().isActive &&
                 deadlineMs - System.currentTimeMillis() > com.example.vpn.smart.ParallelEngineRound.WINDOW_MS) {
                 onProgress("Checking ${round.size} recovery engines at once")
                 XrayLogManager.i("SMART", "Recovery: parallel check of ${round.joinToString { it.engineKey }}")
                 var outcome: com.example.vpn.smart.ParallelEngineRound.Outcome<EngineProbe.Result>? = null
+                val parallelBegan = System.currentTimeMillis()
                 withTimeoutOrNull(com.example.vpn.smart.ParallelEngineRound.WINDOW_MS + 15_000L) {
                     engineWindow {
                         outcome = com.example.vpn.smart.ParallelEngineRound.race<EngineProbe.Result>(round.map { e ->
@@ -736,6 +786,8 @@ class LabController(
                     }
                 }
                 outcome?.finished?.forEach { (id, r) -> byId[id]?.let { recordEngine(it, r) } }
+                summary.add("parallel(${round.joinToString("+") { it.engineKey }})", System.currentTimeMillis() - parallelBegan,
+                    outcome?.winner?.let { "won by ${engineIds[it.first] ?: it.first}" } ?: "nothing carried traffic")
                 outcome?.winner?.let { (id, _) -> XrayLogManager.i("SMART", "Recovery: ${byId[id]?.profile?.name?.let(com.example.core.SecretRedactor::redact)} won the parallel check") }
             }
             loop@ while (currentCoroutineContext().isActive && System.currentTimeMillis() < deadlineMs) {
@@ -761,31 +813,80 @@ class LabController(
                             // progress-aware bootstrap. The service outer deadline includes this grace.
                             // Timeout is a measured unsuccessful attempt, not "not run". User cancellation
                             // still propagates through runInterruptible and stops the child processes.
-                            val windowMs = com.example.vpn.smart.RecoveryAttemptPolicy.window(engine?.id, remaining)
-                            val r = withTimeoutOrNull(windowMs) {
-                                engineWindow { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2, mode = mode, keep = true) }
-                            } ?: EngineProbe.Result(engine?.id ?: "chain", ConnectionStage.NOT_TESTED, null,
-                                "engine startup or traffic verification timed out after ${windowMs / 1000}s", false)
-                            recordEngine(pk, r)
-                        } else when (val o = com.example.vpn.Abandonable.run { RealDelayProbe.measure(listOf(pk.profile), budget.probeTimeoutSec).first() }) {
-                            is RealDelayProbe.Outcome.Delay -> planner.record(pk.profile.id, listOf(true), o.latencyMs, System.currentTimeMillis())
-                            is RealDelayProbe.Outcome.Failed -> planner.record(pk.profile.id, listOf(false), null, System.currentTimeMillis(), o.reason)
-                            is RealDelayProbe.Outcome.NotRun -> planner.notTested(pk.profile.id, o.reason)
+                            val normalMs = com.example.vpn.smart.RecoveryAttemptPolicy.window(engine?.id, remaining)
+                            // Metered or cf=0: ByeDPI and Tor share hard per-search caps (RecoveryEngineCaps).
+                            val windowMs = caps.window(engine?.id, normalMs)
+                            if (windowMs == null) {
+                                planner.notTested(pk.profile.id, "${engine?.id} time cap for this search is used up")
+                                summary.add(engine?.id ?: "chain", 0, "skipped (cap used up)")
+                                continue@loop
+                            }
+                            val torBridges = if (engine?.id == TorSidecar.ID) runCatching { TorSidecar.bridges(pk.profile) }.getOrDefault(emptyList()) else emptyList()
+                            if (torBridges.isNotEmpty() && torBridges.all { it.startsWith("webtunnel ") } &&
+                                bridgeBook.usable(currentIdentity, torBridges).isEmpty()) {
+                                planner.notTested(pk.profile.id, "every WebTunnel bridge of it failed on this network in the last 6 h")
+                                summary.add("tor", 0, "skipped (WebTunnel bridges dropped here)")
+                                continue@loop
+                            }
+                            val began = System.currentTimeMillis()
+                            val watched = if (caps.constrained) watchFor(engine?.id, began, torBridges) else null
+                            var aborted: String? = null
+                            val r = try {
+                                withTimeoutOrNull(windowMs) {
+                                    abortable({ watched?.abortReason?.invoke(System.currentTimeMillis())?.also { aborted = it } }) {
+                                        engineWindow { EngineProbe.testProfile(context, pk.profile, ENGINE_TIMEOUT_SEC, requests = 2, mode = mode, keep = true) }
+                                    }
+                                }
+                            } finally { watched?.close() }
+                            val spent = System.currentTimeMillis() - began
+                            caps.charge(engine?.id, spent)
+                            watched?.dropped?.invoke().orEmpty().forEach { host ->
+                                bridgeBook.drop(currentIdentity, host)
+                                XrayLogManager.w("SMART", "Recovery tor: WebTunnel bridge ${com.example.core.SecretRedactor.redact(host)} dropped " +
+                                    "for ${com.example.vpn.smart.RecoveryEngineCaps.BRIDGE_MEMORY_MS / 3_600_000} h on this network " +
+                                    "(reset or unrecognized reply ${com.example.vpn.smart.RecoveryEngineCaps.BRIDGE_FAILURES_TO_DROP}+ times)")
+                            }
+                            val capped = windowMs < normalMs
+                            val result = r ?: EngineProbe.Result(engine?.id ?: "chain", ConnectionStage.NOT_TESTED, null,
+                                when {
+                                    aborted != null -> "stopped early: $aborted"
+                                    capped -> "stopped at its ${windowMs / 1000}s cap on this network"
+                                    else -> "engine startup or traffic verification timed out after ${windowMs / 1000}s"
+                                }, false)
+                            summary.add(engine?.id ?: "chain", spent, when {
+                                result.outcomes.lastOrNull() == true -> "carried traffic"
+                                aborted != null -> "aborted ($aborted)"
+                                r == null && capped -> "capped"
+                                r == null -> "timed out"
+                                else -> "failed (${result.failure ?: result.stage.title})"
+                            })
+                            recordEngine(pk, result)
+                        } else {
+                            val began = System.currentTimeMillis()
+                            when (val o = com.example.vpn.Abandonable.run { RealDelayProbe.measure(listOf(pk.profile), budget.probeTimeoutSec).first() }) {
+                                is RealDelayProbe.Outcome.Delay -> planner.record(pk.profile.id, listOf(true), o.latencyMs, System.currentTimeMillis())
+                                    .also { summary.add("saved config", System.currentTimeMillis() - began, "carried traffic") }
+                                is RealDelayProbe.Outcome.Failed -> planner.record(pk.profile.id, listOf(false), null, System.currentTimeMillis(), o.reason)
+                                    .also { summary.add("saved config", System.currentTimeMillis() - began, "failed") }
+                                is RealDelayProbe.Outcome.NotRun -> planner.notTested(pk.profile.id, o.reason)
+                            }
                         }
                     }
                 }
             }
             if (com.example.vpn.smart.NetworkIdentity.current(context) != currentIdentity) {
                 com.example.vpn.sidecar.EngineHandoff.clear()
-                return FastRecoveryOutcome(null, 0, false, "network changed during recovery; results discarded")
+                summaryOutcome = "network changed; results discarded"
+                return FastRecoveryOutcome(null, 0, false, "network changed during recovery; results discarded", irancellWarpTried)
             }
             val tested = planner.tracks().count { it.outcomes.isNotEmpty() }
             val best = planner.verifiedFamilies().firstOrNull() ?: planner.best()
             if (best != null) {
                 val pk = byId.getValue(best.candidate.id)
                 XrayLogManager.i("LAB", "Connect recovery: ${pk.profile.name} (${pk.family.title}) carried real traffic after $tested test(s).")
+                summaryOutcome = "connected via ${engineIds[pk.profile.id] ?: "saved config"}"
                 return FastRecoveryOutcome(FastRecoveryResult(pk.profile, pk.family, best.bestLatency, best.status,
-                    Sidecars.isEngineProfile(pk.profile), tested), tested, false, "")
+                    Sidecars.isEngineProfile(pk.profile), tested), tested, false, "", irancellWarpTried)
             }
             val available = families.map { it.second }.filter { it !in plan.skip }.toSet()
             val exhausted = EmergencyRecovery.conclude(cap, planner.tracks(), available) != null
@@ -795,10 +896,56 @@ class LabController(
                 exhausted -> "every available family was tested and none carried traffic"
                 else -> "no candidate carried traffic ($tested tested)"
             }
-            return FastRecoveryOutcome(null, tested, exhausted, why)
+            summaryOutcome = "no path ($why)"
+            return FastRecoveryOutcome(null, tested, exhausted, why, irancellWarpTried)
         } finally {
+            // One line for the whole escalation: each engine, the time it took, and what came of it.
+            if (!summary.isEmpty() || !rememberedOnly) XrayLogManager.i("SMART", summary.line(summaryOutcome))
             testLock.unlock()
         }
+    }
+
+    /** Live watch of one capped engine test, fed by [com.example.vpn.sidecar.EngineSignals]. */
+    private class Watched(
+        val abortReason: (Long) -> String?,
+        val dropped: () -> Set<String>,
+        private val subscription: AutoCloseable
+    ) : AutoCloseable {
+        override fun close() { runCatching { subscription.close() } }
+    }
+
+    /** ByeDPI: consecutive receive timeouts. Tor: bootstrap progress and WebTunnel bridge failures. Null otherwise. */
+    private fun watchFor(engineId: String?, startedAt: Long, bridges: List<String>): Watched? = when (engineId) {
+        com.example.vpn.sidecar.ByedpiSidecar.ID -> {
+            val w = com.example.vpn.smart.RecoveryEngineCaps.ByedpiWatch()
+            val sub = com.example.vpn.sidecar.EngineSignals.subscribe { source, line ->
+                if (source == com.example.vpn.sidecar.ByedpiSidecar.ID) w.saw(line) else Unit
+            }
+            Watched({ w.abortReason() }, { emptySet() }, sub)
+        }
+        TorSidecar.ID -> {
+            val w = com.example.vpn.smart.RecoveryEngineCaps.TorWatch(startedAt)
+            bridges.forEach(w::bridge)
+            val sub = com.example.vpn.sidecar.EngineSignals.subscribe { source, line ->
+                when (source) {
+                    "tor-bridge" -> w.bridge(line)
+                    "tor", "lyrebird" -> w.saw(line, System.currentTimeMillis())
+                    else -> Unit
+                }
+            }
+            Watched({ now -> w.abortReason(now) }, { w.dropped() }, sub)
+        }
+        else -> null
+    }
+
+    /** Runs [block], cancelling it (and its engine, through runInterruptible) as soon as [abort] gives a reason. */
+    private suspend fun <T> abortable(abort: () -> String?, block: suspend () -> T): T? = coroutineScope {
+        val work = async { block() }
+        while (!work.isCompleted) {
+            if (abort() != null) { work.cancel(); return@coroutineScope null }
+            delay(250)
+        }
+        work.await()
     }
 
     /**

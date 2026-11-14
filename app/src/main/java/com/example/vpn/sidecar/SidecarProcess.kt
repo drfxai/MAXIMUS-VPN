@@ -29,6 +29,7 @@ class SidecarProcess(
             process.inputStream.bufferedReader().useLines { lines ->
                 // Engines can print server addresses and keys; only redacted, bounded lines reach the log.
                 lines.forEachIndexed { index, line ->
+                    EngineSignals.publish(name, line)
                     reportApiTlsEvent(line)
                     if (name == AetherSidecar.ID) aetherStage(line)?.let { stage ->
                         if (startupStage != stage) {

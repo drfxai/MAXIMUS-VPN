@@ -1342,7 +1342,8 @@ class RayVpnService : VpnService() {
                     withTimeoutOrNull(FAST_RECOVERY_MS + com.example.vpn.smart.RecoveryAttemptPolicy.TOR_WINDOW_MS + 10_000L) {
                         com.example.RayApplication.instance.lab.fastRecovery(skipRefs + exclude + requestedProfile.id + userProfile.id, deadline,
                             engineWindow = { test -> engineWindow(test) }, mode = settings.operationalMode,
-                            resolveForRecovery = { p -> if (isLiteralIp(p.address)) p else resolveEndpoint(p) }) { step -> showForegroundNotification(step) }
+                            resolveForRecovery = { p -> if (isLiteralIp(p.address)) p else resolveEndpoint(p) },
+                            heldBackAether = deferredAether) { step -> showForegroundNotification(step) }
                     }
                 }.onFailure {
                     if (it is kotlinx.coroutines.CancellationException) throw it
@@ -1371,6 +1372,8 @@ class RayVpnService : VpnService() {
                 } else {
                     recoveryExhausted = outcome?.exhausted == true
                     XrayLogManager.w("SMART", "Recovery found no path: ${outcome.why}.")
+                    // Irancell, cf=0: the held-back Aether already had its one capped WARP attempt before Tor.
+                    if (outcome?.irancellWarpTried == true) deferredAether = null
                 }
             }
 
