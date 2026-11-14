@@ -49,6 +49,28 @@ object BuiltinMethodMemory {
         write(failedKey(scope), all.entries.joinToString(";") { "${it.key}=${it.value}" }.ifEmpty { null })
     }
 
+    /**
+     * Every automatic method failed here and WireGuard's handshake passed without data: the network lets WARP
+     * handshakes through and drops the data (the Irancell pattern). Kept for [BLOCKED_TTL_MS], far longer than
+     * the per-method [FAILED_TTL_MS], so the next connect hours later spends one quick recheck, not five minutes.
+     * Cleared as soon as any method carries HTTPS here.
+     */
+    const val BLOCKED_TTL_MS = 6 * 60 * 60 * 1000L
+
+    private fun blockedKey(scope: String) = "$scope#warpBlocked"
+
+    fun warpDataBlocked(scope: String?, now: Long = System.currentTimeMillis()): Boolean {
+        if (scope == null) return false
+        val at = read(blockedKey(scope))?.toLongOrNull() ?: return false
+        return now - at in 0 until BLOCKED_TTL_MS
+    }
+
+    fun recordWarpDataBlocked(scope: String?, now: Long = System.currentTimeMillis()) {
+        if (scope != null) write(blockedKey(scope), now.toString())
+    }
+
+    fun clearWarpDataBlocked(scope: String?) { if (scope != null) write(blockedKey(scope), null) }
+
     private fun parseFailed(text: String?): Map<String, Long> = text.orEmpty().split(';').mapNotNull { part ->
         val i = part.indexOf('=')
         if (i <= 0) null else part.substring(0, i) to (part.substring(i + 1).toLongOrNull() ?: return@mapNotNull null)

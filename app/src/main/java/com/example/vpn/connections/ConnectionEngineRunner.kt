@@ -34,8 +34,9 @@ object ConnectionEngineRunner {
      * whole 5-6 minute chain, so Smart Connect / the power-button fallback reaches Psiphon, Tor or saved
      * servers in about a minute.
      */
-    fun quickRecheckOnly(methods: List<String>, preferred: String?, recentlyFailed: Set<String>): Boolean =
-        preferred == null && methods.isNotEmpty() && methods.all { it in recentlyFailed }
+    fun quickRecheckOnly(methods: List<String>, preferred: String?, recentlyFailed: Set<String>,
+                         warpDataBlocked: Boolean = false): Boolean =
+        preferred == null && methods.isNotEmpty() && (warpDataBlocked || methods.all { it in recentlyFailed })
 
     /**
      * Readiness windows for automatic Aether carriers. Every attempt on the same link gets the same window:
@@ -113,6 +114,26 @@ object ConnectionEngineRunner {
             .put("rescan", true).put(NOIZE_FOLLOW_UP, true).toString())
 
     internal const val NOIZE_FOLLOW_UP = "noizeFollowUp"
+
+    /** Method names of WARP carried through a saved server verified on this network (see [relayed]). */
+    const val WIREGUARD_RELAY = "wireguard-relay"
+    const val H2_RELAY = "h2-relay"
+    internal const val RELAY_FOLLOW_UP = "relayFollowUp"
+
+    /**
+     * WARP through a saved server that carried verified traffic on this same network (Aether's exit-node
+     * upstream: WireGuard's UDP and MASQUE's TLS leave the phone inside that server's own protocol, e.g. VLESS
+     * REALITY). On a carrier that drops WARP data after the handshake (Irancell) the censor never sees WARP,
+     * and the exit is still Cloudflare's. Only for automatic carriers, when the user picked no exit node of
+     * their own and no Tor/Psiphon relay mode.
+     */
+    fun relayEligible(engineId: String, automatic: Boolean, options: AetherSettings, relayExitNode: String?): Boolean =
+        engineId == AetherSidecar.ID && automatic && !relayExitNode.isNullOrBlank() && options.exitNode.isBlank() &&
+            options.tor == "off" && options.psiphon == "off"
+
+    fun relayed(candidate: VlessProfile, carrier: String, exitNode: String): VlessProfile = candidate.copy(extraSettings =
+        org.json.JSONObject(candidate.extraSettings).put("carrier", carrier).put("exitNode", exitNode)
+            .put(RELAY_FOLLOW_UP, true).apply { remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP); remove("rescan") }.toString())
 
     /** Method name of the reduced-MTU WireGuard retry, recorded so a verified result is reused next time. */
     const val WIREGUARD_MTU = "wireguard-mtu"
@@ -201,6 +222,8 @@ object ConnectionEngineRunner {
         checkDns: Boolean = false,
         ipv4Only: Boolean = false,
         preferWireGuard: Boolean = false,
+        /** Profile id of a saved server verified on this network, for WARP-through-relay (see [relayed]). */
+        relayExitNode: String? = null,
         onProgress: (String) -> Unit = {},
         cancelled: () -> Boolean = { false }
     ): Started {
@@ -233,7 +256,8 @@ object ConnectionEngineRunner {
         }
         fun method(candidate: VlessProfile) = ProfileExtras.read(candidate).let {
             if (engine.id == AetherSidecar.ID) {
-                if (it.optBoolean(MTU_FOLLOW_UP)) WIREGUARD_MTU
+                if (it.optBoolean(RELAY_FOLLOW_UP)) it.optString("carrier") + "-relay"
+                else if (it.optBoolean(MTU_FOLLOW_UP)) WIREGUARD_MTU
                 else if (it.optBoolean(NOIZE_FOLLOW_UP)) WIREGUARD_NOIZE else it.optString("carrier")
             } else it.optString("variant")
         }
@@ -249,7 +273,10 @@ object ConnectionEngineRunner {
             baseChoices.any { method(it) == "wireguard" } &&
             AetherSettings.read(ProfileExtras.read(profile)).mtu.isBlank())
             baseChoices.first { method(it) == "wireguard" }.let(::reducedMtuWireGuard) else null
-        val followUps = listOfNotNull(noizeChoice, mtuChoice)
+        val relays = if (relayEligible(engine.id, automatic, AetherSettings.read(ProfileExtras.read(profile)), relayExitNode))
+            listOf("wireguard", "h2").filter { c -> baseChoices.any { method(it) == c } }
+                .map { c -> relayed(baseChoices.first { method(it) == c }, c, relayExitNode!!) } else emptyList()
+        val followUps = listOfNotNull(noizeChoice, mtuChoice) + relays
         val preferred = BuiltinMethodMemory.preferred(cacheScope, baseChoices.map(::method) + followUps.map(::method))
         val choices = followUps.firstOrNull { method(it) == preferred }?.let { listOf(it) + baseChoices } ?: baseChoices
         // Keep a previously HTTPS-verified method first. Without such evidence, try WG
@@ -260,17 +287,34 @@ object ConnectionEngineRunner {
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
         val failedRegistrationKinds = mutableSetOf<String>()
         val recheckOnly = engine.id == AetherSidecar.ID && automatic &&
-            quickRecheckOnly(ordered.map(::method), preferred, recentlyFailed)
-        val queue = ArrayDeque(if (recheckOnly) ordered.take(1) else ordered)
-        if (recheckOnly) ordered.drop(1).forEach {
-            record(method(it), "queue", "SKIP", "failed on this network in the last 30 min; one quick recheck of ${method(ordered.first())} only")
+            quickRecheckOnly(ordered.map(::method), preferred, recentlyFailed,
+                warpDataBlocked = BuiltinMethodMemory.warpDataBlocked(cacheScope))
+        var handshakeWithoutData = false
+        // WARP data blocked here recently: go straight through the verified saved server when there is one,
+        // otherwise one quick recheck of the first method.
+        val queue = ArrayDeque(when {
+            recheckOnly && relays.isNotEmpty() -> relays
+            recheckOnly -> ordered.take(1)
+            else -> ordered
+        })
+        var relayQueued = recheckOnly && relays.isNotEmpty() || preferred in setOf(WIREGUARD_RELAY, H2_RELAY)
+        if (recheckOnly) ordered.filter { it !in queue }.forEach {
+            record(method(it), "queue", "SKIP", if (relayQueued) "WARP data was blocked on this network recently; trying WARP through a verified saved server"
+                else "WARP data was blocked on this network recently; one quick recheck of ${method(ordered.first())} only")
         }
         val reverseRelay = engine.id == AetherSidecar.ID &&
             AetherSettings.read(ProfileExtras.read(profile)).let { it.tor == "reverse" || it.psiphon == "reverse" }
         var warpInWarpQueued = recheckOnly
         var noizeQueued = recheckOnly || preferred == WIREGUARD_NOIZE
         var mtuQueued = recheckOnly || preferred == WIREGUARD_MTU
-        while (queue.isNotEmpty()) {
+        while (true) {
+            if (queue.isEmpty()) {
+                // Every direct carrier failed: WARP through the saved server that works on this network.
+                if (relayQueued || relays.isEmpty()) break
+                relayQueued = true
+                relays.forEach { record(method(it), "queue", "START", "direct WARP carried no data here; trying WARP through a verified saved server") }
+                queue.addAll(relays)
+            }
             val candidate = queue.removeFirst()
             checkCancellation()
             val extras = ProfileExtras.read(candidate)
@@ -335,16 +379,20 @@ object ConnectionEngineRunner {
                     if (scope() == cacheScope) {
                         BuiltinMethodMemory.record(cacheScope, name)
                         BuiltinMethodMemory.clearFailure(cacheScope, name)
+                        BuiltinMethodMemory.clearWarpDataBlocked(cacheScope)
                     }
                     running = null
                     return Started(process, launch, candidate, result)
                 }
                 lastCheck = result.takeUnless { it.traffic }
+                if (carrier == "wireguard" || carrier == "wiw") handshakeWithoutData = true
                 val reason = result.failure ?: "engine stopped during check"
                 record(name, "https", "FAIL", reason)
                 attempts += "$name: $reason"
                 BuiltinMethodMemory.recordFailure(cacheScope, name)
                 if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
+                // A relayed carrier has no direct follow-ups of its own.
+                if (extras.optBoolean(RELAY_FOLLOW_UP)) continue
                 // Before WARP-in-WARP: the same WireGuard identity with the strongest junk-packet profile and a
                 // fresh endpoint/port scan. It costs one more WireGuard window and is the cheaper fix when the
                 // censor classifies the flow from its first packets.
@@ -393,6 +441,8 @@ object ConnectionEngineRunner {
             }
         }
         checkCancellation()
+        if (engine.id == AetherSidecar.ID && automatic && handshakeWithoutData)
+            BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
         if (engine.id == AetherSidecar.ID && preferWireGuard) attempts += CLOUDFLARE_FILTERED_HINT
         throw NoVerifiedPath(attempts, lastCheck)
     }

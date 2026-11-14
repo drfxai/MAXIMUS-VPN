@@ -1845,8 +1845,16 @@ class RayVpnService : VpnService() {
             val hints = com.example.vpn.connections.ConnectionEngineRunner.linkHints(measured)
             val ipv4Only = hints.ipv4Only
             val preferWireGuard = hints.cloudflareFiltered
+            // A saved server that carried verified traffic on this same network: Aether can carry WARP through it
+            // when the carrier drops WARP's own data (ConnectionEngineRunner.relayed).
+            val relayExitNode = if (engine.id == com.example.vpn.sidecar.AetherSidecar.ID) runCatching {
+                networkMemory.routes.forNetwork(com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService))
+                    .firstOrNull { r -> r.variantKey == null && r.recoveryKey == null &&
+                        com.example.vpn.sidecar.BuiltinExitNode.loadProfile?.invoke(r.profileId)
+                            ?.let(com.example.vpn.sidecar.BuiltinExitNode::eligible) == true }?.profileId
+            }.getOrNull() else null
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
-                ipv4Only = ipv4Only, preferWireGuard = preferWireGuard,
+                ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,
                 cancelled = { connectionOwner?.isActive == false }) else null
             val launch = started?.launch ?: engine.prepare(profile, settings, context)
             if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
