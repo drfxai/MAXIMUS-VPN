@@ -1492,7 +1492,14 @@ class RayVpnService : VpnService() {
             }
 
             // 4. Diagnostic step 4 & 5: Configure and establish Android VpnService TUN interface
-            val configuredMtu = settings.mtu.coerceIn(1280, 1500)
+            // The default on mobile data is 1400 (1280 for WireGuard/MASQUE-carried paths), see TunMtuDefaults;
+            // Wi-Fi and Ethernet keep the setting. The MTU trial below works from this base.
+            val carriesWireGuard = profile.protocolType == com.example.data.model.ProtocolType.WIREGUARD ||
+                com.example.vpn.sidecar.Sidecars.forProfile(profile)?.id in setOf(
+                    com.example.vpn.sidecar.AetherSidecar.ID, com.example.vpn.sidecar.MasqueSidecar.ID)
+            val configuredMtu = com.example.vpn.smart.TunMtuDefaults.base(settings.mtu, routeNetwork, carriesWireGuard)
+            if (configuredMtu != settings.mtu.coerceIn(1280, 1500)) XrayLogManager.i("VPN", "Tunnel MTU $configuredMtu on mobile data " +
+                "instead of ${settings.mtu}" + if (carriesWireGuard) " (WireGuard/MASQUE path)." else ".")
             // A bulk transfer stalled on this network last time while small requests passed: this connect
             // tests the lower MTU (TunMtuTrial); its own bulk check decides whether it stays.
             val safeMtu = networkMemory.mtu.mtuFor(routeNetwork, configuredMtu)
@@ -2579,6 +2586,10 @@ class RayVpnService : VpnService() {
         val dialer = endpoint?.let { com.example.vpn.verify.RouteDialers.engine(it) } ?: com.example.vpn.verify.RouteDialers.vpn(this)
         val path = if (endpoint != null) com.example.vpn.verify.ProbePath.ENGINE_PROXY else com.example.vpn.verify.ProbePath.TUN
         val measuredOn = tunMtu?.first
+        // The server under test, as the diagnostics report may show it (host or address prefix only).
+        val serverLabel = com.example.vpn.verify.serverPrefix(state.activeProfile?.address)
+        // A Cloudflare Worker exit cannot reach speed.cloudflare.com: the graded upload skips it there.
+        val workerExit = state.activeProfile?.let { com.example.vpn.verify.cloudflareWorkerExit(it.address, it.host, it.sni) } == true
         // FreezeBook is keyed like the rest of Smart Connect's memory: the carrier ("cell:43235") or Wi-Fi.
         val freezeNetwork = com.example.vpn.smart.NetworkKey.current(this)
         val registry = com.example.vpn.diagnostics.events.Tests.registry
@@ -2591,7 +2602,8 @@ class RayVpnService : VpnService() {
             val evidence = runCatching {
                 val step = if (slowTunnel()) SLOW_VERIFY_STEP_MS.toInt()
                     else com.example.vpn.verify.TrafficCheck.stepTimeoutFor(requestMs)
-                com.example.vpn.verify.TrafficCheck(dialer, stepTimeoutMs = step).both(attemptId, generation, path)
+                com.example.vpn.verify.TrafficCheck(dialer, stepTimeoutMs = step, cloudflareWorkerExit = workerExit)
+                    .both(attemptId, generation, path)
             }
                 .onFailure {
                     if (it is CancellationException) {
@@ -2607,14 +2619,14 @@ class RayVpnService : VpnService() {
                 registry.cancel(testId, "stale connection attempt or network")
                 return@launch
             }
-            registry.finish(testId, evidence.bidirectional, "${path.name}: ${evidence.describe()}",
+            registry.finish(testId, evidence.bidirectional, "${path.name}: ${evidence.diagLine(serverLabel)}",
                 if (evidence.bidirectional) null else com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED)
             mutateState { if (evidence.appliesTo(it)) it.copy(trafficEvidence = evidence) else it }
             if (path == com.example.vpn.verify.ProbePath.TUN &&
                 evidence.bidirectional && _vpnState.value.attemptId == attemptId) {
                 activeRoute?.let { (net, id) -> networkMemory.routes.markBidirectional(net, id) }
             }
-            XrayLogManager.i("VPN", "Upload/download check: ${evidence.describe()}.")
+            XrayLogManager.i("VPN", "Upload/download check: ${evidence.diagLine(serverLabel)}.")
             if (evidence.fixedSizeFreeze) {
                 XrayLogManager.w("VPN", "The download froze after about 16 KB: this is the censor's fixed-size freeze on this " +
                     "server's address, not an MTU problem. Another server, XHTTP or TLS fragmentation avoids it.")
@@ -2654,6 +2666,8 @@ class RayVpnService : VpnService() {
             com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
                 "result" to if (evidence.bidirectional) "verified" else if (evidence.bulkStalled) "stalled" else "partial",
                 "path" to path.name,
+                "server" to (serverLabel ?: "unknown"),
+                "stall.bytes" to (evidence.stallBytes?.toString() ?: "none"),
                 "detail" to evidence.describe()
             ))
 
@@ -2668,15 +2682,16 @@ class RayVpnService : VpnService() {
                     val step = if (slowTunnel()) SLOW_VERIFY_STEP_MS.toInt()
                         else com.example.vpn.verify.TrafficCheck.stepTimeoutFor(requestMs)
                     val tunEvidence = com.example.vpn.verify.TrafficCheck(
-                        com.example.vpn.verify.RouteDialers.vpn(this@RayVpnService), stepTimeoutMs = step
+                        com.example.vpn.verify.RouteDialers.vpn(this@RayVpnService), stepTimeoutMs = step,
+                        cloudflareWorkerExit = workerExit
                     ).both(attemptId, generation, com.example.vpn.verify.ProbePath.TUN)
                     if (!isActive || !tunEvidence.appliesTo(_vpnState.value)) {
                         registry.cancel(tunId, "stale connection attempt or network")
                         return@launch
                     }
-                    registry.finish(tunId, tunEvidence.bidirectional, "TUN: ${tunEvidence.describe()}",
+                    registry.finish(tunId, tunEvidence.bidirectional, "TUN: ${tunEvidence.diagLine(serverLabel)}",
                         if (tunEvidence.bidirectional) null else com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED)
-                    XrayLogManager.i("VPN", "Android TUN upload/download check: ${tunEvidence.describe()}")
+                    XrayLogManager.i("VPN", "Android TUN upload/download check: ${tunEvidence.diagLine(serverLabel)}")
                     // Prefer device-level evidence over a PASS only at the engine port.
                     mutateState { if (tunEvidence.appliesTo(it)) it.copy(trafficEvidence = tunEvidence) else it }
                     if (tunEvidence.bidirectional) activeRoute?.let { (net, id) ->
@@ -2685,7 +2700,8 @@ class RayVpnService : VpnService() {
                     onTransferChecked(attemptId, freezeNetwork, tunEvidence)
                     com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
                         "result" to if (tunEvidence.bidirectional) "verified" else if (tunEvidence.bulkStalled) "stalled" else "partial",
-                        "path" to "TUN", "detail" to tunEvidence.describe()
+                        "path" to "TUN", "server" to (serverLabel ?: "unknown"),
+                        "stall.bytes" to (tunEvidence.stallBytes?.toString() ?: "none"), "detail" to tunEvidence.describe()
                     ))
                 } catch (e: CancellationException) {
                     registry.cancel(tunId, "connection check cancelled")
