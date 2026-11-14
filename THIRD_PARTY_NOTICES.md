@@ -546,7 +546,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 ## Matrix Transport (Aether-derived, separate executable)
 
 - Upstream source: https://github.com/Floxu1/UAC-SNI-Spoofer-Android/tree/b784ebd149336f4463906509738d354dd9850e23/core/aether
-- Upstream Aether crate version: 1.6.0, AGPL-3.0-only. Cloudflare quiche components retain their upstream licenses.
+- Upstream Aether crate version: 1.6.0, AGPL-3.0-only. This is the separate Matrix Transport executable; the WARP engine (Aether 2.4.0) is listed under Galaxy Connections runtimes below. Cloudflare quiche components retain their upstream licenses.
 - Changes: mandatory MASQUE SPKI authentication, authenticated direct account registration, separate product name and native policy self-test.
 - Reproduction and complete corresponding source: `scripts/engines/matrix-transport.sh`, `scripts/transport/harden-source.py`, and `MatrixTransport-source.tar.gz` accompanying releases that contain this executable.
 - Upstream copyright, license and trademark notices are preserved in the source archive. No affiliation or endorsement is implied. No upstream logo or branding is used.
@@ -626,7 +626,7 @@ The application's license does not restrict recipients' rights in this separate 
 
 ## Galaxy Connections runtimes
 
-* Aether, patterniha/Aether (the PattNG fork) revision `d58f9d568083129ce2c767c85054021eb3ee6a38`, AGPL-3.0-only. Modified for authenticated account HTTPS, mandatory MASQUE gateway SPKI pins and per-session SOCKS5 authentication. Complete corresponding source with locked vendored dependencies is distributed as `Aether-source.tar.gz` beside each APK. Build and patch: scripts/engines/aether.sh and scripts/connections/harden-aether.py.
+* Aether 2.4.0, patterniha/Aether (the PattNG fork) revision `d58f9d568083129ce2c767c85054021eb3ee6a38`, which is the commit tagged `v2.4.0` in the upstream CluvexStudio/Aether (https://github.com/CluvexStudio/Aether/releases/tag/v2.4.0), AGPL-3.0-only. Modified for authenticated account HTTPS, mandatory MASQUE gateway SPKI pins and per-session SOCKS5 authentication. Complete corresponding source with locked vendored dependencies is distributed as `Aether-source.tar.gz` beside each APK. Build and patch: scripts/engines/aether.sh and scripts/connections/harden-aether.py.
 * Direct Serverless uses the separate patterniha/Xray-core executable, revision `f9903959b9ae47538f5c7100f6416fb9fbcd2317`, MPL-2.0, distributed with `Serverless-source.tar.gz`. Its profiles originate in patterniha/Serverless-for-Iran revision `df113f5b0fafc5bbe552e903f43249110510bc34` (GPL-3.0), with the original license in assets/serverless/LICENSE.txt. The app adapts loopback authentication, DNS and geo-file dependent classifications; fragmentation and OOB instructions are retained.
 
 * RegionHop 1.27.0, freeb5d/regionhop revision `d5798d80f77fa6f40406ba30886d810c3c462147`, MIT. The optional VPS installer downloads checksum-pinned upstream components. The upstream Psiphon and Xray binaries retain their respective upstream licenses; release and source provenance remain available from that upstream release. No user deployment config or API token is bundled.

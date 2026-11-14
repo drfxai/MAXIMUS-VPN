@@ -111,7 +111,9 @@ object AetherSidecar : SidecarEngine {
                 override val isAlive get() = child.isAlive && helpers.all { it.running.isAlive }
                 override val startupFailure get() = child.startupFailure
                 override val transportGeneration get() = child.transportGeneration
-                override fun awaitReady(timeoutMs: Long) = child.awaitReadyWhile(timeoutMs) { helpers.all { it.running.isAlive } }
+                override fun awaitReady(timeoutMs: Long) = child.awaitReadyWhile(timeoutMs, { helpers.all { it.running.isAlive } })
+                override fun awaitReadyUnless(timeoutMs: Long, giveUp: () -> Boolean) =
+                    child.awaitReadyWhile(timeoutMs, { helpers.all { it.running.isAlive } }, giveUp)
                 override fun stop() { try { child.stop() } finally { helpers.forEach { it.running.stop() } } }
             }
         } catch (e: Throwable) {
