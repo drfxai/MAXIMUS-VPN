@@ -10,8 +10,16 @@ import kotlinx.coroutines.CancellationException
 /** Serial alternatives, each proven by HTTPS data; never crosses direct/tunnel mode boundaries. */
 object ConnectionEngineRunner {
     data class Started(val running: RunningEngine, val launch: SidecarLaunch, val profile: VlessProfile,
-        val check: AccessProbe.Result)
-    class NoVerifiedPath(attempts: List<String>, val lastCheck: AccessProbe.Result?) :
+        val check: AccessProbe.Result,
+        /** The context the winning engine runs in when it is not the caller's (a raced carrier on its own port). */
+        val context: SidecarContext? = null)
+    class NoVerifiedPath(attempts: List<String>, val lastCheck: AccessProbe.Result?,
+        /**
+         * WARP data is blocked here and no saved server was verified on this network yet to carry it: the caller
+         * should fall back to saved servers and, once one is verified and connected, retry WARP through it in the
+         * background ([AetherBackgroundRelay]).
+         */
+        val relayDeferred: Boolean = false) :
         IllegalStateException(attempts.joinToString(" · "))
 
     /**
@@ -160,6 +168,38 @@ object ConnectionEngineRunner {
     fun warpDataBlockedFastPath(engineId: String, automatic: Boolean, carrier: String, irancell: Boolean,
                                 cloudflareFiltered: Boolean, reverseRelay: Boolean): Boolean =
         engineId == AetherSidecar.ID && automatic && carrier == "wireguard" && (irancell || cloudflareFiltered) && !reverseRelay
+
+    /**
+     * Irancell: MASQUE H3 and WireGuard start at the same time instead of H3 spending its whole window first
+     * ([FirstVerifiedRace]: only HTTPS-verified data wins, the loser is stopped, one deadline inside the ladder
+     * budget). Only when both identities are already stored (two engines must never register at once), never for
+     * a recheck, a relay-only run, a reverse relay, or a second time.
+     */
+    fun raceEligible(engineId: String, automatic: Boolean, irancell: Boolean, next: String, queued: Collection<String>,
+                     recheckOnly: Boolean, relayOnly: Boolean, reverseRelay: Boolean, identitiesStored: Boolean,
+                     alreadyRaced: Boolean): Boolean =
+        engineId == AetherSidecar.ID && automatic && irancell && next == "h3" && "wireguard" in queued &&
+            !recheckOnly && !relayOnly && !reverseRelay && identitiesStored && !alreadyRaced
+
+    /** HTTPS check plus the 6 s recheck must still fit after a raced carrier becomes ready. */
+    const val RACE_CHECK_RESERVE_MS = 20_000L
+    /** Race deadline when no metered ladder budget applies (the engine's own readiness window plus the check). */
+    const val RACE_DEFAULT_DEADLINE_MS = 180_000L + RACE_CHECK_RESERVE_MS
+
+    /**
+     * WireGuard handshook without data (WARP data blocked here) and there is no saved server verified on this
+     * network to carry WARP: stop Aether now and let the session fall back to saved servers, with WARP through the
+     * first one verified retried in the background afterwards. Only when a relay would otherwise be allowed (no
+     * exit node, Tor or Psiphon mode of the user's own).
+     */
+    fun deferRelayToSavedServer(engineId: String, automatic: Boolean, options: AetherSettings, relayExitNode: String?,
+                                warpDataBlocked: Boolean): Boolean =
+        warpDataBlocked && relayExitNode.isNullOrBlank() && relayEligible(engineId, automatic, options, "saved-server")
+
+    /** One raced carrier's result; [process] is set (still running) only when its HTTPS was verified. */
+    private class RaceLeg(val name: String, val candidate: VlessProfile, val context: SidecarContext,
+                          val process: RunningEngine?, val launch: SidecarLaunch?, val check: AccessProbe.Result?,
+                          val ready: Boolean, val reason: String?)
 
     /** The reason recorded for an exception while starting a carrier: fixed, non-secret strings only. */
     internal fun startFailureReason(engineId: String, e: Throwable, stage: String): String {
@@ -365,6 +405,8 @@ object ConnectionEngineRunner {
         relayExitRoute: BuiltinExitNode.Route = BuiltinExitNode.Route(),
         /** The physical link is metered (mobile data): the whole automatic ladder gets [HEAVY_LADDER_BUDGET_MS]. */
         metered: Boolean = false,
+        /** Only WARP through [relayExitNode] (wireguard-relay, then h2-relay): the background retry. */
+        relayOnly: Boolean = false,
         onProgress: (String) -> Unit = {},
         cancelled: () -> Boolean = { false }
     ): Started {
@@ -434,9 +476,9 @@ object ConnectionEngineRunner {
         // ordinary Cloudflare TLS is unreachable but UDP is answering.
         val recentlyFailed = BuiltinMethodMemory.recentlyFailed(cacheScope)
         val rank = order(choices.map(::method), preferred, preferWireGuard, recentlyFailed, irancell = onIrancell, mci = onMci)
-        if (onIrancell) record("ladder", "queue", "START", "Irancell: MASQUE H3 over IPv4 first, then WireGuard, then H2, then H2 with the ClientHello split at the SNI")
-        if (onMci) record("ladder", "queue", "START", "Hamrah-e-Aval: MASQUE H2 with the full ClientHello first, then H2 with the ClientHello split at the SNI over IPv4, then H3, then WireGuard")
-        if (cleanChoices.isNotEmpty()) record(CLEAN_H2, "queue", "START", "${cleanPeers.size} clean H2 gateway(s) remembered on this network; trying " +
+        if (onIrancell && !relayOnly) record("ladder", "queue", "START", "Irancell: MASQUE H3 over IPv4 raced with WireGuard, then H2, then H2 with the ClientHello split at the SNI")
+        if (onMci && !relayOnly) record("ladder", "queue", "START", "Hamrah-e-Aval: MASQUE H2 with the full ClientHello first, then H2 with the ClientHello split at the SNI over IPv4, then H3, then WireGuard")
+        if (cleanChoices.isNotEmpty() && !relayOnly) record(CLEAN_H2, "queue", "START", "${cleanPeers.size} clean H2 gateway(s) remembered on this network; trying " +
             cleanChoices.joinToString(", ") { CleanH2PeerMemory.masked(ProfileExtras.read(it).optString(AetherSidecar.CLEAN_H2_PEER)) } +
             " before any scan" + (cleanPeers.first().rttMs?.let { " (prewarm: $it ms)" }.orEmpty()))
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
@@ -456,13 +498,15 @@ object ConnectionEngineRunner {
         }
         // WARP data blocked here recently: go straight through the verified saved server when there is one,
         // otherwise one quick recheck of the first method.
+        if (relayOnly && relays.isEmpty()) throw NoVerifiedPath(listOf("relay: no saved server to carry WARP through"), null)
         val queue = ArrayDeque(when {
+            relayOnly -> relays
             recheckOnly && relays.isNotEmpty() -> relays
             recheckOnly -> ordered.take(1)
             else -> ordered
         })
-        var relayQueued = recheckOnly && relays.isNotEmpty() || preferred in setOf(WIREGUARD_RELAY, H2_RELAY)
-        if (recheckOnly) ordered.filter { it !in queue }.forEach {
+        var relayQueued = relayOnly || recheckOnly && relays.isNotEmpty() || preferred in setOf(WIREGUARD_RELAY, H2_RELAY)
+        if (recheckOnly && !relayOnly) ordered.filter { it !in queue }.forEach {
             record(method(it), "queue", "SKIP", if (relayQueued) "WARP data was blocked on this network recently; trying WARP through a verified saved server"
                 else "WARP data was blocked on this network recently; one quick recheck of ${method(ordered.first())} only")
         }
@@ -480,6 +524,201 @@ object ConnectionEngineRunner {
             relayQueued = true
             relays.forEach { record(method(it), "queue", "START", reason) }
             queue.addAll(relays)
+        }
+        val options = AetherSettings.read(ProfileExtras.read(profile))
+        var deferRelay = false
+        var raced = false
+        /** HTTPS through the engine's SOCKS port, rechecked after 6 s for Aether on the same transport generation. */
+        fun verify(name: String, process: RunningEngine, launch: SidecarLaunch, ctx: SidecarContext, check: () -> Unit): AccessProbe.Result {
+            val endpoint = Socks5.Endpoint("127.0.0.1", ctx.socksPort,
+                ctx.socksUser.takeIf { launch.socksAuth }, ctx.socksPass.takeIf { launch.socksAuth })
+            val generation = process.transportGeneration
+            val first = AccessProbe.check(endpoint, checkDns, diagnoseAddress = engine.id == AetherSidecar.ID)
+            check()
+            return if (engine.id == AetherSidecar.ID && first.traffic) {
+                record(name, "https", "RECHECK", "checking that the same transport keeps carrying traffic")
+                Thread.sleep(6_000)
+                check()
+                if (process.isAlive && process.transportGeneration == generation) {
+                    val second = AccessProbe.check(endpoint, checkDns = false)
+                    if (process.transportGeneration == generation) second.copy(dns = first.dns)
+                    else first.copy(traffic = false, latencyMs = null, failure = "Aether transport restarted during traffic verification")
+                } else first.copy(traffic = false, latencyMs = null, failure = "Aether transport stopped or restarted before traffic recheck")
+            } else first
+        }
+        /** A direct carrier ran and carried no HTTPS: queue its follow-ups (or the WARP-data-blocked fast path). */
+        fun onNoData(name: String, candidate: VlessProfile, extras: org.json.JSONObject, carrier: String) {
+            // Irancell / Cloudflare-filtered: handshake without data is the WARP data block. Remember it now (the
+            // next connect goes straight to the relay) and skip the full scans that fail the same way.
+            if (!warpBlockFastPath && warpDataBlockedFastPath(engine.id, automatic, carrier, onIrancell, preferWireGuard, reverseRelay)) {
+                warpBlockFastPath = true
+                BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
+                if (relays.isEmpty() && deferRelayToSavedServer(engine.id, automatic, options, relayExitNode, warpDataBlocked = true)) {
+                    // No saved server verified here yet: stop Aether now (no MTU retry, no other carrier) so the session
+                    // reaches saved servers at once; WARP through the first one verified is retried in the background.
+                    deferRelay = true
+                    val skipped = queue.map { method(it) }
+                    queue.clear()
+                    noizeQueued = true; warpInWarpQueued = true; mtuQueued = true
+                    record("ladder", "relay", "DEFER", "WireGuard handshake passed but no data came back on this " +
+                        (if (onIrancell) "Irancell" else "Cloudflare-filtered") + " link and no saved server is verified on this network yet: " +
+                        "stopping Aether now" + (if (skipped.isNotEmpty()) " (skipping " + skipped.joinToString(", ") + ")" else "") +
+                        "; saved servers next, then WARP through the first verified one in the background")
+                    return
+                }
+                val dropped = queue.filterNot { ProfileExtras.read(it).optBoolean(RELAY_FOLLOW_UP) }
+                queue.removeAll(dropped)
+                val mtu = if (reducedMtuWireGuardFollowUp(engine.id, automatic, carrier, AetherSettings.read(extras).mtu,
+                        alreadyQueued = mtuQueued, reverseRelay = reverseRelay)) reducedMtuWireGuard(candidate) else null
+                noizeQueued = true; warpInWarpQueued = true; mtuQueued = true
+                record(name, "queue", "FAST", "WireGuard handshake passed but no data came back on this " +
+                    (if (onIrancell) "Irancell" else "Cloudflare-filtered") + " link: WARP data marked blocked here; " +
+                    (if (relays.isNotEmpty()) "trying WARP through a verified saved server" else "no verified saved server for a relay") +
+                    (if (mtu != null) ", then one MTU ${AetherSettings.MTU_RETRY} retry" else "") +
+                    (if (dropped.isNotEmpty()) "; skipping " + dropped.joinToString(", ") { method(it) } else ""))
+                queueRelays("direct WARP carried no data here; trying WARP through a verified saved server")
+                mtu?.let { queue.addLast(it) }
+                return
+            }
+            // Before WARP-in-WARP: the same WireGuard identity with the strongest junk-packet profile and a
+            // fresh endpoint/port scan. It costs one more WireGuard window and is the cheaper fix when the
+            // censor classifies the flow from its first packets.
+            // Queue order after a plain WireGuard failure: reduced MTU first (same endpoint, quick), then
+            // junk-packet obfuscation with a fresh scan, then the other carriers, WARP-in-WARP last.
+            val obfuscate = obfuscatedWireGuardFollowUp(engine.id, automatic, carrier,
+                    AetherSettings.read(extras).noize, alreadyQueued = noizeQueued, reverseRelay = reverseRelay)
+            if (obfuscate) {
+                noizeQueued = true
+                record(WIREGUARD_NOIZE, "queue", "START",
+                    "WireGuard handshake passed but no data came back; retrying with junk-packet obfuscation and a fresh endpoint scan")
+                queue.addFirst(obfuscatedWireGuard(candidate))
+            }
+            if (reducedMtuWireGuardFollowUp(engine.id, automatic, carrier, AetherSettings.read(extras).mtu,
+                    alreadyQueued = mtuQueued, reverseRelay = reverseRelay)) {
+                mtuQueued = true
+                record(WIREGUARD_MTU, "queue", "START",
+                    "WireGuard handshake passed but no data came back; retrying with MTU ${AetherSettings.MTU_RETRY}")
+                queue.addFirst(reducedMtuWireGuard(candidate))
+            }
+            if (warpInWarpFollowUp(engine.id, automatic, carrier, handshakePassed = true,
+                    alreadyQueued = warpInWarpQueued || choices.any { method(it) == "wiw" }, reverseRelay = reverseRelay)) {
+                warpInWarpQueued = true
+                record("wiw", "queue", "START", "WireGuard handshake passed but no data came back; trying WARP inside WARP")
+                queue.addLast(candidate.copy(extraSettings =
+                    org.json.JSONObject(candidate.extraSettings).put("carrier", "wiw").apply { remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP) }.toString()))
+            }
+        }
+        /**
+         * Irancell: H3 and WireGuard at once ([raceEligible]). WireGuard runs on its own loopback port and work folder;
+         * the winner is returned with its context. Without a winner both are recorded as failed and a WireGuard
+         * handshake without data takes the WARP-data-blocked path ([onNoData]) at once, stopping H3 too.
+         */
+        fun race(h3: VlessProfile, wg: VlessProfile): Started? {
+            val deadline = ladderBudget?.let { maxOf(LADDER_MIN_ATTEMPT_MS, it - (System.currentTimeMillis() - ladderStartedAt)) }
+                ?: RACE_DEFAULT_DEADLINE_MS
+            val deadlineAt = System.currentTimeMillis() + deadline
+            val wgContext = context.copy(workDir = java.io.File(context.workDir, "race-wireguard").apply { mkdirs() },
+                socksPort = Sidecars.freeLoopbackPort())
+            record("ladder", "race", "START h3+wireguard", "first HTTPS-verified carrier wins, the other is stopped; ${deadline / 1000}s deadline")
+            fun leg(lane: FirstVerifiedRace.Lane, candidate: VlessProfile, ctx: SidecarContext): RaceLeg {
+                val name = method(candidate)
+                val carrier = ProfileExtras.read(candidate).optString("carrier")
+                var running: RunningEngine? = null
+                var stage = "configuration preparation failed"
+                fun check() {
+                    if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                    if (lane.aborted || cancelled()) throw CancellationException("race ended")
+                }
+                try {
+                    record(name, "prepare", "START")
+                    val launch = engine.prepare(candidate, settings, ctx)
+                    check()
+                    stage = "engine process could not start"
+                    val process = EngineReaper.track(engine.startPrepared(candidate, settings, launch, ctx)
+                        ?: SidecarProcess.start(engine.id, launch, ctx.workDir, ctx.socksPort))
+                    running = process
+                    lane.onAbort { process.stop() }
+                    check()
+                    stage = "local proxy did not become ready"
+                    val window = readinessBudgetMs(engine.id, automatic, preferWireGuard, carrier, launch.readyTimeoutMs,
+                        failedHere = name in recentlyFailed)
+                    val wait = minOf(window, maxOf(1_000L, deadlineAt - System.currentTimeMillis() - RACE_CHECK_RESERVE_MS))
+                    if (!process.awaitReady(wait)) {
+                        check()
+                        val reason = process.startupFailure ?: stage
+                        record(name, "startup", "FAIL", reason)
+                        return RaceLeg(name, candidate, ctx, null, launch, null, ready = false, reason = reason)
+                    }
+                    check()
+                    record(name, "startup", "PASS")
+                    stage = "access check failed"
+                    val result = verify(name, process, launch, ctx, ::check)
+                    check()
+                    if (result.traffic && process.isAlive) {
+                        running = null
+                        return RaceLeg(name, candidate, ctx, process, launch, result, ready = true, reason = null)
+                    }
+                    val reason = result.failure ?: "engine stopped during check"
+                    record(name, "https", "FAIL", reason)
+                    return RaceLeg(name, candidate, ctx, null, launch, result, ready = true, reason = reason)
+                } catch (e: Exception) {
+                    if (e is InterruptedException || e is CancellationException)
+                        return RaceLeg(name, candidate, ctx, null, null, null, ready = false, reason = "stopped by the race")
+                    val reason = startFailureReason(engine.id, e, stage)
+                    record(name, "startup", "FAIL", reason)
+                    return RaceLeg(name, candidate, ctx, null, null, null, ready = false, reason = reason)
+                } finally {
+                    running?.stop()
+                }
+            }
+            val h3Name = method(h3)
+            val wgName = method(wg)
+            val outcome = FirstVerifiedRace<RaceLeg> { it.process?.stop() }.run(
+                listOf(h3Name to { lane: FirstVerifiedRace.Lane -> leg(lane, h3, context) },
+                    wgName to { lane: FirstVerifiedRace.Lane -> leg(lane, wg, wgContext) }),
+                deadlineMs = deadline,
+                verified = { it.process != null },
+                // WireGuard handshook and carried nothing on this carrier: WARP data is blocked; stop H3 as well.
+                decisive = { it.name == wgName && it.ready && it.check != null &&
+                    warpDataBlockedFastPath(engine.id, automatic, "wireguard", onIrancell, preferWireGuard, reverseRelay) },
+                cancelled = { Thread.currentThread().isInterrupted || cancelled() })
+            checkCancellation()
+            outcome.value?.let { w ->
+                record("ladder", "race", "WIN ${w.name}", outcome.unfinished.takeIf { it.isNotEmpty() }
+                    ?.let { "stopped " + it.joinToString(", ") }.orEmpty())
+                record(w.name, "https", "PASS")
+                if (scope() == cacheScope) {
+                    BuiltinMethodMemory.record(cacheScope, w.name)
+                    BuiltinMethodMemory.clearFailure(cacheScope, w.name)
+                    BuiltinMethodMemory.clearWarpDataBlocked(cacheScope)
+                }
+                return Started(w.process!!, w.launch!!, w.candidate, w.check!!, context = w.context.takeIf { it !== context })
+            }
+            record("ladder", "race", "NONE", when {
+                outcome.decidedBy != null -> "WireGuard handshake passed but no data came back" +
+                    outcome.unfinished.takeIf { it.isNotEmpty() }?.let { "; stopped " + it.joinToString(", ") }.orEmpty()
+                outcome.timedOut -> "${deadline / 1000}s deadline reached" +
+                    outcome.unfinished.takeIf { it.isNotEmpty() }?.let { "; stopped " + it.joinToString(", ") }.orEmpty()
+                else -> "neither carried HTTPS data"
+            })
+            for ((m, racedCandidate) in listOf(h3Name to h3, wgName to wg)) {
+                val r = outcome.losers[m]
+                val reason = r?.reason ?: if (outcome.decidedBy != null) "stopped: WARP data blocked on this network" else "race deadline reached"
+                attempts += "$m: $reason"
+                if (r != null || outcome.timedOut) failed(m, racedCandidate)
+                if (m == preferred) BuiltinMethodMemory.forget(cacheScope)
+                r?.check?.takeUnless { it.traffic }?.let { lastCheck = it }
+                if (r?.reason != null && AetherApiBridge.registrationFailed(r.reason)) {
+                    failedRegistrationKinds += if (AetherApiBridge.bootstrapBlocked(r.reason))
+                        AetherApiBridge.API_UNAVAILABLE else AetherApiBridge.keyKind(racedCandidate)
+                }
+            }
+            val wgLeg = outcome.losers[wgName]
+            if (wgLeg != null && wgLeg.ready && wgLeg.check != null) {
+                handshakeWithoutData = true
+                onNoData(wgName, wg, ProfileExtras.read(wg), "wireguard")
+            }
+            return null
         }
         while (true) {
             if (ladderBudget != null && !ladderStopped && queue.isNotEmpty() &&
@@ -506,6 +745,15 @@ object ConnectionEngineRunner {
             val name = method(candidate)
             // Native carrier name: budgets and follow-ups are about the transport, not the label.
             val carrier = if (engine.id == AetherSidecar.ID) extras.optString("carrier") else name
+            val raceWith = if (name == "h3") queue.firstOrNull { method(it) == "wireguard" } else null
+            if (raceWith != null && raceEligible(engine.id, automatic, onIrancell, name, queue.map { method(it) }, recheckOnly,
+                    relayOnly, reverseRelay, identitiesStored = AetherApiBridge.hasStoredKeys(candidate) &&
+                        AetherApiBridge.hasStoredKeys(raceWith), alreadyRaced = raced)) {
+                raced = true
+                queue.remove(raceWith)
+                race(candidate, raceWith)?.let { return it }
+                continue
+            }
             if (engine.id == AetherSidecar.ID && AetherApiBridge.skipAfterBootstrapFailure(candidate, failedRegistrationKinds)) {
                 record(name, "registration", "SKIP", "account API unavailable; no independent stored identity")
                 continue
@@ -549,21 +797,7 @@ object ConnectionEngineRunner {
                 }
                 record(name, "startup", "PASS")
                 stage = "access check failed"
-                val endpoint = Socks5.Endpoint("127.0.0.1", context.socksPort,
-                    context.socksUser.takeIf { launch.socksAuth }, context.socksPass.takeIf { launch.socksAuth })
-                val generation = process.transportGeneration
-                val first = AccessProbe.check(endpoint, checkDns, diagnoseAddress = engine.id == AetherSidecar.ID)
-                checkCancellation()
-                val result = if (engine.id == AetherSidecar.ID && first.traffic) {
-                    record(name, "https", "RECHECK", "checking that the same transport keeps carrying traffic")
-                    Thread.sleep(6_000)
-                    checkCancellation()
-                    if (process.isAlive && process.transportGeneration == generation) {
-                        val second = AccessProbe.check(endpoint, checkDns = false)
-                        if (process.transportGeneration == generation) second.copy(dns = first.dns)
-                        else first.copy(traffic = false, latencyMs = null, failure = "Aether transport restarted during traffic verification")
-                    } else first.copy(traffic = false, latencyMs = null, failure = "Aether transport stopped or restarted before traffic recheck")
-                } else first
+                val result = verify(name, process, launch, context, ::checkCancellation)
                 checkCancellation()
                 if (result.traffic && process.isAlive) {
                     record(name, "https", "PASS")
@@ -585,52 +819,7 @@ object ConnectionEngineRunner {
                 if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
                 // A relayed carrier has no direct follow-ups of its own.
                 if (extras.optBoolean(RELAY_FOLLOW_UP)) continue
-                // Irancell / Cloudflare-filtered: handshake without data is the WARP data block. Remember it now (the
-                // next connect goes straight to the relay) and skip the full scans that fail the same way.
-                if (!warpBlockFastPath && warpDataBlockedFastPath(engine.id, automatic, carrier, onIrancell, preferWireGuard, reverseRelay)) {
-                    warpBlockFastPath = true
-                    BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
-                    val dropped = queue.filterNot { ProfileExtras.read(it).optBoolean(RELAY_FOLLOW_UP) }
-                    queue.removeAll(dropped)
-                    val mtu = if (reducedMtuWireGuardFollowUp(engine.id, automatic, carrier, AetherSettings.read(extras).mtu,
-                            alreadyQueued = mtuQueued, reverseRelay = reverseRelay)) reducedMtuWireGuard(candidate) else null
-                    noizeQueued = true; warpInWarpQueued = true; mtuQueued = true
-                    record(name, "queue", "FAST", "WireGuard handshake passed but no data came back on this " +
-                        (if (onIrancell) "Irancell" else "Cloudflare-filtered") + " link: WARP data marked blocked here; " +
-                        (if (relays.isNotEmpty()) "trying WARP through a verified saved server" else "no verified saved server for a relay") +
-                        (if (mtu != null) ", then one MTU ${AetherSettings.MTU_RETRY} retry" else "") +
-                        (if (dropped.isNotEmpty()) "; skipping " + dropped.joinToString(", ") { method(it) } else ""))
-                    queueRelays("direct WARP carried no data here; trying WARP through a verified saved server")
-                    mtu?.let { queue.addLast(it) }
-                    continue
-                }
-                // Before WARP-in-WARP: the same WireGuard identity with the strongest junk-packet profile and a
-                // fresh endpoint/port scan. It costs one more WireGuard window and is the cheaper fix when the
-                // censor classifies the flow from its first packets.
-                // Queue order after a plain WireGuard failure: reduced MTU first (same endpoint, quick), then
-                // junk-packet obfuscation with a fresh scan, then the other carriers, WARP-in-WARP last.
-                val obfuscate = obfuscatedWireGuardFollowUp(engine.id, automatic, carrier,
-                        AetherSettings.read(extras).noize, alreadyQueued = noizeQueued, reverseRelay = reverseRelay)
-                if (obfuscate) {
-                    noizeQueued = true
-                    record(WIREGUARD_NOIZE, "queue", "START",
-                        "WireGuard handshake passed but no data came back; retrying with junk-packet obfuscation and a fresh endpoint scan")
-                    queue.addFirst(obfuscatedWireGuard(candidate))
-                }
-                if (reducedMtuWireGuardFollowUp(engine.id, automatic, carrier, AetherSettings.read(extras).mtu,
-                        alreadyQueued = mtuQueued, reverseRelay = reverseRelay)) {
-                    mtuQueued = true
-                    record(WIREGUARD_MTU, "queue", "START",
-                        "WireGuard handshake passed but no data came back; retrying with MTU ${AetherSettings.MTU_RETRY}")
-                    queue.addFirst(reducedMtuWireGuard(candidate))
-                }
-                if (warpInWarpFollowUp(engine.id, automatic, carrier, handshakePassed = true,
-                        alreadyQueued = warpInWarpQueued || choices.any { method(it) == "wiw" }, reverseRelay = reverseRelay)) {
-                    warpInWarpQueued = true
-                    record("wiw", "queue", "START", "WireGuard handshake passed but no data came back; trying WARP inside WARP")
-                    queue.addLast(candidate.copy(extraSettings =
-                        org.json.JSONObject(candidate.extraSettings).put("carrier", "wiw").apply { remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP) }.toString()))
-                }
+                onNoData(name, candidate, extras, carrier)
             } catch (e: Exception) {
                 if (e is InterruptedException || e is CancellationException) throw e
                 checkCancellation()
@@ -652,6 +841,8 @@ object ConnectionEngineRunner {
         if (engine.id == AetherSidecar.ID && automatic && handshakeWithoutData)
             BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
         if (engine.id == AetherSidecar.ID && preferWireGuard) attempts += CLOUDFLARE_FILTERED_HINT
-        throw NoVerifiedPath(attempts, lastCheck)
+        val relayDeferred = !relayOnly && relays.isEmpty() && (deferRelay || deferRelayToSavedServer(engine.id, automatic, options,
+            relayExitNode, warpDataBlocked = BuiltinMethodMemory.warpDataBlocked(cacheScope)))
+        throw NoVerifiedPath(attempts, lastCheck, relayDeferred = relayDeferred)
     }
 }

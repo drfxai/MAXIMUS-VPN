@@ -566,6 +566,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     `app/src/main/java/com/example/vpn/connections/AetherPrewarm.kt` and `AetherPrewarmMonitor.kt`.
   - MCI outer plan (MASQUE HTTP/2 with the full ClientHello first; split-hello HTTP/2 as a separate recipe) →
     `ConnectionEngineRunner.MCI_LADDER` / `operatorVariants`.
+  - First-verified race (`auto/EchKeyResolver.race`: first verified result wins, the rest are cancelled, one
+    deadline) → `app/src/main/java/com/example/vpn/connections/FirstVerifiedRace.kt`, used for the Irancell
+    MASQUE H3 + WireGuard race in `ConnectionEngineRunner`.
 - No affiliation or endorsement is implied.
 
 ## Public WebTunnel bridge metadata
