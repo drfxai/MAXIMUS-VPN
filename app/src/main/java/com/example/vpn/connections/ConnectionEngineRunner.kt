@@ -156,6 +156,20 @@ object ConnectionEngineRunner {
             .put("mtu", AetherSettings.MTU_RETRY.toString()).put(MTU_FOLLOW_UP, true)
             .apply { remove(NOIZE_FOLLOW_UP); remove("rescan") }.toString())
 
+    /** Aether's carrier order on Irancell (MCC-MNC 43235): MASQUE H3, then WireGuard, then MASQUE H2. */
+    val IRANCELL_LADDER = listOf("h3", "wireguard", "h2")
+
+    /** Whether [networkKey] (a [com.example.vpn.smart.NetworkIdentity] key such as "cell:43235") is Irancell. */
+    fun irancell(networkKey: String?): Boolean =
+        com.example.vpn.connectivity.NetworkFirewalls.detect(networkKey) == com.example.vpn.connectivity.NetworkFirewalls.Firewall.IRANCELL
+
+    /** On Irancell MASQUE H3 dials IPv4 only (UAC's Irancell plan); a family the user chose stays theirs. */
+    fun irancellH3(candidate: VlessProfile): VlessProfile {
+        val e = ProfileExtras.read(candidate)
+        if (e.optString("carrier") != "h3" || e.optString("family", "auto") != "auto") return candidate
+        return candidate.copy(extraSettings = org.json.JSONObject(e.toString()).put("family", "ipv4").toString())
+    }
+
     /** One line telling the user what to do when Aether found nothing on a link whose Cloudflare TLS is filtered. */
     const val CLOUDFLARE_FILTERED_HINT = "Cloudflare TLS is filtered on this network: Smart Connect can try saved servers, Psiphon or Tor"
 
@@ -163,15 +177,20 @@ object ConnectionEngineRunner {
      * The order the methods are tried in: a method verified here first, then WireGuard when Cloudflare TLS
      * is filtered but UDP answers, then the rest, with methods that failed here in the last half hour last.
      */
-    fun order(methods: List<String>, preferred: String?, preferWireGuard: Boolean, recentlyFailed: Set<String>): List<String> =
+    fun order(methods: List<String>, preferred: String?, preferWireGuard: Boolean, recentlyFailed: Set<String>,
+              irancell: Boolean = false): List<String> =
         methods.withIndex().sortedWith(compareBy<IndexedValue<String>>({
             when {
                 it.value == preferred -> 0
                 it.value in recentlyFailed -> 3
-                preferWireGuard && it.value == "wireguard" -> 1
+                // Irancell ladder: MASQUE over HTTP/3 (QUIC, IPv4) first; Irancell lets WireGuard handshakes
+                // through and then drops the data, so WireGuard goes after it (pattern from UAC SNI Spoofer).
+                irancell && it.value == "h3" -> 1
+                !irancell && preferWireGuard && it.value == "wireguard" -> 1
                 else -> 2
             }
         }, {
+            if (irancell) return@compareBy IRANCELL_LADDER.indexOf(it.value).let { i -> if (i < 0) methods.size + it.index else i }
             // Among the rest keep the declared order, but on a filtered link (measured, or H2 just failed
             // here) put WireGuard first and H2 (TCP TLS) after H3: WireGuard answers or fails fastest.
             val filtered = preferWireGuard || "h2" in recentlyFailed
@@ -262,7 +281,8 @@ object ConnectionEngineRunner {
             } else it.optString("variant")
         }
         val cacheScope = scope()
-        val baseChoices = candidates(profile, ipv4Only = ipv4Only)
+        val onIrancell = engine.id == AetherSidecar.ID && automatic && irancell(BuiltinMethodMemory.network())
+        val baseChoices = candidates(profile, ipv4Only = ipv4Only).let { list -> if (onIrancell) list.map(::irancellH3) else list }
         // The obfuscated WireGuard retry is not one of the declared carriers, but once it carried HTTPS on
         // this network it is remembered and tried first next time instead of the plain carrier.
         val noizeChoice = if (engine.id == AetherSidecar.ID && automatic &&
@@ -283,7 +303,8 @@ object ConnectionEngineRunner {
         // before long MASQUE gateway scans when fresh physical-link probes show that
         // ordinary Cloudflare TLS is unreachable but UDP is answering.
         val recentlyFailed = BuiltinMethodMemory.recentlyFailed(cacheScope)
-        val rank = order(choices.map(::method), preferred, preferWireGuard, recentlyFailed)
+        val rank = order(choices.map(::method), preferred, preferWireGuard, recentlyFailed, irancell = onIrancell)
+        if (onIrancell) record("ladder", "queue", "START", "Irancell: MASQUE H3 over IPv4 first, then WireGuard, then H2")
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
         val failedRegistrationKinds = mutableSetOf<String>()
         val recheckOnly = engine.id == AetherSidecar.ID && automatic &&
