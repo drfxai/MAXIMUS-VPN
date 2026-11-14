@@ -93,16 +93,83 @@ class AetherRaceTest {
         assertFalse("wireguard" in released)
     }
 
-    @Test fun wireGuardHandshakeWithoutDataEndsTheRaceAtOnce() {
-        val started = System.currentTimeMillis()
+    @Test fun wireGuardHandshakeWithoutDataLetsH3KeepRunningAndWin() {
+        val h3Aborted = CountDownLatch(1)
         val outcome = race().run(listOf(
-            "h3" to { _: FirstVerifiedRace.Lane -> try { Thread.sleep(10_000) } catch (e: InterruptedException) {}; Leg("h3", verified = false) },
+            "h3" to { lane: FirstVerifiedRace.Lane ->
+                lane.onAbort { h3Aborted.countDown() }
+                Thread.sleep(600)
+                Leg("h3", verified = true)
+            },
             "wireguard" to { _: FirstVerifiedRace.Lane -> Leg("wireguard", verified = false, handshake = true) }
         ), deadlineMs = 10_000, verified = { it.verified }, decisive = { it.handshake })
-        assertTrue(System.currentTimeMillis() - started < 3_000)
+        assertEquals("H3 still running when WireGuard had no data keeps its chance", "h3", outcome.winner)
+        assertEquals("wireguard", outcome.decidedBy)
+        assertEquals(setOf("wireguard"), outcome.losers.keys)
+        assertTrue(outcome.unfinished.isEmpty())
+        assertFalse(outcome.timedOut)
+        assertFalse("the winner is never aborted", h3Aborted.await(300, TimeUnit.MILLISECONDS))
+        assertFalse(outcome.value!!.stopped)
+    }
+
+    @Test fun wireGuardHandshakeWithoutDataWaitsForH3ToFail() {
+        val outcome = race().run(listOf(
+            "h3" to { _: FirstVerifiedRace.Lane -> Thread.sleep(400); Leg("h3", verified = false) },
+            "wireguard" to { _: FirstVerifiedRace.Lane -> Leg("wireguard", verified = false, handshake = true) }
+        ), deadlineMs = 10_000, verified = { it.verified }, decisive = { it.handshake })
         assertNull(outcome.winner)
         assertEquals("wireguard", outcome.decidedBy)
+        assertEquals("H3 finished (failed) before the race ended", setOf("wireguard", "h3"), outcome.losers.keys)
+        assertTrue(outcome.unfinished.isEmpty())
+        assertFalse(outcome.timedOut)
+    }
+
+    @Test fun wireGuardHandshakeWithoutDataWaitsForH3UntilTheDeadline() {
+        val h3Aborted = CountDownLatch(1)
+        val started = System.currentTimeMillis()
+        val outcome = race().run(listOf(
+            "h3" to { lane: FirstVerifiedRace.Lane ->
+                lane.onAbort { h3Aborted.countDown() }
+                try { Thread.sleep(10_000) } catch (e: InterruptedException) {}
+                Leg("h3", verified = false)
+            },
+            "wireguard" to { _: FirstVerifiedRace.Lane -> Leg("wireguard", verified = false, handshake = true) }
+        ), deadlineMs = 500, verified = { it.verified }, decisive = { it.handshake })
+        assertTrue("the race did not end at the WireGuard result", System.currentTimeMillis() - started >= 450)
+        assertNull(outcome.winner)
+        assertEquals("wireguard", outcome.decidedBy)
+        assertTrue(outcome.timedOut)
         assertEquals(listOf("h3"), outcome.unfinished)
+        assertTrue("H3 is stopped at the deadline", h3Aborted.await(2, TimeUnit.SECONDS))
+    }
+
+    @Test fun claimReleasesTheWinnerWhenCancelledAfterTheRace() {
+        val r = race()
+        val outcome = r.run(listOf(
+            "h3" to { _: FirstVerifiedRace.Lane -> Leg("h3", verified = true) }
+        ), deadlineMs = 10_000, verified = { it.verified })
+        assertEquals("h3", outcome.winner)
+        try {
+            r.claim(outcome) { throw kotlinx.coroutines.CancellationException("Connection cancelled") }
+            fail("the cancellation is rethrown")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            assertEquals("Connection cancelled", e.message)
+        }
+        assertTrue("the winner's engine is stopped", outcome.value!!.stopped)
+        assertEquals(listOf("h3"), released.toList())
+    }
+
+    @Test fun claimKeepsTheWinnerRunningWhenNotCancelled() {
+        val r = race()
+        val outcome = r.claim(r.run(listOf(
+            "h3" to { _: FirstVerifiedRace.Lane -> Leg("h3", verified = true) }
+        ), deadlineMs = 10_000, verified = { it.verified })) {}
+        assertEquals("h3", outcome.winner)
+        assertFalse(outcome.value!!.stopped)
+        // Without a winner a cancellation stops nothing and is still rethrown.
+        val none = r.run(listOf("h3" to { _: FirstVerifiedRace.Lane -> Leg("h3", verified = false) }),
+            deadlineMs = 10_000, verified = { it.verified })
+        try { r.claim(none) { throw InterruptedException() }; fail() } catch (e: InterruptedException) {}
     }
 
     @Test fun raceOnlyForAutomaticIrancellWithStoredIdentities() {
@@ -143,7 +210,24 @@ class AetherRaceTest {
         assertFalse("server Aether cannot use as an exit", AetherBackgroundRelay.shouldStart("cell:43235", now, "cell:43235", false, true, now))
         assertFalse("not verified yet", AetherBackgroundRelay.shouldStart("cell:43235", now, "cell:43235", true, false, now))
         assertFalse("stale", AetherBackgroundRelay.shouldStart("cell:43235", now - AetherBackgroundRelay.MAX_AGE_MS - 1, "cell:43235", true, true, now))
+        assertFalse("server frozen on this network", AetherBackgroundRelay.shouldStart("cell:43235", now, "cell:43235", true, true, now,
+            connectedFrozen = true))
+        assertFalse("one relay switch per user Connect", AetherBackgroundRelay.shouldStart("cell:43235", now, "cell:43235", true, true, now,
+            alreadySwitched = true))
         assertEquals(listOf(ConnectionEngineRunner.WIREGUARD_RELAY, ConnectionEngineRunner.H2_RELAY), AetherBackgroundRelay.ORDER)
+    }
+
+    @Test fun backgroundRelayIsCappedOnMeteredLinks() {
+        assertTrue(AetherBackgroundRelay.metered(measuredMetered = false, activeMetered = false, networkKey = "cell:43235"))
+        assertTrue(AetherBackgroundRelay.metered(measuredMetered = false, activeMetered = false, networkKey = "cell"))
+        assertTrue(AetherBackgroundRelay.metered(measuredMetered = true, activeMetered = false, networkKey = "wifi"))
+        assertTrue(AetherBackgroundRelay.metered(measuredMetered = false, activeMetered = true, networkKey = "wifi"))
+        assertFalse(AetherBackgroundRelay.metered(measuredMetered = false, activeMetered = false, networkKey = "wifi"))
+        assertFalse(AetherBackgroundRelay.metered(measuredMetered = false, activeMetered = false, networkKey = null))
+        assertEquals(AetherBackgroundRelay.METERED_BUDGET_MS, AetherBackgroundRelay.budgetMs(metered = true))
+        assertNull(AetherBackgroundRelay.budgetMs(metered = false))
+        assertTrue("well inside the 120 s metered Aether budget",
+            AetherBackgroundRelay.METERED_BUDGET_MS < ConnectionEngineRunner.HEAVY_LADDER_BUDGET_MS)
     }
 
     @Test fun backgroundRelaySwitchesOnlyAfterVerifiedDataWithoutBreakingTheConnection() {
@@ -151,5 +235,9 @@ class AetherRaceTest {
         assertFalse(AetherBackgroundRelay.shouldSwitch(relayVerified = false, stillConnected = true, sameNetwork = true))
         assertFalse(AetherBackgroundRelay.shouldSwitch(relayVerified = true, stillConnected = false, sameNetwork = true))
         assertFalse(AetherBackgroundRelay.shouldSwitch(relayVerified = true, stillConnected = true, sameNetwork = false))
+        assertFalse("exit froze here meanwhile", AetherBackgroundRelay.shouldSwitch(relayVerified = true, stillConnected = true,
+            sameNetwork = true, connectedFrozen = true))
+        assertFalse("already switched once this Connect", AetherBackgroundRelay.shouldSwitch(relayVerified = true, stillConnected = true,
+            sameNetwork = true, alreadySwitched = true))
     }
 }

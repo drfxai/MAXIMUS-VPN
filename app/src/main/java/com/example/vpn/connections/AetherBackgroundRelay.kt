@@ -12,19 +12,35 @@ object AetherBackgroundRelay {
     /** Let the new connection settle before a second engine starts beside it. */
     const val SETTLE_MS = 5_000L
 
+    /** Whole background run on a metered link (mobile data): wireguard-relay and h2-relay together, never longer. */
+    const val METERED_BUDGET_MS = 90_000L
+
     /** Order of the relayed carriers tried in the background. */
     val ORDER = listOf(ConnectionEngineRunner.WIREGUARD_RELAY, ConnectionEngineRunner.H2_RELAY)
 
     /**
-     * Start the background relay: a retry is pending for this same network and still fresh, and the connection
-     * that just verified is a saved server Aether can use as its exit hop.
+     * Start the background relay: a retry is pending for this same network and still fresh, the connection that
+     * just verified is a saved server Aether can use as its exit hop, that server is not frozen (~16 KB freeze) on
+     * this network, and this user Connect has not switched to a relay yet (at most one relay switch per Connect).
      */
     fun shouldStart(pendingNetwork: String?, pendingAt: Long, network: String?, savedServerEligible: Boolean,
-                    connectedVerified: Boolean, now: Long): Boolean =
+                    connectedVerified: Boolean, now: Long, connectedFrozen: Boolean = false,
+                    alreadySwitched: Boolean = false): Boolean =
         pendingNetwork != null && !network.isNullOrBlank() && pendingNetwork == network && savedServerEligible &&
-            connectedVerified && now - pendingAt in 0..MAX_AGE_MS
+            connectedVerified && now - pendingAt in 0..MAX_AGE_MS && !connectedFrozen && !alreadySwitched
 
-    /** Switch to Aether only after the relay carried verified HTTPS, with the same connection still up on the same network. */
-    fun shouldSwitch(relayVerified: Boolean, stillConnected: Boolean, sameNetwork: Boolean): Boolean =
-        relayVerified && stillConnected && sameNetwork
+    /**
+     * Switch to Aether only after the relay carried verified HTTPS, with the same connection still up on the same
+     * network, its exit server not frozen there meanwhile, and no relay switch yet in this user Connect.
+     */
+    fun shouldSwitch(relayVerified: Boolean, stillConnected: Boolean, sameNetwork: Boolean,
+                     connectedFrozen: Boolean = false, alreadySwitched: Boolean = false): Boolean =
+        relayVerified && stillConnected && sameNetwork && !connectedFrozen && !alreadySwitched
+
+    /** The physical link counts as metered when measured so, when Android says so, or when it is mobile data. */
+    fun metered(measuredMetered: Boolean, activeMetered: Boolean, networkKey: String?): Boolean =
+        measuredMetered || activeMetered || networkKey?.let { it == "cell" || it.startsWith("cell:") } == true
+
+    /** Total cap of the background run: [METERED_BUDGET_MS] on a metered link, none otherwise. */
+    fun budgetMs(metered: Boolean): Long? = if (metered) METERED_BUDGET_MS else null
 }

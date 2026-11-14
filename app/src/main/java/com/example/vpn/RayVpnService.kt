@@ -743,8 +743,13 @@ class RayVpnService : VpnService() {
             attemptedProfileId = requestedProfile.id, networkGeneration = previous.networkGeneration,
             search = search?.progress()?.takeIf { it.attemptId == attemptId }
         )
-        // A new connect the user asked for supersedes a background WARP-relay retry from an earlier one.
-        if (startedByUser) aetherRelayPending = null
+        // A new connect the user asked for supersedes a background WARP-relay retry from an earlier one, and gets
+        // its own (single) background relay switch.
+        if (startedByUser) {
+            aetherRelayPending = null
+            aetherRelaySwitched = false
+            aetherRelayExit = null
+        }
         val connectStartedAt = System.currentTimeMillis()
         com.example.vpn.diagnostics.ConnectionMetrics.connectAttempts.incrementAndGet()
         // Every test in this connect feeds, and reads, the evidence of the current network session.
@@ -1756,30 +1761,56 @@ class RayVpnService : VpnService() {
     private data class AetherRelayPending(val aether: VlessProfile, val smart: Boolean, val network: String, val at: Long)
     @Volatile private var aetherRelayPending: AetherRelayPending? = null
     @Volatile private var aetherRelayJob: kotlinx.coroutines.Job? = null
+    /** The background relay already switched this user Connect to Aether: at most one such switch per Connect. */
+    @Volatile private var aetherRelaySwitched = false
+    /** The saved server (and how it was reached) the background relay verified, for the Aether start it switches to. */
+    private data class AetherRelayExit(val network: String, val profileId: String, val route: com.example.vpn.sidecar.BuiltinExitNode.Route)
+    @Volatile private var aetherRelayExit: AetherRelayExit? = null
 
     /**
      * The saved server [connected] just carried verified traffic after Aether stopped on blocked WARP data: try WARP
      * through it (wireguard-relay, then h2-relay) on its own port in the background. The working connection is left
      * alone unless the relay carries verified HTTPS and this same connection is still up on the same network; only
-     * then does the session switch to Aether, which goes straight to the remembered relay.
+     * then does the session switch to Aether, which goes straight to the verified relay exit. The switch is an
+     * automatic one (under [ConnectionLifecycle.tryBeginSwitch] with the ticket of the intent it began in), not a
+     * user Connect: freeze/stall counters and runners-up are kept, and it happens at most once per user Connect.
+     * Never through a server frozen on this network; on a metered link the whole run has its own cap.
      */
     private fun retryAetherRelayInBackground(connected: VlessProfile, network: String, attemptId: String) {
         val pending = aetherRelayPending ?: return
         val now = System.currentTimeMillis()
+        fun frozenHere() = runCatching {
+            connected.id in networkMemory.freezes.frozen(com.example.vpn.smart.NetworkKey.current(this@RayVpnService))
+        }.getOrDefault(false)
+        val frozen = frozenHere()
         if (!com.example.vpn.connections.AetherBackgroundRelay.shouldStart(pending.network, pending.at, network,
-                com.example.vpn.sidecar.BuiltinExitNode.eligible(connected), _vpnState.value.isConnected, now)) {
-            if (now - pending.at > com.example.vpn.connections.AetherBackgroundRelay.MAX_AGE_MS || pending.network != network)
-                aetherRelayPending = null
+                com.example.vpn.sidecar.BuiltinExitNode.eligible(connected), _vpnState.value.isConnected, now,
+                connectedFrozen = frozen, alreadySwitched = aetherRelaySwitched)) {
+            if (now - pending.at > com.example.vpn.connections.AetherBackgroundRelay.MAX_AGE_MS || pending.network != network ||
+                aetherRelaySwitched) aetherRelayPending = null
+            if (frozen) XrayLogManager.i("BUILTIN", "aether/relay · background · SKIP · ${connected.name.ifBlank { "saved server" }} froze on this network")
             return
         }
         aetherRelayPending = null
         aetherRelayJob?.cancel()
+        // The intent this relay began in: a newer Connect or Disconnect drops its switch.
+        val ticket = lifecycle.current()
         aetherRelayJob = serviceScope.launch(Dispatchers.IO) {
-            fun current() = _vpnState.value.attemptId == attemptId && _vpnState.value.status == ConnectionStatus.CONNECTED
+            fun current() = _vpnState.value.attemptId == attemptId && _vpnState.value.status == ConnectionStatus.CONNECTED &&
+                lifecycle.isCurrent(ticket)
             delay(com.example.vpn.connections.AetherBackgroundRelay.SETTLE_MS)
             if (!current()) return@launch
             val via = connected.name.ifBlank { "saved server" }
-            XrayLogManager.i("BUILTIN", "aether/relay · background · START via $via")
+            val measured = com.example.vpn.smart.NetworkEnvironment.freshEvidence(
+                com.example.vpn.smart.NetworkCapabilityDetector.last, network, System.currentTimeMillis())
+            val metered = com.example.vpn.connections.AetherBackgroundRelay.metered(
+                measuredMetered = com.example.vpn.connections.ConnectionEngineRunner.linkHints(measured).metered,
+                activeMetered = runCatching { connectivityManager?.isActiveNetworkMetered }.getOrNull() == true,
+                networkKey = runCatching { com.example.vpn.smart.NetworkKey.current(this@RayVpnService) }.getOrNull())
+            val budget = com.example.vpn.connections.AetherBackgroundRelay.budgetMs(metered)
+            val deadlineAt = budget?.let { System.currentTimeMillis() + it }
+            XrayLogManager.i("BUILTIN", "aether/relay · background · START via $via" +
+                (budget?.let { " · metered link, ${it / 1000}s cap" }.orEmpty()))
             val engine = com.example.vpn.sidecar.AetherSidecar
             val executable = com.example.vpn.sidecar.Sidecars.executable(engine) ?: run {
                 XrayLogManager.w("BUILTIN", "aether/relay · background · FAIL · the Aether engine is not included in this build; staying on $via")
@@ -1795,25 +1826,55 @@ class RayVpnService : VpnService() {
                 val context = com.example.vpn.sidecar.SidecarContext(workDir, executable,
                     com.example.vpn.sidecar.Sidecars.freeLoopbackPort(), com.example.vpn.sidecar.Sidecars.randomToken(9),
                     com.example.vpn.sidecar.Sidecars.randomToken(), settings.operationalMode)
-                val result = kotlinx.coroutines.runInterruptible {
-                    com.example.vpn.connections.ConnectionEngineRunner.start(engine, pending.aether, settings, context,
-                        relayExitNode = connected.id,
-                        relayExitRoute = com.example.vpn.sidecar.BuiltinExitNode.Route(route?.endpoint, route?.variantKey),
-                        relayOnly = true, cancelled = { !current() })
+                val exitRoute = com.example.vpn.sidecar.BuiltinExitNode.Route(route?.endpoint, route?.variantKey)
+                val relayRun: suspend () -> com.example.vpn.connections.ConnectionEngineRunner.Started = {
+                    kotlinx.coroutines.runInterruptible {
+                        com.example.vpn.connections.ConnectionEngineRunner.start(engine, pending.aether, settings, context,
+                            relayExitNode = connected.id, relayExitRoute = exitRoute, metered = metered,
+                            relayOnly = true, cancelled = { !current() || deadlineAt != null && System.currentTimeMillis() > deadlineAt })
+                    }
                 }
+                val result = if (budget != null) kotlinx.coroutines.withTimeout(budget) { relayRun() } else relayRun()
                 started = result
                 val method = com.example.vpn.engine.ProfileExtras.read(result.profile).optString("carrier") + "-relay"
                 val sameNetwork = runCatching { com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService) }.getOrNull() == network
                 if (com.example.vpn.connections.AetherBackgroundRelay.shouldSwitch(relayVerified = result.check.traffic,
-                        stillConnected = current(), sameNetwork = sameNetwork)) {
+                        stillConnected = current(), sameNetwork = sameNetwork, connectedFrozen = frozenHere(),
+                        alreadySwitched = aetherRelaySwitched)) {
+                    // An automatic switch inside the service, never a user Connect: one switch at a time, with the
+                    // intent it began in, counters and runners-up kept.
+                    if (!lifecycle.tryBeginSwitch()) {
+                        XrayLogManager.i("BUILTIN", "aether/relay · background · PASS · $method via $via verified, but another switch is under way; staying")
+                        return@launch
+                    }
+                    if (!current()) {
+                        lifecycle.endSwitch()
+                        XrayLogManager.i("BUILTIN", "aether/relay · background · PASS · $method via $via verified, but the connection changed; staying")
+                        return@launch
+                    }
                     XrayLogManager.i("BUILTIN", "aether/relay · background · PASS · $method via $via carried verified HTTPS; switching to Aether")
                     result.running.stop()
                     started = null
-                    VpnController.startVpn(this@RayVpnService, pending.aether, smart = pending.smart)
+                    aetherRelaySwitched = true
+                    aetherRelayExit = AetherRelayExit(network, connected.id, exitRoute)
+                    mutateState { com.example.data.model.ConnectionVerification.onSwitching(it) }
+                    connectJob = serviceScope.launch {
+                        try {
+                            connect(pending.aether, smart = pending.smart, ticket = ticket)
+                        } finally {
+                            aetherRelayExit = null
+                            lifecycle.endSwitch()
+                        }
+                    }
                 } else {
                     XrayLogManager.i("BUILTIN", "aether/relay · background · PASS · $method via $via verified, but the connection changed; staying")
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.TimeoutCancellationException || deadlineAt != null &&
+                    System.currentTimeMillis() >= deadlineAt && (e is kotlinx.coroutines.CancellationException || e is InterruptedException)) {
+                    XrayLogManager.w("BUILTIN", "aether/relay · background · FAIL · ${(budget ?: 0) / 1000}s cap on this metered link used; staying on $via")
+                    return@launch
+                }
                 val reason = when (e) {
                     is kotlinx.coroutines.CancellationException, is InterruptedException -> "the connection changed"
                     is com.example.vpn.connections.ConnectionEngineRunner.NoVerifiedPath -> e.message ?: "no verified relay"
@@ -1958,15 +2019,20 @@ class RayVpnService : VpnService() {
             // when the carrier drops WARP's own data (ConnectionEngineRunner.relayed).
             // The exit hop dials it the way it verified: the recipe's pinned address (e.g. a clean CDN address) and
             // its stealth alternate, never a fresh lookup of the name that may land on a filtered address.
-            val relayRoute = if (engine.id == com.example.vpn.sidecar.AetherSidecar.ID) runCatching {
-                networkMemory.routes.forNetwork(com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService))
+            val relayNetwork = if (engine.id == com.example.vpn.sidecar.AetherSidecar.ID)
+                runCatching { com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService) }.getOrNull() else null
+            // The background relay switch hands over the exit it just verified; Aether uses exactly that one here.
+            val verifiedExit = aetherRelayExit?.takeIf { relayNetwork != null && it.network == relayNetwork }
+            val relayRoute = if (verifiedExit == null && relayNetwork != null) runCatching {
+                networkMemory.routes.forNetwork(relayNetwork)
                     .firstOrNull { r -> r.recoveryKey == null &&
                         com.example.vpn.sidecar.BuiltinExitNode.loadProfile?.invoke(r.profileId)
                             ?.takeIf { it.effectiveFingerprint == r.profileFingerprint }
                             ?.let(com.example.vpn.sidecar.BuiltinExitNode::eligible) == true }
             }.getOrNull() else null
-            val relayExitNode = relayRoute?.profileId
-            val relayExitRoute = com.example.vpn.sidecar.BuiltinExitNode.Route(relayRoute?.endpoint, relayRoute?.variantKey)
+            val relayExitNode = verifiedExit?.profileId ?: relayRoute?.profileId
+            val relayExitRoute = verifiedExit?.route
+                ?: com.example.vpn.sidecar.BuiltinExitNode.Route(relayRoute?.endpoint, relayRoute?.variantKey)
             val metered = hints.metered || runCatching { connectivityManager?.isActiveNetworkMetered }.getOrNull() == true
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,

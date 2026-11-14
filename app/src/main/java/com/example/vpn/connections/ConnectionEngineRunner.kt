@@ -610,8 +610,9 @@ object ConnectionEngineRunner {
         }
         /**
          * Irancell: H3 and WireGuard at once ([raceEligible]). WireGuard runs on its own loopback port and work folder;
-         * the winner is returned with its context. Without a winner both are recorded as failed and a WireGuard
-         * handshake without data takes the WARP-data-blocked path ([onNoData]) at once, stopping H3 too.
+         * the winner is returned with its context. A WireGuard handshake without data does not end the race: H3 keeps
+         * its chance until it finishes or the deadline passes. Only without a winner are both recorded as failed and
+         * the WireGuard handshake without data takes the WARP-data-blocked path ([onNoData]).
          */
         fun race(h3: VlessProfile, wg: VlessProfile): Started? {
             val deadline = ladderBudget?.let { maxOf(LADDER_MIN_ATTEMPT_MS, it - (System.currentTimeMillis() - ladderStartedAt)) }
@@ -673,16 +674,20 @@ object ConnectionEngineRunner {
             }
             val h3Name = method(h3)
             val wgName = method(wg)
-            val outcome = FirstVerifiedRace<RaceLeg> { it.process?.stop() }.run(
+            val race = FirstVerifiedRace<RaceLeg> { it.process?.stop() }
+            val outcome = race.claim(race.run(
                 listOf(h3Name to { lane: FirstVerifiedRace.Lane -> leg(lane, h3, context) },
                     wgName to { lane: FirstVerifiedRace.Lane -> leg(lane, wg, wgContext) }),
                 deadlineMs = deadline,
                 verified = { it.process != null },
-                // WireGuard handshook and carried nothing on this carrier: WARP data is blocked; stop H3 as well.
+                // WireGuard handshook and carried nothing on this carrier: WARP data is blocked. Recorded as the
+                // loser; H3 keeps running until it finishes or the deadline (onNoData runs only after the race).
                 decisive = { it.name == wgName && it.ready && it.check != null &&
                     warpDataBlockedFastPath(engine.id, automatic, "wireguard", onIrancell, preferWireGuard, reverseRelay) },
-                cancelled = { Thread.currentThread().isInterrupted || cancelled() })
-            checkCancellation()
+                cancelled = { Thread.currentThread().isInterrupted || cancelled() })) {
+                // Disconnect or a newer attempt after a winner came back: stop the winner's engine, then rethrow.
+                checkCancellation()
+            }
             outcome.value?.let { w ->
                 record("ladder", "race", "WIN ${w.name}", outcome.unfinished.takeIf { it.isNotEmpty() }
                     ?.let { "stopped " + it.joinToString(", ") }.orEmpty())
@@ -695,7 +700,8 @@ object ConnectionEngineRunner {
                 return Started(w.process!!, w.launch!!, w.candidate, w.check!!, context = w.context.takeIf { it !== context })
             }
             record("ladder", "race", "NONE", when {
-                outcome.decidedBy != null -> "WireGuard handshake passed but no data came back" +
+                outcome.decidedBy != null -> "WireGuard handshake passed but no data came back; " +
+                    (if (outcome.timedOut) "${deadline / 1000}s deadline reached" else "H3 carried no HTTPS either") +
                     outcome.unfinished.takeIf { it.isNotEmpty() }?.let { "; stopped " + it.joinToString(", ") }.orEmpty()
                 outcome.timedOut -> "${deadline / 1000}s deadline reached" +
                     outcome.unfinished.takeIf { it.isNotEmpty() }?.let { "; stopped " + it.joinToString(", ") }.orEmpty()
@@ -703,7 +709,7 @@ object ConnectionEngineRunner {
             })
             for ((m, racedCandidate) in listOf(h3Name to h3, wgName to wg)) {
                 val r = outcome.losers[m]
-                val reason = r?.reason ?: if (outcome.decidedBy != null) "stopped: WARP data blocked on this network" else "race deadline reached"
+                val reason = r?.reason ?: "race deadline reached"
                 attempts += "$m: $reason"
                 if (r != null || outcome.timedOut) failed(m, racedCandidate)
                 if (m == preferred) BuiltinMethodMemory.forget(cacheScope)
