@@ -139,4 +139,49 @@ class AetherReadinessTest {
             assertFalse(process.awaitReady(200))
         } finally { process.stop() }
     }
+
+    @Test fun irancellRegistrationFailureEndsTheWaitWithoutBurningTheWindow() {
+        ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
+            val child = PendingEngine()
+            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.readyLine(listener.localPort), logOutput = false)
+            try {
+                child.line("MAXIMUS_AETHER_STAGE:account")
+                child.line("registration failed: tls handshake failed")
+                val watch = com.example.vpn.connections.IrancellWarp.RegistrationWatch(graceMs = 200L)
+                val started = System.nanoTime()
+                assertFalse(process.awaitReadyUnless(10_000L) { watch.shouldStop(process.startupFailure, System.currentTimeMillis()) })
+                val tookMs = (System.nanoTime() - started) / 1_000_000
+                assertTrue("gave up after the grace, not the 10 s window (took $tookMs ms)", tookMs < 5_000L)
+                assertTrue(process.startupFailure.orEmpty().startsWith("WARP API registration failed"))
+            } finally { process.stop() }
+        }
+    }
+
+    @Test fun registrationClearedByALaterStageKeepsWaiting() {
+        ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
+            val child = PendingEngine()
+            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.readyLine(listener.localPort), logOutput = false)
+            try {
+                child.line("MAXIMUS_AETHER_STAGE:account")
+                child.line("registration retry failed: tls handshake failed")
+                child.line("MAXIMUS_AETHER_STAGE:identity")
+                val watch = com.example.vpn.connections.IrancellWarp.RegistrationWatch(graceMs = 300L)
+                val started = System.nanoTime()
+                assertFalse(process.awaitReadyUnless(700L) { watch.shouldStop(process.startupFailure, System.currentTimeMillis()) })
+                assertTrue("waited the whole window", (System.nanoTime() - started) / 1_000_000 >= 650L)
+                assertFalse(process.startupFailure.orEmpty().startsWith("WARP API registration failed"))
+            } finally { process.stop() }
+        }
+    }
+
+    @Test fun servingEngineIsReadyEvenWithAGiveUpCheck() {
+        ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
+            val child = PendingEngine()
+            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.readyLine(listener.localPort), logOutput = false)
+            try {
+                child.serving(listener.localPort)
+                assertTrue(process.awaitReadyUnless(2_000L) { false })
+            } finally { process.stop() }
+        }
+    }
 }

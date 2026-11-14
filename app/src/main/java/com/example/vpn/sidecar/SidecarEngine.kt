@@ -45,6 +45,11 @@ interface RunningEngine {
     val transportGeneration: Long get() = 0
     /** Waits until the engine can carry traffic on its SOCKS port, it stops, or [timeoutMs] passes. */
     fun awaitReady(timeoutMs: Long): Boolean
+    /**
+     * Like [awaitReady], but gives up early once [giveUp] returns true (polled while waiting), e.g. when the engine
+     * already reported a failure it will not recover from inside the window. Engines that cannot poll wait normally.
+     */
+    fun awaitReadyUnless(timeoutMs: Long, giveUp: () -> Boolean): Boolean = awaitReady(timeoutMs)
     fun stop()
 }
 

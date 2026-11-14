@@ -69,8 +69,18 @@ class SidecarProcess(
     /** Waits until the SOCKS port accepts connections, the program exits, or [timeoutMs] passes. */
     override fun awaitReady(timeoutMs: Long): Boolean = awaitReadyWhile(timeoutMs) { true }
 
+    override fun awaitReadyUnless(timeoutMs: Long, giveUp: () -> Boolean): Boolean =
+        awaitReadyGated(timeoutMs, { true }, giveUp)
+
     /** A helper exiting invalidates readiness immediately; do not wait for a child that cannot start. */
-    internal fun awaitReadyWhile(timeoutMs: Long, prerequisitesAlive: () -> Boolean): Boolean {
+    internal fun awaitReadyWhile(timeoutMs: Long, prerequisitesAlive: () -> Boolean): Boolean =
+        awaitReadyGated(timeoutMs, prerequisitesAlive) { false }
+
+    /**
+     * [awaitReadyWhile], and [giveUp] ends the wait early (the caller decided the failure already reported is
+     * final); the reported failure is kept.
+     */
+    internal fun awaitReadyGated(timeoutMs: Long, prerequisitesAlive: () -> Boolean, giveUp: () -> Boolean): Boolean {
         val started = System.nanoTime()
         while ((System.nanoTime() - started) / 1_000_000 < timeoutMs) {
             if (!prerequisitesAlive()) {
@@ -85,6 +95,10 @@ class SidecarProcess(
                 return false
             }
             if (sawReadyLine && portOpen(socksPort)) { ready = true; return true }
+            if (giveUp()) {
+                if (startupFailure == null) startupFailure = "Engine start abandoned early by the connection plan; traffic is unverified."
+                return false
+            }
             Thread.sleep(100)
         }
         if (startupFailure == null) startupFailure = if (name == AetherSidecar.ID && !sawReadyLine)

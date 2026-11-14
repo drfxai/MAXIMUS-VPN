@@ -17,6 +17,7 @@ object EngineReaper {
             override val startupFailure: String? get() = engine.startupFailure
             override val transportGeneration get() = engine.transportGeneration
             override fun awaitReady(timeoutMs: Long): Boolean = engine.awaitReady(timeoutMs)
+            override fun awaitReadyUnless(timeoutMs: Long, giveUp: () -> Boolean): Boolean = engine.awaitReadyUnless(timeoutMs, giveUp)
             override fun stop() {
                 live.remove(this)
                 engine.stop()
