@@ -226,4 +226,20 @@ class AetherCarrierScopeTest {
         assertFalse(relayed.has("noizeFollowUp"))
         assertFalse(relayed.has("rescan"))
     }
+
+    @Test fun irancellLadderPutsMasqueH3FirstAndKeepsVerifiedAndFailedRules() {
+        val all = listOf("h2", "h3", "wireguard")
+        assertTrue(ConnectionEngineRunner.irancell("cell:43235"))
+        assertFalse(ConnectionEngineRunner.irancell("cell:43211"))
+        assertFalse(ConnectionEngineRunner.irancell("wifi:abc"))
+        assertEquals(listOf("h3", "wireguard", "h2"), ConnectionEngineRunner.order(all, null, true, emptySet(), irancell = true))
+        assertEquals(listOf("h3", "wireguard", "h2"), ConnectionEngineRunner.order(all, null, false, emptySet(), irancell = true))
+        assertEquals("h2", ConnectionEngineRunner.order(all, "h2", true, emptySet(), irancell = true).first())
+        assertEquals(listOf("wireguard", "h2", "h3"), ConnectionEngineRunner.order(all, null, true, setOf("h3"), irancell = true))
+        val h3 = com.example.data.model.VlessProfile(id = "a", name = "A", address = "", port = 0, uuid = "",
+            extraSettings = org.json.JSONObject().put("carrier", "h3").toString())
+        assertEquals("ipv4", org.json.JSONObject(ConnectionEngineRunner.irancellH3(h3).extraSettings).getString("family"))
+        val own = h3.copy(extraSettings = org.json.JSONObject().put("carrier", "h3").put("family", "ipv6").toString())
+        assertEquals("ipv6", org.json.JSONObject(ConnectionEngineRunner.irancellH3(own).extraSettings).getString("family"))
+    }
 }
