@@ -184,7 +184,7 @@ class ConnectionsViewModel(application: Application, private val direct: Boolean
                         com.example.vpn.smart.NetworkCapabilityDetector.last,
                         com.example.vpn.smart.NetworkIdentity.current(app), System.currentTimeMillis()))
                     started = ConnectionEngineRunner.start(engine, profile, app.settingsRepository.getSettings(), ctx, checkDns = true,
-                        ipv4Only = hints.ipv4Only, preferWireGuard = hints.cloudflareFiltered,
+                        ipv4Only = hints.ipv4Only, preferWireGuard = hints.cloudflareFiltered, manual = true,
                         onProgress = { line -> _ui.update { it.copy(message = line, log = (it.log + line).takeLast(40)) } })
                     started.check
                 } finally { try { started?.running?.stop() } finally { dir.deleteRecursively() } }

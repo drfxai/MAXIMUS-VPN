@@ -80,5 +80,16 @@ class StrikeWindow(
         const val WINDOW_MS = 3 * 60_000L
         /** Real passes in a row (about half a minute at the healthy cadence) that clear the window. */
         const val SUSTAINED_PASSES = 3
+
+        /** A connection that degrades on timeouts this soon after it was verified was never really carrying traffic. */
+        const val EARLY_DEGRADE_MS = 60_000L
+
+        /**
+         * Build 151 (16:42:39 → 16:43:09): a reconnect passed one request in 2.3 s and went CONNECTED → DEGRADED on
+         * TIMEOUT 30 s later; the watchdog's window did not count it. A CONNECTED → DEGRADED change on [stage] TIMEOUT
+         * within [EARLY_DEGRADE_MS] of [connectedAt] is one strike. Pure.
+         */
+        fun earlyDegradeStrike(stage: com.example.vpn.diagnostics.FailureStage?, connectedAt: Long?, now: Long): Boolean =
+            stage == com.example.vpn.diagnostics.FailureStage.TIMEOUT && connectedAt != null && now - connectedAt in 0..EARLY_DEGRADE_MS
     }
 }
