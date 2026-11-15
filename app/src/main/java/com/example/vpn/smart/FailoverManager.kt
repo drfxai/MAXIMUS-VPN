@@ -52,7 +52,8 @@ class FailoverManager(
     private val managedRecordsProvider: () -> List<ManagedNodeRecord> = {
         runCatching { SmartNodeStore(RayApplication.instance).all() }.getOrDefault(emptyList())
     },
-    private val onTriggerSwitch: (VlessProfile, String) -> Unit
+    private val savedProfile: (() -> VlessProfile)? = null,
+    private val onTriggerSwitch: (VlessProfile, String, Set<String>) -> Unit
 ) {
     enum class CascadeTier(val stageNumber: Int, val title: String, val badge: String) {
         TIER_1_PRIMARY_REALITY(1, "Your server", "YOUR SERVER"),
@@ -279,7 +280,7 @@ class FailoverManager(
                             _currentTier.value = CascadeTier.TIER_1_PRIMARY_REALITY
                             _failoverEvents.value = reason
                             XrayLogManager.i("GOD_MODE", reason)
-                            onTriggerSwitch(topPrimary, reason)
+                            onTriggerSwitch(topPrimary, reason, emptySet())
                         }
                     } catch (e: CancellationException) {
                         throw e
@@ -307,7 +308,9 @@ class FailoverManager(
         val safeDegraded = SecretRedactor.redact(degradedProfile.name)
 
         // Non-degraded candidates pool (excluding current failing node, bridges, mesh)
-        val nonDegraded = vetted(eligibleFallbacks(allProfiles, degradedProfile))
+        val owner = savedProfile?.invoke() ?: degradedProfile
+        val excluded = failedPathIds(allProfiles, degradedProfile, owner, policy::isPenalized)
+        val nonDegraded = vetted(eligibleFallbacks(allProfiles.filterNot { it.id in excluded }, degradedProfile))
         // A filter that stops one node usually stops its whole kind (QUIC, a TLS fingerprint, a CDN
         // path), so the next node is of a kind that has not failed during this outage.
         failedFamilies.add(protocolFamily(degradedProfile))
@@ -323,7 +326,7 @@ class FailoverManager(
             XrayLogManager.i("FAILOVER", "Trying a different kind of connection than ${failedFamilies.joinToString()}.")
         }
         // Off the failed config's CDN or network, and not one that was just left after failing.
-        val otherDomains = policy.withoutPenalized(SmartFailoverPolicy.preferOtherDomains(otherFamilies, degradedProfile))
+        val otherDomains = SmartFailoverPolicy.preferOtherDomains(otherFamilies, degradedProfile)
         val scoredCandidates = otherDomains.filter { it.overallScore > 0 }
         // Fresh evidence of this network decides first: verified here just now, then passed once here, then
         // untested, then verified earlier. A config that failed a real request here moments ago is never chosen.
@@ -346,8 +349,8 @@ class FailoverManager(
                 val reason = "Trying ${bestFallback.profile.name}; traffic verification is required."
                 _failoverEvents.value = reason
                 XrayLogManager.i("GOD_MODE", reason)
-                policy.recordSwitch(degradedProfile)
-                onTriggerSwitch(bestFallback.profile, reason)
+                policy.recordSwitch(owner)
+                onTriggerSwitch(bestFallback.profile, reason, excluded)
                 return
             }
 
@@ -376,8 +379,8 @@ class FailoverManager(
             val reason = "Failover: Repeated traffic checks failed on $safeDegraded. Trying ${fallback.profile.name}; traffic verification is required."
             _failoverEvents.value = reason
             XrayLogManager.i("FAILOVER", reason)
-            policy.recordSwitch(degradedProfile)
-            onTriggerSwitch(fallback.profile, reason)
+            policy.recordSwitch(owner)
+            onTriggerSwitch(fallback.profile, reason, excluded)
         } else {
             consecutiveFailures.set(0)
             XrayLogManager.w("FAILOVER", "No distinct supported fallback node is available for $safeDegraded; keeping the current connection.")
@@ -424,12 +427,20 @@ class FailoverManager(
                 ordered.filter { book.eligibility(ref(it)) == top } else ordered
         }
 
+        private fun sameFallbackPath(a: VlessProfile, b: VlessProfile): Boolean =
+            a.id == b.id || a.effectiveFingerprint == b.effectiveFingerprint ||
+                (a.address.equals(b.address, ignoreCase = true) && a.port == b.port && protocolFamily(a) == protocolFamily(b))
+
+        internal fun failedPathIds(
+            profiles: List<VlessProfile>, running: VlessProfile, owner: VlessProfile,
+            isPenalized: (VlessProfile) -> Boolean
+        ): Set<String> = profiles.filter {
+            sameFallbackPath(it, owner) || sameFallbackPath(it, running) || isPenalized(it)
+        }.mapTo(mutableSetOf(owner.id, running.id)) { it.id }
+
         internal fun eligibleFallbacks(profiles: List<VlessProfile>, current: VlessProfile): List<VlessProfile> = profiles.filter {
             com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null &&
-                it.id != current.id && it.effectiveFingerprint != current.effectiveFingerprint &&
-                // The same host and port over another kind (Hysteria2 on UDP next to REALITY on TCP) is a real alternative.
-                !(it.address.equals(current.address, ignoreCase = true) && it.port == current.port &&
-                    protocolFamily(it) == protocolFamily(current)) &&
+                !sameFallbackPath(it, current) &&
                 !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-")
         }
     }

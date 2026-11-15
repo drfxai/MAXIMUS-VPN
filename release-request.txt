@@ -1,1 +1,1 @@
-V1.0.4 signed Android rebuild with the metered Aether relay startup budget and clearer readiness diagnostics.
+V1.0.4 signed Android rebuild with Aether relay continuity during degraded traffic and failover route exclusions.
