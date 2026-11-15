@@ -33,7 +33,8 @@ mkdir -p "$OUT"
 output="$(cd "$OUT" && pwd)"
 (
     cd "$source_dir"
-    # Upstream Android builds use this flag for libbox's os.checkPidfdOnce link.\n    go build -mod=readonly -trimpath -buildvcs=false \
+    # Upstream Android builds use this flag for libbox's os.checkPidfdOnce link.
+    go build -mod=readonly -trimpath -buildvcs=false \
         -tags novpn,with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme \
         -ldflags '-s -w -buildid= -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384' \
         -o "$output/libradiance.so" ./cmd/maximus
