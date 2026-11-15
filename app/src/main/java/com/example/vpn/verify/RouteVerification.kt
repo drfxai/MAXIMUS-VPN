@@ -116,7 +116,19 @@ data class TrafficEvidence(
         if (down != null && down.stalled && down.bytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES) return true
         // The same signature upstream: the graded upload stopped at ~16 KB on every reference it reached, and the
         // download also stopped inside the window (even when it ended as a timeout rather than a stall).
-        return uploadFreeze && down != null && down.bytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES
+        if (uploadFreeze && down != null && down.bytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES) return true
+        return uploadFreezeDeadDownload
+    }
+
+    /**
+     * Build 150 (Irancell): the graded upload stalled at exactly 16384 B with no grade confirmed and the download
+     * timed out before its first ~16 KB arrived. Small requests still passed, so nothing switched for minutes. The
+     * upload's 16 KB stall is the cap itself and the download carried nothing at all: freeze evidence, and since a
+     * download that moves nothing gives a same-server rescue nothing to work with, the freeze failover moves on.
+     */
+    val uploadFreezeDeadDownload: Boolean get() {
+        val down = download as? LegResult.Failed ?: return false
+        return uploadFreeze && !down.stalled && down.bytes < FREEZE_MIN_BYTES
     }
 
     /**
@@ -124,7 +136,10 @@ data class TrafficEvidence(
      * measured, with none confirming more: the per-connection ~16 KB cap seen upstream.
      */
     val uploadFreeze: Boolean get() {
-        val measured = uploadProbe?.attempts.orEmpty().filter { a -> a.grades.any { it.outcome != UploadProbe.Outcome.NOT_TESTED } }
+        // A reference that could not be reached at all (failed before writing a byte) says nothing about a cap.
+        val measured = uploadProbe?.attempts.orEmpty().filter { a -> a.grades.any {
+            it.outcome == UploadProbe.Outcome.OK || it.outcome == UploadProbe.Outcome.STALLED ||
+                it.outcome == UploadProbe.Outcome.FAILED && it.sentBytes > 0 } }
         return measured.isNotEmpty() && measured.all { a ->
             a.firstMiss?.let { it.outcome == UploadProbe.Outcome.STALLED && it.sentBytes in FREEZE_MIN_BYTES..FREEZE_MAX_BYTES } == true &&
                 a.confirmedBytes < FREEZE_MIN_BYTES
