@@ -597,7 +597,11 @@ class RayVpnService : VpnService() {
         // Never down to nothing: the oldest-skipped come back (unfrozen first) when fewer than a few are left (PoolRefill).
         val refill = com.example.vpn.smart.PoolRefill.refill(ordered,
             failedAt = { book.recentFailureAt(com.example.vpn.connectivity.PathRef.of(it)) }, frozen = { it.id in frozenHere })
-        val fresh = refill.candidates
+        val fresh = if (book.session()?.networkKey == routeNetwork) {
+            val verifiedOrder = book.eligibleInOrder(refill.candidates, com.example.vpn.connectivity.PathRef::of)
+            val verifiedIds = verifiedOrder.mapTo(hashSetOf()) { it.id }
+            verifiedOrder + refill.candidates.filterNot { it.id in verifiedIds }
+        } else refill.candidates
         if (refill.skipped > 0) XrayLogManager.i("SMART", com.example.vpn.smart.PoolRefill.describe(refill))
         // Last-known-good servers on this network (they passed the upload/download check here) are tested first,
         // and servers that showed the ~16 KB freeze here go to the back while they cool down (FreezeBook).
@@ -2584,6 +2588,8 @@ class RayVpnService : VpnService() {
                 perConfigTimeoutMs = if (slowTunnel()) SLOW_VERIFY_CONFIG_MS else 40_000L
             )
         )
+        val step = if (engineEndpoint == null) com.example.vpn.connectivity.ProbeStep.HTTP_THROUGH_TUNNEL
+            else com.example.vpn.connectivity.ProbeStep.HTTP_THROUGH_ENGINE_PROXY
         val report = engine.run(
             com.example.vpn.connectivity.MultiProbeHealthEngine.Subject(
                 sessionId = state.sessionId ?: attemptId ?: "none",
@@ -2591,7 +2597,7 @@ class RayVpnService : VpnService() {
                 engine = state.activeEngineName,
                 networkProfileId = com.example.vpn.smart.NetworkCapabilityDetector.last?.key()
             ),
-            listOf(com.example.vpn.connectivity.MultiProbeHealthEngine.step(com.example.vpn.connectivity.ProbeStep.HTTP_THROUGH_TUNNEL) {
+            listOf(com.example.vpn.connectivity.MultiProbeHealthEngine.step(step) {
                 routeLatency()
             }),
             // A result for an older attempt or an earlier network never verifies this one.
