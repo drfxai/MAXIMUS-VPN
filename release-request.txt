@@ -1,1 +1,2 @@
-V1.0.4 rebuild 2026-11-15T15:34Z after #218 #219 #220 #221
+V1.0.4 signed Android rebuild after PR #222 (f61f2bff98d4ce931cfe25a224881287d801ee3d).
+Includes the build 151 connectivity fixes for frozen paths, bulk verification and Aether retry handling.
