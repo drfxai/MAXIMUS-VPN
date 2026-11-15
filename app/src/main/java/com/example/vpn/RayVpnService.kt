@@ -60,6 +60,8 @@ import java.net.InetSocketAddress
 class RayVpnService : VpnService() {
 
     companion object {
+        /** Linux TCP_MAXSEG (netinet/tcp.h); android.system.OsConstants does not export it. */
+        private const val TCP_MAXSEG = 2
         const val ACTION_CONNECT = "com.drfxai.maximusvpn.ACTION_CONNECT"
         const val ACTION_DISCONNECT = "com.drfxai.maximusvpn.ACTION_DISCONNECT"
         const val ACTION_RECONNECT = "com.drfxai.maximusvpn.ACTION_RECONNECT"
@@ -298,6 +300,11 @@ class RayVpnService : VpnService() {
         com.example.xray.RealDelayProbe.socketProtector = { fd -> safeProtectFd(fd) }
         // Clean-IP scans and checks measure the phone's network, not this VPN (or its blocking interface).
         com.example.panels.CleanIpOptimizer.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
+        // The TLS record-slicing bridge dials the real server outside this VPN, like the probes.
+        com.example.vpn.stealth.recordslice.RecordSliceBridges.protect = { socket -> vpnInterface == null || safeProtectSocket(socket) }
+        com.example.vpn.stealth.recordslice.RecordSliceBridges.resolve = { host -> bridgeResolve(host) }
+        com.example.vpn.stealth.recordslice.RecordSliceBridges.setMss = { socket, mss -> setSocketMss(socket, mss) }
+        com.example.vpn.stealth.recordslice.RecordSliceBridges.log = { line -> XrayLogManager.i("STEALTH", line) }
     }
 
     private fun observeSettingsFlow() {
@@ -964,6 +971,9 @@ class RayVpnService : VpnService() {
             // probe time limits. The probe's sockets bypass the traffic-blocking interface.
             val network = com.example.vpn.smart.NetworkKey.current(this@RayVpnService)
             val timeouts = networkMemory.timeouts(network)
+            // Uplink Shield: a network where the MSS clamp cleared the 16 KB upload stall gets it on every connect.
+            com.example.vpn.stealth.recordslice.UplinkShield.networkMss =
+                if (networkMemory.shield.active(network)) com.example.vpn.stealth.recordslice.UplinkShield.MSS else null
             // Smart Connect: a server that froze on this network (~16 KB cap) is neither retried as selected nor in a
             // stealth form while another saved server has not frozen here (FrozenGuard).
             suspend fun frozenHold(p: VlessProfile): Boolean {
@@ -2451,6 +2461,27 @@ class RayVpnService : VpnService() {
         return false
     }
 
+    /** The server address for the record-slicing bridge, looked up outside this VPN (as for the core itself). */
+    private fun bridgeResolve(host: String): List<java.net.InetAddress> {
+        val name = host.trim().removePrefix("[").removeSuffix("]")
+        if (isLiteralIp(name)) return listOf(java.net.InetAddress.getByName(name))
+        resolvedHosts[name.lowercase()]?.let { return listOf(java.net.InetAddress.getByName(it)) }
+        val pinned = resolveEndpoint(VlessProfile(name = name, address = name, port = 443, uuid = ""))
+        return listOf(java.net.InetAddress.getByName(pinned.address))
+    }
+
+    /** TCP_MAXSEG on a not yet connected socket (Uplink Shield in the record-slicing bridge). */
+    private fun setSocketMss(socket: Socket, mss: Int): Boolean = try {
+        if (!socket.isBound) socket.bind(java.net.InetSocketAddress(0))
+        android.os.ParcelFileDescriptor.fromSocket(socket).use { pfd ->
+            android.system.Os.setsockoptInt(pfd.fileDescriptor, android.system.OsConstants.IPPROTO_TCP, TCP_MAXSEG, mss)
+        }
+        true
+    } catch (e: Exception) {
+        XrayLogManager.w("STEALTH", "Uplink Shield: TCP_MAXSEG $mss not applied (${e.javaClass.simpleName})")
+        false
+    }
+
     private fun safeProtectFd(fd: Int): Boolean = try {
         protect(fd)
     } catch (e: Exception) {
@@ -2965,19 +2996,46 @@ class RayVpnService : VpnService() {
         val rescue = freezeRescue?.takeIf { it.variantId == running.id }
         val label = rescue?.let { "failover · freeze16k · ${it.rescue.label} ${com.example.core.SecretRedactor.redact(running.name)}" }
         val download = evidence.download
+        val uplinkStall = com.example.vpn.stealth.recordslice.UplinkShield.signature(evidence)
+        // The Uplink Shield's result on this network: it helped when the upload no longer stalls at 16 KB.
+        if (rescue?.rescue == com.example.vpn.smart.FreezeFailover.Rescue.UPLINK_SHIELD) {
+            networkMemory.shield.record(network, helped = !uplinkStall && !evidence.fixedSizeFreeze)
+            shieldEvent(if (!uplinkStall && !evidence.fixedSizeFreeze) "helped" else "no-help", running.id)
+        }
         when {
             evidence.fixedSizeFreeze -> {
                 freezes.recordFrozen(network, running.id)
                 if (label != null) XrayLogManager.w("FAILOVER", "$label: the download froze again after about 16 KB.")
                 freezeRescue = null
-                onFreeze(attemptId, network, running, rescueTried = rescue != null || running.id in freezeRescued)
+                onFreeze(attemptId, network, running, rescueTried = rescue != null || running.id in freezeRescued,
+                    uplinkStall = uplinkStall)
+            }
+            download is com.example.vpn.verify.LegResult.Passed && uplinkStall && rescue == null &&
+                running.id !in freezeRescued && networkMemory.shield.mayTry(network) &&
+                com.example.vpn.smart.FreezeFailover.canShield(running) &&
+                !com.example.vpn.sidecar.Sidecars.isEngineProfile(running) -> {
+                // Downloads pass but every upload stops at the 16 KB grade: try the same server with the MSS clamp.
+                freezes.recordGood(network, running.id)
+                val retry = com.example.vpn.smart.FreezeFailover.Decision.Retry(running.id,
+                    com.example.vpn.stealth.recordslice.UplinkShield.enable(running),
+                    com.example.vpn.smart.FreezeFailover.Rescue.UPLINK_SHIELD)
+                val name = { _: String -> com.example.core.SecretRedactor.redact(running.name) }
+                serviceScope.launch(Dispatchers.IO) {
+                    // A pinned config (power button without fallback, Trade mode) is never changed.
+                    if (exitPinned() || _vpnState.value.attemptId != attemptId) return@launch
+                    XrayLogManager.w("FAILOVER", "failover · upload16k · the upload stalled at the 16 KB grade; " +
+                        com.example.vpn.smart.FreezeFailover.describe(retry, name))
+                    shieldEvent("retry", running.id)
+                    startFreezeRescue(network, running, retry, name)
+                }
             }
             download is com.example.vpn.verify.LegResult.Passed &&
                 (evidence.upload as? com.example.vpn.verify.LegResult.Failed)?.stalled != true -> {
                 // Passed the transfer check here: last-known-good on this network.
                 freezes.recordGood(network, running.id, rescue?.rescue?.key)
                 if (label != null) {
-                    XrayLogManager.i("FAILOVER", "$label: passed the transfer check (${download.bytes / 1024} KB).")
+                    XrayLogManager.i("FAILOVER", "$label: passed the transfer check (${download.bytes / 1024} KB)" +
+                        if (uplinkStall) "; the upload still stalls at the 16 KB grade." else ".")
                     freezeEvent("rescued", rescue?.rescue?.key.orEmpty(), running.id)
                     freezeRescue = null
                 }
@@ -2993,9 +3051,10 @@ class RayVpnService : VpnService() {
      * its saved XHTTP form), then move to a verified backup; see [com.example.vpn.smart.FreezeFailover]. The
      * traffic-blocking interface stays up during each move (connect keeps protection before tearing down).
      */
-    private fun onFreeze(attemptId: String, network: String, server: VlessProfile, rescueTried: Boolean) {
+    private fun onFreeze(attemptId: String, network: String, server: VlessProfile, rescueTried: Boolean,
+                         uplinkStall: Boolean = false) {
         serviceScope.launch(Dispatchers.IO) {
-            val (decision, name) = freezeDecision(network, server, rescueTried)
+            val (decision, name) = freezeDecision(network, server, rescueTried, uplinkStall)
             XrayLogManager.w("FAILOVER", com.example.vpn.smart.FreezeFailover.describe(decision, name))
             if (_vpnState.value.attemptId != attemptId) return@launch
             when (decision) {
@@ -3021,7 +3080,7 @@ class RayVpnService : VpnService() {
         }
     }
 
-    private suspend fun freezeDecision(network: String, server: VlessProfile, rescueTried: Boolean):
+    private suspend fun freezeDecision(network: String, server: VlessProfile, rescueTried: Boolean, uplinkStall: Boolean = false):
         Pair<com.example.vpn.smart.FreezeFailover.Decision, (String) -> String> {
         val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
         val byId = saved.associateBy { it.id }
@@ -3039,7 +3098,8 @@ class RayVpnService : VpnService() {
             frozen = freezes.frozen(network), saved = saved.filter(usable),
             engineProgram = com.example.vpn.sidecar.Sidecars.isEngineProfile(server),
             serverKeys = serverNetworkKeys(server) + serverNetworkKeys(savedServer),
-            networks = (saved.filter(usable) + smartRunnersUp.map { it.owner }).associate { it.id to serverNetworkKeys(it) }
+            networks = (saved.filter(usable) + smartRunnersUp.map { it.owner }).associate { it.id to serverNetworkKeys(it) },
+            uplinkStall = uplinkStall, shieldMayTry = networkMemory.shield.mayTry(network)
         ))
         val name = { id: String -> com.example.core.SecretRedactor.redact(byId[id]?.name ?: if (id == server.id) server.name else id) }
         return decision to name
@@ -3106,6 +3166,13 @@ class RayVpnService : VpnService() {
         com.example.vpn.diagnostics.ConnectionMetrics.failoverSwitches.incrementAndGet()
         freezeEvent("switch", d.to?.let { "backup" } ?: "race", d.fromId)
         connect(lead, smart = true, exclude = frozen, ticket = ticket)
+    }
+
+    private fun shieldEvent(action: String, profileId: String) {
+        com.example.vpn.diagnostics.events.EventLog.event("failover.uplink_shield", attributes = mapOf(
+            "action" to action, "mss" to com.example.vpn.stealth.recordslice.UplinkShield.MSS.toString(),
+            "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(profileId) ?: "none")
+        ))
     }
 
     private fun freezeEvent(action: String, detail: String, profileId: String) {
@@ -3459,6 +3526,11 @@ class RayVpnService : VpnService() {
     override fun onDestroy() {
         com.example.xray.RealDelayProbe.socketProtector = null
         com.example.panels.CleanIpOptimizer.socketProtector = null
+        com.example.vpn.stealth.recordslice.RecordSliceBridges.protect = null
+        com.example.vpn.stealth.recordslice.RecordSliceBridges.resolve = null
+        com.example.vpn.stealth.recordslice.RecordSliceBridges.setMss = null
+        com.example.vpn.stealth.recordslice.RecordSliceBridges.closeAll()
+        com.example.vpn.stealth.recordslice.UplinkShield.networkMss = null
         supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.SERVICE_DESTROYED)
         connectJob?.cancel()
         serviceScope.coroutineContext[Job]?.cancel()

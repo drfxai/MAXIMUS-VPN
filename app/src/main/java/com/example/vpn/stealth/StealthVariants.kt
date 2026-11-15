@@ -4,6 +4,8 @@ import com.example.data.model.ProfileType
 import com.example.data.model.ProtocolType
 import com.example.data.model.VlessProfile
 import com.example.vpn.engine.EngineSelectionPolicy
+import com.example.vpn.stealth.recordslice.RecordSliceConfig
+import com.example.vpn.stealth.recordslice.TlsRecordSlicer
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -20,6 +22,10 @@ import org.json.JSONObject
  *   breaks first-packet length and entropy classifiers.
  * - QUIC (Hysteria2) and WireGuard: random junk datagrams before the handshake, as AmneziaWG does, so a
  *   classifier that looks at the first packet of a UDP flow sees noise. Servers drop the junk.
+ *
+ * - TLS and REALITY over TCP without ECH, as a further escalation: the ClientHello re-framed into several valid
+ *   TLS records cut around the server name (3 records at its first dot, 7 records around it, or records of
+ *   alternating versions), through a local bridge ([com.example.vpn.stealth.recordslice.RecordSliceBridge]).
  *
  * Every profile the app runs on Xray gets at least two alternates. Which one works is decided by a
  * real request through each ([StealthPathFinder]), never assumed.
@@ -86,8 +92,30 @@ object StealthVariants {
         if (out.size < 2 && !hasTcpMask) {
             out += Variant(SPLIT_FIRST, "First packets split into random pieces", profile.copy(finalMask = withTcp(mask, packetFragment("1-3", "40-120")).toString()))
         }
+        out += recordSliceVariants(profile)
         return out
     }
+
+    /**
+     * TLS record-layer slicing around the server name ([TlsRecordSlicer]) through the local bridge: the escalation
+     * after the native fragment and fingerprint alternates. REALITY-safe (whole, non-empty records), so for REALITY
+     * these are the only ClientHello splits beyond the 1-3 packet fragment [com.example.vpn.smart.FragmentPolicy]
+     * allows. Never with ECH. Which one carries traffic is learned per network like every other alternate.
+     */
+    private fun recordSliceVariants(profile: VlessProfile): List<Variant> {
+        if (!RecordSliceConfig.eligible(profile)) return emptyList()
+        return RECORD_SLICE_ORDER.map { vector ->
+            Variant(recordSliceKey(vector), vector.label, RecordSliceConfig.enable(profile, vector))
+        }
+    }
+
+    /** Record-slicing vectors, in the order they are tried. */
+    val RECORD_SLICE_ORDER = listOf(TlsRecordSlicer.Vector.SNI_DOT_3, TlsRecordSlicer.Vector.SNI_FIB_7, TlsRecordSlicer.Vector.ALT_VERSION)
+
+    const val RECORD_SLICE_PREFIX = "record-"
+
+    /** "record-sni-dot-3" and the like. */
+    fun recordSliceKey(vector: TlsRecordSlicer.Vector): String = RECORD_SLICE_PREFIX + vector.key
 
     private fun plainTcpVariants(profile: VlessProfile, mask: JSONObject): List<Variant> {
         if (mask.optJSONArray("tcp")?.let { it.length() > 0 } == true) return emptyList()
