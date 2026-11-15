@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #222 (f61f2bff98d4ce931cfe25a224881287d801ee3d).
-Includes the build 151 connectivity fixes for frozen paths, bulk verification and Aether retry handling.
+V1.0.4 signed Android rebuild after PRs #223–#227 (b89223f5bac30f59e8089a76c8034db8a2499408).
+Includes per-app routing, boot and widget controls, Psiphon setup, licensing changes and the optional Radiance integration source.
