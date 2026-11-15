@@ -188,7 +188,11 @@ fun SettingsScreen(
                         ?: return@withContext "Psiphon settings are unavailable or exceed 512 KiB."
                     PsiphonSidecar.validateNetworkSettings(raw)?.let { return@withContext it }
                     runCatching {
-                        SecureStorage(context.applicationContext).encryptAndSave(PsiphonSidecar.SETTINGS_STORAGE_KEY, raw.trim())
+                        val storage = SecureStorage(context.applicationContext)
+                        val key = PsiphonSidecar.SETTINGS_STORAGE_KEY
+                        val config = raw.trim()
+                        storage.encryptAndSave(key, config)
+                        check(storage.getAndDecrypt(key) == config)
                     }.fold(
                         onSuccess = { "Psiphon settings saved. Connect to verify traffic." },
                         onFailure = { "Could not save Psiphon settings in encrypted storage." }
