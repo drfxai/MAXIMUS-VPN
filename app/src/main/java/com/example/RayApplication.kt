@@ -260,6 +260,9 @@ class RayApplication : Application() {
             com.example.data.security.SecureStorage(this).getAndDecrypt("psiphon_network_settings_v1")?.takeIf { it.isNotBlank() }
         }
 
+        // Home-screen widget follows the connection state.
+        runCatching { com.example.vpn.widget.ConnectWidgetProvider.observe(this) }
+
         // Keep the log of the previous run (a crash or a forced stop would otherwise wipe it).
         runCatching { XrayLogManager.attachDisk(java.io.File(filesDir, "logs")) }
 

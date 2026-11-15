@@ -725,3 +725,14 @@ The application's license does not restrict recipients' rights in this separate 
 * Direct Serverless uses the separate patterniha/Xray-core executable, revision `f9903959b9ae47538f5c7100f6416fb9fbcd2317`, MPL-2.0, distributed with `Serverless-source.tar.gz`. Its profiles originate in patterniha/Serverless-for-Iran revision `df113f5b0fafc5bbe552e903f43249110510bc34` (GPL-3.0), with the original license in assets/serverless/LICENSE.txt. The app adapts loopback authentication, DNS and geo-file dependent classifications; fragmentation and OOB instructions are retained.
 
 * RegionHop 1.27.0, freeb5d/regionhop revision `d5798d80f77fa6f40406ba30886d810c3c462147`, MIT. The optional VPS installer downloads checksum-pinned upstream components. The upstream Psiphon and Xray binaries retain their respective upstream licenses; release and source provenance remain available from that upstream release. No user deployment config or API token is bundled.
+
+## ZedSecure and WhiteAestherMobile — connect on boot, widget, background running (2026-11-15)
+
+- `app/src/main/java/com/example/vpn/boot/BootReceiver.kt` is adapted from ZedSecure
+  (https://github.com/CluvexStudio/ZedSecure, commit `201e82ce18a41696a811ccc5b2e6b913d10edfc7`,
+  `core/BootReceiver.kt`), GNU Affero General Public License v3.0.
+- The home-screen widget and the "Background running" (battery-optimisation exemption) row follow ZedSecure's
+  `ZedWidgetProvider` and WhiteAestherMobile's `AetherWidgetProvider` / background-running card
+  (https://github.com/WhiteDNS/WhiteAestherMobile, commit `6e2ade9e86c5f66194c66e6be1e23b40677c2db2`), both
+  AGPL-3.0; the widget, `QuickConnect`, `BootPolicy` and `BackgroundRunning` code is Maximus's own.
+- No affiliation or endorsement is implied.

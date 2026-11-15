@@ -7,4 +7,9 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Home-screen connect widget -->
+    <color name="widget_background">#F0121418</color>
+    <color name="widget_text">#FFF4F4F5</color>
+    <color name="widget_text_muted">#FFA1A1AA</color>
+    <color name="widget_accent">#FFD4A843</color>
 </resources>
