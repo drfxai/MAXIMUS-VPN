@@ -766,7 +766,7 @@ class RayVpnService : VpnService() {
         // The saved profile the connection belongs to; a same-server switch below can change it.
         var requestedProfile = if (settingsRepository.getSettings().preferredEngine == EngineType.SING_BOX &&
             !com.example.vpn.sidecar.Sidecars.isEngineProfile(userProfile) &&
-            com.example.vpn.sidecar.SingBoxSidecar.conversionProblem(userProfile) == null &&
+            com.example.vpn.sidecar.SingBoxSidecar.autoSelectProblem(userProfile) == null &&
             com.example.vpn.sidecar.Sidecars.isBundled(com.example.vpn.sidecar.SingBoxSidecar)) {
             com.example.vpn.sidecar.SingBoxSidecar.select(userProfile)
         } else userProfile
@@ -882,7 +882,7 @@ class RayVpnService : VpnService() {
                         !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) &&
                         com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) }
                     ?.let { alt ->
-                        if (settings.preferredEngine == EngineType.SING_BOX && com.example.vpn.sidecar.SingBoxSidecar.conversionProblem(alt) == null &&
+                        if (settings.preferredEngine == EngineType.SING_BOX && com.example.vpn.sidecar.SingBoxSidecar.autoSelectProblem(alt) == null &&
                             com.example.vpn.sidecar.Sidecars.isBundled(com.example.vpn.sidecar.SingBoxSidecar)) com.example.vpn.sidecar.SingBoxSidecar.select(alt)
                         else alt
                     }
@@ -1043,6 +1043,7 @@ class RayVpnService : VpnService() {
                 raced = true
                 chosenVariant = win.variantKey
                 win.variantKey?.let { networkMemory.variants(network)[win.owner.id] = it }
+                com.example.vpn.stealth.StealthPathFinder.rememberFingerprint(networkMemory.variants(network), win.owner, win.profile, win.variantKey)
                 networkMemory.recordSuccess(network, com.example.vpn.stealth.ConnectionKind.of(win.profile), win.latencyMs)
                 mutateState { it.copy(activeProfile = win.owner, attemptedProfileId = win.owner.id) }
             }
