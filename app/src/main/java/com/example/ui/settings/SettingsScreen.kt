@@ -290,6 +290,10 @@ fun SettingsScreen(
     val back: () -> Unit = { pageName = null }
     var showSplitTunnel by rememberSaveable { mutableStateOf(false) }
     val splitTunnel by com.example.vpn.routing.SplitTunnelStore.flow(context).collectAsStateWithLifecycle()
+    var batteryUnrestricted by remember { mutableStateOf(com.example.vpn.boot.BackgroundRunning.isUnrestricted(context)) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        batteryUnrestricted = com.example.vpn.boot.BackgroundRunning.isUnrestricted(context)
+    }
 
     val updateUi = UpdateUi(
         checking = updateChecking,
@@ -412,7 +416,9 @@ fun SettingsScreen(
                         )
                     }
                 },
-                onBack = back
+                onBack = back,
+                batteryUnrestricted = batteryUnrestricted,
+                onRequestBackgroundRunning = { com.example.vpn.boot.BackgroundRunning.request(context) }
             )
 
             SettingsPage.SHARING -> {
