@@ -667,7 +667,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             val result = withContext(Dispatchers.IO) {
                 val backend = com.example.panels.servers.RegionHopManager({ name -> getApplication<Application>().assets.open(name).use { it.readBytes() } })
                 if (operation == "install") {
-                    val config = com.example.data.security.SecureStorage(getApplication()).getAndDecrypt("psiphon_network_settings_v1")
+                    val config = com.example.data.security.SecureStorage(getApplication()).getAndDecrypt(com.example.vpn.sidecar.PsiphonSidecar.SETTINGS_STORAGE_KEY)
                         ?: error("Import your Psiphon.config first.")
                     backend.install(s, config, quiet)
                 } else if (operation == "uninstall") backend.uninstall(s, quiet)
@@ -679,7 +679,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     fun importPsiphonConfig(raw: String) {
         val problem = com.example.vpn.sidecar.PsiphonSidecar.validateNetworkSettings(raw)
         if (problem != null) { _state.update { it.copy(error = problem) }; return }
-        if (runCatching { com.example.data.security.SecureStorage(getApplication()).encryptAndSave("psiphon_network_settings_v1", raw.trim()) }.isFailure) {
+        if (runCatching { com.example.data.security.SecureStorage(getApplication()).encryptAndSave(com.example.vpn.sidecar.PsiphonSidecar.SETTINGS_STORAGE_KEY, raw.trim()) }.isFailure) {
             _state.update { it.copy(error = "Could not save Psiphon settings in encrypted device storage.") }; return
         }
         _events.tryEmit(ServersEvent.Message("Psiphon settings saved privately. They will be sent only to a VPS you choose to install RegionHop on."))

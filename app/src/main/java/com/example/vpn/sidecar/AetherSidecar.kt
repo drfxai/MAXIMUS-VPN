@@ -83,7 +83,8 @@ object AetherSidecar : SidecarEngine {
             if (advanced.psiphon != "only") command += listOf("--psiphon-bind",
                 "127.0.0.1:${if (chainPsiphon) context.socksPort else 0}")
             command += listOf("--psiphon-bin", binary.absolutePath)
-            Sidecars.psiphonSettings?.invoke()?.takeIf { it.isNotBlank() }?.let { config ->
+            Sidecars.psiphonNetworkSettings()?.let { config ->
+                PsiphonSidecar.validateNetworkSettings(config)?.let { error(it) }
                 val file = File(context.workDir, "psiphon-base.json").apply { writeText(config) }
                 environment["AETHER_PSIPHON_CONFIG"] = file.absolutePath
             }

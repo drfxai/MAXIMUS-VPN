@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CurrencyBitcoin
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Inventory2
@@ -263,7 +265,9 @@ fun RoutingDnsSettingsPage(
     onTestVpnDns: () -> Unit,
     onTestResolver: () -> Unit,
     onOpenResolverData: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    splitTunnelSummary: String? = null,
+    onOpenSplitTunnel: (() -> Unit)? = null
 ) {
     var showDns by rememberSaveable { mutableStateOf(false) }
     Column {
@@ -278,6 +282,19 @@ fun RoutingDnsSettingsPage(
                         subtitle = SettingsLabels.routingDescription(mode),
                         selected = settings.routingMode == mode,
                         onSelect = { actions.setRoutingMode(mode) }
+                    )
+                }
+            }
+
+            if (onOpenSplitTunnel != null) {
+                SettingsSectionLabel("Apps")
+                SettingsGroup {
+                    SettingsNavRow(
+                        title = "Per-app routing",
+                        subtitle = splitTunnelSummary ?: "Every app on this phone",
+                        icon = Icons.Default.Apps,
+                        modifier = Modifier.testTag("settings_split_tunnel_row"),
+                        onClick = onOpenSplitTunnel
                     )
                 }
             }
@@ -469,7 +486,9 @@ fun PrivacySettingsPage(
     settings: AppSettings,
     actions: SettingsActions,
     onOpenAndroidVpnSettings: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    batteryUnrestricted: Boolean? = null,
+    onRequestBackgroundRunning: (() -> Unit)? = null
 ) {
     Column {
         SettingsTopBar("Privacy & security", onBack = onBack)
@@ -511,6 +530,35 @@ fun PrivacySettingsPage(
                     checked = settings.autoReconnect,
                     onCheckedChange = actions::setAutoReconnect
                 )
+            }
+
+            if (onRequestBackgroundRunning != null) {
+                SettingsSectionLabel("Startup & background")
+                SettingsGroup {
+                    SettingsSwitchRow(
+                        title = "Connect when the phone starts",
+                        subtitle = "Starts the config selected in Nodes after a reboot",
+                        icon = Icons.Default.PowerSettingsNew,
+                        modifier = Modifier.testTag("settings_connect_on_boot"),
+                        checked = settings.autoConnectOnBoot,
+                        onCheckedChange = { actions.updateSettings(settings.copy(autoConnectOnBoot = it)) }
+                    )
+                    SettingsDivider()
+                    SettingsNavRow(
+                        title = "Background running",
+                        subtitle = when (batteryUnrestricted) {
+                            true -> "Allowed: Android will not stop the tunnel to save battery"
+                            false -> "Restricted: Android may stop the tunnel when the screen is off. Tap to allow"
+                            null -> "Let Maximus keep running when the screen is off"
+                        },
+                        icon = Icons.Default.BatteryChargingFull,
+                        iconTint = if (batteryUnrestricted == false) AppTheme.colors.statusWarning else AppTheme.colors.primary,
+                        modifier = Modifier.testTag("settings_background_running"),
+                        trailing = { ExternalIcon() },
+                        onClick = onRequestBackgroundRunning
+                    )
+                }
+                SettingsFootnote("Connect on boot needs VPN permission granted once from the app. If Android's Always-on VPN is set to Maximus, Android starts it instead. Add the Maximus widget from your home screen's widget list for one-tap connect.")
             }
         }
     }

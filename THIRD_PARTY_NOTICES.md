@@ -726,6 +726,29 @@ The application's license does not restrict recipients' rights in this separate 
 
 * RegionHop 1.27.0, freeb5d/regionhop revision `d5798d80f77fa6f40406ba30886d810c3c462147`, MIT. The optional VPS installer downloads checksum-pinned upstream components. The upstream Psiphon and Xray binaries retain their respective upstream licenses; release and source provenance remain available from that upstream release. No user deployment config or API token is bundled.
 
+## WhiteAestherMobile and ZedSecure — per-app routing (2026-11-15)
+
+- Upstream: https://github.com/WhiteDNS/WhiteAestherMobile at commit `6e2ade9e86c5f66194c66e6be1e23b40677c2db2`
+  (`main`, read 2026-11-15; files `data/SplitTunnel.kt`, `data/InstalledApps.kt`, `ui/SplitTunnelScreen.kt`),
+  GNU Affero General Public License v3.0. Copied and adapted into `app/src/main/java/com/example/vpn/routing/`
+  (`SplitTunnel.kt`, `InstalledApps.kt`) and `ui/settings/SplitTunnelPage.kt`.
+- The rule that keeps the app's own traffic inside the tunnel in "only selected apps" mode when the engine runs
+  in-process follows ZedSecure (https://github.com/CluvexStudio/ZedSecure, commit `201e82ce18a41696a811ccc5b2e6b913d10edfc7`,
+  `ZedVpnService.applyAppRules`), GNU Affero General Public License v3.0.
+- Changes: plain-English labels, Maximus settings components, a plan object that never mixes allow and deny
+  calls, and the "Leave Iranian apps outside" suggestion (`IranianApps.kt`, Maximus's own code).
+
+## ZedSecure and WhiteAestherMobile — connect on boot, widget, background running (2026-11-15)
+
+- `app/src/main/java/com/example/vpn/boot/BootReceiver.kt` is adapted from ZedSecure
+  (https://github.com/CluvexStudio/ZedSecure, commit `201e82ce18a41696a811ccc5b2e6b913d10edfc7`,
+  `core/BootReceiver.kt`), GNU Affero General Public License v3.0.
+- The home-screen widget and the "Background running" (battery-optimisation exemption) row follow ZedSecure's
+  `ZedWidgetProvider` and WhiteAestherMobile's `AetherWidgetProvider` / background-running card
+  (https://github.com/WhiteDNS/WhiteAestherMobile, commit `6e2ade9e86c5f66194c66e6be1e23b40677c2db2`), both
+  AGPL-3.0; the widget, `QuickConnect`, `BootPolicy` and `BackgroundRunning` code is Maximus's own.
+- No affiliation or endorsement is implied.
+
 ## Lantern Radiance experimental integration
 
 The experimental Android build script fetches [Radiance](https://github.com/getlantern/radiance) at
