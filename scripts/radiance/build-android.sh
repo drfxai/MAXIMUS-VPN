@@ -39,6 +39,18 @@ output="$(cd "$OUT" && pwd)"
     # Upstream Android builds use this flag for libbox's os.checkPidfdOnce link.
     go build -mod=readonly -trimpath -buildvcs=false \
         -tags novpn,with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme \
-        -ldflags '-s -w -buildid= -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384' \
+        -ldflags '-s -w -buildid= -checklinkname=0 -extldflags "-Wl,-z,max-page-size=16384 -static-libstdc++"' \
         -o "$output/libradiance.so" ./cmd/maximus
 )
+
+# Publish the corresponding source exactly once for all Android ABIs.
+if [[ "$ABI" == arm64-v8a && -n "${RADIANCE_SOURCE_OFFER:-}" ]]; then
+    mkdir -p "$RADIANCE_SOURCE_OFFER"
+    source_offer="$(cd "$RADIANCE_SOURCE_OFFER" && pwd)"
+    (cd "$source_dir" && go mod vendor)
+    mkdir -p "$source_dir/maximus-build/scripts/engines" "$source_dir/maximus-build/scripts/radiance"
+    cp "$root/scripts/engines/common.sh" "$source_dir/maximus-build/scripts/engines/"
+    cp "$root/scripts/radiance/"{build-android.sh,main.go} "$source_dir/maximus-build/scripts/radiance/"
+    printf '%s\n' "$rev" > "$source_dir/MAXIMUS_UPSTREAM_REVISION"
+    tar --exclude=.git -czf "$source_offer/Radiance-source.tar.gz" -C "$source_dir" .
+fi

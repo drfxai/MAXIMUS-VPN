@@ -12,4 +12,6 @@ for abi in "${ABIS[@]}"; do
     [[ "$(basename "$script")" == common.sh ]] && continue
     ABI="$abi" OUT="$REPO_ROOT/app/src/main/jniLibs/$abi" bash "$script"
   done
+  ABI="$abi" OUT="$REPO_ROOT/app/src/main/jniLibs/$abi" \
+    RADIANCE_SOURCE_OFFER="$REPO_ROOT/build/transport-offer" bash "$REPO_ROOT/scripts/radiance/build-android.sh"
 done

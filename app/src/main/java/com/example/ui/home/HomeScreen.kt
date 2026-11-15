@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +30,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Public
@@ -40,11 +44,20 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod
+import com.example.vpn.engine.RuntimeCapabilities
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,7 +101,8 @@ fun HomeScreen(
     onNavigateToSecretChat: () -> Unit = {},
     onNavigateToGodBrowser: () -> Unit = {},
     onNavigateToAiAgent: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onConfigureConnectionEngines: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val connectionState by vpnViewModel.connectionState.collectAsStateWithLifecycle()
@@ -557,6 +571,18 @@ fun HomeScreen(
                 onStop = { com.example.vpn.VpnController.stopVpn(context) }
             )
             Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        if (settings.operationalMode != com.example.data.model.OperationalMode.TRADE) {
+            ConfigFreeConnectButton(
+                enabled = !connectionState.isTunnelUp && !connectionState.isBusy,
+                onConfigureEngines = onConfigureConnectionEngines,
+                onConnect = { method ->
+                    vpnViewModel.startOrRequestPermission(context, method.profile(), exact = true) {
+                        onRequestVpnPermission()
+                    }
+                }
+            )
         }
 
         // Error message banner if failed
@@ -1125,4 +1151,98 @@ private fun formatDuration(seconds: Long): String {
     val mins = (seconds % 3600) / 60
     val secs = seconds % 60
     return String.format(Locale.US, "%02d:%02d:%02d", hrs, mins, secs)
+}
+
+
+@Composable
+private fun ConfigFreeConnectButton(
+    enabled: Boolean,
+    onConfigureEngines: () -> Unit,
+    onConnect: (ConfigFreeMethod) -> Unit
+) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    val dark = AppTheme.colors.isDark
+    val accent = if (dark) Color(0xFF70EFF3) else Color(0xFF00646D)
+    val shape = RoundedCornerShape(28.dp)
+    val border = if (enabled) accent.copy(alpha = .82f) else MaterialTheme.colorScheme.outlineVariant
+    OutlinedButton(
+        onClick = { open = true },
+        enabled = enabled,
+        shape = shape,
+        border = BorderStroke(1.dp, border),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).clip(shape)
+            .background(
+                Brush.horizontalGradient(listOf(accent.copy(alpha = if (enabled) .12f else .03f),
+                    MaterialTheme.colorScheme.surface, accent.copy(alpha = if (enabled) .07f else .02f)))
+            )
+    ) {
+        Icon(Icons.Filled.Link, contentDescription = null, modifier = Modifier.size(21.dp))
+        Spacer(Modifier.width(10.dp))
+        Text("Connect without a config", fontWeight = FontWeight.SemiBold)
+    }
+
+    if (open) {
+        var availability by remember { mutableStateOf<Map<ConfigFreeMethod, String?>?>(null) }
+        LaunchedEffect(Unit) {
+            availability = withContext(Dispatchers.IO) {
+                ConfigFreeMethod.entries.associateWith { RuntimeCapabilities.unsupportedReason(it.profile()) }
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = if (dark) Color(0xFF192535) else MaterialTheme.colorScheme.surface,
+            title = { Text("Connect without a config", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (availability == null) Text("Checking installed engines…")
+                    availability?.entries?.forEachIndexed { index, (method, problem) ->
+                        if (index > 0) HorizontalDivider(
+                            modifier = Modifier.padding(start = 53.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)
+                        )
+                        val ready = enabled && problem == null
+                        val icon = when (method) {
+                            ConfigFreeMethod.AETHER_WARP -> Icons.Filled.Cloud
+                            ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Filled.Public
+                            ConfigFreeMethod.SERVERLESS -> Icons.Filled.Bolt
+                            ConfigFreeMethod.PSIPHON -> Icons.Filled.Shield
+                            ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
+                        }
+                        TextButton(
+                            enabled = ready,
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(vertical = 11.dp),
+                            onClick = { open = false; onConnect(method) }
+                        ) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                                Box(
+                                    Modifier.size(40.dp).clip(RoundedCornerShape(12.dp))
+                                        .background(accent.copy(alpha = if (ready) .12f else .04f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp),
+                                        tint = if (ready) accent else MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(method.title, fontWeight = FontWeight.SemiBold,
+                                        color = if (ready) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(problem ?: method.description, style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { open = false }) { Text("Close", color = accent) } },
+            dismissButton = {
+                if (availability?.get(ConfigFreeMethod.PSIPHON) != null) {
+                    TextButton(onClick = { open = false; onConfigureEngines() }) { Text("Set up Psiphon") }
+                }
+            }
+        )
+    }
 }

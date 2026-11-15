@@ -216,7 +216,8 @@ fun MainApp(
                     onRequestVpnPermission = onRequestVpnPermission,
                     onNavigateToSecretChat = { navController.navigate(Screen.SecretChat.route) },
                     onNavigateToGodBrowser = { navController.navigate(Screen.GodBrowser.route) },
-                    onNavigateToAiAgent = { navController.navigate(Screen.AiAgent.route) }
+                    onNavigateToAiAgent = { navController.navigate(Screen.AiAgent.route) },
+                    onConfigureConnectionEngines = { navController.navigate("settings/core-engines") }
                 )
             }
             composable(Screen.Top10.route) {
@@ -357,6 +358,14 @@ fun MainApp(
                     viewModel = panelManagerViewModel,
                     onNavigateBack = { navController.popBackStack() },
                     onOpenSettings = { navController.navigate(Screen.Settings.route) }
+                )
+            }
+            composable("settings/core-engines") {
+                SettingsScreen(
+                    viewModel = settingsViewModel,
+                    onNavigateToDiagnostics = { navController.navigate(Screen.Diagnostics.route) },
+                    onNavigateToAiAgent = { navController.navigate(Screen.AiAgent.route) },
+                    openCoreInventory = true
                 )
             }
             composable(Screen.Settings.route) {

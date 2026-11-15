@@ -83,7 +83,8 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     modifier: Modifier = Modifier,
     onNavigateToDiagnostics: () -> Unit = {},
-    onNavigateToAiAgent: () -> Unit = {}
+    onNavigateToAiAgent: () -> Unit = {},
+    openCoreInventory: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -142,7 +143,7 @@ fun SettingsScreen(
     var cleanIpStatus by remember { mutableStateOf<String?>(null) }
     var resolverStatus by remember { mutableStateOf<String?>(null) }
     var vpnOnlyUpdates by remember { mutableStateOf(UpdateNetworkPolicy.vpnOnly(context)) }
-    var showCoreInventory by remember { mutableStateOf(false) }
+    var showCoreInventory by rememberSaveable(openCoreInventory) { mutableStateOf(openCoreInventory) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     var updateDownloading by remember { mutableStateOf(false) }
     var updateJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
