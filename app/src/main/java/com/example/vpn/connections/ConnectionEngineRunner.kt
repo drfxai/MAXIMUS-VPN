@@ -504,7 +504,7 @@ object ConnectionEngineRunner {
         if (irancellSingle && irancellPick == null) attempts += "irancell: no MASQUE HTTP/2 carrier available"
         if (irancellSingle) record("ladder", "queue", "START", "Irancell: one MASQUE HTTP/2 (TCP) attempt" +
             (irancellPick?.let { " (" + method(it) + ")" } ?: " (none available)") +
-            ", ${IrancellWarp.BUDGET_MS / 1000}s cap, account API via Aether's name/edge fallback with the ClientHello fragmented; " +
+            ", ${IrancellWarp.BUDGET_MS / 1000}s cap, account API via Aether's own call raced against the OOB ClientHello lane; " +
             "skipping " + IrancellWarp.skipped(ordered.map(::method), irancellPick?.let(::method)).joinToString(", ").ifEmpty { "nothing" } +
             "; a registration failure ends it at once")
         val failedRegistrationKinds = mutableSetOf<String>()
@@ -800,10 +800,15 @@ object ConnectionEngineRunner {
             }
             try {
                 record(name, "prepare", "START")
-                val launch = engine.prepare(candidate, settings, context)
+                // Iranian mobile networks: Aether races its account calls through the OOB ClientHello lane (WarpApiLane).
+                val launched = if (engine.id == AetherSidecar.ID && automatic &&
+                    WarpApiLane.applies(onIrancell, onMci, candidate)) WarpApiLane.mark(candidate).also {
+                        record(name, "api-lane", "START", WarpApiLane.summary(AetherSettings.read(ProfileExtras.read(it))))
+                    } else candidate
+                val launch = engine.prepare(launched, settings, context)
                 checkCancellation()
                 stage = "engine process could not start"
-                val process = EngineReaper.track(engine.startPrepared(candidate, settings, launch, context) ?: SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
+                val process = EngineReaper.track(engine.startPrepared(launched, settings, launch, context) ?: SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
                 running = process
                 checkCancellation()
                 stage = "local proxy did not become ready"
