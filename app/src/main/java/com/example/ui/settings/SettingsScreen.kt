@@ -1,6 +1,8 @@
 package com.example.ui.settings
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -63,6 +65,11 @@ import com.example.update.ResolverPackUpdater
 import com.example.update.UpdateNetworkPolicy
 import com.example.vpn.diagnostics.DnsPathTest
 import com.example.vpn.safety.DnsResolvers
+import com.example.data.security.SecureStorage
+import com.example.vpn.sidecar.PsiphonSidecar
+import com.example.vpn.sidecar.Sidecars
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 /**
@@ -159,6 +166,51 @@ fun SettingsScreen(
     }
     LaunchedEffect(Unit) { performUpdateCheck() }
 
+    var psiphonStatus by remember { mutableStateOf<String?>(null) }
+    var psiphonImporting by remember { mutableStateOf(false) }
+    val psiphonImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            psiphonImporting = true
+            try {
+                psiphonStatus = withContext(Dispatchers.IO) {
+                    val raw = runCatching {
+                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                            val buffer = ByteArray(PsiphonSidecar.MAX_SETTINGS_BYTES + 1)
+                            var offset = 0
+                            while (offset < buffer.size) {
+                                val read = stream.read(buffer, offset, buffer.size - offset)
+                                if (read < 0) break
+                                offset += read
+                            }
+                            if (offset == buffer.size) null else String(buffer, 0, offset, Charsets.UTF_8)
+                        }
+                    }.getOrElse { return@withContext "Could not read Psiphon settings." }
+                        ?: return@withContext "Psiphon settings are unavailable or exceed 512 KiB."
+                    PsiphonSidecar.validateNetworkSettings(raw)?.let { return@withContext it }
+                    runCatching {
+                        val storage = SecureStorage(context.applicationContext)
+                        val key = PsiphonSidecar.SETTINGS_STORAGE_KEY
+                        val config = raw.trim()
+                        storage.encryptAndSave(key, config)
+                        check(storage.getAndDecrypt(key) == config)
+                    }.fold(
+                        onSuccess = { "Psiphon settings saved. Connect to verify traffic." },
+                        onFailure = { "Could not save Psiphon settings in encrypted storage." }
+                    )
+                }
+            } finally {
+                psiphonImporting = false
+            }
+        }
+    }
+    LaunchedEffect(showCoreInventory) {
+        if (showCoreInventory && psiphonStatus == null) {
+            psiphonStatus = withContext(Dispatchers.IO) {
+                Sidecars.psiphon().problem(PsiphonSidecar.profile()) ?: "Psiphon settings configured."
+            }
+        }
+    }
+
     if (showCoreInventory) {
         AlertDialog(
             onDismissRequest = { showCoreInventory = false },
@@ -173,7 +225,10 @@ fun SettingsScreen(
                             Text("${engine.id}: " + if (present) "Installed in APK" else "Not present on this device")
                         }
                     Text("Executable engine upgrades are released as signed APKs, not remotely executable code.")
-                    Text("Psiphon fetches and validates its own server lists using Psiphon's configured signing key when it runs.")
+                    psiphonStatus?.let { Text(it) }
+                    TextButton(enabled = !psiphonImporting, onClick = { psiphonImporter.launch(arrayOf("*/*")) }) {
+                        Text(if (psiphonImporting) "Importing…" else "Import Psiphon.config")
+                    }
                 }
             },
             confirmButton = { TextButton(onClick = { showCoreInventory = false }) { Text("Close") } }

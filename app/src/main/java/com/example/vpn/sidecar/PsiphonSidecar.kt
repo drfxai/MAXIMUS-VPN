@@ -107,6 +107,8 @@ class PsiphonSidecar(
         const val BINARY = "psiphon"
         /** Asset CI writes from a secret; absent in builds without Psiphon network settings. */
         const val ASSET_PATH = "psiphon/config.json"
+        const val SETTINGS_STORAGE_KEY = "psiphon_network_settings_v1"
+        const val MAX_SETTINGS_BYTES = 512 * 1024
         const val KEY_ENGINE = "engine"
         const val KEY_REGION = "region"
         const val KEY_PRIVATE_PROFILE_ID = "privateProfileId"
@@ -118,7 +120,7 @@ class PsiphonSidecar(
         val TUNNEL_UP = Regex("Tunnels.*\"count\":\\s*[1-9]")
 
         const val MISSING_SETTINGS =
-            "Psiphon needs this build's Psiphon network settings, which are not included. Use a build that ships them."
+            "Psiphon needs this build's Psiphon network settings, which are not included. Import a Psiphon.config file in Settings → Core & resource manager."
 
         /** Plain DNS servers Psiphon may use to find its server lists when Android gives it none. */
         val DEFAULT_DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")
@@ -218,7 +220,7 @@ class PsiphonSidecar(
         }
 
         fun validateNetworkSettings(raw: String): String? {
-            if (raw.length > 512 * 1024) return "Psiphon settings exceed 512 KiB."
+            if (raw.length > MAX_SETTINGS_BYTES) return "Psiphon settings exceed 512 KiB."
             val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return "Psiphon settings must be a JSON object."
             incompleteReason(obj)?.let { return it }
             for (key in listOf("RemoteServerListURLs", "ObfuscatedServerListRootURLs")) {
