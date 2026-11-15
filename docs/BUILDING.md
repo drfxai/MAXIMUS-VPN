@@ -1,6 +1,6 @@
 # Build MAXIMUS VPN
 
-Read [LICENSE](../LICENSE) before building or redistributing the source. The project uses a permission-based, non-commercial source-available license. Upstream components have separate license obligations in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+Read [LICENSE](../LICENSE) before building or redistributing the source. MAXIMUS VPN application code owned by DrFX uses AGPL-3.0-only. Upstream components have separate license obligations in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 ## Android app
 
