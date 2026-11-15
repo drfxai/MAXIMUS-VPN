@@ -16,10 +16,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import kotlin.random.Random
 
 /** Record slicing as a stealth vector (config through the bridge) and the Uplink Shield as a probed per-network rescue. */
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class RecordSliceConfigTest {
     private val reality = VlessProfile(
         id = "r1", name = "REALITY", address = "203.0.113.10", port = 443,
