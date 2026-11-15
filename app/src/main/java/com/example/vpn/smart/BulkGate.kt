@@ -36,7 +36,7 @@ object BulkGate {
     /** Carried in the connect's exclude set, one per gated candidate that froze. */
     const val MARKER_PREFIX = "__bulk-gate-"
 
-    fun marker(n: Int): String = "$MARKER_PREFIX$n__"
+    fun marker(n: Int): String = "${MARKER_PREFIX}${n}__"
 
     /** How many candidates this Connect already gated out (markers in [exclude]). */
     fun gatedSoFar(exclude: Set<String>): Int = exclude.count { it.startsWith(MARKER_PREFIX) }
