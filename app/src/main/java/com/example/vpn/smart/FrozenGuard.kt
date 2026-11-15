@@ -1,5 +1,7 @@
 package com.example.vpn.smart
 
+import com.example.data.model.VlessProfile
+
 /**
  * Keeps a server that froze (or stalled) on this network ([FreezeBook.frozen]) out of Smart Connect's choices.
  *
@@ -42,6 +44,29 @@ object FrozenGuard {
     }
 
     data class Split<T, S>(val seed: List<S>, val candidates: List<T>, val lastResortSeed: List<S>, val leftOut: Int)
+
+    /**
+     * [frozenIds] plus every server in [all] on the same IPv4 /16 as a frozen one
+     * ([com.example.vpn.connectivity.DiversitySelector.traitsOf], "net:a.b.0.0/16"): the ~16 KB cap is applied per
+     * flagged hosting range. Build 151 (Irancell): after p:b9917628cc froze on 51.158.x.x, the next Smart Connect
+     * picked p:e63b7946e8 on the same Scaleway /16 and it froze at the same 16050 B. CDN and name-based servers are
+     * not grouped (one frozen Cloudflare config says nothing about the others). Pure.
+     */
+    fun widen(frozenIds: Set<String>, all: List<VlessProfile>): Set<String> {
+        if (frozenIds.isEmpty()) return frozenIds
+        val nets = all.filter { it.id in frozenIds }.mapNotNull { slash16(it) }.toSet()
+        if (nets.isEmpty()) return frozenIds
+        return frozenIds + all.filter { slash16(it) in nets }.map { it.id }
+    }
+
+    /** The server's IPv4 /16 failure domain ("net:51.158.0.0/16"), or null for CDN, name-based or IPv6 servers. */
+    fun slash16(p: VlessProfile): String? = runCatching { com.example.vpn.connectivity.DiversitySelector.traitsOf(p).failureDomain }
+        .getOrNull()?.takeIf { it.startsWith("net:") && it.endsWith("/16") }
+
+    /** The `smart.selected_frozen` line: the selected server froze here, so Smart Connect picks instead. */
+    fun selectedFrozenLine(name: String, sameRange: Boolean): String =
+        "Selected server " + (if (sameRange) "sits on the same /16 as a server that froze" else "froze") +
+            " on this network (~16 KB cap): Smart Connect picks another server ($name)."
 
     fun skipLine(name: String): String =
         "Selected server froze on this network (~16 KB cap): stealth alternates are not tried for it while other servers remain ($name)."

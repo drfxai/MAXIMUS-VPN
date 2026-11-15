@@ -602,7 +602,11 @@ class RayVpnService : VpnService() {
         // Servers that failed a real request on this network moments ago are not raced again (ConnectivityBrain).
         val book = com.example.vpn.connectivity.ConnectivityBrain.book
         val freezes = networkMemory.freezes
-        val frozenHere = freezes.frozen(network)
+        // Frozen here, and every saved server on the same IPv4 /16 as a frozen one (FrozenGuard.widen; build 151).
+        val frozenIds = freezes.frozen(network)
+        val frozenHere = com.example.vpn.smart.FrozenGuard.widen(frozenIds, all)
+        if (frozenHere.size > frozenIds.size) XrayLogManager.i("SMART", "${frozenHere.size - frozenIds.size} server(s) share a /16 " +
+            "with a server frozen on this network; treated as frozen here.")
         // Never down to nothing: the oldest-skipped come back (unfrozen first) when fewer than a few are left (PoolRefill).
         val refill = com.example.vpn.smart.PoolRefill.refill(ordered,
             failedAt = { book.recentFailureAt(com.example.vpn.connectivity.PathRef.of(it)) }, frozen = { it.id in frozenHere })
@@ -978,13 +982,33 @@ class RayVpnService : VpnService() {
                 if (networkMemory.shield.active(network)) com.example.vpn.stealth.recordslice.UplinkShield.MSS else null
             // Smart Connect: a server that froze on this network (~16 KB cap) is neither retried as selected nor in a
             // stealth form while another saved server has not frozen here (FrozenGuard).
+            // Build 151: the same /16 as a frozen server counts as frozen (FrozenGuard.widen), in every stage A-G.
+            suspend fun frozenWide(): Set<String> {
+                if (!raceFirst) return emptySet()
+                val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
+                    .filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }
+                return com.example.vpn.smart.FrozenGuard.widen(networkMemory.freezes.frozen(network), saved)
+            }
+            var selectedFrozenLogged = false
             suspend fun frozenHold(p: VlessProfile): Boolean {
                 if (!raceFirst) return false
-                val frozen = networkMemory.freezes.frozen(network)
+                val frozen = frozenWide()
                 if (p.id !in frozen) return false
                 val others = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
                     .filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }.map { it.id }
-                return !com.example.vpn.smart.FrozenGuard.stealthAllowed(p.id, frozen, others)
+                val hold = !com.example.vpn.smart.FrozenGuard.stealthAllowed(p.id, frozen, others)
+                // The session's selected server froze here (or sits on a frozen /16): say so once, and let Smart pick.
+                // A pinned config (power button, Trade) never gets here: raceFirst is off for it.
+                if (hold && !selectedFrozenLogged) {
+                    selectedFrozenLogged = true
+                    val sameRange = p.id !in networkMemory.freezes.frozen(network)
+                    XrayLogManager.i("SMART", com.example.vpn.smart.FrozenGuard.selectedFrozenLine(
+                        com.example.core.SecretRedactor.redact(p.name), sameRange))
+                    com.example.vpn.diagnostics.events.EventLog.event("smart.selected_frozen", attributes = mapOf(
+                        "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(p.id) ?: "none"),
+                        "reason" to if (sameRange) "same /16 as a frozen server" else "frozen on this network"))
+                }
+                return hold
             }
             runCatching { com.example.vpn.smart.NetworkEnvironment.observe(this@RayVpnService, networkMemory, dnsPoisoned || dnsTamperedOn(network)) }
                 .onSuccess { report ->
@@ -1078,8 +1102,10 @@ class RayVpnService : VpnService() {
             if (!lockExit && !force && !xrayExhausted && !aetherLast) {
                 // Smart Connect replays only a route whose upload and download went through here and whose
                 // download did not stall since; anything weaker competes in the comparison instead.
+                val frozenA = frozenWide()
                 val remembered = networkMemory.routes.forNetwork(routeNetwork).filter {
-                    it.profileId !in exclude && (!compare || it.bidirectional && networkMemory.speeds.sample(routeNetwork, it.profileId)?.stalled != true)
+                    it.profileId !in exclude && it.profileId !in frozenA &&
+                        (!compare || it.bidirectional && networkMemory.speeds.sample(routeNetwork, it.profileId)?.stalled != true)
                 }
                 val ordered = remembered.filter { it.profileId == requestedProfile.id } +
                     if (raceFirst) remembered.filter { it.profileId != requestedProfile.id }.take(1) else emptyList()
@@ -1219,7 +1245,7 @@ class RayVpnService : VpnService() {
             // 3a. A recovery candidate that carried traffic for this config on this network before (FIX BPB
             // or earlier recovery): a derived copy, the saved config itself is unchanged. One request decides;
             // a failure counts towards its rollback and the normal path search continues.
-            if (!raced && !lockExit && !xrayExhausted && !aetherLast) {
+            if (!raced && !lockExit && !xrayExhausted && !aetherLast && !frozenHold(requestedProfile)) {
                 val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile) }.getOrNull()
                 if (recovery != null) {
                     showForegroundNotification("Trying the recovered settings...")
@@ -1356,7 +1382,7 @@ class RayVpnService : VpnService() {
                 val deadline = System.currentTimeMillis() + FAST_RECOVERY_MS
                 val outcome = runCatching {
                     withTimeoutOrNull(FAST_RECOVERY_MS + com.example.vpn.smart.RecoveryAttemptPolicy.TOR_WINDOW_MS + 10_000L) {
-                        com.example.RayApplication.instance.lab.fastRecovery(skipRefs + exclude + requestedProfile.id + userProfile.id, deadline,
+                        com.example.RayApplication.instance.lab.fastRecovery(skipRefs + exclude + requestedProfile.id + userProfile.id + frozenWide(), deadline,
                             engineWindow = { test -> engineWindow(test) }, mode = settings.operationalMode,
                             resolveForRecovery = { p -> if (isLiteralIp(p.address)) p else resolveEndpoint(p) },
                             heldBackAether = deferredAether) { step -> showForegroundNotification(step) }
@@ -1417,9 +1443,11 @@ class RayVpnService : VpnService() {
                 mutateState { if (it.attemptId == attemptId) it.copy(reviving = true) else it }
                 val reviveDeadline = System.currentTimeMillis() + CONFIG_REVIVE_MS
                 val attemptJob = coroutineContext[Job]
+                val frozenG = frozenWide()
                 val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
                     .filter { com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) }
                     .filterNot { it.id in exclude }
+                    .let { list -> list.filterNot { it.id in frozenG }.ifEmpty { list } }
                 val report = com.example.vpn.Abandonable.run {
                     runCatching {
                         com.example.RayApplication.instance.configRevival.run(
@@ -1569,11 +1597,9 @@ class RayVpnService : VpnService() {
             val sidecarEngine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
             val engineChain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
             appOutsideVpn = sidecarEngine != null || engineChain != null
-            if (appOutsideVpn) {
-                // A separate engine program cannot ask Android to keep its own sockets out of the VPN,
-                // so the app's own traffic is left out; every other app still goes through the tunnel.
-                builder.addDisallowedApplication(packageName)
-            }
+            // A separate engine program cannot ask Android to keep its own sockets out of the VPN, so the app's
+            // own traffic is left out then. The user's per-app routing (Settings › Routing & DNS) is applied too.
+            com.example.vpn.routing.SplitTunnelStore.apply(this@RayVpnService, builder, excludeSelf = appOutsideVpn, interfaceName = "tunnel")
 
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 4. Builder.establish() invoked (MTU=$safeMtu, Address=172.19.0.1/30, DNS=$primaryDns).")
             val pfd = try {
@@ -1776,6 +1802,51 @@ class RayVpnService : VpnService() {
                     com.example.vpn.stealth.ConnectionKind.of(measuredProfile), check.first != null,
                     check.first, check.second?.name)
             }
+            // Bulk gate (build 151): on a metered network or one with a ~16 KB freeze on record, a Smart pick must also
+            // carry a short bulk download before it counts as verified. One that stops inside the freeze window is marked
+            // frozen here and the search goes on without it (at most BulkGate.MAX_CANDIDATES per Connect, ≤ 6 s each).
+            if (check.first != null && currentNetwork && engineEndpoint == null && raced && raceFirst && !force && !exact &&
+                activeRecovery == null && !com.example.vpn.sidecar.Sidecars.isEngineProfile(requestedProfile)) {
+                val freezes = networkMemory.freezes
+                val gated = com.example.vpn.smart.BulkGate.gatedSoFar(exclude)
+                val gateNow = System.currentTimeMillis()
+                val meteredHere = _environment.value?.signals?.contains(com.example.vpn.smart.NetworkEnvironment.Signal.METERED) == true ||
+                    com.example.vpn.connections.AetherBackgroundRelay.metered(measuredMetered = runCatching {
+                        com.example.vpn.connections.ConnectionEngineRunner.linkHints(com.example.vpn.smart.NetworkEnvironment.freshEvidence(
+                            com.example.vpn.smart.NetworkCapabilityDetector.last, routeNetwork, gateNow)).metered
+                    }.getOrDefault(false), activeMetered = false, networkKey = network)
+                val recentlyGood = freezes.good(network, requestedProfile.id)
+                    ?.let { gateNow - it.at in 0 until com.example.vpn.smart.BulkGate.RECENT_GOOD_MS } == true
+                if (com.example.vpn.smart.BulkGate.applies(smartPick = true, tunPath = true, metered = meteredHere,
+                        freezeHistory = freezes.frozen(network).isNotEmpty(), recentlyGood = recentlyGood, gatedSoFar = gated)) {
+                    showForegroundNotification("Checking a bulk download through ${profile.name}...")
+                    val read = withTimeoutOrNull(com.example.vpn.smart.BulkGate.BUDGET_MS + 500L) {
+                        kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
+                            com.example.vpn.verify.TrafficCheck(com.example.vpn.verify.RouteDialers.vpn(this@RayVpnService),
+                                stepTimeoutMs = com.example.vpn.smart.BulkGate.STEP_MS).gateDownload()
+                        }
+                    } ?: com.example.vpn.smart.BulkGate.Read.NotTested("gate time limit")
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    if (_vpnState.value.attemptId != attemptId) return@withContext
+                    val verdict = com.example.vpn.smart.BulkGate.verdict(read)
+                    val safe = com.example.core.SecretRedactor.redact(requestedProfile.name)
+                    com.example.vpn.diagnostics.events.EventLog.event("smart.bulk_gate", attributes = mapOf(
+                        "result" to verdict.name.lowercase(), "detail" to com.example.vpn.smart.BulkGate.describe(read),
+                        "candidate" to (gated + 1).toString(),
+                        "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(requestedProfile.id) ?: "none")))
+                    XrayLogManager.i("SMART", "Bulk gate ${verdict.name.lowercase()} for $safe: ${com.example.vpn.smart.BulkGate.describe(read)}.")
+                    if (verdict == com.example.vpn.smart.BulkGate.Verdict.FROZEN) {
+                        freezes.recordFrozen(network, requestedProfile.id)
+                        networkMemory.recordFailure(network, com.example.vpn.stealth.ConnectionKind.of(profile))
+                        XrayLogManager.w("SMART", "$safe passed one small request but its download stopped at about 16 KB: " +
+                            "marked frozen on this network; searching again without it (and its /16).")
+                        showForegroundNotification("Server froze at 16 KB; trying another...")
+                        disconnectResources()
+                        connectLocked(userProfile, smart = smart, exclude = exclude + com.example.vpn.smart.BulkGate.marker(gated + 1))
+                        return@withContext
+                    }
+                }
+            }
             if (check.first != null) ladder.advance(com.example.vpn.connectivity.RecoveryStage.CONNECTED_VERIFIED)
             else if (currentNetwork) activeMtuKey?.let { com.example.vpn.lab.MtuIntelligence.cache.failed(it); activeMtuKey = null }
             // Local proxy checks only exercise the sidecar chain. TUN checks exercise the forwarding core.
@@ -1968,6 +2039,13 @@ class RayVpnService : VpnService() {
     private fun retryAetherRelayInBackground(connected: VlessProfile, network: String, attemptId: String) {
         val pending = aetherRelayPending ?: return
         val now = System.currentTimeMillis()
+        // WARP's data plane is held on this network (gateway scan failed with Cloudflare filtered): no relay run.
+        if (com.example.vpn.connections.WarpDataPlaneHold.blocked(network, now)) {
+            aetherRelayPending = null
+            XrayLogManager.i("BUILTIN", "aether/relay · background · SKIP · " +
+                com.example.vpn.connections.WarpDataPlaneHold.describe(network, now))
+            return
+        }
         // WARP registration failed on this network recently: the relay would repeat it (WarpRegistrationMemory).
         if (com.example.vpn.connections.WarpRegistrationMemory.blocked(network, now)) {
             aetherRelayPending = null
@@ -2015,9 +2093,17 @@ class RayVpnService : VpnService() {
                     firstRealPassAt = watchdog?.firstRealPassAt() ?: 0L, now = t, metered = metered,
                     strikes = watchdog?.strikeCount() ?: 0,
                     registrationBlocked = com.example.vpn.connections.WarpRegistrationMemory.blocked(network, t),
-                    waitedMs = t - gateStartedAt)
+                    waitedMs = t - gateStartedAt,
+                    // The main tunnel's bulk.tun check is still running: the relay waits for its verdict.
+                    bulkRunning = trafficCheckJob?.isActive == true,
+                    warpDataHeld = com.example.vpn.connections.WarpDataPlaneHold.blocked(network, t))
                 when (gate) {
                     com.example.vpn.connections.AetherBackgroundRelay.Gate.START -> break
+                    com.example.vpn.connections.AetherBackgroundRelay.Gate.SKIP_WARP_DATA -> {
+                        XrayLogManager.i("BUILTIN", "aether/relay · background · SKIP · " +
+                            com.example.vpn.connections.WarpDataPlaneHold.describe(network, t))
+                        return@launch
+                    }
                     com.example.vpn.connections.AetherBackgroundRelay.Gate.SKIP_REGISTRATION -> {
                         XrayLogManager.i("BUILTIN", "aether/relay · background · SKIP · " +
                             com.example.vpn.connections.WarpRegistrationMemory.describe(network, t))
@@ -2031,6 +2117,7 @@ class RayVpnService : VpnService() {
                     com.example.vpn.connections.AetherBackgroundRelay.Gate.WAIT -> if (!waitLogged) {
                         waitLogged = true
                         XrayLogManager.i("BUILTIN", "aether/relay · background · WAIT · until $via passes a real traffic check " +
+                            "and its upload/download check has finished " +
                             "(+${com.example.vpn.connections.AetherBackgroundRelay.GRACE_AFTER_REAL_CHECK_MS / 1000}s)" +
                             if (metered) " with no failover strike" else "")
                     }
@@ -2294,9 +2381,15 @@ class RayVpnService : VpnService() {
             val relayExitRoute = verifiedExit?.route
                 ?: com.example.vpn.sidecar.BuiltinExitNode.Route(relayRoute?.endpoint, relayRoute?.variantKey)
             val metered = hints.metered || runCatching { connectivityManager?.isActiveNetworkMetered }.getOrNull() == true
+            // cf=0 as Smart Connect reads it (SmartConnectPlan.cloudflareBlocked): a gateway-scan failure then holds WARP's
+            // data plane on this network (WarpDataPlaneHold). The power button's own Aether run is manual: never refused.
+            val cfBlocked = preferWireGuard || relayNetwork != null && runCatching {
+                com.example.vpn.smart.SmartConnectPlan.cloudflareBlocked(com.example.vpn.smart.NetworkCapabilityDetector.last,
+                    relayNetwork, System.currentTimeMillis())
+            }.getOrDefault(false)
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,
-                relayExitRoute = relayExitRoute, metered = metered,
+                relayExitRoute = relayExitRoute, metered = metered, manual = exactSession, cloudflareBlocked = cfBlocked,
                 cancelled = { connectionOwner?.isActive == false }) else null
             val launch = started?.launch ?: engine.prepare(profile, settings, context)
             if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
@@ -2496,7 +2589,8 @@ class RayVpnService : VpnService() {
             .setMtu(1280).setBlocking(true)
             .apply {
                 appOutsideVpn = excludeApp
-                if (excludeApp) addDisallowedApplication(packageName)
+                // Same per-app rules as the tunnel, so apps left outside keep working while it reconnects.
+                com.example.vpn.routing.SplitTunnelStore.apply(this@RayVpnService, this, excludeSelf = excludeApp, interfaceName = "guard")
                 com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { addAddress(it.address, it.prefix) }
                 com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { addRoute(it.address, it.prefix) }
             }
@@ -2603,6 +2697,8 @@ class RayVpnService : VpnService() {
         val passive = if (activeEngine is NativeTunVpnEngine) com.example.vpn.smart.PassiveHealth() else null
         pingJob = serviceScope.launch {
             var okStreak = 0
+            // The early-degrade strike is counted once per connection.
+            var earlyStrikeCounted = false
             while (isActive && _vpnState.value.isTunnelUp && _vpnState.value.attemptId == attemptId) {
                 val wasConnected = _vpnState.value.isConnected
                 // A verified connection that is busy carrying data needs no extra request to prove it.
@@ -2639,6 +2735,13 @@ class RayVpnService : VpnService() {
                     }
                     if (wasConnected && _vpnState.value.status == ConnectionStatus.DEGRADED) {
                         XrayLogManager.w("VPN", "Checks through the tunnel failed ${_vpnState.value.probeFailures} times in a row (${stage.name}): DEGRADED.")
+                        // DEGRADED on timeouts within a minute of connect: a failover strike (StrikeWindow.earlyDegradeStrike).
+                        if (!earlyStrikeCounted && com.example.vpn.smart.StrikeWindow.earlyDegradeStrike(stage,
+                                _vpnState.value.lastConnectedTime, System.currentTimeMillis())) {
+                            earlyStrikeCounted = true
+                            failoverManager?.reportEarlyDegrade("${stage.name} after ${(System.currentTimeMillis() -
+                                (_vpnState.value.lastConnectedTime ?: 0L)) / 1000}s")
+                        }
                         showForegroundNotification("Connection degraded (${stage.name})")
                         if (fallbackFromDirect(profile)) return@launch
                     }
@@ -2752,6 +2855,14 @@ class RayVpnService : VpnService() {
         val freezeNetwork = com.example.vpn.smart.NetworkKey.current(this)
         val registry = com.example.vpn.diagnostics.events.Tests.registry
         registry.beginSession(state.sessionId)
+        // This check is the Uplink Shield retry's verdict: when it never finishes (the session ends, the network or
+        // attempt changes), the shield's run is recorded inconclusive, never as help (build 151).
+        val shieldRun = freezeRescue?.takeIf {
+            it.rescue == com.example.vpn.smart.FreezeFailover.Rescue.UPLINK_SHIELD && it.variantId == state.activeProfile?.id
+        }
+        fun shieldInconclusive(why: String) {
+            if (shieldRun != null && path == com.example.vpn.verify.ProbePath.TUN) shieldNoVerdict(freezeNetwork, shieldRun.serverId, why)
+        }
         trafficCheckJob?.cancel()
         trafficCheckJob = serviceScope.launch(Dispatchers.IO) {
             val testId = registry.queue("bulk.${path.name.lowercase()}", state.sessionId,
@@ -2766,6 +2877,7 @@ class RayVpnService : VpnService() {
                 .onFailure {
                     if (it is CancellationException) {
                         registry.cancel(testId, "connection check cancelled")
+                        shieldInconclusive("check cancelled")
                         throw it
                     }
                     registry.finish(testId, false, it.javaClass.simpleName,
@@ -2775,6 +2887,7 @@ class RayVpnService : VpnService() {
                 .getOrNull() ?: return@launch
             if (!isActive || !evidence.appliesTo(_vpnState.value)) {
                 registry.cancel(testId, "stale connection attempt or network")
+                shieldInconclusive("session ended before the verdict")
                 return@launch
             }
             registry.finish(testId, evidence.bidirectional, "${path.name}: ${evidence.diagLine(serverLabel)}",
@@ -3191,6 +3304,11 @@ class RayVpnService : VpnService() {
                 // The retry's transfer check decides when it carried traffic; with none at all, move on now.
                 if (lifecycle.isCurrent(ticket) && freezeRescue?.variantId == d.variant.id && !_vpnState.value.isConnected) {
                     freezeRescue = null
+                    // A shield retry that carried nothing at all did not help here.
+                    if (d.rescue == com.example.vpn.smart.FreezeFailover.Rescue.UPLINK_SHIELD) {
+                        networkMemory.shield.record(network, helped = false)
+                        shieldEvent("no-help", d.serverId)
+                    }
                     XrayLogManager.w("FAILOVER", "failover · freeze16k · ${d.rescue.label} ${name(d.serverId)}: carried no traffic.")
                     val (next, nextName) = freezeDecision(network, server, rescueTried = true)
                     XrayLogManager.w("FAILOVER", com.example.vpn.smart.FreezeFailover.describe(next, nextName))
@@ -3234,6 +3352,19 @@ class RayVpnService : VpnService() {
         com.example.vpn.diagnostics.ConnectionMetrics.failoverSwitches.incrementAndGet()
         freezeEvent("switch", d.to?.let { "backup" } ?: "race", d.fromId)
         connect(lead, smart = true, exclude = frozen, ticket = ticket)
+    }
+
+    /**
+     * The Uplink Shield's run on [network] ended with no transfer verdict: recorded inconclusive (never as help). After
+     * [com.example.vpn.smart.UplinkShieldBook.MAX_INCONCLUSIVE] in a row the shield is skipped there for 12 h.
+     */
+    private fun shieldNoVerdict(network: String, serverId: String, why: String) {
+        val book = networkMemory.shield
+        val n = book.recordInconclusive(network)
+        if (freezeRescue?.serverId == serverId && freezeRescue?.rescue == com.example.vpn.smart.FreezeFailover.Rescue.UPLINK_SHIELD) freezeRescue = null
+        XrayLogManager.i("FAILOVER", "failover · uplink-shield · inconclusive ($why): $n in a row on this network" +
+            if (!book.mayTry(network)) "; not tried here for ${com.example.vpn.smart.UplinkShieldBook.NO_HELP_COOLDOWN_MS / 3_600_000} h" else "")
+        shieldEvent("inconclusive", serverId)
     }
 
     private fun shieldEvent(action: String, profileId: String) {

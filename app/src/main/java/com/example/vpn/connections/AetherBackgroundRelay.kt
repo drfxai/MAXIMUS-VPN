@@ -62,15 +62,22 @@ object AetherBackgroundRelay {
     const val MAX_GATE_WAIT_MS = 3 * 60_000L
     const val GATE_POLL_MS = 2_000L
 
-    enum class Gate { WAIT, START, SKIP_REGISTRATION, SKIP_TIMEOUT }
+    enum class Gate { WAIT, START, SKIP_REGISTRATION, SKIP_TIMEOUT, SKIP_WARP_DATA }
 
     /**
      * Whether the background relay may start now. [firstRealPassAt]: when the watchdog's first real check after
      * connect passed (0: none yet). [strikes]: failover strikes inside its window. [registrationBlocked]: WARP
      * registration failed on this network recently ([WarpRegistrationMemory]). [waitedMs]: time spent waiting.
+     * [warpDataHeld]: WARP's data plane is held on this network ([WarpDataPlaneHold]): never started.
+     * [bulkRunning]: the main tunnel's upload/download check (bulk.tun) is still running: wait for its verdict, so the
+     * relay neither competes with it for the link nor starts beside a server that is about to be called frozen
+     * (build 151: the relay started at 16:36:21 while the main tunnel's bulk test was still running on mobile data).
      */
-    fun gate(firstRealPassAt: Long, now: Long, metered: Boolean, strikes: Int, registrationBlocked: Boolean, waitedMs: Long): Gate = when {
+    fun gate(firstRealPassAt: Long, now: Long, metered: Boolean, strikes: Int, registrationBlocked: Boolean, waitedMs: Long,
+             bulkRunning: Boolean = false, warpDataHeld: Boolean = false): Gate = when {
+        warpDataHeld -> Gate.SKIP_WARP_DATA
         registrationBlocked -> Gate.SKIP_REGISTRATION
+        bulkRunning -> if (waitedMs >= MAX_GATE_WAIT_MS) Gate.SKIP_TIMEOUT else Gate.WAIT
         firstRealPassAt > 0 && now - firstRealPassAt >= GRACE_AFTER_REAL_CHECK_MS && !(metered && strikes > 0) -> Gate.START
         waitedMs >= MAX_GATE_WAIT_MS -> Gate.SKIP_TIMEOUT
         else -> Gate.WAIT

@@ -310,4 +310,29 @@ class TrafficCheckTest {
         val r = check.download()
         assertTrue(r.toString(), r is LegResult.Failed && r.stage == FailureStage.CERTIFICATE_VALIDATION_FAILED)
     }
+
+    @Test fun theBulkGateSeesTheFreezeAt16050Bytes() {
+        server.enqueue(MockResponse().setBody(Buffer().write(ByteArray(com.example.vpn.smart.BulkGate.DOWNLOAD_BYTES)))
+            .throttleBody(16_050, 10, TimeUnit.SECONDS))
+        server.start()
+        val read = TrafficCheck(direct, tls = false, stepTimeoutMs = 3_000)
+            .gateDownload(target("/gate", com.example.vpn.smart.BulkGate.DOWNLOAD_BYTES))
+        assertTrue(read.toString(), read is com.example.vpn.smart.BulkGate.Read.Cut && read.bytes == 16_050 && read.timedOut)
+        assertEquals(com.example.vpn.smart.BulkGate.Verdict.FROZEN, com.example.vpn.smart.BulkGate.verdict(read))
+    }
+
+    @Test fun theBulkGatePassesAWorkingDownload() {
+        server.enqueue(MockResponse().setBody(Buffer().write(ByteArray(com.example.vpn.smart.BulkGate.DOWNLOAD_BYTES))))
+        server.start()
+        val read = TrafficCheck(direct, tls = false, stepTimeoutMs = 3_000)
+            .gateDownload(target("/gate", com.example.vpn.smart.BulkGate.DOWNLOAD_BYTES))
+        assertEquals(com.example.vpn.smart.BulkGate.Verdict.PASS, com.example.vpn.smart.BulkGate.verdict(read))
+    }
+
+    @Test fun theBulkGateDoesNotCallAnErrorStatusFrozen() {
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.start()
+        val read = TrafficCheck(direct, tls = false, stepTimeoutMs = 3_000).gateDownload(target("/gate", 1))
+        assertEquals(com.example.vpn.smart.BulkGate.Verdict.INCONCLUSIVE, com.example.vpn.smart.BulkGate.verdict(read))
+    }
 }

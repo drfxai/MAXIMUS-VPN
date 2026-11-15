@@ -75,7 +75,7 @@ Android **7.0 or later** is required. To update, install the official APK over y
 
 ## License & support
 
-MAXIMUS VPN is **source-available**, under a non-commercial license requiring prior permission for use of the source. It is not offered under a standard open-source license. Read [LICENSE](LICENSE) before copying, modifying, building or redistributing it. Third-party components retain their own licenses.
+MAXIMUS VPN application code owned by DrFX is offered under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). Third-party components retain the licenses listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Report reproducible bugs through [Issues](https://github.com/drfxai/MAXIMUS-VPN/issues). Remove tokens, private keys, subscription URLs and server credentials from reports. For vulnerabilities, follow [SECURITY.md](SECURITY.md).
 

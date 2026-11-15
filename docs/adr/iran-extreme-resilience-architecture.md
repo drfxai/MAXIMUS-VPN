@@ -103,7 +103,7 @@ Provide a **Survival mode**: low-bandwidth minimal probes, lower battery drain, 
 - DNS: encrypted or in-tunnel resolution where configured; no silent plaintext fallback; prevent IPv6 escape and DNS direct leak. Do not claim an unperformed third-party leak test passed.
 - Certificate and hostname verification are mandatory; explicit pinned identity where specified. No global `allowInsecure`, public fallback identity, silent SNI changes, unauthorized scanning, spoofed credentials, or safety-critical AI actions.
 - MTU is a controlled per-route A/B experiment; 1280 is a candidate only, not an ISP-wide constant. Distinguish TCP/UDP/MASQUE H2/H3 actual adapter capability and tested ALPN.
-- New libraries: dependency/SBOM and CVE review; Lantern main app/Unbounded are GPL-3.0 while Kindling is Apache-2.0. **Do not copy GPL source into MAXIMUS's source-available distribution without legal review**; engineering concepts can be independently reimplemented.
+- New libraries: dependency/SBOM and CVE review; Lantern main app/Unbounded are GPL-3.0 while Kindling is Apache-2.0. Record each component’s exact source, license, and corresponding-source obligations before bundling it.
 
 ## 6. Explicit scenario matrix and pass/fail requirements
 

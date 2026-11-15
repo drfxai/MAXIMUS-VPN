@@ -257,7 +257,7 @@ class RayApplication : Application() {
             com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)
         }
         com.example.vpn.sidecar.Sidecars.psiphonSettings = {
-            com.example.data.security.SecureStorage(this).getAndDecrypt("psiphon_network_settings_v1")?.takeIf { it.isNotBlank() }
+            com.example.data.security.SecureStorage(this).getAndDecrypt(com.example.vpn.sidecar.PsiphonSidecar.SETTINGS_STORAGE_KEY)?.takeIf { it.isNotBlank() }
         }
 
         // Home-screen widget follows the connection state.
