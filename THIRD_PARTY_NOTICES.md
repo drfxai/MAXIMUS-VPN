@@ -755,3 +755,12 @@ The Android release build script fetches [Radiance](https://github.com/getlanter
 `aced057665daaa4821e9f45e6133257969f4a8e7` under GPL-3.0. The separate executable is built with
 Radiance's SOCKS-only mode, the entry point and loopback authentication change under
 `scripts/radiance/`. The APK bundles the executable and its corresponding source is supplied as `Radiance-source.tar.gz`.
+
+
+## Psiphon public bootstrap profile
+
+`app/src/main/assets/psiphon/public-config.json` is copied verbatim from
+[LML VPN v1.0.2-preview](https://github.com/nukesamp-crypto/LML-VPN/blob/v1.0.2-preview/desktop/resources/bin/psiphon-default.json),
+SHA-256 `487a7a0546437d46a06a8f14ad6fdf2d6857456755d4408dc805e23ba15d7fc0`.
+[LML credits the profile and bootstrap data to MehrON](https://github.com/nukesamp-crypto/LML-VPN/blob/v1.0.2-preview/THIRD-PARTY-NOTICES.md)
+under GPL-3.0. Network availability depends on the upstream service.

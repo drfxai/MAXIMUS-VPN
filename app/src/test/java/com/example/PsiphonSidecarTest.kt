@@ -122,6 +122,18 @@ class PsiphonSidecarTest {
     }
 
     @Test
+    fun assetProviderFallsBackToThePublicProfileWithoutDistributorSettings() {
+        val requested = mutableListOf<String>()
+        val provider = PsiphonSidecar.assetProvider { path ->
+            requested += path
+            if (path == "psiphon/config.json") throw FileNotFoundException(path)
+            ByteArrayInputStream("public-profile".toByteArray())
+        }
+        assertEquals("public-profile", provider())
+        assertEquals(listOf("psiphon/config.json", "psiphon/public-config.json"), requested)
+    }
+
+    @Test
     fun assetProviderReadsTheAssetOrReportsItMissing() {
         assertEquals("{}", PsiphonSidecar.assetProvider { path ->
             assertEquals("psiphon/config.json", path)

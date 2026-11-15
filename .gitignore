@@ -28,7 +28,7 @@ release-notes.md
 
 # Engine programs built by scripts/build-engines.sh
 app/src/main/jniLibs/
-app/src/main/assets/psiphon/
+app/src/main/assets/psiphon/config.json
 
 # Built by the free config list workflow; published on the free-configs branch, never committed here.
 tools/aggregator/output/*

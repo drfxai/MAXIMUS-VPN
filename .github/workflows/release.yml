@@ -107,8 +107,7 @@ jobs:
           go-version: '1.24'
           cache: false
       - name: Psiphon network settings
-        # Issued to this app by Psiphon Inc. and kept only as a repository secret; without it the
-        # Psiphon engine is built but reports that its settings are missing.
+        # App-specific settings can override the attributed public profile shipped in the APK.
         env:
           PSIPHON_CONFIG: ${{ secrets.PSIPHON_CONFIG }}
         run: |
@@ -118,7 +117,7 @@ jobs:
             python3 -c 'import json; json.load(open("app/src/main/assets/psiphon/config.json"))'
             echo "Psiphon settings included"
           else
-            echo "No PSIPHON_CONFIG secret; Psiphon stays off in this build"
+            echo "No app-specific PSIPHON_CONFIG; using the bundled public profile"
           fi
       - name: Free config list key
         # The app checks the free list's signature with the public half of HUB_SIGNING_KEY. Only the

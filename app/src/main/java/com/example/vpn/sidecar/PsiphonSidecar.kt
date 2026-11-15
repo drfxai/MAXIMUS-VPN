@@ -107,6 +107,7 @@ class PsiphonSidecar(
         const val BINARY = "psiphon"
         /** Asset CI writes from a secret; absent in builds without Psiphon network settings. */
         const val ASSET_PATH = "psiphon/config.json"
+        private const val PUBLIC_ASSET_PATH = "psiphon/public-config.json"
         const val SETTINGS_STORAGE_KEY = "psiphon_network_settings_v1"
         const val MAX_SETTINGS_BYTES = 512 * 1024
         const val KEY_ENGINE = "engine"
@@ -196,13 +197,14 @@ class PsiphonSidecar(
 
         fun validRegion(region: String): Boolean = region.isEmpty() || REGION.matches(region)
 
-        /** Reads [ASSET_PATH] through [open] (an AssetManager's `open`); null when the asset is absent. */
+        /** Prefer the distributor settings included by CI, then the attributed public profile. */
         fun assetProvider(open: (String) -> InputStream): () -> String? = {
-            try {
-                open(ASSET_PATH).use { it.readBytes().toString(Charsets.UTF_8) }
+            fun read(path: String): String? = try {
+                open(path).use { it.readBytes().toString(Charsets.UTF_8) }.takeIf { it.isNotBlank() }
             } catch (_: FileNotFoundException) {
                 null
             }
+            read(ASSET_PATH) ?: read(PUBLIC_ASSET_PATH)
         }
 
         internal fun incompleteReason(settings: JSONObject): String? {
