@@ -1745,18 +1745,31 @@ class RayVpnService : VpnService() {
                     revived = activeRecovery != null) else it
             }
             showForegroundNotification("Verifying traffic through ${profile.name}...")
-            val check = verifyTraffic()
-            book.recordPath(com.example.vpn.connectivity.EvidenceSource.SMART_CONNECT, com.example.vpn.connectivity.MeasurementType.TUNNEL_TRAFFIC,
-                com.example.vpn.connectivity.PathRef.of(profile), com.example.vpn.stealth.ConnectionKind.of(profile), check.first != null,
-                check.first, check.second?.name)
+            val verificationGeneration = _vpnState.value.networkGeneration
+            val result = verifyTraffic()
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (_vpnState.value.attemptId != attemptId) return@withContext
+            val currentNetwork = _vpnState.value.networkGeneration == verificationGeneration &&
+                result.second != com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED
+            val check = if (currentNetwork) result else null to com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED
+            val measurement = if (engineEndpoint == null) com.example.vpn.connectivity.MeasurementType.TUNNEL_TRAFFIC
+                else com.example.vpn.connectivity.MeasurementType.ENGINE_REQUEST
+            if (currentNetwork) {
+                val measuredProfile = if (engineEndpoint != null && check.first != null) requestedProfile else profile
+                book.recordPath(com.example.vpn.connectivity.EvidenceSource.SMART_CONNECT, measurement,
+                    com.example.vpn.connectivity.PathRef.of(measuredProfile),
+                    com.example.vpn.stealth.ConnectionKind.of(measuredProfile), check.first != null,
+                    check.first, check.second?.name)
+            }
             if (check.first != null) ladder.advance(com.example.vpn.connectivity.RecoveryStage.CONNECTED_VERIFIED)
-            else activeMtuKey?.let { com.example.vpn.lab.MtuIntelligence.cache.failed(it); activeMtuKey = null }
-            // Every engine on the path shares the verdict: the request crossed all of them, or none is proven.
-            val pathEngines = listOf(engineId) + (engineChain?.hops?.map { it.engineId } ?: listOfNotNull(sidecarEngine?.id))
-            pathEngines.forEach { id ->
+            else if (currentNetwork) activeMtuKey?.let { com.example.vpn.lab.MtuIntelligence.cache.failed(it); activeMtuKey = null }
+            // Local proxy checks only exercise the sidecar chain. TUN checks exercise the forwarding core.
+            val sidecarIds = engineChain?.hops?.map { it.engineId } ?: listOfNotNull(sidecarEngine?.id)
+            val pathEngines = if (engineEndpoint == null) listOf(engineId) + sidecarIds else sidecarIds
+            if (currentNetwork) pathEngines.forEach { id ->
                 val ledger = com.example.vpn.engine.registry.EngineLedger.shared
                 if (check.first != null) ledger.verified(id, routeNetwork)
-                // Only a lone engine owns a failure; in a chain or behind Xray it may be another part's.
+                // A chain failure does not identify which engine failed.
                 else if (pathEngines.size == 1) ledger.failed(id, routeNetwork, check.second?.name)
             }
             mutateState {
@@ -1782,7 +1795,7 @@ class RayVpnService : VpnService() {
                 showForegroundNotification("Tunnel up, no traffic yet (${stage.name})")
                 XrayLogManager.w("VPN", "[DIAGNOSTICS] 10. Tunnel started but no request went through it (${stage.name}). " +
                     "State: TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED; checks continue and failover may switch servers.")
-                recordFreeOutcome(requestedProfile, success = false, rttMs = null, stage = stage)
+                if (currentNetwork) recordFreeOutcome(requestedProfile, success = false, rttMs = null, stage = stage)
             }
 
             // Refresh due subscriptions through the new tunnel: their addresses may be blocked outside it.
@@ -2599,7 +2612,11 @@ class RayVpnService : VpnService() {
      * local port when the app is left out of its own tunnel (see [engineEndpoint]).
      */
     private suspend fun routeLatency(): Long {
-        val endpoint = engineEndpoint ?: return com.example.vpn.diagnostics.LiveTunnelProbe.latency(this, probeStepMs())
+        val endpoint = engineEndpoint
+        if (endpoint == null) {
+            check(!appOutsideVpn) { "Engine proxy unavailable for traffic verification" }
+            return com.example.vpn.diagnostics.LiveTunnelProbe.latency(this, probeStepMs())
+        }
         val managed = _vpnState.value.activeProfile?.id in setOf(
             com.example.vpn.connections.BuiltinConnections.AETHER, com.example.vpn.connections.BuiltinConnections.DIRECT
         )
@@ -3097,10 +3114,10 @@ class RayVpnService : VpnService() {
         val s = _vpnState.value
         com.example.vpn.diagnostics.events.EventLog.pass(
             testType = testType,
-            destination = java.net.URI(com.example.xray.RealDelayProbe.PROBE_URL).host,
+            destination = if (engineEndpoint == null) java.net.URI(com.example.xray.RealDelayProbe.PROBE_URL).host else "HTTPS probe target",
             profileRef = com.example.vpn.diagnostics.events.DiagEvent.profileRef(s.activeProfile?.id ?: s.attemptedProfileId),
             elapsedMs = elapsedMs,
-            interfaceName = "tun (VPN network)"
+            interfaceName = if (engineEndpoint == null) "tun (VPN network)" else "engine local proxy"
         )
     }
 

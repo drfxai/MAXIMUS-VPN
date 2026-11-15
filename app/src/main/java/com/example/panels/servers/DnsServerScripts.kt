@@ -44,10 +44,15 @@ object DnsServerScripts {
           command -v ss >/dev/null 2>&1 || { echo 'Cannot inspect listeners: install iproute2 before retrying' >&2; exit 23; }
           if [ "§proto" = udp ]; then flags=-Hlnu; else flags=-Hlnt; fi
           listeners=§(ss "§flags" 2>/dev/null) || { echo 'Cannot inspect listeners; no installation changes made' >&2; exit 23; }
+          owners=§(§SUDO ss "§flags" -p 2>/dev/null) || owners=
+          [ -z "§owners" ] || listeners=§owners
           occupied=§(printf '%s\n' "§listeners" | awk -v port="§port" -v bind="§bind" '{
             endpoint=§4; n=split(endpoint,a,":"); if(a[n]!=port) next;
             sub(/:[^:]*§/, "", endpoint); sub(/%[^%]*§/, "", endpoint);
-            if(bind=="*" || endpoint==bind || endpoint=="0.0.0.0" || endpoint=="*" || endpoint=="[::]" || endpoint=="::" || endpoint=="[::ffff:" bind "]") print §4
+            if(bind=="*" || endpoint==bind || endpoint=="0.0.0.0" || endpoint=="*" || endpoint=="[::]" || endpoint=="::" || endpoint=="[::ffff:" bind "]") {
+              owner=""; for(i=6;i<=NF;i++) owner=owner " " §i;
+              print §4 owner;
+            }
           }')
           if [ -n "§occupied" ]; then
             echo "Cannot bind §proto §bind:§port: conflicting listener(s): §occupied. Remove or move that tool first; system DNS is not stopped." >&2

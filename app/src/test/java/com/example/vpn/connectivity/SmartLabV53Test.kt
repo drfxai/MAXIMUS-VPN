@@ -63,6 +63,20 @@ class SmartLabV53Test {
             book.eligibleInOrder(listOf("dead", "stale", "never", "candidate", "verified")) { it })
     }
 
+    @Test fun pathsInTheSameTierUseCurrentNetworkSuccessRateThenLatency() {
+        book.observeNetwork("irancell")
+        fail("unstable")
+        book.recordPath(EvidenceSource.APP_TEST, MeasurementType.TUNNEL_TRAFFIC, "unstable", "TLS", true, 10)
+        pass("steady", MeasurementType.TUNNEL_TRAFFIC)
+        book.recordPath(EvidenceSource.APP_TEST, MeasurementType.TUNNEL_TRAFFIC, "fast", "TLS", true, 100)
+
+        assertEquals(listOf("fast", "steady", "unstable"),
+            book.eligibleInOrder(listOf("unstable", "steady", "fast")) { it })
+        book.observeNetwork("wifi")
+        assertEquals(listOf("unstable", "steady", "fast"),
+            book.eligibleInOrder(listOf("unstable", "steady", "fast")) { it })
+    }
+
     @Test fun aRecentFailureAgesOutAndANetworkChangeStartsAFreshSession() {
         val first = book.observeNetwork("net-a")
         fail("x")
