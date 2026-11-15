@@ -44,7 +44,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod
+import com.example.vpn.engine.RuntimeCapabilities
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -557,6 +565,17 @@ fun HomeScreen(
                 onStop = { com.example.vpn.VpnController.stopVpn(context) }
             )
             Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        if (settings.operationalMode != com.example.data.model.OperationalMode.TRADE) {
+            ConfigFreeConnectButton(
+                enabled = !connectionState.isTunnelUp && !connectionState.isBusy,
+                onConnect = { method ->
+                    vpnViewModel.startOrRequestPermission(context, method.profile(), exact = true) {
+                        onRequestVpnPermission()
+                    }
+                }
+            )
         }
 
         // Error message banner if failed
@@ -1125,4 +1144,46 @@ private fun formatDuration(seconds: Long): String {
     val mins = (seconds % 3600) / 60
     val secs = seconds % 60
     return String.format(Locale.US, "%02d:%02d:%02d", hrs, mins, secs)
+}
+
+
+@Composable
+private fun ConfigFreeConnectButton(enabled: Boolean, onConnect: (ConfigFreeMethod) -> Unit) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    OutlinedButton(
+        onClick = { open = true },
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+    ) { Text("Connect without a config") }
+
+    if (open) {
+        var availability by remember { mutableStateOf<Map<ConfigFreeMethod, String?>?>(null) }
+        LaunchedEffect(Unit) {
+            availability = withContext(Dispatchers.IO) {
+                ConfigFreeMethod.entries.associateWith { RuntimeCapabilities.unsupportedReason(it.profile()) }
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text("Connect without a config") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (availability == null) Text("Checking installed engines…")
+                    availability?.forEach { (method, problem) ->
+                        TextButton(
+                            enabled = enabled && problem == null,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { open = false; onConnect(method) }
+                        ) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(method.title, fontWeight = FontWeight.SemiBold)
+                                Text(problem ?: method.description, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { open = false }) { Text("Close") } }
+        )
+    }
 }
