@@ -53,6 +53,10 @@ class FailoverManager(
         runCatching { SmartNodeStore(RayApplication.instance).all() }.getOrDefault(emptyList())
     },
     private val savedProfile: (() -> VlessProfile)? = null,
+    /** Servers FreezeBook marks frozen (~16 KB cap or bulk stall) on the given network key ("cell:43235"). */
+    private val frozenOn: (String) -> Set<String> = { emptySet() },
+    /** Strikes inside a sliding window (see [StrikeWindow]); injected for JVM tests. */
+    private val strikes: StrikeWindow = StrikeWindow(),
     private val onTriggerSwitch: (VlessProfile, String, Set<String>) -> Unit
 ) {
     enum class CascadeTier(val stageNumber: Int, val title: String, val badge: String) {
@@ -86,7 +90,15 @@ class FailoverManager(
     private val _failoverEvents = MutableStateFlow<String?>(null)
     val failoverEvents: StateFlow<String?> = _failoverEvents.asStateFlow()
 
-    private val consecutiveFailures = java.util.concurrent.atomic.AtomicInteger(0)
+    /** Real checks through the tunnel that carried traffic since monitoring began, and when the first one did. */
+    private val realPasses = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var firstRealPassAt = 0L
+
+    /** Strikes inside the window now (failed real checks and tunnel errors); 0 while healthy. */
+    fun strikeCount(): Int = strikes.count()
+
+    /** When the first real traffic check after connect passed (0: none yet), for the background relay's gate. */
+    fun firstRealPassAt(): Long = firstRealPassAt
     private val lastTunnelReportTime = java.util.concurrent.atomic.AtomicLong(0L)
     private var currentActiveProfile: VlessProfile? = null
     private var currentActiveSettings: AppSettings? = null
@@ -98,15 +110,24 @@ class FailoverManager(
         currentActiveProfile = currentProfile
         currentActiveSettings = settings
         _currentTier.value = determineInitialTier(currentProfile)
-        consecutiveFailures.set(0)
+        strikes.reset()
+        realPasses.set(0)
+        firstRealPassAt = 0L
 
         monitorJob = scope.launch {
             val safeName = SecretRedactor.redact(currentProfile.name)
             XrayLogManager.i("FAILOVER", "Failover watchdog active for '$safeName' [Mode: ${settings.operationalMode.displayName}, Tier: ${_currentTier.value.badge}].")
             runCatching {
                 // Backups with recent real-traffic evidence first; the label says what is actually known.
+                // Never a server (or its /16 network) frozen on this network, nor a route failover itself would
+                // leave out (the saved/running endpoints and their aliases, penalized configs; #217).
+                val all = serverRepository.allProfiles.first()
+                val owner = savedProfile?.invoke() ?: currentProfile
+                val excluded = failedPathIds(all, currentProfile, owner, policy::isPenalized)
+                val frozenIds = runCatching { frozenOn(currentNetworkKey()) }.getOrDefault(emptySet())
+                val pool = withoutFrozen(vetted(eligibleFallbacks(all.filterNot { it.id in excluded }, currentProfile)), frozenIds, all)
                 val plan = SmartFailoverPolicy.plan(currentProfile,
-                    byFreshEvidence(vetted(eligibleFallbacks(serverRepository.allProfiles.first(), currentProfile))), { com.example.vpn.connectivity.BackupEvidence.rank(it) })
+                    byFreshEvidence(pool), { com.example.vpn.connectivity.BackupEvidence.rank(it) })
                 _backupPlan.value = plan
                 fun label(b: SmartFailoverPolicy.Backup?, none: String) =
                     b?.let { "${it.kind} on ${it.failureDomain} (${com.example.vpn.connectivity.BackupEvidence.describe(it.profile)})" } ?: none
@@ -116,30 +137,33 @@ class FailoverManager(
 
             while (isActive) {
                 // Every 12 s while healthy, every 3 s after a failed check (see WatchPolicy).
-                delay(WatchPolicy.nextCheckDelayMs(consecutiveFailures.get()))
+                delay(WatchPolicy.nextCheckDelayMs(strikes.consecutive()))
 
-                // While confirming a failure every check is a real request; otherwise data flowing through a
-                // recently verified tunnel stands in for one (PassiveHealth).
-                val isHealthy = if (consecutiveFailures.get() == 0 && passive?.maySkipActiveCheck() == true) {
+                // While any strike is inside the window every check is a real request; otherwise data flowing
+                // through a recently verified tunnel stands in for one (PassiveHealth). A skipped check is no
+                // evidence either way: it never resets a strike (StrikeWindow).
+                if (strikes.maySkip() && passive?.maySkipActiveCheck() == true) {
                     com.example.vpn.diagnostics.ConnectionMetrics.passiveSkips.incrementAndGet()
-                    true
-                } else checkActiveTunnel(currentProfile, settings.failoverThresholdMs)
+                    continue
+                }
+                val isHealthy = checkActiveTunnel(currentProfile, settings.failoverThresholdMs)
                 // A blocking probe can outlive a switch or disconnect; its result is stale then.
                 if (!isActive) break
                 if (!isHealthy) {
-                    val failures = consecutiveFailures.updateAndGet { (it + 1).coerceAtMost(WatchPolicy.FAILURES_TO_SWITCH) }
-                    XrayLogManager.w("FAILOVER", "Node $safeName failed a real traffic check ($failures/${WatchPolicy.FAILURES_TO_SWITCH}).")
+                    val n = strikes.fail()
+                    XrayLogManager.w("FAILOVER", "Node $safeName failed a real traffic check (${strikes.describe(n)}).")
 
-                    // Several failures in a row, so one lost request does not cause flapping.
-                    if (failures >= WatchPolicy.FAILURES_TO_SWITCH) {
+                    // Three failures inside the window, in a row or with passes between them.
+                    if (strikes.shouldSwitch()) {
                         // The cooldown must survive a service switch, which creates a new manager.
                         if (acquireFailoverCooldown(maxOf(25000L, policy.cooldownMs()))) {
                             attemptFailover(currentProfile, settings)
                         }
                     }
                 } else {
-                    consecutiveFailures.set(0)
-                    failedFamilies.clear()
+                    strikes.pass()
+                    if (realPasses.incrementAndGet() == 1) firstRealPassAt = System.currentTimeMillis()
+                    if (strikes.count() == 0) failedFamilies.clear()
                 }
             }
         }
@@ -173,18 +197,15 @@ class FailoverManager(
             if (lastTunnelReportTime.compareAndSet(previous, now)) break
         }
 
-        val failures = consecutiveFailures.updateAndGet { (it + 1).coerceAtMost(3) }
+        val n = strikes.fail()
         val safeName = SecretRedactor.redact(profile.name)
-        XrayLogManager.w("FAILOVER", "Active tunnel error reported on '$safeName' ($failures/3): ${SecretRedactor.redact(reason)}")
+        XrayLogManager.w("FAILOVER", "Active tunnel error reported on '$safeName' (${strikes.describe(n)}): ${SecretRedactor.redact(reason)}")
 
-        if (failures >= 3) {
-            if (acquireFailoverCooldown(maxOf(20000L, policy.cooldownMs()))) {
-                failoverJob?.cancel()
-                failoverJob = scope.launch {
-                    attemptFailover(profile, settings)
-                }
-            } else {
-                consecutiveFailures.set(3)
+        // When the cooldown refuses, the strikes stay in the window and the next failure tries again.
+        if (strikes.shouldSwitch() && acquireFailoverCooldown(maxOf(20000L, policy.cooldownMs()))) {
+            failoverJob?.cancel()
+            failoverJob = scope.launch {
+                attemptFailover(profile, settings)
             }
         }
     }
@@ -196,7 +217,7 @@ class FailoverManager(
         recoveryProbeJob = null
         failoverJob?.cancel()
         failoverJob = null
-        consecutiveFailures.set(0)
+        strikes.reset()
         currentActiveProfile = null
         currentActiveSettings = null
     }
@@ -269,7 +290,7 @@ class FailoverManager(
                         // refuses one), and a handshake proves nothing about traffic: a healthy tunnel is never
                         // dropped on that evidence. The watchdog switches only when this connection is failing
                         // or nothing works; then trying the primary costs nothing.
-                        val currentFailing = _currentTier.value == CascadeTier.DEGRADED_OFFLINE || consecutiveFailures.get() > 0
+                        val currentFailing = _currentTier.value == CascadeTier.DEGRADED_OFFLINE || strikes.count() > 0
                         if (!currentFailing) continue
 
                         // Back to the primary only after it passed several checks over a minute and this
@@ -292,7 +313,7 @@ class FailoverManager(
 
     private suspend fun attemptFailover(degradedProfile: VlessProfile, settings: AppSettings) {
         if (staysOnSelected()) {
-            consecutiveFailures.set(0)
+            strikes.reset()
             XrayLogManager.w("FAILOVER", "${SecretRedactor.redact(degradedProfile.name)} stopped carrying traffic. Staying on it: it was " +
                 "connected with the power button. Use Smart Connect to search for another.")
             return
@@ -310,7 +331,11 @@ class FailoverManager(
         // Non-degraded candidates pool (excluding current failing node, bridges, mesh)
         val owner = savedProfile?.invoke() ?: degradedProfile
         val excluded = failedPathIds(allProfiles, degradedProfile, owner, policy::isPenalized)
-        val nonDegraded = vetted(eligibleFallbacks(allProfiles.filterNot { it.id in excluded }, degradedProfile))
+        // Servers frozen on this network (and their /16) go last: used only when nothing else is left (FrozenGuard).
+        val frozenIds = runCatching { frozenOn(currentNetworkKey()) }.getOrDefault(emptySet())
+        val nonDegraded = vetted(eligibleFallbacks(allProfiles.filterNot { it.id in excluded }, degradedProfile)).let { pool ->
+            withoutFrozen(pool, frozenIds, allProfiles).ifEmpty { pool }
+        }
         // A filter that stops one node usually stops its whole kind (QUIC, a TLS fingerprint, a CDN
         // path), so the next node is of a kind that has not failed during this outage.
         failedFamilies.add(protocolFamily(degradedProfile))
@@ -375,14 +400,14 @@ class FailoverManager(
             }
 
         if (fallback != null) {
-            consecutiveFailures.set(0)
+            strikes.reset()
             val reason = "Failover: Repeated traffic checks failed on $safeDegraded. Trying ${fallback.profile.name}; traffic verification is required."
             _failoverEvents.value = reason
             XrayLogManager.i("FAILOVER", reason)
             policy.recordSwitch(owner)
             onTriggerSwitch(fallback.profile, reason, excluded)
         } else {
-            consecutiveFailures.set(0)
+            strikes.reset()
             XrayLogManager.w("FAILOVER", "No distinct supported fallback node is available for $safeDegraded; keeping the current connection.")
         }
     }
@@ -437,6 +462,22 @@ class FailoverManager(
         ): Set<String> = profiles.filter {
             sameFallbackPath(it, owner) || sameFallbackPath(it, running) || isPenalized(it)
         }.mapTo(mutableSetOf(owner.id, running.id)) { it.id }
+
+        /**
+         * [candidates] without the servers frozen on this network ([frozenIds], FreezeBook) and without any server on
+         * the same address network (/16, [com.example.vpn.connectivity.DiversitySelector.traitsOf]) as a frozen one:
+         * the ~16 KB cap is applied per flagged hosting range (build 150: the backup plan named a REALITY server on
+         * the Scaleway /16 a frozen server sat in). CDN and name-based domains are not widened: one frozen
+         * Cloudflare config says nothing about the others. [all] supplies the frozen servers' addresses.
+         */
+        internal fun withoutFrozen(candidates: List<VlessProfile>, frozenIds: Set<String>, all: List<VlessProfile>): List<VlessProfile> {
+            if (frozenIds.isEmpty()) return candidates
+            val frozenNets = all.filter { it.id in frozenIds }
+                .map { com.example.vpn.connectivity.DiversitySelector.traitsOf(it).failureDomain }
+                .filter { it.startsWith("net:") }.toSet()
+            return candidates.filter { it.id !in frozenIds &&
+                com.example.vpn.connectivity.DiversitySelector.traitsOf(it).failureDomain !in frozenNets }
+        }
 
         internal fun eligibleFallbacks(profiles: List<VlessProfile>, current: VlessProfile): List<VlessProfile> = profiles.filter {
             com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null &&

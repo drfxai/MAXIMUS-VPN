@@ -51,6 +51,34 @@ object AetherBackgroundRelay {
                      connectedFrozen: Boolean = false, alreadySwitched: Boolean = false): Boolean =
         relayVerified && stillConnected && sameNetwork && !connectedFrozen && !alreadySwitched
 
+    /**
+     * After connect the main tunnel must pass at least one real traffic check of the failover watchdog (not only the
+     * connect-time request), and then [GRACE_AFTER_REAL_CHECK_MS] more, before a second engine starts beside it.
+     * Build 150: the relay started 6 s after connect on Irancell while the connected server was already failing its
+     * checks, and spent the metered link on a registration that had failed twice there minutes before.
+     */
+    const val GRACE_AFTER_REAL_CHECK_MS = 20_000L
+    /** Longest wait for that check; past it the relay is not started for this connection. */
+    const val MAX_GATE_WAIT_MS = 3 * 60_000L
+    const val GATE_POLL_MS = 2_000L
+
+    enum class Gate { WAIT, START, SKIP_REGISTRATION, SKIP_TIMEOUT }
+
+    /**
+     * Whether the background relay may start now. [firstRealPassAt]: when the watchdog's first real check after
+     * connect passed (0: none yet). [strikes]: failover strikes inside its window. [registrationBlocked]: WARP
+     * registration failed on this network recently ([WarpRegistrationMemory]). [waitedMs]: time spent waiting.
+     */
+    fun gate(firstRealPassAt: Long, now: Long, metered: Boolean, strikes: Int, registrationBlocked: Boolean, waitedMs: Long): Gate = when {
+        registrationBlocked -> Gate.SKIP_REGISTRATION
+        firstRealPassAt > 0 && now - firstRealPassAt >= GRACE_AFTER_REAL_CHECK_MS && !(metered && strikes > 0) -> Gate.START
+        waitedMs >= MAX_GATE_WAIT_MS -> Gate.SKIP_TIMEOUT
+        else -> Gate.WAIT
+    }
+
+    /** A running relay on a metered link stops as soon as the main tunnel has a failover strike: it needs the link. */
+    fun mustStop(metered: Boolean, strikes: Int): Boolean = metered && strikes > 0
+
     /** The physical link counts as metered when measured so, when Android says so, or when it is mobile data. */
     fun metered(measuredMetered: Boolean, activeMetered: Boolean, networkKey: String?): Boolean =
         measuredMetered || activeMetered || networkKey?.let { it == "cell" || it.startsWith("cell:") } == true
