@@ -1,1 +1,2 @@
-V1.0.4 rebuild 2026-11-14T21:20Z after #213 #214
+V1.0.4 signed Android rebuild after PR #215 (ee75e2811dc9959ef9646a14364698e8dbb8b241).
+Validated PR workflows: Checks, Connection workspace UI, LAB connection engines, Transport recovery, SOAR and CottenDNS.
