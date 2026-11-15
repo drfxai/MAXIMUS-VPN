@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CurrencyBitcoin
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Inventory2
@@ -263,7 +264,9 @@ fun RoutingDnsSettingsPage(
     onTestVpnDns: () -> Unit,
     onTestResolver: () -> Unit,
     onOpenResolverData: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    splitTunnelSummary: String? = null,
+    onOpenSplitTunnel: (() -> Unit)? = null
 ) {
     var showDns by rememberSaveable { mutableStateOf(false) }
     Column {
@@ -278,6 +281,19 @@ fun RoutingDnsSettingsPage(
                         subtitle = SettingsLabels.routingDescription(mode),
                         selected = settings.routingMode == mode,
                         onSelect = { actions.setRoutingMode(mode) }
+                    )
+                }
+            }
+
+            if (onOpenSplitTunnel != null) {
+                SettingsSectionLabel("Apps")
+                SettingsGroup {
+                    SettingsNavRow(
+                        title = "Per-app routing",
+                        subtitle = splitTunnelSummary ?: "Every app on this phone",
+                        icon = Icons.Default.Apps,
+                        modifier = Modifier.testTag("settings_split_tunnel_row"),
+                        onClick = onOpenSplitTunnel
                     )
                 }
             }
