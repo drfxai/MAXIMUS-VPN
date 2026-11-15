@@ -82,7 +82,8 @@ class RealityPostQuantumFingerprintTest {
             "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none"}]}]},
             "streamSettings":{"network":"tcp","security":"reality","realitySettings":{"serverName":"www.example.com",
             "fingerprint":"qq","publicKey":"pbk","shortId":"ab"}}}]}"""
-        val p = VlessProfile(name = "json", profileType = ProfileType.XRAY_JSON, rawConfig = raw)
+        val p = VlessProfile(name = "json", address = "203.0.113.20", port = 443, uuid = "11111111-2222-3333-4444-555555555555",
+            profileType = ProfileType.XRAY_JSON, rawConfig = raw)
         val reality = JSONObject(XrayConfigBuilder.buildJson(p, AppSettings())).getJSONArray("outbounds").getJSONObject(0)
             .getJSONObject("streamSettings").getJSONObject("realitySettings")
         assertEquals("chrome", reality.getString("fingerprint"))
