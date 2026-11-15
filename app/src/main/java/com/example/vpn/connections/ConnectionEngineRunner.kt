@@ -554,11 +554,13 @@ object ConnectionEngineRunner {
         var deferRelay = false
         var raced = false
         /** HTTPS through the engine's SOCKS port, rechecked after 6 s for Aether on the same transport generation. */
-        fun verify(name: String, process: RunningEngine, launch: SidecarLaunch, ctx: SidecarContext, check: () -> Unit): AccessProbe.Result {
+        fun verify(name: String, process: RunningEngine, launch: SidecarLaunch, ctx: SidecarContext,
+                   reserveForNextRelay: Boolean = false, check: () -> Unit): AccessProbe.Result {
             val endpoint = Socks5.Endpoint("127.0.0.1", ctx.socksPort,
                 ctx.socksUser.takeIf { launch.socksAuth }, ctx.socksPass.takeIf { launch.socksAuth })
             val generation = process.transportGeneration
-            val first = AccessProbe.check(endpoint, checkDns, diagnoseAddress = engine.id == AetherSidecar.ID)
+            val first = AccessProbe.check(endpoint, checkDns,
+                diagnoseAddress = engine.id == AetherSidecar.ID && !reserveForNextRelay)
             check()
             return if (engine.id == AetherSidecar.ID && first.traffic) {
                 record(name, "https", "RECHECK", "checking that the same transport keeps carrying traffic")
@@ -678,7 +680,7 @@ object ConnectionEngineRunner {
                     check()
                     record(name, "startup", "PASS")
                     stage = "access check failed"
-                    val result = verify(name, process, launch, ctx, ::check)
+                    val result = verify(name, process, launch, ctx, check = ::check)
                     check()
                     if (result.traffic && process.isAlive) {
                         running = null
@@ -792,6 +794,10 @@ object ConnectionEngineRunner {
             var running: RunningEngine? = null
             var stage = "configuration preparation failed"
             val attemptStartedAt = System.currentTimeMillis()
+            val attemptStartedNanos = System.nanoTime()
+            val reserveForNextRelay = relayOnly && metered && queue.any {
+                !AetherApiBridge.skipAfterBootstrapFailure(it, failedRegistrationKinds)
+            }
             try {
                 record(name, "prepare", "START")
                 val launch = engine.prepare(candidate, settings, context)
@@ -814,10 +820,16 @@ object ConnectionEngineRunner {
                     val wait = IrancellWarp.waitMs(capped, ladderStartedAt, System.currentTimeMillis())
                     val watch = IrancellWarp.RegistrationWatch()
                     process.awaitReadyUnless(wait) { watch.shouldStop(process.startupFailure, System.currentTimeMillis()) }
+                } else if (reserveForNextRelay) {
+                    val elapsedMs = (System.nanoTime() - attemptStartedNanos) / 1_000_000
+                    val wait = AetherBackgroundRelay.startupWindowMs(capped, elapsedMs, metered, hasNext = true)
+                    record(name, "budget", "START", "up to ${wait} ms to reach readiness before the next relay")
+                    wait > 0 && process.awaitReady(wait)
                 } else process.awaitReady(capped)
                 checkCancellation()
                 if (!ready) {
-                    val reason = process.startupFailure ?: stage
+                    val reason = process.startupFailure ?: if (reserveForNextRelay)
+                        "Relay did not reach readiness within its startup budget; traffic is unverified." else stage
                     record(name, "startup", "FAIL", reason)
                     attempts += "$name: $reason"
                     failed(name, candidate)
@@ -833,7 +845,7 @@ object ConnectionEngineRunner {
                 }
                 record(name, "startup", "PASS")
                 stage = "access check failed"
-                val result = verify(name, process, launch, context, ::checkCancellation)
+                val result = verify(name, process, launch, context, reserveForNextRelay, ::checkCancellation)
                 checkCancellation()
                 if (result.traffic && process.isAlive) {
                     record(name, "https", "PASS")
