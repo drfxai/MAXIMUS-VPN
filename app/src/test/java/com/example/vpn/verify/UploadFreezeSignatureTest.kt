@@ -40,6 +40,32 @@ class UploadFreezeSignatureTest {
         assertTrue(ev(LegResult.Failed(FailureStage.TIMEOUT, 16_050, stalled = true, reason = "t"), null).fixedSizeFreeze)
     }
 
+    @Test fun build150UploadStalledAt16kAndADownloadThatCarriedNothingIsAFreeze() {
+        val e = ev(LegResult.Failed(FailureStage.TIMEOUT, 0, stalled = false, reason = "TIMEOUT"), upFrozen)
+        assertTrue(e.uploadFreezeDeadDownload)
+        assertTrue(e.fixedSizeFreeze)
+        assertTrue(capClass(e.stallBytes))
+    }
+
+    @Test fun aReferenceThatNeverConnectedDoesNotHideTheSignature() {
+        val unreachable = UploadProbe.HostAttempt("httpbingo.org", listOf(
+            UploadProbe.Grade(16_384, UploadProbe.Outcome.FAILED, 0, 4_000),
+            UploadProbe.Grade(65_536, UploadProbe.Outcome.NOT_TESTED, 0, 0)))
+        val probe = UploadProbe(listOf(stalledAt16k("speed.cloudflare.com"), unreachable))
+        assertTrue(ev(LegResult.Failed(FailureStage.TIMEOUT, 0, stalled = false, reason = "TIMEOUT"), probe).fixedSizeFreeze)
+    }
+
+    @Test fun aDeadDownloadWithoutTheUploadStallIsNotAFreeze() {
+        val e = ev(LegResult.Failed(FailureStage.TIMEOUT, 0, stalled = false, reason = "TIMEOUT"), null)
+        assertFalse(e.uploadFreezeDeadDownload)
+        assertFalse(e.fixedSizeFreeze)
+        // An upload stall past the window with a dead download is not the 16 KB cap either.
+        val late = UploadProbe(listOf(UploadProbe.HostAttempt("speed.cloudflare.com", listOf(
+            UploadProbe.Grade(16_384, UploadProbe.Outcome.OK, 16_384, 300),
+            UploadProbe.Grade(65_536, UploadProbe.Outcome.STALLED, 40_000, 8_000)))))
+        assertFalse(ev(LegResult.Failed(FailureStage.TIMEOUT, 0, stalled = false, reason = "TIMEOUT"), late).fixedSizeFreeze)
+    }
+
     private fun capClass(bytes: Int?) =
         com.example.vpn.smart.StallFailover.classify(bytes) == com.example.vpn.smart.StallFailover.StallClass.CAP
 }

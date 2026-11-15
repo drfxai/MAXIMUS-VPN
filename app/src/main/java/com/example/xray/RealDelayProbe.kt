@@ -48,6 +48,38 @@ object RealDelayProbe {
     const val FAST_TARGETS = 2
 
     /**
+     * The second-target retry rescued nobody lately: on a network where nothing passes (Irancell, cf=0) every round
+     * of a Smart Connect race paid the timeout twice (~12 s per five servers; build 150 took 47.9 s to verified
+     * traffic). Off by default (unit tests); the app turns it on. See [RetryMemory].
+     */
+    @Volatile var skipUselessRetry: Boolean = false
+    val retryMemory = RetryMemory()
+
+    /**
+     * When a retry on the next target of at least [MIN_RETRIED] failed candidates rescued none of them, both
+     * independent targets failed through every one of them: the servers are dead, not the first target. For
+     * [HOLD_MS] after that, later rounds call a failure on the first target final. Any retry that rescues a
+     * candidate (the first target was the problem after all) ends the hold at once. Thread-safe; [clock] for tests.
+     */
+    class RetryMemory(private val clock: () -> Long = System::currentTimeMillis) {
+        @Volatile private var uselessUntil = 0L
+
+        fun record(retried: Int, rescued: Int) {
+            if (rescued > 0) uselessUntil = 0L
+            else if (retried >= MIN_RETRIED) uselessUntil = clock() + HOLD_MS
+        }
+
+        fun skipRetry(): Boolean = clock() < uselessUntil
+
+        fun reset() { uselessUntil = 0L }
+
+        companion object {
+            const val MIN_RETRIED = 2
+            const val HOLD_MS = 60_000L
+        }
+    }
+
+    /**
      * Every finished outcome of [measure], so one evidence model sees every real test the app runs (see
      * ConnectivityBrain). Never given credentials: the receiver gets the profile object and keeps only its
      * fingerprint and family.
@@ -97,7 +129,10 @@ object RealDelayProbe {
             if (someonePassed || ProbeTargets.health.knownUp(previous)) break
             val retry = results.indices.filter { (results[it] as? Outcome.Failed)?.request == true }
             if (retry.isEmpty()) break
+            if (skipUselessRetry && retryMemory.skipRetry()) break
             val again = measureBatch(retry.map { batch[it] }, timeoutSec, next)
+            if (skipUselessRetry && again.any { it !is Outcome.NotRun })
+                retryMemory.record(retry.size, again.count { it is Outcome.Delay })
             retry.forEachIndexed { i, index ->
                 val before = results[index] as Outcome.Failed
                 results[index] = when (val o = again[i]) {

@@ -296,6 +296,8 @@ class RayVpnService : VpnService() {
         observeSettingsFlow()
         // Real-delay probes must bypass this VPN while it exists.
         com.example.xray.RealDelayProbe.socketProtector = { fd -> safeProtectFd(fd) }
+        // Smart Connect races: a second-target retry that rescued nobody is not repeated for a minute (RetryMemory).
+        com.example.xray.RealDelayProbe.skipUselessRetry = true
         // Clean-IP scans and checks measure the phone's network, not this VPN (or its blocking interface).
         com.example.panels.CleanIpOptimizer.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
     }
@@ -1828,6 +1830,7 @@ class RayVpnService : VpnService() {
                 passive = if (activeEngine is NativeTunVpnEngine) com.example.vpn.smart.PassiveHealth() else null,
                 staysOnSelected = { exactSession },
                 savedProfile = { requestedProfile },
+                frozenOn = { net -> networkMemory.freezes.frozen(net) },
                 onTriggerSwitch = onTriggerSwitch@{ newProfile, reason, excluded ->
                     if (exactSession) {
                         // Failover checks staysOnSelected first; this only catches a switch already under way.
@@ -1955,6 +1958,13 @@ class RayVpnService : VpnService() {
     private fun retryAetherRelayInBackground(connected: VlessProfile, network: String, attemptId: String) {
         val pending = aetherRelayPending ?: return
         val now = System.currentTimeMillis()
+        // WARP registration failed on this network recently: the relay would repeat it (WarpRegistrationMemory).
+        if (com.example.vpn.connections.WarpRegistrationMemory.blocked(network, now)) {
+            aetherRelayPending = null
+            XrayLogManager.i("BUILTIN", "aether/relay · background · SKIP · " +
+                com.example.vpn.connections.WarpRegistrationMemory.describe(network, now))
+            return
+        }
         fun frozenHere() = runCatching {
             connected.id in networkMemory.freezes.frozen(com.example.vpn.smart.NetworkKey.current(this@RayVpnService))
         }.getOrDefault(false)
@@ -1984,6 +1994,44 @@ class RayVpnService : VpnService() {
                 measuredMetered = com.example.vpn.connections.ConnectionEngineRunner.linkHints(measured).metered,
                 activeMetered = runCatching { connectivityManager?.isActiveNetworkMetered }.getOrNull() == true,
                 networkKey = runCatching { com.example.vpn.smart.NetworkKey.current(this@RayVpnService) }.getOrNull())
+            // Not before the main tunnel passed a real watchdog check after connect plus a grace period, and on a
+            // metered link not while it has failover strikes (AetherBackgroundRelay.gate).
+            val gateStartedAt = System.currentTimeMillis()
+            var waitLogged = false
+            while (true) {
+                val t = System.currentTimeMillis()
+                val watchdog = failoverManager
+                val gate = com.example.vpn.connections.AetherBackgroundRelay.gate(
+                    firstRealPassAt = watchdog?.firstRealPassAt() ?: 0L, now = t, metered = metered,
+                    strikes = watchdog?.strikeCount() ?: 0,
+                    registrationBlocked = com.example.vpn.connections.WarpRegistrationMemory.blocked(network, t),
+                    waitedMs = t - gateStartedAt)
+                when (gate) {
+                    com.example.vpn.connections.AetherBackgroundRelay.Gate.START -> break
+                    com.example.vpn.connections.AetherBackgroundRelay.Gate.SKIP_REGISTRATION -> {
+                        XrayLogManager.i("BUILTIN", "aether/relay · background · SKIP · " +
+                            com.example.vpn.connections.WarpRegistrationMemory.describe(network, t))
+                        return@launch
+                    }
+                    com.example.vpn.connections.AetherBackgroundRelay.Gate.SKIP_TIMEOUT -> {
+                        XrayLogManager.i("BUILTIN", "aether/relay · background · SKIP · $via did not pass a real traffic check " +
+                            "without failover strikes within ${com.example.vpn.connections.AetherBackgroundRelay.MAX_GATE_WAIT_MS / 60_000} min")
+                        return@launch
+                    }
+                    com.example.vpn.connections.AetherBackgroundRelay.Gate.WAIT -> if (!waitLogged) {
+                        waitLogged = true
+                        XrayLogManager.i("BUILTIN", "aether/relay · background · WAIT · until $via passes a real traffic check " +
+                            "(+${com.example.vpn.connections.AetherBackgroundRelay.GRACE_AFTER_REAL_CHECK_MS / 1000}s)" +
+                            if (metered) " with no failover strike" else "")
+                    }
+                }
+                delay(com.example.vpn.connections.AetherBackgroundRelay.GATE_POLL_MS)
+                if (!current()) return@launch
+            }
+            // On a metered link the relay stops once the main tunnel gets a failover strike.
+            var strikeStop = false
+            fun strikesNow(): Boolean = com.example.vpn.connections.AetherBackgroundRelay.mustStop(metered,
+                failoverManager?.strikeCount() ?: 0).also { if (it) strikeStop = true }
             val budget = com.example.vpn.connections.AetherBackgroundRelay.budgetMs(metered)
             val deadlineAt = budget?.let { System.currentTimeMillis() + it }
             XrayLogManager.i("BUILTIN", "aether/relay · background · START via $via" +
@@ -2008,7 +2056,8 @@ class RayVpnService : VpnService() {
                     kotlinx.coroutines.runInterruptible {
                         com.example.vpn.connections.ConnectionEngineRunner.start(engine, pending.aether, settings, context,
                             relayExitNode = connected.id, relayExitRoute = exitRoute, metered = metered,
-                            relayOnly = true, cancelled = { !current() || deadlineAt != null && System.currentTimeMillis() > deadlineAt })
+                            relayOnly = true, cancelled = { !current() || strikesNow() ||
+                                deadlineAt != null && System.currentTimeMillis() > deadlineAt })
                     }
                 }
                 val result = if (budget != null) kotlinx.coroutines.withTimeout(budget) { relayRun() } else relayRun()
@@ -2053,7 +2102,8 @@ class RayVpnService : VpnService() {
                     return@launch
                 }
                 val reason = when (e) {
-                    is kotlinx.coroutines.CancellationException, is InterruptedException -> "the connection changed"
+                    is kotlinx.coroutines.CancellationException, is InterruptedException ->
+                        if (strikeStop) "the main tunnel failed a traffic check on this metered link" else "the connection changed"
                     is com.example.vpn.connections.ConnectionEngineRunner.NoVerifiedPath -> e.message ?: "no verified relay"
                     else -> e.javaClass.simpleName
                 }
@@ -2700,7 +2750,10 @@ class RayVpnService : VpnService() {
                 activeRoute?.let { (net, id) -> networkMemory.routes.markBidirectional(net, id) }
             }
             XrayLogManager.i("VPN", "Upload/download check: ${evidence.diagLine(serverLabel)}.")
-            if (evidence.fixedSizeFreeze) {
+            if (evidence.uploadFreezeDeadDownload) {
+                XrayLogManager.w("VPN", "The upload stopped at 16 KB and the download carried nothing: this is the censor's " +
+                    "fixed-size freeze on this server's address, not an MTU problem.")
+            } else if (evidence.fixedSizeFreeze) {
                 XrayLogManager.w("VPN", "The download froze after about 16 KB: this is the censor's fixed-size freeze on this " +
                     "server's address, not an MTU problem. Another server, XHTTP or TLS fragmentation avoids it.")
             } else if (evidence.bulkStalled) {
@@ -2971,7 +3024,11 @@ class RayVpnService : VpnService() {
                 freezes.recordFrozen(network, running.id)
                 if (label != null) XrayLogManager.w("FAILOVER", "$label: the download froze again after about 16 KB.")
                 freezeRescue = null
-                onFreeze(attemptId, network, running, rescueTried = rescue != null || running.id in freezeRescued)
+                // Upload capped at 16 KB and a download that carried nothing: no same-server rescue, move on now.
+                if (evidence.uploadFreezeDeadDownload) XrayLogManager.w("FAILOVER", "failover · freeze16k · upload stalled at " +
+                    "${evidence.stallBytes ?: 16384} B and the download carried nothing: marked frozen on this network; switching")
+                onFreeze(attemptId, network, running, rescueTried = rescue != null || running.id in freezeRescued ||
+                    evidence.uploadFreezeDeadDownload)
             }
             download is com.example.vpn.verify.LegResult.Passed &&
                 (evidence.upload as? com.example.vpn.verify.LegResult.Failed)?.stalled != true -> {
@@ -3459,6 +3516,8 @@ class RayVpnService : VpnService() {
 
     override fun onDestroy() {
         com.example.xray.RealDelayProbe.socketProtector = null
+        com.example.xray.RealDelayProbe.skipUselessRetry = false
+        com.example.xray.RealDelayProbe.retryMemory.reset()
         com.example.panels.CleanIpOptimizer.socketProtector = null
         supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.SERVICE_DESTROYED)
         connectJob?.cancel()
