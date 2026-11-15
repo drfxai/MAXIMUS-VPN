@@ -428,6 +428,13 @@ object ConnectionEngineRunner {
         metered: Boolean = false,
         /** Only WARP through [relayExitNode] (wireguard-relay, then h2-relay): the background retry. */
         relayOnly: Boolean = false,
+        /**
+         * The user's own run (the Connections page test, the power button on Aether): never refused by
+         * [WarpDataPlaneHold] or [AetherLadderGuard], but still recorded by them.
+         */
+        manual: Boolean = false,
+        /** Cloudflare is filtered here (cf=0 / CLOUDFLARE_TLS_PATH_FAILURE): a gateway-scan failure starts [WarpDataPlaneHold]. */
+        cloudflareBlocked: Boolean = preferWireGuard,
         onProgress: (String) -> Unit = {},
         cancelled: () -> Boolean = { false }
     ): Started {
@@ -494,6 +501,21 @@ object ConnectionEngineRunner {
             AetherSettings.read(ProfileExtras.read(profile)).let { it.tor == "reverse" || it.psiphon == "reverse" }
         // Irancell: one MASQUE HTTP/2 attempt inside IrancellWarp.BUDGET_MS, no WireGuard/H3 (see IrancellWarp).
         val irancellSingle = IrancellWarp.applies(engine.id, automatic, onIrancell, relayOnly, reverseRelay)
+        // Build 151: WARP's data plane is held on this network (gateway scan failed with Cloudflare filtered), or the same
+        // ladder ran here under a minute ago: an automatic run stops at once so the search goes on.
+        val ladderKind = if (relayOnly) "relay" else "ladder"
+        val guarded = engine.id == AetherSidecar.ID && automatic
+        if (guarded && !manual && WarpDataPlaneHold.blocked(networkKey)) {
+            val why = WarpDataPlaneHold.describe(networkKey)
+            record(ladderKind, "warp-data", "SKIP", why)
+            throw NoVerifiedPath(listOf("$ladderKind: $why"), null)
+        }
+        if (guarded) AetherLadderGuard.begin(networkKey, ladderKind, enforce = !manual)?.let { since ->
+            val why = "the same Aether $ladderKind ran on this network ${since / 1000}s ago; not repeated within " +
+                "${AetherLadderGuard.MIN_GAP_MS / 1000}s"
+            record(ladderKind, "queue", "SKIP", why)
+            throw NoVerifiedPath(listOf("$ladderKind: $why"), null)
+        }
         if (onMci && !relayOnly) record("ladder", "queue", "START", "Hamrah-e-Aval: MASQUE H2 with the full ClientHello first, then H2 with the ClientHello split at the SNI over IPv4, then H3, then WireGuard")
         if (cleanChoices.isNotEmpty() && !relayOnly) record(CLEAN_H2, "queue", "START", "${cleanPeers.size} clean H2 gateway(s) remembered on this network; trying " +
             cleanChoices.joinToString(", ") { CleanH2PeerMemory.masked(ProfileExtras.read(it).optString(AetherSidecar.CLEAN_H2_PEER)) } +
@@ -849,6 +871,15 @@ object ConnectionEngineRunner {
                     attempts += "$name: $reason"
                     failed(name, candidate)
                     if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
+                    // Registration worked (the scan comes after it) but no gateway served a tunnel with Cloudflare
+                    // filtered: WARP's data plane is blocked here. Hold automatic Aether; keep the saved identity.
+                    if (guarded && WarpDataPlaneHold.startsHold(reason, cloudflareBlocked, relayed = extras.optBoolean(RELAY_FOLLOW_UP))) {
+                        WarpDataPlaneHold.record(networkKey)
+                        WarpRegistrationMemory.clear(networkKey)
+                        record("ladder", "warp-data", "REMEMBER", "gateway scan found no serving tunnel with Cloudflare filtered; " +
+                            "automatic Aether and the background relay held for ${WarpDataPlaneHold.HOLD_MS / 60_000} min on this network " +
+                            "(registration works: the saved identity is kept)")
+                    }
                     // Registration is shared by H2/H3 MASQUE. Do not repeat a failed signup
                     // for the same identity, but allow an independent stored or new WG identity.
                     // A proven API transport failure/rate limit blocks all *new* registrations.
@@ -868,6 +899,8 @@ object ConnectionEngineRunner {
                     record(name, "https", "PASS")
                     if (engine.id == AetherSidecar.ID && automatic) rememberCleanH2(name, candidate, networkKey, attemptStartedAt, ::record)
                     if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
+                    if (engine.id == AetherSidecar.ID && !extras.optBoolean(RELAY_FOLLOW_UP)) WarpDataPlaneHold.clear(networkKey)
+                    if (guarded) AetherLadderGuard.finish(networkKey, ladderKind)
                     if (scope() == cacheScope) {
                         BuiltinMethodMemory.record(cacheScope, name)
                         BuiltinMethodMemory.clearFailure(cacheScope, name)
@@ -918,6 +951,7 @@ object ConnectionEngineRunner {
         val relayDeferred = irancellSingle && relayEligible(engine.id, automatic, options, "saved-server") ||
             !relayOnly && relays.isEmpty() && (deferRelay || deferRelayToSavedServer(engine.id, automatic, options,
             relayExitNode, warpDataBlocked = BuiltinMethodMemory.warpDataBlocked(cacheScope)))
+        if (guarded) AetherLadderGuard.finish(networkKey, ladderKind)
         throw NoVerifiedPath(attempts, lastCheck, relayDeferred = relayDeferred)
     }
 }

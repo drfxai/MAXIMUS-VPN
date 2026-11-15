@@ -131,6 +131,28 @@ class TrafficCheck(
         return TrafficEvidence(attemptId, networkGeneration, path, down, up, clock(), lastUploadProbe)
     }
 
+    /**
+     * Smart Connect's bulk gate ([com.example.vpn.smart.BulkGate]): one download from [t] within [stepTimeoutMs],
+     * noting when the last body byte arrived, so a read that stopped at ~16 KB and went quiet can be told from a
+     * slow one that was still moving at the deadline.
+     */
+    fun gateDownload(t: Target = GATE_DOWNLOAD): com.example.vpn.smart.BulkGate.Read {
+        val started = clock()
+        var total = 0
+        var lastByteAt = started
+        return try {
+            val r = exchange(t, "GET", null, keepBody = false, onBody = { n -> total += n; lastByteAt = clock() })
+            if (r.status !in 200..299) com.example.vpn.smart.BulkGate.Read.NotTested("$t answered HTTP ${r.status}")
+            else com.example.vpn.smart.BulkGate.Read.Done(r.bodyBytes, clock() - started)
+        } catch (e: TransferException) {
+            if (e.cause is Socks5.Socks5Exception) return com.example.vpn.smart.BulkGate.Read.NotTested("$t: ${e.cause?.message}")
+            // Nothing came at all: the reference (or its name) was not reached; the gate says nothing then.
+            if (total == 0 && !e.timedOut) return com.example.vpn.smart.BulkGate.Read.NotTested("$t: ${e.cause?.javaClass?.simpleName ?: "error"}")
+            val end = clock()
+            com.example.vpn.smart.BulkGate.Read.Cut(total, end - lastByteAt, e.timedOut, end - started)
+        }
+    }
+
     internal fun downloadFrom(t: Target): LegResult {
         val started = clock()
         return try {
@@ -226,7 +248,7 @@ class TrafficCheck(
      * no timeout of its own, so a watchdog closes the socket at the deadline.
      */
     internal fun exchange(t: Target, method: String, payload: ByteArray?, keepBody: Boolean, extraHeaders: Map<String, String> = emptyMap(),
-                          progress: ((Int) -> Unit)? = null): Response {
+                          progress: ((Int) -> Unit)? = null, onBody: ((Int) -> Unit)? = null): Response {
         require(method in setOf("GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"))
         require(extraHeaders.all { (key, value) -> key.matches(Regex("[A-Za-z0-9-]+")) &&
             value.length <= 8192 && value.none { it == '\r' || it == '\n' } &&
@@ -275,7 +297,7 @@ class TrafficCheck(
             val status = headers.first
             val body = if (keepBody) ByteArrayOutputStream() else null
             if (payload == null) moved = 0
-            val counter: (Int) -> Unit = { n -> if (payload == null) moved += n }
+            val counter: (Int) -> Unit = { n -> if (payload == null) moved += n; onBody?.invoke(n) }
             val length = headers.second["content-length"]?.trim()?.toIntOrNull()
             val chunked = headers.second["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true
             val total = when {
@@ -352,6 +374,9 @@ class TrafficCheck(
             Target("httpbingo.org", 443, "/bytes/$DOWNLOAD_BYTES", DOWNLOAD_BYTES),
             Target("speed.cloudflare.com", 443, "/__down?bytes=$DOWNLOAD_BYTES", DOWNLOAD_BYTES, cloudflare = true)
         )
+        /** The bulk gate's download (Fly.io, not Cloudflare, so it works through a Worker exit and on cf=0). */
+        val GATE_DOWNLOAD = Target("httpbingo.org", 443, "/bytes/${com.example.vpn.smart.BulkGate.DOWNLOAD_BYTES}",
+            com.example.vpn.smart.BulkGate.DOWNLOAD_BYTES)
         val UPLOADS = listOf(
             Target("speed.cloudflare.com", 443, "/__up", echoes = false, cloudflare = true),
             Target("httpbingo.org", 443, "/post"),

@@ -210,6 +210,25 @@ class FailoverManager(
         }
     }
 
+    /**
+     * The connection went CONNECTED → DEGRADED on timeouts within a minute of being verified
+     * ([StrikeWindow.earlyDegradeStrike]): one strike in the window, like a failed real check. Returns the strikes now
+     * in the window (0 when not monitoring).
+     */
+    fun reportEarlyDegrade(detail: String): Int {
+        val profile = currentActiveProfile ?: return 0
+        val settings = currentActiveSettings ?: return 0
+        if (monitorJob?.isActive != true) return 0
+        val n = strikes.fail()
+        XrayLogManager.w("FAILOVER", "${SecretRedactor.redact(profile.name)} degraded within a minute of connecting ($detail): " +
+            "counted as a strike (${strikes.describe(n)}).")
+        if (strikes.shouldSwitch() && acquireFailoverCooldown(maxOf(20000L, policy.cooldownMs()))) {
+            failoverJob?.cancel()
+            failoverJob = scope.launch { attemptFailover(profile, settings) }
+        }
+        return n
+    }
+
     fun stopMonitoring() {
         monitorJob?.cancel()
         monitorJob = null
@@ -472,10 +491,12 @@ class FailoverManager(
          */
         internal fun withoutFrozen(candidates: List<VlessProfile>, frozenIds: Set<String>, all: List<VlessProfile>): List<VlessProfile> {
             if (frozenIds.isEmpty()) return candidates
+            // Shared with Smart Connect's search (FrozenGuard.widen); frozen IPv6 /32s stay grouped here as before.
             val frozenNets = all.filter { it.id in frozenIds }
                 .map { com.example.vpn.connectivity.DiversitySelector.traitsOf(it).failureDomain }
                 .filter { it.startsWith("net:") }.toSet()
-            return candidates.filter { it.id !in frozenIds &&
+            val wide = FrozenGuard.widen(frozenIds, all + candidates)
+            return candidates.filter { it.id !in wide &&
                 com.example.vpn.connectivity.DiversitySelector.traitsOf(it).failureDomain !in frozenNets }
         }
 
