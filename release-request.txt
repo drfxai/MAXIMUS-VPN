@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PRs #223–#227 (b89223f5bac30f59e8089a76c8034db8a2499408).
-Includes per-app routing, boot and widget controls, Psiphon setup, licensing changes and the optional Radiance integration source.
+V1.0.4 signed Android rebuild after PR #228 (35e5e063b18167aa0d9625e7a82a311d77ca1e8f).
+Includes the configuration-free selector, bundled Lantern/Radiance and the Psiphon setup shortcut.
