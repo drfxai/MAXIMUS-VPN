@@ -23,7 +23,7 @@ object EngineRegistry {
         val runtime: EngineSelectionPolicy.Runtime?
     )
 
-    val XRAY = EngineDescriptor("xray", "Xray-core (libXray)", "libXray v26.10.31", "MPL-2.0 (Xray-core), MIT (libXray)",
+    val XRAY = EngineDescriptor("xray", "Xray-core (libXray)", "libXray v26.11.9", "MPL-2.0 (Xray-core), MIT (libXray)",
         bundled = true, runtime = EngineSelectionPolicy.Runtime.XRAY)
     val KOTLIN_TUNNEL = EngineDescriptor("kotlin-tunnel", "Kotlin packet tunnel", "in app", "Proprietary (this app)",
         bundled = true, runtime = EngineSelectionPolicy.Runtime.KOTLIN_TUNNEL)

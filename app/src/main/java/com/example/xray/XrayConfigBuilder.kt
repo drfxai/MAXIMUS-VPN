@@ -475,10 +475,11 @@ object XrayConfigBuilder {
             } else if (sec == "reality") {
                 val realityObj = JSONObject().apply {
                     put("show", false)
-                    if (profile.fingerprint.isNotBlank()) {
-                        // REALITY does not accept TLS's allowInsecure field.
-                        put("fingerprint", if (profile.fingerprint.equals("unsafe", ignoreCase = true)) "chrome" else profile.fingerprint)
-                    }
+                    // REALITY servers on Xray v26.9.8+ only accept a ClientHello with an X25519MLKEM768 key share,
+                    // so edge/ios/qq/random/android/360 (and Go TLS, which REALITY refuses) are sent as a
+                    // post-quantum browser instead; the saved choice is kept and the swap is logged once.
+                    val realityFp = RealityFingerprint.forRealityLogged(profile.fingerprint, profile.name)
+                    if (realityFp.isNotBlank()) put("fingerprint", realityFp)
                     if (profile.cipherSuites.isNotBlank()) {
                         put("cipherSuites", profile.cipherSuites)
                     }

@@ -40,6 +40,22 @@ object SingBoxSidecar : SidecarEngine {
 
     override fun problem(profile: VlessProfile): String? = conversionProblem(profile)
 
+    /**
+     * sing-box (1.14.4 and 1.15.0-alpha.13, common/tls/reality_client.go) removes X25519MLKEM768 from the
+     * uTLS curves and key shares of every REALITY ClientHello. Xray REALITY servers v26.9.8+ treat such a
+     * hello as a foreign client (XTLS/Xray-core#7259, "for sing-box: cannot connect"), so REALITY stays on
+     * the bundled Xray core, which sends the post-quantum share.
+     */
+    const val REALITY_PQ_PROBLEM = "sing-box strips the post-quantum key share that Xray REALITY servers v26.9.8+ require; REALITY stays on Xray."
+
+    /**
+     * [conversionProblem], plus what makes an automatic move to sing-box (preferred engine, subscription
+     * preset core, recovery second core) a bad trade even though the conversion itself is lossless.
+     * A profile the user pinned to sing-box is still run as they chose.
+     */
+    fun autoSelectProblem(p: VlessProfile): String? = conversionProblem(p)
+        ?: REALITY_PQ_PROBLEM.takeIf { p.security.equals("reality", ignoreCase = true) }
+
     fun select(profile: VlessProfile): VlessProfile {
         require(conversionProblem(profile) == null) { conversionProblem(profile).orEmpty() }
         return ProfileExtras.with(profile.copy(engineType = EngineType.SING_BOX, canonicalFingerprint = ""), "engine", id)
@@ -47,6 +63,10 @@ object SingBoxSidecar : SidecarEngine {
 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
         problem(profile)?.let { error(it) }
+        if (profile.security.equals("reality", ignoreCase = true)) {
+            com.example.xray.XrayLogManager.w("SING-BOX", "REALITY on sing-box: no X25519MLKEM768 key share is sent, so " +
+                "Xray REALITY servers v26.9.8+ will reject '${profile.name}'. Switch this server back to the Xray engine if it fails.")
+        }
         val file = File(context.workDir, "sing-box.json")
         PrivateEngineFile.write(file, config(profile, context).toString())
         return SidecarLaunch(listOf(context.executable.absolutePath, "run", "-D", context.workDir.absolutePath,

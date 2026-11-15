@@ -4,6 +4,7 @@ import com.example.data.model.ProfileType
 import com.example.data.model.ProtocolType
 import com.example.data.model.VlessProfile
 import com.example.vpn.engine.EngineSelectionPolicy
+import com.example.xray.RealityFingerprint
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -56,26 +57,46 @@ object StealthVariants {
         }
     }
 
+    /**
+     * Other browser fingerprints to try for [profile], in rotation order (chrome, then firefox, then safari),
+     * without the one it already sends. Only post-quantum fingerprints are used: REALITY servers on Xray
+     * v26.9.8+ drop a ClientHello without an X25519MLKEM768 key share ([RealityFingerprint]). For REALITY
+     * the saved fingerprint counts as what is really sent (edge goes out as chrome), so it is not tried twice.
+     * "unsafe" on TLS means Go TLS with custom cipher suites; another fingerprint would drop them.
+     */
+    fun fingerprintRotation(profile: VlessProfile): List<String> {
+        val fp = profile.fingerprint.trim().lowercase()
+        val reality = profile.security.equals("reality", ignoreCase = true)
+        if (!reality && fp == "unsafe") return emptyList()
+        val current = if (reality) RealityFingerprint.effectiveForRotation(fp) else
+            RealityFingerprint.effectiveForRotation(fp).takeIf { RealityFingerprint.isPqCapable(fp) }
+        return RealityFingerprint.PQ_ROTATION.filter { it != current }.take(MAX_FINGERPRINT_ALTERNATES)
+    }
+
+    /** The variant key of the fingerprint alternate that sends [fingerprint] (one key per browser, so a per-network winner is exact). */
+    fun fingerprintKey(fingerprint: String): String = "$FINGERPRINT-${fingerprint.lowercase()}"
+
+    /** The browser a variant key sends, or null when the key is not a fingerprint alternate. */
+    fun fingerprintOf(key: String): String? = key.removePrefix("$FINGERPRINT-").takeIf { key.startsWith("$FINGERPRINT-") && it in RealityFingerprint.PQ_ROTATION }
+
+    /** At most this many fingerprint alternates per profile; the third browser is the one it already sends. */
+    const val MAX_FINGERPRINT_ALTERNATES = 2
+
     /** The variant with [key] for [profile], if it still applies (used to reuse the last winner). */
     fun find(profile: VlessProfile, key: String): Variant? = of(profile).firstOrNull { it.key == key }
 
     private fun tlsVariants(profile: VlessProfile, mask: JSONObject): List<Variant> {
         val out = mutableListOf<Variant>()
         val hasTcpMask = mask.optJSONArray("tcp")?.let { it.length() > 0 } == true
-        val fp = profile.fingerprint.lowercase()
-        // "unsafe" means Go TLS with custom cipher suites; another fingerprint would drop them.
-        val altFp = when {
-            fp == "unsafe" -> null
-            fp.isBlank() || fp == "chrome" || fp.startsWith("hellochrome") -> "firefox"
-            else -> "chrome"
-        }
+        val altFps = fingerprintRotation(profile)
+        val altFp = altFps.firstOrNull()
         val fragmented = if (hasTcpMask) null else profile.copy(finalMask = withTcp(mask, helloFragment()).toString())
         fragmented?.let { out += Variant(FRAGMENT, "TLS handshake split into small pieces", it) }
         if (!hasTcpMask) {
             out += Variant(DOUBLE_FRAGMENT, "TLS handshake split into 1-byte records and tiny packets",
                 profile.copy(finalMask = withTcpChain(mask, doubleFragment()).toString()))
         }
-        altFp?.let { out += Variant(FINGERPRINT, "${it.replaceFirstChar(Char::uppercase)} TLS fingerprint", profile.copy(fingerprint = it)) }
+        altFps.forEach { out += Variant(fingerprintKey(it), "${it.replaceFirstChar(Char::uppercase)} TLS fingerprint", profile.copy(fingerprint = it)) }
         if (fragmented != null && altFp != null) {
             out += Variant(FRAGMENT_FINGERPRINT, "Split handshake with a $altFp fingerprint", fragmented.copy(fingerprint = altFp))
         }
