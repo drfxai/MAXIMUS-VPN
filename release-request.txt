@@ -1,1 +1,1 @@
-V1.0.4 signed Android rebuild with Aether relay continuity during degraded traffic and failover route exclusions.
+V1.0.4 rebuild 2026-11-15T15:34Z after #218 #219 #220 #221
