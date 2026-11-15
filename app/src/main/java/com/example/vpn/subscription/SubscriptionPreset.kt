@@ -24,7 +24,7 @@ data class SubscriptionPreset(val core: EngineType? = null, val excludedCountrie
             }
             p = ProfileExtras.with(p, "subscriptionPresetCore", null)
             if (core == EngineType.SING_BOX && p.engineType in setOf(EngineType.AUTO, EngineType.XRAY) &&
-                SingBoxSidecar.conversionProblem(p) == null) {
+                SingBoxSidecar.autoSelectProblem(p) == null) {
                 p = SingBoxSidecar.select(p)
                 p = ProfileExtras.with(p, "subscriptionPresetCore", EngineType.SING_BOX.name)
             }

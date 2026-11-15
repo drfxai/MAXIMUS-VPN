@@ -285,6 +285,7 @@ object XrayConfigParser {
                 }
             }
             rejectHostnameEndpoints(root.optJSONArray("outbounds"))
+            usePostQuantumRealityFingerprints(root.optJSONArray("outbounds"))
             // The first outbound carries everything no rule matches: a direct or blocking one there
             // would send all traffic around the tunnel (or nowhere) while the app shows "connected".
             val firstProtocol = root.optJSONArray("outbounds")?.optJSONObject(0)?.optString("protocol").orEmpty()
@@ -319,6 +320,23 @@ object XrayConfigParser {
             root.toString(2)
         } catch (e: Exception) {
             throw IllegalArgumentException("Xray configuration rejected by security validation", e)
+        }
+    }
+
+    /**
+     * Imported REALITY outbounds whose fingerprint sends no X25519MLKEM768 key share (edge, ios, qq, random,
+     * android, 360) are switched to a post-quantum browser, as for app-built profiles ([RealityFingerprint]).
+     */
+    internal fun usePostQuantumRealityFingerprints(outbounds: JSONArray?) {
+        outbounds ?: return
+        for (i in 0 until outbounds.length()) {
+            val outbound = outbounds.optJSONObject(i) ?: continue
+            val stream = outbound.optJSONObject("streamSettings") ?: continue
+            if (!stream.optString("security").equals("reality", ignoreCase = true)) continue
+            val reality = stream.optJSONObject("realitySettings") ?: continue
+            val requested = reality.optString("fingerprint", "")
+            val sent = RealityFingerprint.forRealityLogged(requested, outbound.optString("tag").ifBlank { "outbound ${i + 1}" })
+            if (sent.isBlank()) reality.remove("fingerprint") else reality.put("fingerprint", sent)
         }
     }
 

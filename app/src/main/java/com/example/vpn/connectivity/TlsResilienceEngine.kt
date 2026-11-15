@@ -5,7 +5,7 @@ import com.example.data.model.VlessProfile
 /**
  * Judges a config's TLS settings before it is used, and says what the bundled engine really supports.
  *
- * Facts checked in Xray-core v26.9.9 (the core in libXray v26.9.9, pinned in scripts/fetch-libxray-android.sh):
+ * Facts checked in Xray-core v26.11.9 (the core in libXray v26.11.9, pinned in scripts/fetch-libxray-android.sh):
  * - `allowInsecure` was removed; Xray refuses it. Maximus refuses it too.
  * - fingerprint "unsafe" is not a uTLS preset: Xray dials with Go's own crypto/tls
  *   (transport/internet/tcp/dialer.go), so the custom cipher list applies and the certificate chain and
@@ -19,10 +19,10 @@ import com.example.data.model.VlessProfile
 object TlsResilienceEngine {
     enum class Engine { XRAY, KOTLIN, SIDECAR }
 
-    /** Every fingerprint name Xray-core v26.9.9 accepts (PresetFingerprints, ModernFingerprints, OtherFingerprints). */
+    /** Every fingerprint name Xray-core v26.11.9 accepts (PresetFingerprints, ModernFingerprints, OtherFingerprints). */
     val XRAY_FINGERPRINTS: Set<String> = setOf(
         "", "chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized", "randomizednoalpn", "unsafe",
-        "hellofirefox_120", "hellofirefox_148", "hellochrome_120", "hellochrome_131", "hellochrome_133", "helloios_13", "helloios_14",
+        "hellofirefox_120", "hellofirefox_148", "hellochrome_120", "hellochrome_131", "hellochrome_133", "hellochrome_155", "helloios_13", "helloios_14",
         "helloedge_106", "hellosafari_26_3", "hello360_11_0", "helloqq_11_1", "hellogolang", "hellorandomized", "hellorandomizedalpn",
         "hellorandomizednoalpn", "hellofirefox_auto", "hellofirefox_55", "hellofirefox_56", "hellofirefox_63", "hellofirefox_65",
         "hellofirefox_99", "hellofirefox_102", "hellofirefox_105", "hellochrome_auto", "hellochrome_58", "hellochrome_62", "hellochrome_70",
@@ -50,6 +50,9 @@ object TlsResilienceEngine {
             if (fp !in XRAY_FINGERPRINTS) refusals += "Unknown TLS fingerprint '${profile.fingerprint}'"
             if (security == "reality" && (fp == "unsafe" || fp == "hellogolang")) {
                 notes += "REALITY cannot use the '$fp' fingerprint; a browser fingerprint is used instead"
+            } else if (security == "reality" && fp in XRAY_FINGERPRINTS && !com.example.xray.RealityFingerprint.isPqCapable(fp)) {
+                notes += "REALITY servers on Xray v26.9.8+ reject '$fp' (no post-quantum key share); " +
+                    "'${com.example.xray.RealityFingerprint.forReality(fp)}' is sent instead"
             }
             if (security == "tls" && fp == "unsafe") {
                 notes += "Go TLS stack: certificate still verified, ClientHello easier to identify"
