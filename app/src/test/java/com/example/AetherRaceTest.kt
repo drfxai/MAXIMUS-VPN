@@ -230,6 +230,14 @@ class AetherRaceTest {
             AetherBackgroundRelay.METERED_BUDGET_MS < ConnectionEngineRunner.HEAVY_LADDER_BUDGET_MS)
     }
 
+    @Test fun meteredRelayStartupReservesTimeAfterHelperStartup() {
+        assertEquals(15_000L, AetherBackgroundRelay.startupWindowMs(180_000, 15_000, metered = true, hasNext = true))
+        assertEquals(0L, AetherBackgroundRelay.startupWindowMs(180_000, 31_000, metered = true, hasNext = true))
+        assertEquals(10_000L, AetherBackgroundRelay.startupWindowMs(10_000, 0, metered = true, hasNext = true))
+        assertEquals(180_000L, AetherBackgroundRelay.startupWindowMs(180_000, 30_000, metered = true, hasNext = false))
+        assertEquals(180_000L, AetherBackgroundRelay.startupWindowMs(180_000, 30_000, metered = false, hasNext = true))
+    }
+
     @Test fun backgroundRelaySwitchesOnlyAfterVerifiedDataWithoutBreakingTheConnection() {
         assertTrue(AetherBackgroundRelay.shouldSwitch(relayVerified = true, stillConnected = true, sameNetwork = true))
         assertFalse(AetherBackgroundRelay.shouldSwitch(relayVerified = false, stillConnected = true, sameNetwork = true))

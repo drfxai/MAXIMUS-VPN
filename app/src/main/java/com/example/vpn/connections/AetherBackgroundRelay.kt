@@ -15,6 +15,13 @@ object AetherBackgroundRelay {
     /** Whole background run on a metered link (mobile data): wireguard-relay and h2-relay together, never longer. */
     const val METERED_BUDGET_MS = 90_000L
 
+    /** Leave the second carrier time to start and pass HTTPS verification on mobile data. */
+    internal const val FIRST_STARTUP_BUDGET_MS = 30_000L
+
+    internal fun startupWindowMs(windowMs: Long, elapsedMs: Long, metered: Boolean, hasNext: Boolean): Long =
+        if (metered && hasNext) minOf(windowMs, (FIRST_STARTUP_BUDGET_MS - elapsedMs).coerceAtLeast(0))
+        else windowMs
+
     /** Order of the relayed carriers tried in the background. */
     val ORDER = listOf(ConnectionEngineRunner.WIREGUARD_RELAY, ConnectionEngineRunner.H2_RELAY)
 

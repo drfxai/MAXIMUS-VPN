@@ -128,7 +128,8 @@ class SidecarProcess(
             val detail = hint?.let { "; $it" }.orEmpty()
             return when (stage) {
                 "account" -> "WARP API registration failed (account bootstrap or refresh timed out after ${timeoutMs / 1000}s$detail); traffic is unverified."
-                "identity", "scan" -> "Aether gateway scan did not reach a serving tunnel within ${timeoutMs / 1000}s$detail; traffic is unverified."
+                "identity" -> "Aether identity setup did not reach gateway scan within ${timeoutMs / 1000}s$detail; traffic is unverified."
+                "scan" -> "Aether gateway scan did not reach a serving tunnel within ${timeoutMs / 1000}s$detail; traffic is unverified."
                 "transport" -> "Aether transport did not start serving within ${timeoutMs / 1000}s$detail; traffic is unverified."
                 else -> "Aether readiness marker missing after ${timeoutMs / 1000}s (native startup stage unavailable$detail); traffic is unverified."
             }
