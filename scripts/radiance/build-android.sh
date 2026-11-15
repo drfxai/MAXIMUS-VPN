@@ -4,6 +4,9 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export GOTOOLCHAIN=go1.26.10
 . "$root/scripts/engines/common.sh"
+# The Radiance dependency graph contains C++ code, so Go also needs the NDK C++ driver.
+export CXX="${CC%clang}clang++"
+test -x "$CXX"
 
 rev=aced057665daaa4821e9f45e6133257969f4a8e7
 source_dir="$(mktemp -d)"
