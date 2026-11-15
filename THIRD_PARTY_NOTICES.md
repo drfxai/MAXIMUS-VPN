@@ -748,3 +748,10 @@ The application's license does not restrict recipients' rights in this separate 
   (https://github.com/WhiteDNS/WhiteAestherMobile, commit `6e2ade9e86c5f66194c66e6be1e23b40677c2db2`), both
   AGPL-3.0; the widget, `QuickConnect`, `BootPolicy` and `BackgroundRunning` code is Maximus's own.
 - No affiliation or endorsement is implied.
+
+## Lantern Radiance experimental integration
+
+The experimental Android build script fetches [Radiance](https://github.com/getlantern/radiance) at
+`aced057665daaa4821e9f45e6133257969f4a8e7` under GPL-3.0. The separate executable is built with
+Radiance's SOCKS-only mode, the entry point and loopback authentication change under
+`scripts/radiance/`. The stable APK build does not bundle this executable.
