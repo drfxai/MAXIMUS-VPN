@@ -924,6 +924,8 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
     var transport by remember(profile.id) { mutableStateOf(initial?.transport ?: "auto") }
     var backups by remember(profile.id) { mutableStateOf(initial?.backups?.joinToString("\n").orEmpty()) }
     var tlsName by remember(profile.id) { mutableStateOf(initial?.tlsName.orEmpty()) }
+    var mode by remember(profile.id) { mutableStateOf(initial?.mode ?: "cottenmax") }
+    var modeMenu by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     var discard by remember { mutableStateOf(false) }
@@ -934,8 +936,8 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
     Column(Modifier.fillMaxSize().background(AppTheme.colors.background).testTag("edit_cotten_dns_screen")) {
         EditTopBar("CottenDNS", name, saving, { leave() }, { remove = true }) {
             val next = runCatching {
-                com.example.vpn.sidecar.CottenDnsSidecar.withSettings(profile.copy(name = name.trim().ifBlank { "CottenDNS · Max beta" }),
-                    com.example.vpn.sidecar.CottenDnsSidecar.Settings(domain, profile.uuid, lines(resolvers), transport.trim(), lines(backups), tlsName, initial?.mode ?: "cottenmax", initial?.method ?: 5))
+                com.example.vpn.sidecar.CottenDnsSidecar.withSettings(profile.copy(name = name.trim().ifBlank { "CottenDNS" }),
+                    com.example.vpn.sidecar.CottenDnsSidecar.Settings(domain, profile.uuid, lines(resolvers), transport.trim(), lines(backups), tlsName, mode, initial?.method ?: 5))
             }.getOrElse { error = it.message ?: "Check the CottenDNS settings"; return@EditTopBar }
             saving = true
             scope.launch {
@@ -946,7 +948,20 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Hint("CottenDNS mode: ${initial?.mode ?: "cottenmax"}. Only the resolvers listed below are used. The imported server mode and key are preserved.")
+            if (mode == "masterdns") {
+                Hint("Tunnel mode: MasterDNS")
+            } else {
+                Box {
+                    TextButton(onClick = { modeMenu = true }, enabled = !saving) {
+                        Text(if (mode == "legacy") "Tunnel mode: Normal" else "Tunnel mode: CottenMax")
+                    }
+                    DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
+                        DropdownMenuItem(text = { Text("Normal") }, onClick = { mode = "legacy"; modeMenu = false })
+                        DropdownMenuItem(text = { Text("CottenMax") }, onClick = { mode = "cottenmax"; modeMenu = false })
+                    }
+                }
+                Hint("CottenMax requires a compatible server. Reconnect after saving a change.")
+            }
             error?.let { Text(it, color = AppTheme.colors.statusError) }
             EditField("Name", name) { name = it }
             EditField("Delegated tunnel domain", domain, monospace = true) { domain = it }

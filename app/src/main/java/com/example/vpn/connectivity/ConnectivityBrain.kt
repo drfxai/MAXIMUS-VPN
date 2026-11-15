@@ -271,13 +271,32 @@ class EvidenceBook(private val clock: () -> Long = System::currentTimeMillis) {
 
     /**
      * Failover order from fresh evidence: FRESH_VERIFIED, FRESH_CANDIDATE, UNTESTED, STALE_VERIFIED; RECENTLY_FAILED
-     * is left out. [refOf] gives each item's profile fingerprint. Stable within a class.
+     * is left out. Fresh success rate and median latency break ties within a class.
      */
-    fun <T> eligibleInOrder(items: List<T>, refOf: (T) -> String): List<T> =
-        items.map { it to eligibility(refOf(it)) }
-            .filter { it.second.automatic }
-            .sortedBy { it.second.ordinal }
-            .map { it.first }
+    fun <T> eligibleInOrder(items: List<T>, refOf: (T) -> String): List<T> {
+        data class Ranked<T>(val item: T, val tier: PathEligibility, val successRate: Double, val latencyMs: Long)
+
+        val now = clock()
+        val evidence = current().filter {
+            it.type in setOf(MeasurementType.REAL_REQUEST, MeasurementType.MULTI_TARGET, MeasurementType.ENGINE_REQUEST,
+                MeasurementType.TUNNEL_TRAFFIC, MeasurementType.STABILITY) && now - it.at in 0..FRESH_MS
+        }
+            .groupBy { it.profileRef }
+        return items.map { item ->
+            val ref = refOf(item)
+            val tier = eligibility(ref)
+            val samples = evidence[ref].orEmpty()
+            val passes = samples.filter { it.success }
+            val successRate = if (samples.isEmpty()) 0.0 else passes.size.toDouble() / samples.size
+            val latencies = passes.mapNotNull { it.latencyMs }.sorted()
+            val latency = latencies.getOrNull(latencies.size / 2) ?: Long.MAX_VALUE
+            Ranked(item, tier, successRate, latency)
+        }.filter { it.tier.automatic }
+            .sortedWith(compareBy<Ranked<T>> { it.tier.ordinal }
+                .thenByDescending { it.successRate }
+                .thenBy { it.latencyMs })
+            .map { it.item }
+    }
 
     /**
      * One assessment for everyone. The LAB's measured reading of the raw network is the base; path evidence of

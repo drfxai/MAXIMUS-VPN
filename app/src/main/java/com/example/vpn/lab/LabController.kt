@@ -1052,9 +1052,19 @@ class LabController(
             cache.map { it.address to it.port }.toSet() == wanted) {
             return ResolverIntelligence.rankForDnsTunnel(cache, ctx.networkKey)
         }
+        // Keep a resolver pack from launching a burst of parallel sockets on a metered network.
         val results = coroutineScope {
-            candidates.map { c ->
-                async(Dispatchers.IO) { runCatching { ResolverIntelligence.evaluate(network, c, ctx.networkKey) }.getOrNull() }
+            val dispatcher = Dispatchers.IO.limitedParallelism(4)
+            candidates.map { candidate ->
+                async(dispatcher) {
+                    try {
+                        ResolverIntelligence.evaluate(network, candidate, ctx.networkKey)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
             }.awaitAll().filterNotNull()
         }
         // The captured Android Network owns these measurements. Do not publish them after handover.

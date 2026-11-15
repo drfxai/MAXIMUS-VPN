@@ -15,6 +15,7 @@ enum class ProbeStep(val passVerdict: ProbeVerdict, val failure: FailureStage) {
     ENGINE_START(ProbeVerdict.ENGINE_OK, FailureStage.ENGINE_START_FAILED),
     TUN_ESTABLISH(ProbeVerdict.TUN_OK, FailureStage.TUN_ESTABLISH_FAILED),
     HTTP_THROUGH_TUNNEL(ProbeVerdict.INTERNET_OK, FailureStage.HTTP_REQUEST_FAILED),
+    HTTP_THROUGH_ENGINE_PROXY(ProbeVerdict.INTERNET_OK, FailureStage.HTTP_REQUEST_FAILED),
     DNS_THROUGH_TUNNEL(ProbeVerdict.DNS_TUNNEL_OK, FailureStage.DNS_TUNNEL_FAILED),
     STABILITY(ProbeVerdict.INTERNET_OK, FailureStage.HTTP_REQUEST_FAILED)
 }
