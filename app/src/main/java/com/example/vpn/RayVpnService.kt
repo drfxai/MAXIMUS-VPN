@@ -1571,7 +1571,7 @@ class RayVpnService : VpnService() {
             appOutsideVpn = sidecarEngine != null || engineChain != null
             // A separate engine program cannot ask Android to keep its own sockets out of the VPN, so the app's
             // own traffic is left out then. The user's per-app routing (Settings › Routing & DNS) is applied too.
-            com.example.vpn.routing.SplitTunnelStore.apply(this, builder, excludeSelf = appOutsideVpn, interfaceName = "tunnel")
+            com.example.vpn.routing.SplitTunnelStore.apply(this@RayVpnService, builder, excludeSelf = appOutsideVpn, interfaceName = "tunnel")
 
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 4. Builder.establish() invoked (MTU=$safeMtu, Address=172.19.0.1/30, DNS=$primaryDns).")
             val pfd = try {
