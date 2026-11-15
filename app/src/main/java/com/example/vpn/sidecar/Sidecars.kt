@@ -16,11 +16,7 @@ object Sidecars {
             SingBoxSidecar,
             MihomoSidecar,
             PsiphonSidecar(
-                configProvider = {
-                    psiphonSettings?.invoke() ?: PsiphonSidecar.assetProvider { name ->
-                        openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
-                    }.invoke()
-                },
+                configProvider = ::psiphonNetworkSettings,
                 privateConfigProvider = { id -> privatePsiphonSettings?.invoke(id) }
             ),
             DnsttSidecar(),
@@ -46,6 +42,11 @@ object Sidecars {
 
     /** Opens a file from the APK's assets; set once by the app. */
     @Volatile var openAsset: ((String) -> java.io.InputStream)? = null
+
+    internal fun psiphonNetworkSettings(): String? =
+        psiphonSettings?.invoke()?.takeIf { it.isNotBlank() } ?: PsiphonSidecar.assetProvider { name ->
+            openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
+        }.invoke()
 
     fun psiphon(): PsiphonSidecar = ENGINES.filterIsInstance<PsiphonSidecar>().single()
 
