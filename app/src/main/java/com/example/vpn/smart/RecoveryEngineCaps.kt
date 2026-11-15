@@ -32,7 +32,7 @@ object RecoveryEngineCaps {
     const val BRIDGE_FAILURES_TO_DROP = 3
     const val BRIDGE_MEMORY_MS = 6 * 60 * 60_000L
 
-    /** The Irancell WARP attempt's own budget (IrancellWarp.BUDGET_MS, 15 s) plus a short traffic check. */
+    /** The Irancell WARP attempt's own budget (IrancellWarp.BUDGET_MS, 20 s) plus a short traffic check. */
     const val IRANCELL_WARP_WINDOW_MS = com.example.vpn.connections.IrancellWarp.BUDGET_MS + 5_000L
 
     /** Metered (mobile data) or Cloudflare measured blocked here: heavy engines are capped. */

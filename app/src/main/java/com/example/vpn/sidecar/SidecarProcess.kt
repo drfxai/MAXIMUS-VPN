@@ -138,6 +138,11 @@ class SidecarProcess(
         fun reportApiTlsEvent(line: String) {
             if (line.trim() == "MAXIMUS_AETHER_API_TLS:compatible-retry")
                 XrayLogManager.i("BUILTIN", "aether/api · retrying TLS before sending HTTP with compatible API settings; CA, hostname and ECH checks preserved")
+            com.example.vpn.connections.WarpApiLane.lane(line)?.let { lane ->
+                XrayLogManager.i("BUILTIN", "aether/api · " + com.example.vpn.connections.WarpApiLane.describe(lane))
+                com.example.vpn.diagnostics.events.EventLog.event("aether.api_lane", attributes = mapOf("lane" to lane),
+                    result = if (lane == "none" || lane == "relay-invalid") "FAIL" else "PASS")
+            }
         }
 
         fun isFailureLine(line: String): Boolean = listOf("error", "failed", "no such file", "unknown argument",

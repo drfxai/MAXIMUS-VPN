@@ -232,5 +232,19 @@ replace('lib.rs', 'establish_wg(&primary, peer, TUNNEL_MTU, true, 5, "outer")',
         'establish_wg(&primary, peer, maximus_wg_mtu(), true, 5, "outer")')
 replace('lib.rs', 'establish_wg(&secondary, forwarder, INNER_MTU, false, 20, "inner")',
         'establish_wg(&secondary, forwarder, maximus_wg_inner_mtu(), false, 20, "inner")')
-(root / 'MAXIMUS_POLICY').write_text('WARP API: CA + hostname; MASQUE: mandatory upstream SPKI pins\n')
+# WARP account API lanes for Iranian mobile networks (UAC SNI Spoofer 200de3b oob.rs/relay.rs,
+# AGPL-3.0-only, adapted): an OOB/urgent-byte ClientHello desync to api.cloudflareclient.com and an
+# optional user-owned Worker relay race Aether's own call; only the first finished handshake sends
+# the request, so nothing is replayed. Opt-in per run (AETHER_API_OOB=1 / AETHER_API_RELAY=https://..).
+here = pathlib.Path(__file__).resolve().parent
+# In the source offer this script is MAXIMUS_PATCH.py beside MAXIMUS_PATCH_FILES/.
+lane_source = next(p for p in (here / 'aether/maximus_api_lane.rs', here / 'MAXIMUS_PATCH_FILES/aether/maximus_api_lane.rs') if p.is_file())
+(src / 'maximus_api_lane.rs').write_text(lane_source.read_text())
+replace('https.rs', '    let (address, port) = request.address.unwrap_or((request.host, request.port));', r"""    if maximus_api_lane::applies(request) {
+        return maximus_api_lane::race(request, fingerprint, ech, fragment).await;
+    }
+    let (address, port) = request.address.unwrap_or((request.host, request.port));""")
+with (src / 'https.rs').open('a') as output:
+    output.write('\n#[path = "maximus_api_lane.rs"]\nmod maximus_api_lane;\n')
+(root / 'MAXIMUS_POLICY').write_text('WARP API: CA + hostname on every lane (direct, OOB, relay); MASQUE: mandatory upstream SPKI pins\n')
 print('Aether authenticated registration and gateway pin policy applied')

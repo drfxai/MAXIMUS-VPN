@@ -654,7 +654,7 @@ class LabController(
         rememberedOnly: Boolean = false,
         /**
          * The automatic Aether lead Smart Connect held back because Cloudflare is blocked here (cf=0). On Irancell its
-         * single capped WARP attempt (IrancellWarp: MASQUE over HTTP/2, 15 s) runs before the other recovery engines.
+         * single capped WARP attempt (IrancellWarp: MASQUE over HTTP/2, 20 s) runs before the other recovery engines.
          */
         heldBackAether: VlessProfile? = null,
         onProgress: (String) -> Unit = {}

@@ -236,6 +236,14 @@ internal fun BuiltinConnectionScreen(
                     SettingField("API address · blank for automatic", options.advanced.apiAddress, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(apiAddress = value)) }
                     }
+                    SettingField("WARP API relay · your Worker https:// address, blank for none", options.advanced.apiRelay, configurable) { value ->
+                        model.options { it.copy(advanced = it.advanced.copy(apiRelay = value.trim())) }
+                    }
+                    TextButton(onClick = {
+                        runCatching { context.assets.open("warp-relay/worker.js").bufferedReader().use { it.readText() } }
+                            .onSuccess { clipboard.setText(AnnotatedString(it)) }
+                    }) { Text("Copy WARP API relay Worker script") }
+                    Footnote(c, "Irancell/MCI: each WARP account call races Aether's TLS against an OOB ClientHello lane. A relay on your own Worker (set RELAY_KEY, enter https://<worker>.workers.dev/<RELAY_KEY>) joins the race.")
                     SettingField("Fragment bytes · default 8-16", options.advanced.fragmentSize, configurable && options.fragment) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(fragmentSize = value)) }
                     }

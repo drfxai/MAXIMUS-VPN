@@ -24,7 +24,12 @@ data class AetherSettings(
     val psiphon: String = "off",
     val apiRoute: String = "auto",
     /** WireGuard data-plane MTU (blank = engine default 1280). Only WireGuard and WARP-in-WARP use it. */
-    val mtu: String = ""
+    val mtu: String = "",
+    /**
+     * The user's own Cloudflare Worker that relays the WARP account calls (blank = none), for example
+     * https://warp-api.me.workers.dev/<secret>. Only Aether's account API lane uses it (AETHER_API_RELAY).
+     */
+    val apiRelay: String = ""
 ) {
     fun problem(carrier: String? = null): String? = when {
         apiRoute !in apiRoutes -> "Unsupported account API route"
@@ -44,6 +49,7 @@ data class AetherSettings(
         exitDialMode.length > 512 || exitDialMode.any { it.isISOControl() } -> "Invalid dialMode"
         alias.length > 120 -> "Alias is too long"
         !validMtu(mtu) -> "WireGuard MTU must be ${MTU_RANGE.first}–${MTU_RANGE.last}"
+        !validRelay(apiRelay) -> "WARP API relay must be an https:// address of your own Cloudflare Worker"
         !range(fragmentSize, 1..16384) -> "Fragment size must be 1–16384 bytes or an ascending range"
         !range(fragmentDelay, 0..1000) -> "Fragment delay must be 0–1000 ms or an ascending range"
         else -> null
@@ -67,6 +73,7 @@ data class AetherSettings(
         .put("apiSni", apiSni).put("fingerprint", fingerprint).put("alias", alias.trim())
         .put("exitNode", exitNode).put("exitFinalMask", exitFinalMask).put("exitDialMode", exitDialMode.trim())
         .put("tor", tor).put("psiphon", psiphon).put("apiRoute", apiRoute).put("mtu", mtu.trim())
+        .put("apiRelay", apiRelay.trim())
 
     fun arguments(carrier: String, fragment: Boolean): List<String> {
         require(problem() == null) { problem().orEmpty() }
@@ -112,6 +119,29 @@ data class AetherSettings(
         /** The automatic retry value: middle of the 1180–1220 band that survives Iranian mobile carriers. */
         const val MTU_RETRY = 1200
         const val MTU_ENV = "AETHER_WG_MTU"
+        /**
+         * A relay address as the engine accepts it (scripts/connections/aether/maximus_api_lane.rs parse_relay):
+         * https://name[:443][/plain-path], a DNS name host, no credentials, query or "..". Blank is valid (no relay).
+         */
+        fun validRelay(value: String): Boolean {
+            val text = value.trim()
+            if (text.isEmpty()) return true
+            if (!text.startsWith("https://") || text.length > 300) return false
+            val rest = text.removePrefix("https://")
+            val authority = rest.substringBefore('/')
+            val path = if (rest.contains('/')) "/" + rest.substringAfter('/') else "/"
+            val host = when {
+                !authority.contains(':') -> authority
+                authority.substringAfterLast(':') == "443" -> authority.substringBeforeLast(':')
+                else -> return false
+            }.lowercase()
+            val labels = host.split('.')
+            val labelOk = { l: String -> l.isNotEmpty() && l.length <= 63 && !l.startsWith('-') && !l.endsWith('-') &&
+                l.all { it in 'a'..'z' || it in '0'..'9' || it == '-' } }
+            if (host.length > 253 || labels.size < 2 || !labels.all(labelOk) || labels.last().all { it in '0'..'9' }) return false
+            return path.length <= 256 && !path.contains("..") &&
+                path.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in "/-_.~" }
+        }
         fun validMtu(value: String): Boolean = value.isBlank() ||
             (value.trim().all { it in '0'..'9' } && value.trim().length <= 4 && value.trim().toInt() in MTU_RANGE)
         val apiRoutes = listOf("auto", "native", "oob")
@@ -127,7 +157,7 @@ data class AetherSettings(
             json.optString("apiSni"), json.optString("fingerprint", "chrome"), json.optString("alias"),
             json.optString("exitNode"), json.optString("exitFinalMask"), json.optString("exitDialMode"),
             json.optString("tor", "off"), json.optString("psiphon", "off"), json.optString("apiRoute", "auto"),
-            json.optString("mtu"))
+            json.optString("mtu"), json.optString("apiRelay"))
 
         private fun range(value: String, bounds: IntRange): Boolean {
             if (value.isBlank()) return true

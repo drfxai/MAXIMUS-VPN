@@ -4,7 +4,7 @@ set -euo pipefail
 : "${ABI:?}" "${OUT:?}"
 TASK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 REV=d58f9d568083129ce2c767c85054021eb3ee6a38
-patch_hash=$(sha256sum "$TASK_ROOT/scripts/connections/harden-aether.py" | cut -c1-16)
+patch_hash=$(cat "$TASK_ROOT/scripts/connections/harden-aether.py" "$TASK_ROOT"/scripts/connections/aether/*.rs | sha256sum | cut -c1-16)
 source_dir="$TASK_ROOT/build/aether-source-${REV:0:12}-$patch_hash"
 if [[ ! -f "$source_dir/MAXIMUS_POLICY" ]]; then
   mkdir -p "$source_dir"
@@ -27,6 +27,7 @@ rustup target add "$target"
 # boring-sys 5.3 names ErrLib from rustfmt-formatted bindgen output.
 rustup component add rustfmt --toolchain "$RUSTUP_TOOLCHAIN"
 python3 "$TASK_ROOT/scripts/connections/test-aether-api-policy.py" "$source_dir"
+python3 "$TASK_ROOT/scripts/connections/test-aether-api-lanes.py" "$source_dir"
 if ! cargo ndk --version | grep -q '3.5.4'; then cargo install cargo-ndk --version 3.5.4 --locked; fi
 ndk="${ANDROID_NDK_HOME:-${ANDROID_HOME}/ndk/26.3.11579264}"
 export ANDROID_NDK_HOME="$ndk" ANDROID_NDK_ROOT="$ndk"
@@ -50,9 +51,11 @@ fi
 mkdir -p "$OUT" "$TASK_ROOT/build/transport-offer"
 install -m 0755 "$source_dir/aether/target/$target/release/aether" "$OUT/libaether.so"
 cp "$TASK_ROOT/scripts/connections/harden-aether.py" "$source_dir/MAXIMUS_PATCH.py"
+rm -rf "$source_dir/MAXIMUS_PATCH_FILES" && mkdir -p "$source_dir/MAXIMUS_PATCH_FILES/aether"
+cp "$TASK_ROOT"/scripts/connections/aether/*.rs "$source_dir/MAXIMUS_PATCH_FILES/aether/"
 printf '%s\n' "$REV" > "$source_dir/UPSTREAM_REVISION"
 if [[ ! -d "$source_dir/aether/vendor" ]]; then
  (cd "$source_dir/aether" && mkdir -p .cargo && cargo vendor --locked vendor > .cargo/config.toml.vendor && mv .cargo/config.toml.vendor .cargo/config.toml)
 fi
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --exclude=target --exclude=.git -C "$source_dir" \
- -czf "$TASK_ROOT/build/transport-offer/Aether-source.tar.gz" aether quiche LICENSE TRADEMARK.md MAXIMUS_POLICY MAXIMUS_PATCH.py UPSTREAM_REVISION
+ -czf "$TASK_ROOT/build/transport-offer/Aether-source.tar.gz" aether quiche LICENSE TRADEMARK.md MAXIMUS_POLICY MAXIMUS_PATCH.py MAXIMUS_PATCH_FILES UPSTREAM_REVISION

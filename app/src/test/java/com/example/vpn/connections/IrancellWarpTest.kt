@@ -65,18 +65,18 @@ class IrancellWarpTest {
         assertEquals("native", ProfileExtras.read(IrancellWarp.withNativeApi(auto)).optString("apiRoute"))
     }
 
-    @Test fun readinessWaitFitsTheFifteenSecondCap() {
-        assertEquals(15_000L, IrancellWarp.BUDGET_MS)
+    @Test fun readinessWaitFitsTheTwentySecondCap() {
+        assertEquals(20_000L, IrancellWarp.BUDGET_MS)
         // The 75 s filtered window (what H3 burned) is cut to the cap.
-        assertEquals(15_000L, IrancellWarp.waitMs(75_000L, startedAt = 1_000L, now = 1_000L))
+        assertEquals(20_000L, IrancellWarp.waitMs(75_000L, startedAt = 1_000L, now = 1_000L))
         // Time spent preparing the engine counts against the cap.
-        assertEquals(11_000L, IrancellWarp.waitMs(75_000L, startedAt = 1_000L, now = 5_000L))
+        assertEquals(16_000L, IrancellWarp.waitMs(75_000L, startedAt = 1_000L, now = 5_000L))
         // Never longer than the engine's own window.
         assertEquals(8_000L, IrancellWarp.waitMs(8_000L, startedAt = 0L, now = 0L))
         // Budget spent: still a short wait so the engine can report why it failed.
         assertEquals(IrancellWarp.MIN_WAIT_MS, IrancellWarp.waitMs(75_000L, startedAt = 0L, now = 40_000L))
         // Prepare + wait ends at the cap whenever the floor is not needed.
-        for (spent in 0L..14_000L step 500L)
+        for (spent in 0L..19_000L step 500L)
             assertEquals(IrancellWarp.BUDGET_MS, spent + IrancellWarp.waitMs(180_000L, 0L, spent))
     }
 

@@ -24,10 +24,16 @@ import com.example.vpn.sidecar.AetherSidecar
  *
  * WARP through a saved server is left to the background relay ([AetherBackgroundRelay]) after a saved server is
  * verified, outside this budget.
+ *
+ * 2026-11-15: even with the fragment and the compatible TLS retry every start still failed with "account bootstrap or
+ * refresh timed out after 14s". The attempt now also switches on Aether's account API lanes ([WarpApiLane]): each
+ * account call races Aether's own TLS against the OOB ClientHello lane (and the user's Worker relay when set), and
+ * only the first finished handshake sends it. The budget grew from 15 s to 20 s so one lane race (≤ about 9 s) plus
+ * MASQUE enrollment still fits.
  */
 object IrancellWarp {
     /** Whole direct WARP attempt on Irancell, engine preparation to readiness. */
-    const val BUDGET_MS = 15_000L
+    const val BUDGET_MS = 20_000L
 
     /**
      * Aether retries the account call on its fallback routes by itself; a registration failure still reported this
