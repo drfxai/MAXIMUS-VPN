@@ -63,6 +63,8 @@ import com.example.update.ResolverPackUpdater
 import com.example.update.UpdateNetworkPolicy
 import com.example.vpn.diagnostics.DnsPathTest
 import com.example.vpn.safety.DnsResolvers
+import com.example.vpn.sidecar.RadianceSidecar
+import com.example.vpn.sidecar.Sidecars
 import kotlinx.coroutines.launch
 
 /**
@@ -159,6 +161,7 @@ fun SettingsScreen(
     }
     LaunchedEffect(Unit) { performUpdateCheck() }
 
+    var radianceStatus by remember { mutableStateOf<String?>(null) }
     if (showCoreInventory) {
         AlertDialog(
             onDismissRequest = { showCoreInventory = false },
@@ -167,11 +170,26 @@ fun SettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(com.example.vpn.lab.CoreCapabilityRegistry.CORE + " • inside the signed APK")
                     com.example.vpn.sidecar.Sidecars.ENGINES
-                        .filter { it.id in setOf("sing-box", "mihomo", "aether", "psiphon", "tor") }
+                        .filter { it.id in setOf("sing-box", "mihomo", "aether", "psiphon", "tor", "radiance") }
                         .forEach { engine ->
                             val present = com.example.vpn.sidecar.Sidecars.isBundled(engine)
                             Text("${engine.id}: " + if (present) "Installed in APK" else "Not present on this device")
                         }
+                    if (Sidecars.isBundled(RadianceSidecar)) {
+                        TextButton(onClick = {
+                            scope.launch {
+                                radianceStatus = runCatching {
+                                    val profile = RadianceSidecar.profile()
+                                    val repository = com.example.RayApplication.instance.serverRepository
+                                    if (repository.getProfileById(profile.id) == null) repository.insert(profile)
+                                }.fold(
+                                    onSuccess = { "Open Nodes and select Lantern / Radiance to connect." },
+                                    onFailure = { "Could not add the Lantern / Radiance profile." }
+                                )
+                            }
+                        }) { Text("Add Lantern / Radiance to Nodes") }
+                        radianceStatus?.let { Text(it) }
+                    }
                     Text("Executable engine upgrades are released as signed APKs, not remotely executable code.")
                     Text("Psiphon fetches and validates its own server lists using Psiphon's configured signing key when it runs.")
                 }

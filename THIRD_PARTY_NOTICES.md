@@ -725,3 +725,10 @@ The application's license does not restrict recipients' rights in this separate 
 * Direct Serverless uses the separate patterniha/Xray-core executable, revision `f9903959b9ae47538f5c7100f6416fb9fbcd2317`, MPL-2.0, distributed with `Serverless-source.tar.gz`. Its profiles originate in patterniha/Serverless-for-Iran revision `df113f5b0fafc5bbe552e903f43249110510bc34` (GPL-3.0), with the original license in assets/serverless/LICENSE.txt. The app adapts loopback authentication, DNS and geo-file dependent classifications; fragmentation and OOB instructions are retained.
 
 * RegionHop 1.27.0, freeb5d/regionhop revision `d5798d80f77fa6f40406ba30886d810c3c462147`, MIT. The optional VPS installer downloads checksum-pinned upstream components. The upstream Psiphon and Xray binaries retain their respective upstream licenses; release and source provenance remain available from that upstream release. No user deployment config or API token is bundled.
+
+## Lantern Radiance experimental integration
+
+The experimental Android build script fetches [Radiance](https://github.com/getlantern/radiance) at
+`aced057665daaa4821e9f45e6133257969f4a8e7` under GPL-3.0. The separate executable is built with
+Radiance's SOCKS-only mode, the entry point and loopback authentication change under
+`scripts/radiance/`. The stable APK build does not bundle this executable.

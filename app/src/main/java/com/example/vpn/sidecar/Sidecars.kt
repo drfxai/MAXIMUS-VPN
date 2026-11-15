@@ -12,6 +12,7 @@ object Sidecars {
         listOf(
             AetherSidecar,
             ServerlessSidecar,
+            RadianceSidecar,
             ByedpiSidecar,
             SingBoxSidecar,
             MihomoSidecar,

@@ -1,0 +1,38 @@
+name: Radiance Android
+on:
+  pull_request:
+    paths:
+      - 'scripts/radiance/**'
+      - '.github/workflows/radiance-android.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Install Android NDK
+        run: |
+          sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkmanager_bin=$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager -print -quit)
+          test -n "$sdkmanager_bin"
+          "$sdkmanager_bin" 'ndk;26.3.11579264'
+          echo "ANDROID_NDK_HOME=$sdk_root/ndk/26.3.11579264" >> "$GITHUB_ENV"
+      - name: Compile pinned Radiance
+        env:
+          ABI: ${{ matrix.abi }}
+          OUT: build/radiance
+        run: |
+          bash scripts/radiance/build-android.sh
+          readelf -h build/radiance/libradiance.so
+          readelf -h build/radiance/libradiance.so | grep -q 'DYN'
