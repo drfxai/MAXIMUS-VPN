@@ -595,6 +595,45 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   2606:4700:103::/48 seed, the measured IPv4 MASQUE gateway list, the strict v4/v6 fallback, the ECH fallback blob
   and the MASQUE-H2 fingerprint profile option.
 
+## Alan-RIP-Dpi — TLS record slicing and Uplink Shield (2026-11-15)
+
+- Upstream: https://github.com/DrAlanK/Alan-RIP-Dpi-Android (v1.6.0, commit `f4810b4`) and
+  https://github.com/DrAlanK/Alan-RIP-Dpi-Windows (v1.3.0), MIT License, Copyright (c) 2026 DrAlanK (LabAlan).
+  No upstream code, branding or artwork is copied verbatim; the ideas below were reimplemented in Kotlin.
+- Adapted ideas:
+  - ClientHello record re-framing vectors `sni_dot_3rec` (VEC-17), `fibonacci_7rec` (VEC-20) and
+    `chameleon_interleave` (VEC-23) with the two-burst send, from `TlsByteMutator.kt` →
+    `app/src/main/java/com/example/vpn/stealth/recordslice/TlsRecordSlicer.kt` (exact ClientHello parser, no
+    zero-length records, record versions 0x0301/0x0303 only).
+  - The local mutator bridge (Xray outbound → loopback → protected socket), from `FullDuplexMutatorBridge.kt` →
+    `app/src/main/java/com/example/vpn/stealth/recordslice/RecordSliceBridge.kt`.
+  - "Uplink Shield" (first 16 KB of upload in ~1360 B pieces) → `UplinkShield.kt`, as TCP_MAXSEG on the server
+    socket (Xray `sockopt.tcpMaxSeg`) plus paced writes in the bridge.
+
+```
+MIT License
+
+Copyright (c) 2026 DrAlanK (LabAlan)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Public WebTunnel bridge metadata
 
 - Bootstrap bridge lines from the user-supplied UAC-SNI-Spoofer-Android source archive, revision b784ebd149336f4463906509738d354dd9850e23, app/src/main/assets/tor/bridges-webtunnel.txt.

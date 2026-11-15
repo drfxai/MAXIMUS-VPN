@@ -26,7 +26,9 @@ class NetworkMemory(
     loadSpeeds: () -> String? = { null },
     saveSpeeds: (String) -> Unit = {},
     loadFreezes: () -> String? = { null },
-    saveFreezes: (String) -> Unit = {}
+    saveFreezes: (String) -> Unit = {},
+    loadShield: () -> String? = { null },
+    saveShield: (String) -> Unit = {}
 ) {
     /** The exact routes that carried verified traffic, per network (see [RouteRecipe]). */
     val routes = RouteBook(loadRoutes, saveRoutes)
@@ -39,6 +41,9 @@ class NetworkMemory(
 
     /** Last-known-good and ~16 KB-frozen servers per network, for Smart Connect's order (see [FreezeBook]). */
     val freezes = FreezeBook(loadFreezes, saveFreezes)
+
+    /** Whether the Uplink Shield cleared the 16 KB upload stall, per network (see [UplinkShieldBook]). */
+    val shield = UplinkShieldBook(loadShield, saveShield)
 
     private class Entry(
         val variants: ConcurrentHashMap<String, String> = ConcurrentHashMap(),
@@ -91,7 +96,7 @@ class NetworkMemory(
         persist()
     }
 
-    /** Forgets everything learned about every network: kinds, alternates, latencies, routes, speeds and freezes. */
+    /** Forgets everything learned about every network: kinds, alternates, latencies, routes, speeds, freezes and the Uplink Shield results. */
     @Synchronized
     fun clear() {
         entries.clear()
@@ -100,6 +105,7 @@ class NetworkMemory(
         mtu.clear()
         speeds.clear()
         freezes.clear()
+        shield.clear()
     }
 
     @Synchronized

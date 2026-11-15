@@ -80,7 +80,9 @@ class RayApplication : Application() {
             loadSpeeds = { prefs.getString("speeds", null) },
             saveSpeeds = { prefs.edit().putString("speeds", it).apply() },
             loadFreezes = { prefs.getString("freezes", null) },
-            saveFreezes = { prefs.edit().putString("freezes", it).apply() }
+            saveFreezes = { prefs.edit().putString("freezes", it).apply() },
+            loadShield = { prefs.getString("uplink_shield", null) },
+            saveShield = { prefs.edit().putString("uplink_shield", it).apply() }
         )
     }
 

@@ -3,12 +3,15 @@ package com.example.vpn.smart
 import com.example.data.model.ProfileType
 import com.example.data.model.ProtocolType
 import com.example.data.model.VlessProfile
+import com.example.vpn.stealth.recordslice.UplinkShield
 
 /**
  * What to do when the upload/download check after a connect finds the ~16 KB freeze
  * ([com.example.vpn.verify.TrafficEvidence.fixedSizeFreeze]): small requests pass, so the failover watchdog
  * sees a healthy tunnel and never switches, yet every bulk download stops after its first ~16 KB.
  *
+ * 0. When the upload also stalled at the 16 KB grade ([UplinkShield.signature]) and the shield has not just failed
+ *    on this network, the one same-server retry is the Uplink Shield (MSS clamp) instead.
  * 1. Retry the same server once with a deep ClientHello fragmentation ([DEEP_FRAGMENT_MASK]), or, when its
  *    transport cannot take a TCP fragment mask, with a saved XHTTP form of the same server; the transfer check
  *    runs again on the retry. Never for REALITY (tlshello and tiny splits stop REALITY: the field rescue carried
@@ -34,7 +37,9 @@ object FreezeFailover {
 
     enum class Rescue(val key: String, val label: String) {
         DEEP_FRAGMENT("deep-fragment", "FRAGMENT"),
-        XHTTP("xhttp", "XHTTP")
+        XHTTP("xhttp", "XHTTP"),
+        /** TCP_MAXSEG ~1360 on the server socket ([UplinkShield]); for the upload stall at the 16 KB grade. */
+        UPLINK_SHIELD("uplink-shield", "UPLINK SHIELD")
     }
 
     sealed class Decision {
@@ -74,12 +79,19 @@ object FreezeFailover {
         /** [HostPrefix.keys] of [server]. */
         val serverKeys: Set<String> = emptySet(),
         /** [HostPrefix.keys] of the other servers, by id. */
-        val networks: Map<String, Set<String>> = emptyMap()
+        val networks: Map<String, Set<String>> = emptyMap(),
+        /** The upload stalled at the 16 KB grade ([UplinkShield.signature]). */
+        val uplinkStall: Boolean = false,
+        /** The Uplink Shield has not just failed to help on this network ([UplinkShieldBook.mayTry]). */
+        val shieldMayTry: Boolean = true
     )
 
     fun decide(i: Input): Decision {
         if (i.pinned) return Decision.Fail("the config is pinned (power button without fallback or Trade mode)")
         if (!i.rescueTried) {
+            // An upload that stalls at the 16 KB grade: the MSS clamp first, for any TCP config (REALITY and ECH too).
+            if (!i.engineProgram && i.uplinkStall && i.shieldMayTry && canShield(i.running))
+                return Decision.Retry(i.server.id, UplinkShield.enable(i.running), Rescue.UPLINK_SHIELD)
             if (!i.engineProgram && canDeepFragment(i.running)) return Decision.Retry(i.server.id, deepFragment(i.running), Rescue.DEEP_FRAGMENT)
             if (!i.engineProgram) xhttpForm(i.server, i.saved, i.frozen)?.let { return Decision.Retry(i.server.id, it, Rescue.XHTTP) }
         }
@@ -104,6 +116,9 @@ object FreezeFailover {
             p.security.equals("tls", ignoreCase = true) && p.echConfigList.isBlank() &&
             p.transport.lowercase() in TCP_TRANSPORTS && !p.alpn.lowercase().split(',').map { it.trim() }.contains("h3") &&
             p.finalMask != DEEP_FRAGMENT_MASK
+
+    /** Xray carries [p] over TCP and it does not run the shield yet. */
+    fun canShield(p: VlessProfile): Boolean = UplinkShield.canShield(p) && UplinkShield.mss(p) == null
 
     /** The same config with the deep ClientHello fragmentation; everything else, the certificate check included, is unchanged. */
     fun deepFragment(p: VlessProfile): VlessProfile = p.copy(finalMask = DEEP_FRAGMENT_MASK)

@@ -282,9 +282,27 @@ object XrayConfigBuilder {
             })
         })
 
+        // Uplink Shield (MSS clamp) and TLS record slicing: only the proxy outbound's TCP dial changes.
+        applyDialShaping(root, profile)
         applyPrivateDns(root, settings)
         applyFakeDns(root, settings)
         return root.toString(2)
+    }
+
+    /**
+     * Points the proxy outbound's dial at a record-slicing bridge when [profile] asks for one (the bridge also
+     * applies the Uplink Shield MSS), else sets Xray's own `sockopt.tcpMaxSeg` when the shield is on for it.
+     * See [com.example.vpn.stealth.recordslice.RecordSliceConfig] and [com.example.vpn.stealth.recordslice.UplinkShield].
+     */
+    internal fun applyDialShaping(root: JSONObject, profile: VlessProfile) {
+        val mss = com.example.vpn.stealth.recordslice.UplinkShield.effectiveMss(profile)
+        val spec = com.example.vpn.stealth.recordslice.RecordSliceConfig.spec(profile, mss)
+        if (spec != null) {
+            val port = com.example.vpn.stealth.recordslice.RecordSliceBridges.portFor(profile.address, profile.port, spec)
+            com.example.vpn.stealth.recordslice.RecordSliceConfig.apply(root, port)
+        } else if (mss != null) {
+            com.example.vpn.stealth.recordslice.UplinkShield.applyNative(root, mss)
+        }
     }
 
     /**
