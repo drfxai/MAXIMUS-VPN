@@ -1,10 +1,10 @@
 # Third party notices
 
-The Android application bundles the official XTLS/libXray release `v26.10.31` and Xray-core. The project is distributed under the MIT License and Mozilla Public License 2.0, reproduced below.
+The Android application bundles the official XTLS/libXray release `v26.11.9` and Xray-core. The project is distributed under the MIT License and Mozilla Public License 2.0, reproduced below.
 
 - libXray source: https://github.com/XTLS/libXray
 - Xray-core source: https://github.com/XTLS/Xray-core
-- Pinned Android artifact: `libxray-android.zip` from the libXray `v26.10.31` release. CI verifies SHA-256 `fb99f04acf379cc2957c1e1d0ce2b3c0005d3f49974a44c09a11242a0562c1ca` before extracting the AAR.
+- Pinned Android artifact: `libxray-android.zip` from the libXray `v26.11.9` release. CI verifies SHA-256 `1b1aa12124a7112af983a6cea74c77f27aadc6b650acf3c5a57019619ba9fa48` before extracting the AAR.
 - The AAR is downloaded during CI and is not stored in this repository.
 - Mihomo (MetaCubeX) `v1.19.32`, GNU General Public License v3.0. It runs as a separate program
   (`libmihomo.so`, an executable), started by the app and reached only over a local SOCKS port; it is
@@ -577,6 +577,24 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     the same-server retry after the ~16 KB freeze (ideas re-implemented; no upstream code copied verbatim).
 - No affiliation or endorsement is implied.
 
+### WARP account API lanes in the Aether executable (2026-11-15)
+
+- Source: UAC SNI Spoofer `core/aether/src/oob.rs` (2.0.9: OOB/urgent-byte ClientHello desync methods
+  `disoob-byte0-ttl1`, `oob-insni+5-ttl1`, `oob-byte0-nottl` and the Android plain/split variants, TLS 1.2 without
+  ALPN first on Android, pinned api.cloudflareclient.com addresses) and `core/aether/src/relay.rs` (WARP calls through
+  a user-owned Worker relay, `AETHER_API_RELAY`, raced on Cloudflare IPv4/IPv6 edges, DoH-by-IP answers filtered to
+  Cloudflare ranges) at commit `200de3b`, AGPL-3.0-only. Ported and adapted into
+  `scripts/connections/aether/maximus_api_lane.rs`, which `scripts/connections/harden-aether.py` adds to the
+  separately built Aether 2.4.0 executable only (never to the Kotlin app). The race in which only the first finished
+  TLS handshake sends the account request follows the "OOB API lane" idea of WhiteDNS/WhiteAestherMobile v1.16.0
+  (PR #102, AGPL-3.0); no code from it is included. UAC's built-in third-party relay URL is not used: the relay lane
+  runs only with the user's own Worker.
+- The relay Worker script `app/src/main/assets/warp-relay/worker.js` is MAXIMUS's own code; it speaks UAC's relay
+  envelope (`{ok, status, body}`) and requires a per-user `RELAY_KEY`.
+- Not ported (they do not apply to Aether 2.4.0's own gateway prober without rewriting it): the IPv6 MASQUE
+  2606:4700:103::/48 seed, the measured IPv4 MASQUE gateway list, the strict v4/v6 fallback, the ECH fallback blob
+  and the MASQUE-H2 fingerprint profile option.
+
 ## Alan-RIP-Dpi — TLS record slicing and Uplink Shield (2026-11-15)
 
 - Upstream: https://github.com/DrAlanK/Alan-RIP-Dpi-Android (v1.6.0, commit `f4810b4`) and
@@ -703,7 +721,7 @@ The application's license does not restrict recipients' rights in this separate 
 
 ## Galaxy Connections runtimes
 
-* Aether 2.4.0, patterniha/Aether (the PattNG fork) revision `d58f9d568083129ce2c767c85054021eb3ee6a38`, which is the commit tagged `v2.4.0` in the upstream CluvexStudio/Aether (https://github.com/CluvexStudio/Aether/releases/tag/v2.4.0), AGPL-3.0-only. Modified for authenticated account HTTPS, mandatory MASQUE gateway SPKI pins and per-session SOCKS5 authentication. Complete corresponding source with locked vendored dependencies is distributed as `Aether-source.tar.gz` beside each APK. Build and patch: scripts/engines/aether.sh and scripts/connections/harden-aether.py.
+* Aether 2.4.0, patterniha/Aether (the PattNG fork) revision `d58f9d568083129ce2c767c85054021eb3ee6a38`, which is the commit tagged `v2.4.0` in the upstream CluvexStudio/Aether (https://github.com/CluvexStudio/Aether/releases/tag/v2.4.0), AGPL-3.0-only. Modified for authenticated account HTTPS, mandatory MASQUE gateway SPKI pins, per-session SOCKS5 authentication and the WARP account API lanes (OOB ClientHello desync and user-owned Worker relay, adapted from UAC SNI Spoofer 200de3b, AGPL-3.0-only, see the UAC section above). Complete corresponding source with locked vendored dependencies is distributed as `Aether-source.tar.gz` beside each APK; since 2026-11-15 it also carries the added source file under `MAXIMUS_PATCH_FILES/`. Build and patch: scripts/engines/aether.sh, scripts/connections/harden-aether.py and scripts/connections/aether/maximus_api_lane.rs.
 * Direct Serverless uses the separate patterniha/Xray-core executable, revision `f9903959b9ae47538f5c7100f6416fb9fbcd2317`, MPL-2.0, distributed with `Serverless-source.tar.gz`. Its profiles originate in patterniha/Serverless-for-Iran revision `df113f5b0fafc5bbe552e903f43249110510bc34` (GPL-3.0), with the original license in assets/serverless/LICENSE.txt. The app adapts loopback authentication, DNS and geo-file dependent classifications; fragmentation and OOB instructions are retained.
 
 * RegionHop 1.27.0, freeb5d/regionhop revision `d5798d80f77fa6f40406ba30886d810c3c462147`, MIT. The optional VPS installer downloads checksum-pinned upstream components. The upstream Psiphon and Xray binaries retain their respective upstream licenses; release and source provenance remain available from that upstream release. No user deployment config or API token is bundled.

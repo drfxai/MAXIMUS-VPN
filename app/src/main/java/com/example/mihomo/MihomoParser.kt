@@ -486,7 +486,12 @@ object MihomoParser {
         if (profile.sni.isNotBlank()) {
             sb.appendLine("    servername: ${yamlQuote(profile.sni)}")
         }
-        if (profile.fingerprint.isNotBlank()) {
+        val isReality = profile.security.equals("reality", ignoreCase = true)
+        if (isReality) {
+            // Xray REALITY servers v26.9.8+ need an X25519MLKEM768 key share; Mihomo sends it only with the
+            // Chrome fingerprint and support-x25519mlkem768 (XTLS/Xray-core#7259).
+            sb.appendLine("    client-fingerprint: \"chrome\"")
+        } else if (profile.fingerprint.isNotBlank()) {
             sb.appendLine("    client-fingerprint: ${yamlQuote(profile.fingerprint)}")
         }
         if (profile.flow.isNotBlank()) {
@@ -503,6 +508,7 @@ object MihomoParser {
             if (profile.spiderX.isNotBlank()) {
                 sb.appendLine("      spider-x: ${yamlQuote(profile.spiderX)}")
             }
+            sb.appendLine("      support-x25519mlkem768: true")
         }
 
         // Transport opts

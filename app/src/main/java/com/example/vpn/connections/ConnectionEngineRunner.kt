@@ -504,10 +504,18 @@ object ConnectionEngineRunner {
         if (irancellSingle && irancellPick == null) attempts += "irancell: no MASQUE HTTP/2 carrier available"
         if (irancellSingle) record("ladder", "queue", "START", "Irancell: one MASQUE HTTP/2 (TCP) attempt" +
             (irancellPick?.let { " (" + method(it) + ")" } ?: " (none available)") +
-            ", ${IrancellWarp.BUDGET_MS / 1000}s cap, account API via Aether's name/edge fallback with the ClientHello fragmented; " +
+            ", ${IrancellWarp.BUDGET_MS / 1000}s cap, account API via Aether's own call raced against the OOB ClientHello lane; " +
             "skipping " + IrancellWarp.skipped(ordered.map(::method), irancellPick?.let(::method)).joinToString(", ").ifEmpty { "nothing" } +
             "; a registration failure ends it at once")
         val failedRegistrationKinds = mutableSetOf<String>()
+        // WARP registration failed on this network within WarpRegistrationMemory.HOLD_MS: a carrier that would need a
+        // new registration is skipped at once (one with its own saved identity still runs).
+        val registrationHeld = engine.id == AetherSidecar.ID && WarpRegistrationMemory.blocked(networkKey)
+        if (registrationHeld) {
+            failedRegistrationKinds += AetherApiBridge.API_UNAVAILABLE
+            record("ladder", "registration", "SKIP", WarpRegistrationMemory.describe(networkKey) +
+                "; carriers without a saved identity are not started")
+        }
         val recheckOnly = !irancellSingle && engine.id == AetherSidecar.ID && automatic &&
             quickRecheckOnly(ordered.map(::method).filter { it != CLEAN_H2 }, preferred, recentlyFailed,
                 warpDataBlocked = BuiltinMethodMemory.warpDataBlocked(cacheScope))
@@ -719,6 +727,7 @@ object ConnectionEngineRunner {
                 record("ladder", "race", "WIN ${w.name}", outcome.unfinished.takeIf { it.isNotEmpty() }
                     ?.let { "stopped " + it.joinToString(", ") }.orEmpty())
                 record(w.name, "https", "PASS")
+                if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                 if (scope() == cacheScope) {
                     BuiltinMethodMemory.record(cacheScope, w.name)
                     BuiltinMethodMemory.clearFailure(cacheScope, w.name)
@@ -789,6 +798,7 @@ object ConnectionEngineRunner {
             }
             if (engine.id == AetherSidecar.ID && AetherApiBridge.skipAfterBootstrapFailure(candidate, failedRegistrationKinds)) {
                 record(name, "registration", "SKIP", "account API unavailable; no independent stored identity")
+                attempts += "$name: skipped (WARP API registration unavailable on this network, no saved identity)"
                 continue
             }
             var running: RunningEngine? = null
@@ -800,10 +810,15 @@ object ConnectionEngineRunner {
             }
             try {
                 record(name, "prepare", "START")
-                val launch = engine.prepare(candidate, settings, context)
+                // Iranian mobile networks: Aether races its account calls through the OOB ClientHello lane (WarpApiLane).
+                val launched = if (engine.id == AetherSidecar.ID && automatic &&
+                    WarpApiLane.applies(onIrancell, onMci, candidate)) WarpApiLane.mark(candidate).also {
+                        record(name, "api-lane", "START", WarpApiLane.summary(AetherSettings.read(ProfileExtras.read(it))))
+                    } else candidate
+                val launch = engine.prepare(launched, settings, context)
                 checkCancellation()
                 stage = "engine process could not start"
-                val process = EngineReaper.track(engine.startPrepared(candidate, settings, launch, context) ?: SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
+                val process = EngineReaper.track(engine.startPrepared(launched, settings, launch, context) ?: SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
                 running = process
                 checkCancellation()
                 stage = "local proxy did not become ready"
@@ -840,6 +855,8 @@ object ConnectionEngineRunner {
                     if (engine.id == AetherSidecar.ID && AetherApiBridge.registrationFailed(reason)) {
                         failedRegistrationKinds += if (AetherApiBridge.bootstrapBlocked(reason))
                             AetherApiBridge.API_UNAVAILABLE else AetherApiBridge.keyKind(candidate)
+                        // At once, not only at the end: a cancelled or capped run (the background relay) still remembers it.
+                        if (AetherApiBridge.bootstrapBlocked(reason)) WarpRegistrationMemory.record(networkKey)
                     }
                     continue
                 }
@@ -850,6 +867,7 @@ object ConnectionEngineRunner {
                 if (result.traffic && process.isAlive) {
                     record(name, "https", "PASS")
                     if (engine.id == AetherSidecar.ID && automatic) rememberCleanH2(name, candidate, networkKey, attemptStartedAt, ::record)
+                    if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                     if (scope() == cacheScope) {
                         BuiltinMethodMemory.record(cacheScope, name)
                         BuiltinMethodMemory.clearFailure(cacheScope, name)
@@ -886,6 +904,13 @@ object ConnectionEngineRunner {
             }
         }
         checkCancellation()
+        // The account API failed here in this run: remembered for this network, so neither the next ladder nor the
+        // background relay repeats the same registration for WarpRegistrationMemory.HOLD_MS.
+        if (engine.id == AetherSidecar.ID && !registrationHeld && AetherApiBridge.API_UNAVAILABLE in failedRegistrationKinds) {
+            WarpRegistrationMemory.record(networkKey)
+            record("ladder", "registration", "REMEMBER", "WARP API registration failed on this network; " +
+                "not retried for ${WarpRegistrationMemory.HOLD_MS / 60_000} min")
+        }
         if (engine.id == AetherSidecar.ID && automatic && handshakeWithoutData)
             BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
         if (engine.id == AetherSidecar.ID && preferWireGuard) attempts += CLOUDFLARE_FILTERED_HINT

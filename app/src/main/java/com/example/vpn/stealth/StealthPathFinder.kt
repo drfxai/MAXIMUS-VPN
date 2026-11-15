@@ -4,6 +4,7 @@ import com.example.core.SecretRedactor
 import com.example.data.model.VlessProfile
 import com.example.vpn.engine.RuntimeCapabilities
 import com.example.xray.RealDelayProbe
+import com.example.xray.RealityFingerprint
 import com.example.xray.XrayLogManager
 import java.util.concurrent.ConcurrentHashMap
 
@@ -47,8 +48,21 @@ class StealthPathFinder(
 
     /** The path tried first for [requested] ([resolved] is its host turned into an address): the alternate that worked last time, or the profile as saved. */
     fun firstPath(requested: VlessProfile, resolved: VlessProfile): Choice {
-        val remembered = memory[requested.id]?.let { key -> StealthVariants.of(resolved).firstOrNull { it.key == key } }
+        val variants by lazy { StealthVariants.of(resolved) }
+        val remembered = memory[requested.id]?.let { key -> variants.firstOrNull { it.key == key } }
+            ?: networkFingerprintVariant(requested, variants)
         return remembered?.let { Choice(it.profile, requested, it.label, variantKey = it.key) } ?: Choice(resolved, requested, "as saved")
+    }
+
+    /**
+     * A REALITY profile with nothing remembered of its own starts with the browser fingerprint that last
+     * reached a REALITY server on this network, when that is not what it already sends.
+     */
+    private fun networkFingerprintVariant(requested: VlessProfile, variants: List<StealthVariants.Variant>): StealthVariants.Variant? {
+        if (!requested.security.equals("reality", ignoreCase = true)) return null
+        val fp = memory[RealityFingerprint.NETWORK_WINNER_KEY]?.takeIf { it in RealityFingerprint.PQ_ROTATION } ?: return null
+        if (fp == RealityFingerprint.effectiveForRotation(requested.fingerprint)) return null
+        return variants.firstOrNull { it.key == StealthVariants.fingerprintKey(fp) }
     }
 
     /**
@@ -98,6 +112,7 @@ class StealthPathFinder(
         best(ordered, requested.id)?.let { win ->
             if (win.owner.id == requested.id) {
                 if (win.variantKey == null) memory.remove(requested.id) else memory[requested.id] = win.variantKey
+                rememberFingerprint(memory, win.owner, win.profile, win.variantKey)
                 log("Connected through an alternate path: ${win.label} (${win.latencyMs} ms).")
             } else {
                 log("Switched to ${SecretRedactor.redact(win.label)} (${win.latencyMs} ms).")
@@ -114,6 +129,7 @@ class StealthPathFinder(
         }.take(RealDelayProbe.MAX_BATCH)
         best(disguisedSiblings, requested.id)?.let { win ->
             win.variantKey?.let { memory[win.owner.id] = it }
+            rememberFingerprint(memory, win.owner, win.profile, win.variantKey)
             log("Switched to ${SecretRedactor.redact(win.label)} (${win.latencyMs} ms).")
             return win
         }
@@ -153,6 +169,18 @@ class StealthPathFinder(
                 if (target != null) target += c else batches += mutableListOf(c)
             }
             return batches
+        }
+
+        /**
+         * When a fingerprint alternate of a REALITY profile carried the traffic, keeps that browser as this
+         * network's REALITY fingerprint ([memory] is the network's map), so other REALITY profiles start with it.
+         */
+        fun rememberFingerprint(memory: MutableMap<String, String>, owner: VlessProfile, used: VlessProfile, variantKey: String?) {
+            if (variantKey == null || !owner.security.equals("reality", ignoreCase = true)) return
+            val fp = used.fingerprint.trim().lowercase()
+            if (fp in RealityFingerprint.PQ_ROTATION && fp != RealityFingerprint.effectiveForRotation(owner.fingerprint)) {
+                memory[RealityFingerprint.NETWORK_WINNER_KEY] = fp
+            }
         }
 
         const val FIRST_TIMEOUT_SEC = 4

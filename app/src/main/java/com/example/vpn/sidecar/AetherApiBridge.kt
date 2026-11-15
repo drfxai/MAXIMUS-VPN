@@ -22,9 +22,13 @@ object AetherApiBridge {
     const val UNREACHABLE_WITHOUT_IDENTITY =
         "WARP API registration failed: account API unreachable (TLS) on this network and no saved identity for this carrier"
 
-    /** Whether to stop before the native engine starts: probe failed, nothing saved, automatic route only. */
-    fun failFastWithoutIdentity(apiRoute: String, apiReachable: Boolean, hasIdentity: Boolean): Boolean =
-        apiRoute == "auto" && !apiReachable && !hasIdentity
+    /**
+     * Whether to stop before the native engine starts: probe failed, nothing saved, automatic route only. Not when the
+     * engine's own account API lanes are on ([com.example.vpn.connections.WarpApiLane]): its OOB ClientHello lane or
+     * the user's relay can still register where Android TLS through Direct OOB could not.
+     */
+    fun failFastWithoutIdentity(apiRoute: String, apiReachable: Boolean, hasIdentity: Boolean, laneFallback: Boolean = false): Boolean =
+        apiRoute == "auto" && !apiReachable && !hasIdentity && !laneFallback
 
     private class NoIdentity : IllegalStateException(UNREACHABLE_WITHOUT_IDENTITY)
 
@@ -102,12 +106,16 @@ object AetherApiBridge {
             check(process.awaitReady(launch.readyTimeoutMs)) { "Direct API bridge did not start" }
             val endpoint = Socks5.Endpoint("127.0.0.1", context.socksPort, context.socksUser, context.socksPass)
             if (!apiTlsReachable(options, endpoint) || !process.isAlive) {
-                if (failFastWithoutIdentity(options.apiRoute, apiReachable = false, hasIdentity = hasStoredKeys(profile))) {
+                val lanes = com.example.vpn.connections.WarpApiLane.enabled(extras) ||
+                    com.example.vpn.connections.WarpApiLane.environment(extras, options).isNotEmpty()
+                if (failFastWithoutIdentity(options.apiRoute, apiReachable = false, hasIdentity = hasStoredKeys(profile), laneFallback = lanes)) {
                     XrayLogManager.i("BUILTIN", "aether/api · WARP API TLS unreachable via Direct OOB and no saved identity for ${keyKind(profile)}; not starting a registration that cannot finish")
                     throw NoIdentity()
                 }
                 if (options.apiRoute == "auto") {
-                    XrayLogManager.i("BUILTIN", "aether/api · WARP API TLS unreachable via Direct OOB; saved identity is reused, trying native API route for its refresh")
+                    XrayLogManager.i("BUILTIN", if (lanes && !hasStoredKeys(profile))
+                        "aether/api · WARP API TLS unreachable via Direct OOB; registering through Aether's own account lanes (OOB ClientHello / relay)"
+                        else "aether/api · WARP API TLS unreachable via Direct OOB; saved identity is reused, trying native API route for its refresh")
                     process.stop()
                     return null
                 }

@@ -43,7 +43,7 @@ object RecoveryEngineCatalog {
         // A second core is tried on the SAME server before heavier public fallback engines.
         // No TLS pin, mask, ECH or custom transport is silently dropped by conversion.
         val alternateCore = saved.filter {
-            !Sidecars.isEngineProfile(it) && com.example.vpn.sidecar.SingBoxSidecar.conversionProblem(it) == null
+            !Sidecars.isEngineProfile(it) && com.example.vpn.sidecar.SingBoxSidecar.autoSelectProblem(it) == null
         }.take(12).map { com.example.vpn.sidecar.SingBoxSidecar.select(it) }
         return (saved.filter { Sidecars.isEngineProfile(it) } + alternateCore + webTunnel + defaults)
             .filter { com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) && !it.allowInsecure && available(it) }
