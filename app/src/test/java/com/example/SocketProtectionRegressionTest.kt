@@ -39,6 +39,17 @@ class SocketProtectionRegressionTest {
         assertEquals(listOf("real-backup"), FailoverManager.eligibleFallbacks(choices, active).map { it.id })
     }
 
+    @Test fun failoverExcludesAliasesOfTheSavedAndRunningEndpoints() {
+        val owner = active.copy(id = "saved", address = "cdn.example.com")
+        val running = owner.copy(address = active.address)
+        val alias = owner.copy(id = "other-import", address = "CDN.example.com", uuid = "different")
+        val direct = running.copy(id = "same-ip")
+        val penalized = owner.copy(id = "penalized", address = "penalized.example.com")
+        val backup = owner.copy(id = "backup", address = "backup.example.com")
+        assertEquals(setOf(owner.id, alias.id, direct.id, penalized.id),
+            FailoverManager.failedPathIds(listOf(alias, direct, penalized, backup), running, owner) { it == penalized })
+    }
+
     @Test fun failoverPrefersAKindOfConnectionThatHasNotFailed() {
         val reality = active.copy(id = "reality", address = "r.example.com", security = "reality",
             publicKey = "Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw", sni = "www.example.com")

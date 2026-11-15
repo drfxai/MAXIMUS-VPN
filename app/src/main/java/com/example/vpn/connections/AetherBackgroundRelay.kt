@@ -1,5 +1,8 @@
 package com.example.vpn.connections
 
+import com.example.data.model.ConnectionState
+import com.example.data.model.ConnectionStatus
+
 /**
  * WARP through a saved server, retried in the background after Aether stopped because the carrier drops WARP data
  * (WireGuard handshake passed, no HTTPS) while no saved server had been verified on this network yet. The session
@@ -35,6 +38,10 @@ object AetherBackgroundRelay {
                     alreadySwitched: Boolean = false): Boolean =
         pendingNetwork != null && !network.isNullOrBlank() && pendingNetwork == network && savedServerEligible &&
             connectedVerified && now - pendingAt in 0..MAX_AGE_MS && !connectedFrozen && !alreadySwitched
+
+    internal fun isSameRunningAttempt(state: ConnectionState, attemptId: String, networkGeneration: Int): Boolean =
+        state.attemptId == attemptId && state.networkGeneration == networkGeneration &&
+            (state.status == ConnectionStatus.CONNECTED || state.status == ConnectionStatus.DEGRADED)
 
     /**
      * Switch to Aether only after the relay carried verified HTTPS, with the same connection still up on the same

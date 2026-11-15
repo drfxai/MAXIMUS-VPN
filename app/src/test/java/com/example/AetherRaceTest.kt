@@ -1,5 +1,7 @@
 package com.example
 
+import com.example.data.model.ConnectionState
+import com.example.data.model.ConnectionStatus
 import com.example.vpn.connections.AetherBackgroundRelay
 import com.example.vpn.connections.ConnectionEngineRunner
 import com.example.vpn.connections.FirstVerifiedRace
@@ -228,6 +230,14 @@ class AetherRaceTest {
         assertNull(AetherBackgroundRelay.budgetMs(metered = false))
         assertTrue("well inside the 120 s metered Aether budget",
             AetherBackgroundRelay.METERED_BUDGET_MS < ConnectionEngineRunner.HEAVY_LADDER_BUDGET_MS)
+    }
+
+    @Test fun relaySurvivesDegradedTrafficOnlyWithinTheSameAttemptAndNetwork() {
+        val degraded = ConnectionState(status = ConnectionStatus.DEGRADED, attemptId = "relay", networkGeneration = 4)
+        assertTrue(AetherBackgroundRelay.isSameRunningAttempt(degraded, "relay", 4))
+        assertFalse(AetherBackgroundRelay.isSameRunningAttempt(degraded, "another", 4))
+        assertFalse(AetherBackgroundRelay.isSameRunningAttempt(degraded, "relay", 5))
+        assertFalse(AetherBackgroundRelay.isSameRunningAttempt(degraded.copy(status = ConnectionStatus.SWITCHING), "relay", 4))
     }
 
     @Test fun meteredRelayStartupReservesTimeAfterHelperStartup() {
