@@ -24,7 +24,7 @@ class EngineRegistryTest {
             assertNotNull(d.version)
         }
         // Engines the plan still calls for are listed, with a license, and map to no runtime.
-        val planned = EngineRegistry.ENGINES.filter { !it.bundled && it !== EngineRegistry.RADIANCE }
+        val planned = EngineRegistry.ENGINES.filterNot { it.bundled }
         assertTrue(planned.all { it.runtime == null && it.version == null && it.license.isNotBlank() })
         // Mihomo is a separate program carried behind Xray, so it is bundled without being a runtime.
         assertTrue(EngineRegistry.MIHOMO.bundled)
@@ -32,14 +32,14 @@ class EngineRegistryTest {
         assertEquals("GPL-3.0", EngineRegistry.MIHOMO.license)
     }
 
-    @Test fun radianceIsPinnedButOptionalInTheStableApk() {
+    @Test fun radianceIsPinnedAndRequiredInTheReleaseApk() {
         val descriptor = EngineRegistry.RADIANCE
         val sidecar = com.example.vpn.sidecar.RadianceSidecar
-        assertFalse(descriptor.bundled)
+        assertTrue(descriptor.bundled)
         assertNull(descriptor.runtime)
         assertEquals(sidecar.REVISION, descriptor.version)
         assertTrue(com.example.vpn.sidecar.Sidecars.ENGINES.contains(sidecar))
-        assertFalse(EngineRegistry.requiredNativePrograms().contains(sidecar.binary))
+        assertTrue(EngineRegistry.requiredNativePrograms().contains(sidecar.binary))
     }
 
     @Test fun theMatrixMatchesWhatTheEnginesAccept() {

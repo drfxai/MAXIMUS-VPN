@@ -41,8 +41,8 @@ object EngineRegistry {
         bundled = true, runtime = null)
     val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core (separate program)", "4d6eb0e8a7e9", "GPL-3.0",
         bundled = true, runtime = null)
-    val RADIANCE = EngineDescriptor("radiance", "Lantern / Radiance (experimental)",
-        com.example.vpn.sidecar.RadianceSidecar.REVISION, "GPL-3.0-only", bundled = false, runtime = null)
+    val RADIANCE = EngineDescriptor("radiance", "Lantern / Radiance",
+        com.example.vpn.sidecar.RadianceSidecar.REVISION, "GPL-3.0-only", bundled = true, runtime = null)
     val TOR = EngineDescriptor("tor", "Tor (in app) with lyrebird bridges (separate program)",
         "tor-android 0.4.9.5.1, lyrebird 75ef9b2c1f18", "BSD-3-Clause (Tor, lyrebird), GPL-3.0 parts of lyrebird",
         bundled = true, runtime = null)
@@ -111,9 +111,7 @@ object EngineRegistry {
      * one, and a test keeps its list equal to this one.
      */
     fun requiredNativePrograms(): Set<String> =
-        com.example.vpn.sidecar.Sidecars.ENGINES
-            .filterNot { it === com.example.vpn.sidecar.RadianceSidecar }
-            .map { it.binary }.toSet() + TOR_LIBRARY
+        com.example.vpn.sidecar.Sidecars.ENGINES.map { it.binary }.toSet() + TOR_LIBRARY
 
     /** The Tor library inside the APK (libtor.so); the lyrebird program is TorSidecar's. */
     const val TOR_LIBRARY = "tor"

@@ -749,9 +749,9 @@ The application's license does not restrict recipients' rights in this separate 
   AGPL-3.0; the widget, `QuickConnect`, `BootPolicy` and `BackgroundRunning` code is Maximus's own.
 - No affiliation or endorsement is implied.
 
-## Lantern Radiance experimental integration
+## Lantern Radiance
 
-The experimental Android build script fetches [Radiance](https://github.com/getlantern/radiance) at
+The Android release build script fetches [Radiance](https://github.com/getlantern/radiance) at
 `aced057665daaa4821e9f45e6133257969f4a8e7` under GPL-3.0. The separate executable is built with
 Radiance's SOCKS-only mode, the entry point and loopback authentication change under
-`scripts/radiance/`. The stable APK build does not bundle this executable.
+`scripts/radiance/`. The APK bundles the executable and its corresponding source is supplied as `Radiance-source.tar.gz`.
