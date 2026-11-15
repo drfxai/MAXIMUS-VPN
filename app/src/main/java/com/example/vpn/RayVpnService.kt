@@ -2470,8 +2470,12 @@ class RayVpnService : VpnService() {
         return listOf(java.net.InetAddress.getByName(pinned.address))
     }
 
-    /** TCP_MAXSEG on a not yet connected socket (Uplink Shield in the record-slicing bridge). */
-    private fun setSocketMss(socket: Socket, mss: Int): Boolean = try {
+    /**
+     * TCP_MAXSEG on a not yet connected socket (Uplink Shield in the record-slicing bridge). Android 8+ only
+     * (Os.setsockoptInt); older phones keep the bridge's paced first 16 KB, and Xray's own sockopt still applies
+     * when no bridge is used.
+     */
+    private fun setSocketMss(socket: Socket, mss: Int): Boolean = if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) false else try {
         if (!socket.isBound) socket.bind(java.net.InetSocketAddress(0))
         android.os.ParcelFileDescriptor.fromSocket(socket).use { pfd ->
             android.system.Os.setsockoptInt(pfd.fileDescriptor, android.system.OsConstants.IPPROTO_TCP, TCP_MAXSEG, mss)
