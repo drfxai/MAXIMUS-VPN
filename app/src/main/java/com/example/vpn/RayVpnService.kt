@@ -1569,11 +1569,9 @@ class RayVpnService : VpnService() {
             val sidecarEngine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
             val engineChain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
             appOutsideVpn = sidecarEngine != null || engineChain != null
-            if (appOutsideVpn) {
-                // A separate engine program cannot ask Android to keep its own sockets out of the VPN,
-                // so the app's own traffic is left out; every other app still goes through the tunnel.
-                builder.addDisallowedApplication(packageName)
-            }
+            // A separate engine program cannot ask Android to keep its own sockets out of the VPN, so the app's
+            // own traffic is left out then. The user's per-app routing (Settings › Routing & DNS) is applied too.
+            com.example.vpn.routing.SplitTunnelStore.apply(this, builder, excludeSelf = appOutsideVpn, interfaceName = "tunnel")
 
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 4. Builder.establish() invoked (MTU=$safeMtu, Address=172.19.0.1/30, DNS=$primaryDns).")
             val pfd = try {
@@ -2496,7 +2494,8 @@ class RayVpnService : VpnService() {
             .setMtu(1280).setBlocking(true)
             .apply {
                 appOutsideVpn = excludeApp
-                if (excludeApp) addDisallowedApplication(packageName)
+                // Same per-app rules as the tunnel, so apps left outside keep working while it reconnects.
+                com.example.vpn.routing.SplitTunnelStore.apply(this@RayVpnService, this, excludeSelf = excludeApp, interfaceName = "guard")
                 com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { addAddress(it.address, it.prefix) }
                 com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { addRoute(it.address, it.prefix) }
             }

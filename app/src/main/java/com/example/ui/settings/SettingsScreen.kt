@@ -233,6 +233,8 @@ fun SettingsScreen(
     BackHandler(enabled = page != null) { pageName = null }
     val open: (SettingsPage) -> Unit = { pageName = it.name }
     val back: () -> Unit = { pageName = null }
+    var showSplitTunnel by rememberSaveable { mutableStateOf(false) }
+    val splitTunnel by com.example.vpn.routing.SplitTunnelStore.flow(context).collectAsStateWithLifecycle()
 
     val updateUi = UpdateUi(
         checking = updateChecking,
@@ -299,7 +301,9 @@ fun SettingsScreen(
                 onBack = back
             )
 
-            SettingsPage.ROUTING_DNS -> RoutingDnsSettingsPage(
+            SettingsPage.ROUTING_DNS -> if (showSplitTunnel) {
+                SplitTunnelPage(onBack = { showSplitTunnel = false })
+            } else RoutingDnsSettingsPage(
                 settings = settings,
                 actions = actions,
                 dnsTestRunning = dnsTestRunning,
@@ -333,7 +337,9 @@ fun SettingsScreen(
                     }
                 },
                 onOpenResolverData = { open(SettingsPage.UPDATES) },
-                onBack = back
+                onBack = back,
+                splitTunnelSummary = splitTunnel?.summary(),
+                onOpenSplitTunnel = { showSplitTunnel = true }
             )
 
             SettingsPage.ANTI_CENSORSHIP -> AntiCensorshipSettingsPage(settings = settings, actions = actions, onBack = back)
