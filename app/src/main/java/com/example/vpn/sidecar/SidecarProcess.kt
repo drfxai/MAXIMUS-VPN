@@ -56,6 +56,10 @@ class SidecarProcess(
                             "Radiance could not resolve a connection host",
                             "Radiance loopback port is already in use",
                             "Radiance connection permission denied",
+                            "Radiance Android network monitor failed",
+                            "Radiance could not build route options",
+                            "Radiance could not initialize the tunnel backend",
+                            "Radiance tunnel backend could not connect",
                             "Radiance could not start a Lantern route" -> startupFailure = "Radiance startup failed: $reason"
                         }
                     }

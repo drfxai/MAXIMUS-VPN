@@ -10,6 +10,7 @@ import (
     "net/netip"
     "os"
     "os/signal"
+    "strings"
     "syscall"
 
     "github.com/getlantern/radiance/backend"
@@ -64,6 +65,14 @@ func classifyConnectError(err error) error {
         return errors.New("Radiance loopback port is already in use")
     case errors.Is(err, os.ErrPermission):
         return errors.New("Radiance connection permission denied")
+    case strings.Contains(err.Error(), "create network monitor"):
+        return errors.New("Radiance Android network monitor failed")
+    case strings.Contains(err.Error(), "failed to build options"):
+        return errors.New("Radiance could not build route options")
+    case strings.Contains(err.Error(), "initializing tunnel:"):
+        return errors.New("Radiance could not initialize the tunnel backend")
+    case strings.Contains(err.Error(), "connecting tunnel:"):
+        return errors.New("Radiance tunnel backend could not connect")
     default:
         return errors.New("Radiance could not start a Lantern route")
     }
