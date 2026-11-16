@@ -102,7 +102,8 @@ fun HomeScreen(
     onNavigateToGodBrowser: () -> Unit = {},
     onNavigateToAiAgent: () -> Unit = {},
     modifier: Modifier = Modifier,
-    onConfigureConnectionEngines: () -> Unit = {}
+    onConfigureConnectionEngines: () -> Unit = {},
+    onConfigureAether: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val connectionState by vpnViewModel.connectionState.collectAsStateWithLifecycle()
@@ -577,6 +578,7 @@ fun HomeScreen(
             ConfigFreeConnectButton(
                 enabled = !connectionState.isTunnelUp && !connectionState.isBusy,
                 onConfigureEngines = onConfigureConnectionEngines,
+                onConfigureAether = onConfigureAether,
                 onConnect = { method ->
                     vpnViewModel.startOrRequestPermission(context, method.profile(), exact = true) {
                         onRequestVpnPermission()
@@ -1158,6 +1160,7 @@ private fun formatDuration(seconds: Long): String {
 private fun ConfigFreeConnectButton(
     enabled: Boolean,
     onConfigureEngines: () -> Unit,
+    onConfigureAether: () -> Unit,
     onConnect: (ConfigFreeMethod) -> Unit
 ) {
     var open by rememberSaveable { mutableStateOf(false) }
@@ -1205,9 +1208,13 @@ private fun ConfigFreeConnectButton(
                             Text(if (showAetherModes) "All connection methods" else "Aether transports and chains")
                         }
                     }
-                    availability?.entries
-                        ?.filter { showAetherModes == (it.key.aetherTransport != null) }
-                        ?.forEachIndexed { index, (method, problem) ->
+                    if (showAetherModes) {
+                        TextButton(onClick = { open = false; onConfigureAether() }) {
+                            Text("Configure a chain with a saved node")
+                        }
+                    }
+                    val methods = availability?.filterKeys { showAetherModes == (it.aetherTransport != null) }
+                    methods?.entries?.forEachIndexed { index, (method, problem) ->
                         if (index > 0) HorizontalDivider(
                             modifier = Modifier.padding(start = 53.dp),
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)
