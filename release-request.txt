@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #229 (98be5b811601089c9f5e86c06b3a04b77758177a).
-Includes public Psiphon bootstrap, bundled Lantern/Radiance, and per-engine APK ABI verification.
+V1.0.4 signed Android rebuild after PRs #230, #231 and #232 (ba2e6b2c70499efb313cff4f38c012e13290b626).
+Includes updated Tunnel controls, Aether relay chains, AmneziaWG native packaging, and the LAB Domain Fronting page.
