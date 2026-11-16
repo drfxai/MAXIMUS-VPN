@@ -10,7 +10,14 @@ object RuntimeCapabilities {
         if (com.example.vpn.sidecar.ChainRunner.isChain(profile)) {
             val chain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
                 ?: return "The engine chain is invalid."
-            return chain.hops.firstNotNullOfOrNull { unsupportedReason(com.example.vpn.sidecar.EngineChain.hopProfile(it)) }
+            return chain.hops.firstNotNullOfOrNull { hop ->
+                val hopProfile = try {
+                    com.example.vpn.sidecar.EngineChain.hopProfile(hop)
+                } catch (_: Exception) {
+                    return "A saved node in this engine chain is unavailable or incompatible."
+                }
+                unsupportedReason(hopProfile)
+            }
         }
         // Profiles a separate engine program carries (Mihomo, Psiphon, Tor, DNS tunnel) are checked by it.
         com.example.vpn.sidecar.Sidecars.forProfile(profile)?.let { engine ->
