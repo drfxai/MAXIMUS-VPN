@@ -313,11 +313,10 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
                 val profile = withContext(Dispatchers.IO) {
                     val chain = ui.engineChain()
                     com.example.vpn.sidecar.EngineChain.problem(chain)?.let { error(it) }
-                    val savedHop = chain.hops.firstOrNull { it.engineId == com.example.vpn.sidecar.SingBoxSidecar.id }
-                    val nodeName = savedHop?.let { com.example.vpn.sidecar.EngineChain.hopProfile(it).name }
-                    val profile = com.example.vpn.sidecar.ChainRunner.profile(chain) {
-                        if (it == com.example.vpn.sidecar.SingBoxSidecar.id) nodeName.orEmpty() else titleOf(it)
+                    val nodeTitles = chain.hops.filter { it.profileId.isNotBlank() }.associate { hop ->
+                        hop.profileId to com.example.vpn.sidecar.EngineChain.hopProfile(hop).name
                     }
+                    val profile = com.example.vpn.sidecar.ChainRunner.profile(chain, nodeTitles, ::titleOf)
                     RayApplication.instance.serverRepository.insert(profile)
                     profile
                 }
