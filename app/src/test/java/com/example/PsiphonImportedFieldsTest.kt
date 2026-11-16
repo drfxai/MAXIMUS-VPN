@@ -11,7 +11,9 @@ class PsiphonImportedFieldsTest {
             .put("clientplatform", "Windows").put("enableupgradedownload", true)
         val result = PsiphonSidecar.buildConfig(source, "DE", 12345, File("/tmp/fixture"))
         assertFalse(result.has("upstreamproxyurl")); assertFalse(result.has("LOCALSOCKSPROXYPORT"))
-        assertEquals(12345, result.getInt("LocalSocksProxyPort")); assertEquals("lo", result.getString("ListenInterface"))
+        assertEquals(12345, result.getInt("LocalSocksProxyPort"))
+        assertFalse(result.has("listeninterface"))
+        assertFalse(result.has("ListenInterface"))
         assertEquals("Android", result.getString("ClientPlatform")); assertFalse(result.getBoolean("EnableUpgradeDownload"))
         assertEquals("DE", result.getString("EgressRegion"))
     }
