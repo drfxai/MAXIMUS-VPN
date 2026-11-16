@@ -101,8 +101,11 @@ object WireGuardConf {
     }
 
     private val AMNEZIA_KEYS = setOf(
-        "jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5"
+        "jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5",
+        "j1", "j2", "j3", "itime"
     )
+
+    private val PACKET_DESCRIPTORS = setOf("i1", "i2", "i3", "i4", "i5", "j1", "j2", "j3")
 
     private fun build(
         name: String,
@@ -163,8 +166,10 @@ object WireGuardConf {
         proxy["mtu"] = mtu?.takeIf { it > 0 } ?: 1280
         keepAlive?.takeIf { it > 0 }?.let { proxy["persistent-keepalive"] = it }
         reserved.split(',').mapNotNull { it.trim().toIntOrNull() }.takeIf { it.size == 3 }?.let { proxy["reserved"] = it }
-        // Numbers stay numbers; I1–I5 are packet descriptions and stay text.
-        proxy["amnezia-wg-option"] = amnezia.mapValues { (k, v) -> if (k.startsWith("i")) v else v.toLongOrNull() ?: v }
+        // Header ranges and packet descriptions must be passed to Mihomo as text.
+        proxy["amnezia-wg-option"] = amnezia.mapValues { (key, value) ->
+            if (key.startsWith("h") || key in PACKET_DESCRIPTORS) value else value.toLongOrNull() ?: value
+        }
         return com.example.vpn.sidecar.MihomoSidecar.profile(proxy)
     }
 
@@ -172,8 +177,10 @@ object WireGuardConf {
     internal fun checkAmneziaCompatible(awg: Map<String, String>) {
         val padding = listOf("s1", "s2", "s3", "s4").filter { (awg[it]?.toIntOrNull() ?: 0) != 0 }
         val headers = STANDARD_HEADERS.keys.filter { key -> awg[key]?.let { it != STANDARD_HEADERS[key] } == true }
-        if (padding.isNotEmpty() || headers.isNotEmpty()) {
-            val changed = (padding + headers).joinToString(", ") { it.uppercase() }
+        val customPackets = PACKET_DESCRIPTORS.filter { !awg[it].isNullOrBlank() }
+        if (padding.isNotEmpty() || headers.isNotEmpty() || customPackets.isNotEmpty() || !awg["itime"].isNullOrBlank()) {
+            val changed = (padding + headers + customPackets + listOfNotNull("itime".takeIf { !awg[it].isNullOrBlank() }))
+                .joinToString(", ") { it.uppercase() }
             throw Unsupported(
                 "This AmneziaWG server changes WireGuard's packet format ($changed). MAXIMUS runs WireGuard on " +
                     "the Xray core, which only speaks the standard format. Ask for a config with S1/S2 = 0 and " +
