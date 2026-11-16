@@ -6,6 +6,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "net"
     "net/netip"
     "os"
     "os/signal"
@@ -39,11 +40,33 @@ func run(ctx context.Context) error {
     defer core.Close()
     core.Start()
     if err := core.ConnectVPN(ctx, ""); err != nil {
-        return errors.New("Radiance could not start a Lantern route")
+        return classifyConnectError(err)
     }
     fmt.Println("MAXIMUS_RADIANCE_READY")
     <-ctx.Done()
     return nil
+}
+
+// Export only stable categories. Upstream errors may contain private routes or tokens.
+func classifyConnectError(err error) error {
+    var dnsErr *net.DNSError
+    var netErr net.Error
+    switch {
+    case errors.Is(err, context.Canceled):
+        return errors.New("Radiance connection was canceled")
+    case errors.Is(err, context.DeadlineExceeded):
+        return errors.New("Radiance connection timed out")
+    case errors.As(err, &dnsErr):
+        return errors.New("Radiance could not resolve a connection host")
+    case errors.As(err, &netErr) && netErr.Timeout():
+        return errors.New("Radiance connection timed out")
+    case errors.Is(err, syscall.EADDRINUSE):
+        return errors.New("Radiance loopback port is already in use")
+    case errors.Is(err, os.ErrPermission):
+        return errors.New("Radiance connection permission denied")
+    default:
+        return errors.New("Radiance could not start a Lantern route")
+    }
 }
 
 func main() {
