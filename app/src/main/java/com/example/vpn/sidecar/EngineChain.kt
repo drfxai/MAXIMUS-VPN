@@ -38,9 +38,7 @@ object EngineChain {
         if (hops.size > MAX_HOPS) return "A chain can hold at most $MAX_HOPS engines."
         if (hops.map { it.engineId }.distinct().size != hops.size) return "Each engine can appear once in a chain."
         val saved = hops.firstOrNull { it.engineId == SingBoxSidecar.id }
-        if (saved != null && (hops.first() != saved || saved.profileId.isBlank())) {
-            return "Choose a saved node as the first hop."
-        }
+        if (saved != null && saved.profileId.isBlank()) return "Choose a saved node for the chain."
         if (hops.any { it.engineId != SingBoxSidecar.id && it.profileId.isNotEmpty() }) return "Unexpected saved node reference."
         val carrier = hops.firstOrNull { it.engineId in setOf("masque", "matrix-transport") }
         if (carrier != null && (hops.last() != carrier || hops[hops.lastIndex - 1].engineId !in setOf("psiphon", SingBoxSidecar.id))) {
