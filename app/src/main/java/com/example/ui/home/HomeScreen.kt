@@ -1183,10 +1183,13 @@ private fun ConfigFreeConnectButton(
     }
 
     if (open) {
+        var showAetherModes by rememberSaveable { mutableStateOf(false) }
         var availability by remember { mutableStateOf<Map<ConfigFreeMethod, String?>?>(null) }
         LaunchedEffect(Unit) {
             availability = withContext(Dispatchers.IO) {
-                ConfigFreeMethod.entries.associateWith { RuntimeCapabilities.unsupportedReason(it.profile()) }
+                ConfigFreeMethod.entries.associateWith { method ->
+                    RuntimeCapabilities.unsupportedReason(method.profile()) ?: method.missingDependency()
+                }
             }
         }
         AlertDialog(
@@ -1197,7 +1200,14 @@ private fun ConfigFreeConnectButton(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     if (availability == null) Text("Checking installed engines…")
-                    availability?.entries?.forEachIndexed { index, (method, problem) ->
+                    if (availability != null) {
+                        TextButton(onClick = { showAetherModes = !showAetherModes }) {
+                            Text(if (showAetherModes) "All connection methods" else "Aether transports and chains")
+                        }
+                    }
+                    availability?.entries
+                        ?.filter { showAetherModes == (it.key.aetherTransport != null) }
+                        ?.forEachIndexed { index, (method, problem) ->
                         if (index > 0) HorizontalDivider(
                             modifier = Modifier.padding(start = 53.dp),
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)
@@ -1209,6 +1219,7 @@ private fun ConfigFreeConnectButton(
                             ConfigFreeMethod.SERVERLESS -> Icons.Filled.Bolt
                             ConfigFreeMethod.PSIPHON -> Icons.Filled.Shield
                             ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
+                            else -> Icons.Filled.Cloud
                         }
                         TextButton(
                             enabled = ready,
