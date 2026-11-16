@@ -18,7 +18,7 @@ with zipfile.ZipFile(path) as apk:
     assert apk.read(f"assets/{psiphon_asset}") == (assets_root / psiphon_asset).read_bytes(), "Bundled public Psiphon profile differs"
     # Check both the packaged path and the ELF header for each shipped engine.
     for abi in (["arm64-v8a"] if requested == "arm64-v8a" else ["arm64-v8a", "armeabi-v7a", "x86_64"]):
-        for engine in ("aether", "serverless", "byedpi", "mihomo", "singbox", "psiphon", "dnstt", "cottendns", "soar", "slipstream", "lyrebird", "tor", "usque", "matrixtransport", "radiance", "amneziawg"):
+        for engine in ("aether", "serverless", "byedpi", "mihomo", "singbox", "psiphon", "dnstt", "cottendns", "soar", "slipstream", "lyrebird", "tor", "usque", "matrixtransport", "radiance", "amneziawg", "amneziawg_android"):
             entry = f"lib/{abi}/lib{engine}.so"
             assert entry in apk.namelist(), f"{engine} engine missing for {abi}"
             with apk.open(entry) as library:
