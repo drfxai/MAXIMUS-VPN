@@ -31,6 +31,7 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
     var expanded by remember { mutableStateOf(false) }
     val ui = state.transportTools
     val bases = state.configs.filter { it.supportsDomainFronting }
+    val base = bases.firstOrNull { it.id == selected } ?: bases.singleOrNull().takeIf { frontingOnly }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(vertical = 16.dp)) {
         if (!frontingOnly) {
@@ -56,12 +57,19 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
             if (bases.isEmpty()) Text("Import a VLESS, VMess or Trojan WebSocket TLS profile to begin.")
             if (frontingOnly && state.vpnOn) Text("Disconnect the VPN before testing this route.")
         }
+        if (frontingOnly) item {
+            Text("1. Choose a saved profile", style = MaterialTheme.typography.titleMedium)
+        }
         item { Box {
-            OutlinedButton(onClick = { expanded = true }, enabled = bases.isNotEmpty() && !ui.running) { Text(bases.firstOrNull { it.id == selected }?.name ?: "Choose a base config") }
+            OutlinedButton(onClick = { expanded = true }, enabled = bases.isNotEmpty() && !ui.running) { Text(base?.name ?: "Choose a base config") }
             DropdownMenu(expanded, { expanded = false }) {
                 bases.forEach { c -> DropdownMenuItem(text = { Text(c.name) }, onClick = { selected = c.id; expanded = false }) }
             }
         } }
+        if (frontingOnly) item {
+            Text("2. Enter the front and destination", style = MaterialTheme.typography.titleMedium)
+            Text("Use the public IP, TLS certificate name and destination Host provided by your operator.")
+        }
         item { OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Front IP") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(sni, { sni = it }, label = { Text("TLS SNI / certificate name") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(host, { host = it }, label = { Text("Origin HTTP Host") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
@@ -72,11 +80,15 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
             item { OutlinedTextField(ttl, { ttl = it }, label = { Text("Decoy TTL · 1–32") }, singleLine = true) }
             item { Text("TTL must expire before the real server. A wrong value can break TLS; test each network. Requires the bundled ByeDPI engine.") }
         }
+        if (frontingOnly) item {
+            Text("3. Test and save", style = MaterialTheme.typography.titleMedium)
+            Text("The test checks traffic through the proxy. Saved profiles are available in Nodes.")
+        }
         item {
             Button(
-                onClick = { actions.onSaveFronted(selected, endpoint, sni, host, !frontingOnly && splitHello,
-                    if (!frontingOnly && fake) decoy else "", ttl.toIntOrNull() ?: 0) },
-                enabled = bases.any { it.id == selected } && endpoint.isNotBlank() && sni.isNotBlank() &&
+                onClick = { base?.let { actions.onSaveFronted(it.id, endpoint, sni, host, !frontingOnly && splitHello,
+                    if (!frontingOnly && fake) decoy else "", ttl.toIntOrNull() ?: 0) } },
+                enabled = base != null && endpoint.isNotBlank() && sni.isNotBlank() &&
                     host.isNotBlank() && !ui.running && !state.vpnOn
             ) { Text(if (ui.running) "Testing…" else "Test and save fronted profile") }
         }
