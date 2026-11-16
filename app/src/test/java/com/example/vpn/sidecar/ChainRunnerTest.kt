@@ -100,6 +100,16 @@ class ChainRunnerTest {
         assertEquals("DE", back.hops.first().region)
     }
 
+    @Test fun savedNodeChainSerializesOnlyTheReference() {
+        val chain = EngineChain.Chain(listOf(
+            EngineChain.Hop(SingBoxSidecar.id, profileId = "saved-profile-id"),
+            EngineChain.Hop("tor")
+        ))
+        val profile = ChainRunner.profile(chain) { it }
+        assertEquals(chain, ChainRunner.readChain(profile))
+        assertEquals("saved-profile-id", EngineChain.plan(chain).last().hop.profileId)
+    }
+
     @Test fun anOrdinaryProfileIsNotAChain() {
         assertFalse(ChainRunner.isChain(VlessProfile(name = "s", address = "1.2.3.4", port = 443, uuid = "x")))
         assertNull(ChainRunner.readChain(VlessProfile(name = "s", address = "1.2.3.4", port = 443, uuid = "x")))
