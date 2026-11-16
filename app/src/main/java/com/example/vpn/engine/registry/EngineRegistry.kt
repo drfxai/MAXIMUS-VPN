@@ -35,7 +35,7 @@ object EngineRegistry {
     val BYEDPI = EngineDescriptor("byedpi", "Native fake-SNI TCP carrier", "ba532298de7b", "MIT", bundled = true, runtime = null)
     val MIHOMO = EngineDescriptor("mihomo", "Mihomo (separate program)", com.example.vpn.sidecar.MihomoSidecar.VERSION, "GPL-3.0",
         bundled = true, runtime = null)
-    val AMNEZIAWG = EngineDescriptor("amneziawg", "amneziawg-go", null, "MIT", bundled = false, runtime = null)
+    val AMNEZIAWG = EngineDescriptor("amneziawg", "AmneziaWG native", "735cffbcb303", "MIT", bundled = true, runtime = null)
     /** WARP needs no engine of its own: a registered device runs on Xray's WireGuard client. */
     val WARP = EngineDescriptor("warp", "Cloudflare WARP (WireGuard on Xray)", "in app", "Proprietary (this app)",
         bundled = true, runtime = null)
@@ -122,7 +122,8 @@ object EngineRegistry {
      */
     fun statuses(network: String, ledger: EngineLedger = EngineLedger.shared): List<EngineStatus> = ENGINES.map { d ->
         val engine = com.example.vpn.sidecar.Sidecars.ENGINES.firstOrNull { it.id == d.id }
-        val bundled = engine?.let { com.example.vpn.sidecar.Sidecars.isBundled(it) }
+        val bundled = if (d.id == AMNEZIAWG.id) com.example.vpn.engine.AmneziaNativeEngine.available()
+            else engine?.let { com.example.vpn.sidecar.Sidecars.isBundled(it) }
         // Account-bound engines must not be shown as AVAILABLE without their private
         // configuration, even when the native executable is present in the APK.
         val problem = if (d.id == MATRIX_TRANSPORT.id) {
