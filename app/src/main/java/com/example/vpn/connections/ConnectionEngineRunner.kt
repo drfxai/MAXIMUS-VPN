@@ -499,8 +499,8 @@ object ConnectionEngineRunner {
         val rank = order(choices.map(::method), preferred, preferWireGuard, recentlyFailed, irancell = onIrancell, mci = onMci)
         val reverseRelay = engine.id == AetherSidecar.ID &&
             AetherSettings.read(ProfileExtras.read(profile)).let { it.tor == "reverse" || it.psiphon == "reverse" }
-        // Irancell: one MASQUE HTTP/2 attempt inside IrancellWarp.BUDGET_MS, no WireGuard/H3 (see IrancellWarp).
-        val irancellSingle = IrancellWarp.applies(engine.id, automatic, onIrancell, relayOnly, reverseRelay)
+        // Irancell: restrict this ladder to HTTP/2 with a bounded extra variant for manual runs.
+        val irancellHttp2 = IrancellWarp.applies(engine.id, automatic, onIrancell, relayOnly, reverseRelay)
         val irancellBudgetMs = if (manual) IrancellWarp.MANUAL_BUDGET_MS else IrancellWarp.BUDGET_MS
         // Build 151: WARP's data plane is held on this network (gateway scan failed with Cloudflare filtered), or the same
         // ladder ran here under a minute ago: an automatic run stops at once so the search goes on.
@@ -522,14 +522,12 @@ object ConnectionEngineRunner {
             cleanChoices.joinToString(", ") { CleanH2PeerMemory.masked(ProfileExtras.read(it).optString(AetherSidecar.CLEAN_H2_PEER)) } +
             " before any scan" + (cleanPeers.first().rttMs?.let { " (prewarm: $it ms)" }.orEmpty()))
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
-        val irancellPick = if (irancellSingle) IrancellWarp.pick(ordered.map(::method), preferred)
-            ?.let { m -> ordered.first { method(it) == m } } else null
-        if (irancellSingle && irancellPick == null) attempts += "irancell: no MASQUE HTTP/2 carrier available"
-        if (irancellSingle) record("ladder", "queue", "START", "Irancell: one MASQUE HTTP/2 (TCP) attempt" +
-            (irancellPick?.let { " (" + method(it) + ")" } ?: " (none available)") +
-            ", ${irancellBudgetMs / 1000}s cap, account API via Aether's own call raced against the OOB ClientHello lane; " +
-            "skipping " + IrancellWarp.skipped(ordered.map(::method), irancellPick?.let(::method)).joinToString(", ").ifEmpty { "nothing" } +
-            "; a registration failure ends it at once")
+        val irancellPlan = if (irancellHttp2) IrancellWarp.plan(ordered.map(::method), preferred, manual)
+            .map { name -> ordered.first { method(it) == name } } else emptyList()
+        if (irancellHttp2 && irancellPlan.isEmpty()) attempts += "irancell: no MASQUE HTTP/2 carrier available"
+        if (irancellHttp2) record("ladder", "queue", "START",
+            "Irancell MASQUE HTTP/2: ${irancellPlan.joinToString(", ") { method(it) }.ifEmpty { "none available" }}; " +
+                "${irancellBudgetMs / 1000}s readiness budget; account API racing enabled")
         val failedRegistrationKinds = mutableSetOf<String>()
         // WARP registration failed on this network within WarpRegistrationMemory.HOLD_MS: a carrier that would need a
         // new registration is skipped at once (one with its own saved identity still runs).
@@ -539,7 +537,7 @@ object ConnectionEngineRunner {
             record("ladder", "registration", "SKIP", WarpRegistrationMemory.describe(networkKey) +
                 "; carriers without a saved identity are not started")
         }
-        val recheckOnly = !irancellSingle && engine.id == AetherSidecar.ID && automatic &&
+        val recheckOnly = !irancellHttp2 && engine.id == AetherSidecar.ID && automatic &&
             quickRecheckOnly(ordered.map(::method).filter { it != CLEAN_H2 }, preferred, recentlyFailed,
                 warpDataBlocked = BuiltinMethodMemory.warpDataBlocked(cacheScope))
         var handshakeWithoutData = false
@@ -556,21 +554,21 @@ object ConnectionEngineRunner {
         // otherwise one quick recheck of the first method.
         if (relayOnly && relays.isEmpty()) throw NoVerifiedPath(listOf("relay: no saved server to carry WARP through"), null)
         val queue = ArrayDeque(when {
-            irancellSingle -> listOfNotNull(irancellPick?.let(IrancellWarp::withNativeApi))
+            irancellHttp2 -> irancellPlan.map(IrancellWarp::withNativeApi)
             relayOnly -> relays
             recheckOnly && relays.isNotEmpty() -> relays
             recheckOnly -> ordered.take(1)
             else -> ordered
         })
         // Irancell: WARP through a saved server is the background relay's job, after a saved server is verified.
-        var relayQueued = irancellSingle || relayOnly || recheckOnly && relays.isNotEmpty() || preferred in setOf(WIREGUARD_RELAY, H2_RELAY)
+        var relayQueued = irancellHttp2 || relayOnly || recheckOnly && relays.isNotEmpty() || preferred in setOf(WIREGUARD_RELAY, H2_RELAY)
         if (recheckOnly && !relayOnly) ordered.filter { it !in queue }.forEach {
             record(method(it), "queue", "SKIP", if (relayQueued) "WARP data was blocked on this network recently; trying WARP through a verified saved server"
                 else "WARP data was blocked on this network recently; one quick recheck of ${method(ordered.first())} only")
         }
-        var warpInWarpQueued = recheckOnly || irancellSingle
-        var noizeQueued = recheckOnly || irancellSingle || preferred == WIREGUARD_NOIZE
-        var mtuQueued = recheckOnly || irancellSingle || preferred == WIREGUARD_MTU
+        var warpInWarpQueued = recheckOnly || irancellHttp2
+        var noizeQueued = recheckOnly || irancellHttp2 || preferred == WIREGUARD_NOIZE
+        var mtuQueued = recheckOnly || irancellHttp2 || preferred == WIREGUARD_MTU
         val ladderBudget = ladderBudgetMs(engine.id, automatic, metered, onIrancell, preferWireGuard)
         val ladderStartedAt = System.currentTimeMillis()
         var ladderStopped = false
@@ -786,7 +784,7 @@ object ConnectionEngineRunner {
             return null
         }
         while (true) {
-            if (!irancellSingle && ladderBudget != null && !ladderStopped && queue.isNotEmpty() &&
+            if (!irancellHttp2 && ladderBudget != null && !ladderStopped && queue.isNotEmpty() &&
                 !ProfileExtras.read(queue.first()).optBoolean(RELAY_FOLLOW_UP) &&
                 ladderBudget - (System.currentTimeMillis() - ladderStartedAt) < LADDER_MIN_ATTEMPT_MS) {
                 ladderStopped = true
@@ -804,6 +802,7 @@ object ConnectionEngineRunner {
                 relays.forEach { record(method(it), "queue", "START", "direct WARP carried no data here; trying WARP through a verified saved server") }
                 queue.addAll(relays)
             }
+            if (irancellHttp2 && System.currentTimeMillis() - ladderStartedAt >= irancellBudgetMs) break
             val candidate = queue.removeFirst()
             checkCancellation()
             val extras = ProfileExtras.read(candidate)
@@ -854,8 +853,9 @@ object ConnectionEngineRunner {
                 val left = ladderBudget?.takeIf { !extras.optBoolean(RELAY_FOLLOW_UP) }
                     ?.let { maxOf(LADDER_MIN_ATTEMPT_MS, it - (System.currentTimeMillis() - ladderStartedAt)) }
                 val capped = if (left != null) minOf(window, left) else window
-                val ready = if (irancellSingle) {
-                    val wait = IrancellWarp.waitMs(capped, ladderStartedAt, System.currentTimeMillis(), irancellBudgetMs)
+                val ready = if (irancellHttp2) {
+                    val windowWithFallback = if (queue.isNotEmpty()) minOf(capped, IrancellWarp.MANUAL_FIRST_ATTEMPT_MS) else capped
+                    val wait = IrancellWarp.waitMs(windowWithFallback, ladderStartedAt, System.currentTimeMillis(), irancellBudgetMs)
                     val watch = IrancellWarp.RegistrationWatch()
                     process.awaitReadyUnless(wait) { watch.shouldStop(process.startupFailure, System.currentTimeMillis()) }
                 } else if (reserveForNextRelay) {
@@ -949,7 +949,7 @@ object ConnectionEngineRunner {
             BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
         if (engine.id == AetherSidecar.ID && preferWireGuard) attempts += CLOUDFLARE_FILTERED_HINT
         // Irancell's single attempt never ran WARP through a saved server: the background relay may, once one is verified.
-        val relayDeferred = irancellSingle && relayEligible(engine.id, automatic, options, "saved-server") ||
+        val relayDeferred = irancellHttp2 && relayEligible(engine.id, automatic, options, "saved-server") ||
             !relayOnly && relays.isEmpty() && (deferRelay || deferRelayToSavedServer(engine.id, automatic, options,
             relayExitNode, warpDataBlocked = BuiltinMethodMemory.warpDataBlocked(cacheScope)))
         if (guarded) AetherLadderGuard.finish(networkKey, ladderKind)
