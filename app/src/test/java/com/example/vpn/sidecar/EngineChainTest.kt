@@ -15,8 +15,17 @@ class EngineChainTest {
 
     @Test fun oneHopIsTooFew() = assertTrue(EngineChain.problem(chain("psiphon"))!!.contains("at least"))
 
-    @Test fun threeHopsAreTooMany() =
-        assertTrue(EngineChain.problem(chain("psiphon", "tor", "psiphon"))!!.contains("at most"))
+    @Test fun fourHopsAreTooMany() =
+        assertTrue(EngineChain.problem(chain("psiphon", "tor", "aether", "masque"))!!.contains("at most"))
+
+    @Test fun aetherCanCarryTorAndPsiphonWithoutDialingAnotherHop() {
+        val route = chain("tor", "psiphon", "aether")
+        assertNull(EngineChain.problem(route))
+        val steps = EngineChain.plan(route)
+        assertEquals(listOf(2, 1, 0), steps.map { it.index })
+        assertEquals(listOf(null, 2, 1), steps.map { it.upstreamHop })
+        assertTrue(EngineChain.problem(chain("aether", "tor"))!!.contains("last"))
+    }
 
     @Test fun theSameEngineTwiceIsRejected() =
         assertTrue(EngineChain.problem(chain("tor", "tor"))!!.contains("once"))

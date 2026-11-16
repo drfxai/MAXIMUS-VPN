@@ -217,7 +217,8 @@ fun MainApp(
                     onNavigateToSecretChat = { navController.navigate(Screen.SecretChat.route) },
                     onNavigateToGodBrowser = { navController.navigate(Screen.GodBrowser.route) },
                     onNavigateToAiAgent = { navController.navigate(Screen.AiAgent.route) },
-                    onConfigureConnectionEngines = { navController.navigate("settings/core-engines") }
+                    onConfigureConnectionEngines = { navController.navigate("settings/core-engines") },
+                    onConfigureAether = { navController.navigate("lab/aether") }
                 )
             }
             composable(Screen.Top10.route) {

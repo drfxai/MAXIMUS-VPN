@@ -2,6 +2,7 @@ package com.example
 
 import com.example.data.model.ProtocolType
 import com.example.data.model.VlessProfile
+import com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod
 import com.example.vpn.engine.EngineSelectionPolicy
 import com.example.vpn.engine.ProtocolLinks
 import com.example.vpn.engine.RuntimeCapabilities
@@ -14,9 +15,31 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.json.JSONObject
 
 /** V1.0.1 step 5: the engine registry, the capability matrix and the per-engine circuit breaker. */
 class EngineRegistryTest {
+    @Test fun aetherPresetsKeepTheirTransportAndRelayDirection() {
+        val presets = mapOf(
+            ConfigFreeMethod.AETHER_H2 to "h2",
+            ConfigFreeMethod.AETHER_H3 to "h3",
+            ConfigFreeMethod.AETHER_WG to "wireguard",
+            ConfigFreeMethod.AETHER_GOOL to "gool",
+            ConfigFreeMethod.AETHER_GOOL_CLASSIC to "wiw",
+            ConfigFreeMethod.AETHER_MIM to "mim",
+            ConfigFreeMethod.AETHER_PSIPHON to "h2",
+            ConfigFreeMethod.AETHER_TOR to "h2"
+        )
+        for ((preset, carrier) in presets) {
+            val profile = preset.profile()
+            val extras = JSONObject(profile.extraSettings)
+            assertEquals(preset.id, profile.id)
+            assertEquals(carrier, extras.getString("carrier"))
+            assertEquals(if (preset == ConfigFreeMethod.AETHER_PSIPHON) "chain" else "off", extras.getString("psiphon"))
+            assertEquals(if (preset == ConfigFreeMethod.AETHER_TOR) "chain" else "off", extras.getString("tor"))
+        }
+    }
+
     @Test fun everyRuntimeHasABundledPinnedDescriptor() {
         for (runtime in EngineSelectionPolicy.Runtime.values()) {
             val d = EngineRegistry.descriptorFor(runtime)

@@ -45,8 +45,23 @@ class SidecarProcess(
                     }
                     if (!sawReadyLine && readyLine?.containsMatchIn(line) == true) sawReadyLine = true
                     // Categorize first: a summary must not freeze an earlier, less specific cause.
+                    if (name == RadianceSidecar.id) {
+                        // The Android wrapper emits these fixed messages without route or account data.
+                        when (val reason = line.trim()) {
+                            "missing authenticated loopback settings",
+                            "missing app-private Radiance data directory",
+                            "Radiance initialization failed",
+                            "Radiance connection was canceled",
+                            "Radiance connection timed out",
+                            "Radiance could not resolve a connection host",
+                            "Radiance loopback port is already in use",
+                            "Radiance connection permission denied",
+                            "Radiance could not start a Lantern route" -> startupFailure = "Radiance startup failed: $reason"
+                        }
+                    }
                     if (isFailureLine(line)) failureHint = preferFailure(failureHint, line)
-                    if ((line.contains("registration", true) && isFailureLine(line)) || startupFailure?.startsWith("WARP API registration failed") == true) {
+                    if (name == AetherSidecar.ID && ((line.contains("registration", true) && isFailureLine(line)) ||
+                            startupFailure?.startsWith("WARP API registration failed") == true)) {
                         startupFailure = "WARP API registration failed (${failureHint ?: failureCategory(line)})"
                     }
                     if (logOutput && index < MAX_LOG_LINES) XrayLogManager.d(name, SecretRedactor.redact(line).take(300))

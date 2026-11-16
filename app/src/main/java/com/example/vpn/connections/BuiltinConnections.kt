@@ -13,12 +13,21 @@ import com.example.vpn.sidecar.TorSidecar
 object BuiltinConnections {
     const val AETHER = "maximus-aether"
     const val DIRECT = "maximus-serverless"
-    enum class ConfigFreeMethod(val id: String, val title: String, val description: String) {
+    enum class ConfigFreeMethod(val id: String, val title: String, val description: String, val aetherTransport: String? = null) {
         AETHER_WARP("config-free-aether", "Aether / WARP", "Cloudflare tunnel with on-device registration"),
         TOR_SNOWFLAKE("config-free-tor", "Tor / Snowflake", "Tor through the built-in Snowflake bridge"),
         SERVERLESS("config-free-direct", "Serverless Direct", "Direct access with your ISP exit IP"),
         PSIPHON("config-free-psiphon", "Psiphon", "Uses configured Psiphon network settings"),
-        RADIANCE("config-free-radiance", "Lantern / Radiance", "Uses the Lantern network when the engine is installed");
+        RADIANCE("config-free-radiance", "Lantern / Radiance", "Uses the Lantern network when the engine is installed"),
+        AETHER_H2("config-free-aether-h2", "MASQUE HTTP/2", "TCP transport", "h2"),
+        AETHER_H3("config-free-aether-h3", "MASQUE HTTP/3", "QUIC over UDP", "h3"),
+        AETHER_WG("config-free-aether-wg", "WireGuard", "WARP over WireGuard", "wireguard"),
+        AETHER_GOOL("config-free-aether-gool", "Gool", "WireGuard inside MASQUE", "gool"),
+        AETHER_GOOL_CLASSIC("config-free-aether-wiw", "Gool Classic", "WireGuard inside WireGuard", "wiw"),
+        AETHER_MIM("config-free-aether-mim", "MASQUE-in-MASQUE", "Nested MASQUE transport", "mim"),
+        AETHER_PSIPHON("config-free-aether-psiphon", "Aether → Psiphon",
+            "Psiphon exits through an Aether carrier", "h2"),
+        AETHER_TOR("config-free-aether-tor", "Aether → Tor", "Tor exits through an Aether carrier", "h2");
 
         fun profile(): VlessProfile = when (this) {
             AETHER_WARP -> AetherSidecar.profile()
@@ -26,7 +35,21 @@ object BuiltinConnections {
             SERVERLESS -> ServerlessSidecar.profile()
             PSIPHON -> PsiphonSidecar.profile(tcpOnly = true)
             RADIANCE -> RadianceSidecar.profile()
+            else -> AetherSidecar.profile(
+                transport = requireNotNull(aetherTransport),
+                advanced = AetherSettings(
+                    alias = title,
+                    psiphon = if (this == AETHER_PSIPHON) "chain" else "off",
+                    tor = if (this == AETHER_TOR) "chain" else "off"
+                )
+            )
         }.copy(id = id)
+
+        fun missingDependency(): String? = when (this) {
+            AETHER_PSIPHON -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(PSIPHON.profile())
+            AETHER_TOR -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(TOR_SNOWFLAKE.profile())
+            else -> null
+        }
     }
 
     fun resolve(context: Context, id: String): VlessProfile? {

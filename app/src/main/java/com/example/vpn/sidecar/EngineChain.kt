@@ -12,7 +12,7 @@ import com.example.data.model.VlessProfile
  * an upstream SOCKS5 proxy can be chained. Here that is Psiphon (`UpstreamProxyURL`) and Tor
  * (`Socks5Proxy`), so either may sit at either position: Psiphon then Tor, or Tor then Psiphon.
  * WARP MASQUE offers an authenticated SOCKS port and may carry Psiphon as the final proxy hop.
- * It cannot dial an upstream proxy, so it is never placed before another hop.
+ * Aether can carry Tor or Psiphon. These carriers cannot dial another chain hop.
  *
  * Nothing about security changes: each hop still offers its SOCKS port on 127.0.0.1 with a random
  * per-connection login, Xray still owns the TUN, the DNS and the kill switch, and every hop's own
@@ -26,10 +26,10 @@ object EngineChain {
     data class Chain(val hops: List<Hop>)
 
     /** Engine ids that can be chained, in a stable order for the picker. */
-    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque", "matrix-transport")
+    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque", "matrix-transport", "aether")
 
     const val MIN_HOPS = 2
-    const val MAX_HOPS = 2
+    const val MAX_HOPS = 3
 
     /** Why [chain] cannot run, or null when it is valid. */
     fun problem(chain: Chain): String? {
@@ -40,6 +40,9 @@ object EngineChain {
         val carrier = hops.firstOrNull { it.engineId in setOf("masque", "matrix-transport") }
         if (carrier != null && (hops.last() != carrier || hops.first().engineId != "psiphon")) {
             return "A WARP carrier can only be the outer carrier for Psiphon."
+        }
+        if (hops.dropLast(1).any { it.engineId == "aether" }) {
+            return "Aether must be the last hop in this chain."
         }
         for (hop in hops) {
             if (hop.engineId !in CHAINABLE) return "${hop.engineId} cannot be part of a chain."
@@ -53,6 +56,7 @@ object EngineChain {
         "tor" -> TorSidecar.profile(hop.bridges)
         "masque" -> MasqueSidecar.profile()
         "matrix-transport" -> MatrixTransportSidecar.profile("h2")
+        "aether" -> AetherSidecar.profile(transport = "h2")
         else -> throw IllegalArgumentException("${hop.engineId} cannot be part of a chain.")
     }
 

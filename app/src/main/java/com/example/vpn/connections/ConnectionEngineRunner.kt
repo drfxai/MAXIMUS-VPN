@@ -501,6 +501,7 @@ object ConnectionEngineRunner {
             AetherSettings.read(ProfileExtras.read(profile)).let { it.tor == "reverse" || it.psiphon == "reverse" }
         // Irancell: one MASQUE HTTP/2 attempt inside IrancellWarp.BUDGET_MS, no WireGuard/H3 (see IrancellWarp).
         val irancellSingle = IrancellWarp.applies(engine.id, automatic, onIrancell, relayOnly, reverseRelay)
+        val irancellBudgetMs = if (manual) IrancellWarp.MANUAL_BUDGET_MS else IrancellWarp.BUDGET_MS
         // Build 151: WARP's data plane is held on this network (gateway scan failed with Cloudflare filtered), or the same
         // ladder ran here under a minute ago: an automatic run stops at once so the search goes on.
         val ladderKind = if (relayOnly) "relay" else "ladder"
@@ -526,7 +527,7 @@ object ConnectionEngineRunner {
         if (irancellSingle && irancellPick == null) attempts += "irancell: no MASQUE HTTP/2 carrier available"
         if (irancellSingle) record("ladder", "queue", "START", "Irancell: one MASQUE HTTP/2 (TCP) attempt" +
             (irancellPick?.let { " (" + method(it) + ")" } ?: " (none available)") +
-            ", ${IrancellWarp.BUDGET_MS / 1000}s cap, account API via Aether's own call raced against the OOB ClientHello lane; " +
+            ", ${irancellBudgetMs / 1000}s cap, account API via Aether's own call raced against the OOB ClientHello lane; " +
             "skipping " + IrancellWarp.skipped(ordered.map(::method), irancellPick?.let(::method)).joinToString(", ").ifEmpty { "nothing" } +
             "; a registration failure ends it at once")
         val failedRegistrationKinds = mutableSetOf<String>()
@@ -854,7 +855,7 @@ object ConnectionEngineRunner {
                     ?.let { maxOf(LADDER_MIN_ATTEMPT_MS, it - (System.currentTimeMillis() - ladderStartedAt)) }
                 val capped = if (left != null) minOf(window, left) else window
                 val ready = if (irancellSingle) {
-                    val wait = IrancellWarp.waitMs(capped, ladderStartedAt, System.currentTimeMillis())
+                    val wait = IrancellWarp.waitMs(capped, ladderStartedAt, System.currentTimeMillis(), irancellBudgetMs)
                     val watch = IrancellWarp.RegistrationWatch()
                     process.awaitReadyUnless(wait) { watch.shouldStop(process.startupFailure, System.currentTimeMillis()) }
                 } else if (reserveForNextRelay) {

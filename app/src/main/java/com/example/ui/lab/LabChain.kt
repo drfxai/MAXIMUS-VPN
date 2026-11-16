@@ -21,15 +21,20 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.protocols.LabColors
 import com.example.ui.protocols.LabText
 
-/** The two orders a Psiphon/Tor chain can run in. */
-enum class ChainOrder(val first: String, val second: String, val title: String) {
+/** Supported relay orders shown in the chain picker. */
+enum class ChainOrder(val first: String, val second: String, val title: String, val third: String? = null) {
     PSIPHON_TOR("psiphon", "tor", "Psiphon → Tor"),
     TOR_PSIPHON("tor", "psiphon", "Tor → Psiphon"),
     PSIPHON_MASQUE("psiphon", "masque", "Psiphon / WARP"),
-    PSIPHON_MATRIX("psiphon", "matrix-transport", "Psiphon / HTTP2")
+    PSIPHON_MATRIX("psiphon", "matrix-transport", "Psiphon / HTTP2"),
+    TOR_AETHER("tor", "aether", "Tor / Aether"),
+    PSIPHON_AETHER("psiphon", "aether", "Psiphon / Aether"),
+    TOR_PSIPHON_AETHER("tor", "psiphon", "Tor / Psiphon / Aether", "aether");
+
+    val hops: List<String> get() = listOfNotNull(first, second, third)
 }
 
-/** LAB "Engine chain": builds a two-hop Psiphon/Tor chain and saves it as a server to connect to. */
+/** LAB "Engine chain": builds a relay chain and saves it as a server to connect to. */
 data class ChainUi(
     val order: ChainOrder = ChainOrder.PSIPHON_TOR,
     /** Psiphon egress country, or empty for any. */
@@ -38,6 +43,7 @@ data class ChainUi(
     val torReady: Boolean = true,
     val masqueReady: Boolean = false,
     val matrixReady: Boolean = false,
+    val aetherReady: Boolean = false,
     val saving: Boolean = false,
     /** Name of the chain last saved this session, for the confirmation line. */
     val savedName: String? = null
@@ -52,9 +58,9 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
         item {
             Panel(c) {
                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                    LabText("Send your traffic through two relays", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
+                    LabText("Send your traffic through multiple relays", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
                     LabText("Your traffic enters the first engine, which dials the second, and the second reaches the site. " +
-                        "Two hops that block differently are harder to cut off together than either alone.",
+                        "Choose the order in which the relays carry your traffic.",
                         c.text2, 12.5.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 4, lineHeight = 17.sp)
                 }
             }
@@ -84,6 +90,9 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
                         ChainOrder.TOR_PSIPHON -> "Tor is the way in; Psiphon is the exit the site sees."
                         ChainOrder.PSIPHON_MATRIX -> "Psiphon reaches its servers through a pinned MASQUE HTTP/2 carrier. The final exit is Psiphon."
                         ChainOrder.PSIPHON_MASQUE -> "Psiphon reaches its servers through WARP MASQUE (HTTP/3). The final exit is Psiphon."
+                        ChainOrder.TOR_AETHER -> "Tor reaches its bridges through Aether HTTP/2."
+                        ChainOrder.PSIPHON_AETHER -> "Psiphon reaches its servers through Aether HTTP/2."
+                        ChainOrder.TOR_PSIPHON_AETHER -> "Tor reaches its bridges through Psiphon, which connects through Aether HTTP/2."
                     },
                     c.text3, 12.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp), maxLines = 2, lineHeight = 16.sp
                 )
@@ -98,12 +107,12 @@ internal fun ChainPage(c: LabColors, s: ChainUi, onOrder: (ChainOrder) -> Unit, 
             }
         }
         val missing = buildList {
-            if (!s.psiphonReady) add("Psiphon")
-            if (s.order == ChainOrder.PSIPHON_MATRIX) {
-                if (!s.matrixReady) add("Matrix Transport")
-            } else if (s.order == ChainOrder.PSIPHON_MASQUE) {
-                if (!s.masqueReady) add("WARP MASQUE")
-            } else if (!s.torReady) add("Tor")
+            val hops = s.order.hops
+            if ("psiphon" in hops && !s.psiphonReady) add("Psiphon")
+            if ("tor" in hops && !s.torReady) add("Tor")
+            if ("matrix-transport" in hops && !s.matrixReady) add("Matrix Transport")
+            if ("masque" in hops && !s.masqueReady) add("WARP MASQUE")
+            if ("aether" in hops && !s.aetherReady) add("Aether")
         }
         if (missing.isNotEmpty()) item {
             Panel(c) {
