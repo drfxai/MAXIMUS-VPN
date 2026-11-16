@@ -13,3 +13,12 @@ git -C "$source_dir" checkout --detach FETCH_HEAD
 test "$(git -C "$source_dir" rev-parse HEAD)" = "$revision"
 
 build_main "$source_dir" . amneziawg
+
+# The CLI is retained for packaging. Android calls this JNI form of the same pinned core.
+mkdir -p "$source_dir/cmd/maximus-android"
+cp "$(dirname "${BASH_SOURCE[0]}")/../amneziawg/"{android.go,android.c} "$source_dir/cmd/maximus-android/"
+library="$(cd "$OUT" && pwd)/libamneziawg_android.so"
+(cd "$source_dir" && GOFLAGS=-mod=readonly go build -trimpath -buildvcs=false \
+  -buildmode=c-shared -ldflags '-s -w -buildid= -extldflags "-Wl,-z,max-page-size=16384"' \
+  -o "$library" ./cmd/maximus-android)
+rm -f "${library%.so}.h"
