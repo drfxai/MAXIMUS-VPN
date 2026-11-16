@@ -27,6 +27,14 @@ class EngineChainTest {
         assertTrue(EngineChain.problem(chain("aether", "tor"))!!.contains("last"))
     }
 
+    @Test fun savedNodeCanBeBeforeOrAfterTor() {
+        val saved = EngineChain.Hop(SingBoxSidecar.id, profileId = "saved")
+        val tor = EngineChain.Hop("tor")
+        assertNull(EngineChain.problem(EngineChain.Chain(listOf(saved, tor))))
+        assertNull(EngineChain.problem(EngineChain.Chain(listOf(tor, saved))))
+        assertEquals(saved, EngineChain.plan(EngineChain.Chain(listOf(tor, saved))).first().hop)
+    }
+
     @Test fun theSameEngineTwiceIsRejected() =
         assertTrue(EngineChain.problem(chain("tor", "tor"))!!.contains("once"))
 

@@ -19,6 +19,20 @@ import org.json.JSONObject
 
 /** V1.0.1 step 5: the engine registry, the capability matrix and the per-engine circuit breaker. */
 class EngineRegistryTest {
+    @Test fun amneziaCustomPacketOnlyProfilesKeepTheMihomoSettings() {
+        val profile = com.example.vpn.engine.WireGuardConf.parse("""
+            [Interface]
+            PrivateKey = test-private-key
+            Address = 10.0.0.2/32
+            I1 = <b 0x01020304>
+            [Peer]
+            PublicKey = test-public-key
+            Endpoint = example.invalid:51820
+        """.trimIndent())
+        val proxy = com.example.vpn.sidecar.MihomoSidecar.proxyOf(profile)!!
+        assertEquals("<b 0x01020304>", proxy.getJSONObject("amnezia-wg-option").getString("i1"))
+    }
+
     @Test fun directPsiphonLetsTheCoreChooseTransport() {
         assertFalse(JSONObject(ConfigFreeMethod.PSIPHON.profile().extraSettings).optBoolean("tcpOnly"))
     }

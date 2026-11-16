@@ -7,10 +7,22 @@ import com.example.data.model.VlessProfile
 /** Import compatibility is broader than the Xray-core and Kotlin forwarding runtimes. */
 object RuntimeCapabilities {
     fun unsupportedReason(profile: VlessProfile): String? {
+        if (AmneziaNativeEngine.handles(profile)) {
+            if (!AmneziaNativeEngine.available()) return "The AmneziaWG native library is not included for this device."
+            return runCatching { AmneziaNativeEngine.config(profile); null }
+                .getOrElse { "The native AmneziaWG profile is invalid." }
+        }
         if (com.example.vpn.sidecar.ChainRunner.isChain(profile)) {
             val chain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
                 ?: return "The engine chain is invalid."
-            return chain.hops.firstNotNullOfOrNull { unsupportedReason(com.example.vpn.sidecar.EngineChain.hopProfile(it)) }
+            return chain.hops.firstNotNullOfOrNull { hop ->
+                val hopProfile = try {
+                    com.example.vpn.sidecar.EngineChain.hopProfile(hop)
+                } catch (_: Exception) {
+                    return "A saved node in this engine chain is unavailable or incompatible."
+                }
+                unsupportedReason(hopProfile)
+            }
         }
         // Profiles a separate engine program carries (Mihomo, Psiphon, Tor, DNS tunnel) are checked by it.
         com.example.vpn.sidecar.Sidecars.forProfile(profile)?.let { engine ->

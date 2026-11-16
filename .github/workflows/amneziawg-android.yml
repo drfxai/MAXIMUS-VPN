@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'scripts/engines/amneziawg.sh'
+      - 'scripts/amneziawg/**'
       - 'scripts/engines/common.sh'
       - 'scripts/check-apk.py'
       - '.github/workflows/amneziawg-android.yml'
@@ -41,9 +42,13 @@ jobs:
           import sys
 
           expected = {"arm64-v8a": (2, 183), "armeabi-v7a": (1, 40), "x86_64": (2, 62)}
-          with Path("build/amneziawg/libamneziawg.so").open("rb") as binary:
-              header = binary.read(20)
-          assert header[:4] == b"\x7fELF"
-          assert int.from_bytes(header[16:18], "little") == 3, "Expected an Android PIE"
-          assert (header[4], int.from_bytes(header[18:20], "little")) == expected[sys.argv[1]]
+          libraries = ("libamneziawg.so", "libamneziawg_android.so")
+          for name in libraries:
+              with Path("build/amneziawg", name).open("rb") as binary:
+                  header = binary.read(20)
+              assert header[:4] == b"\x7fELF"
+              assert int.from_bytes(header[16:18], "little") == 3, "Expected an Android PIE"
+              assert (header[4], int.from_bytes(header[18:20], "little")) == expected[sys.argv[1]]
           PY
+
+          readelf -Ws build/amneziawg/libamneziawg_android.so | grep 'Java_com_example_vpn_engine_AmneziaNativeEngine_startNative'

@@ -19,6 +19,7 @@ object ChainRunner {
     class Running(
         val entryContext: SidecarContext,
         val entryLaunch: SidecarLaunch,
+        val entryProfile: VlessProfile,
         val engines: List<RunningEngine>,
         private val onStop: () -> Unit
     ) : RunningEngine {
@@ -60,6 +61,7 @@ object ChainRunner {
             val launches = arrayOfNulls<SidecarLaunch>(chain.hops.size)
             var entryContext: SidecarContext? = null
             var entryLaunch: SidecarLaunch? = null
+            var entryProfile: VlessProfile? = null
             for (step in EngineChain.plan(chain)) {
                 val engine = engineFor(step.hop.engineId)
                     ?: throw IllegalStateException("The ${step.hop.engineId} engine is not included in this build for this phone")
@@ -69,20 +71,29 @@ object ChainRunner {
                 val next = step.upstreamHop
                 val nextContext = next?.let { contexts[it] }
                 val nextAuth = next?.let { launches[it]?.socksAuth } == true
-                val ctx = context.create(step.hop.engineId, port, upstream).copy(
+                val base = context.create(step.hop.engineId, port, upstream)
+                val workDir = if (step.hop.engineId == SingBoxSidecar.id) {
+                    File(base.workDir, "hop-${step.index}").apply {
+                        check(isDirectory || mkdirs()) { "Could not create the saved-node working directory." }
+                    }
+                } else base.workDir
+                val ctx = base.copy(
+                    workDir = workDir,
                     upstreamUser = if (nextAuth) nextContext?.socksUser else null,
                     upstreamPass = if (nextAuth) nextContext?.socksPass else null
                 )
                 contexts[step.index] = ctx
-                val (running, launch) = start.start(engine, EngineChain.hopProfile(step.hop), ctx)
+                val profile = EngineChain.hopProfile(step.hop)
+                val (running, launch) = start.start(engine, profile, ctx)
                 started += running
                 launches[step.index] = launch
                 if (step.index == 0) {
                     entryContext = ctx
                     entryLaunch = launch
+                    entryProfile = profile
                 }
             }
-            return Running(entryContext!!, entryLaunch!!, started.toList(), ::stopAll)
+            return Running(entryContext!!, entryLaunch!!, entryProfile!!, started.toList(), ::stopAll)
         } catch (t: Throwable) {
             stopAll()
             throw t
@@ -101,17 +112,18 @@ object ChainRunner {
      * A saved profile standing for a chain. Each hop keeps only its own knobs (Psiphon's region, Tor's
      * bridges), so the hop engines are rebuilt from them at run time.
      */
-    fun profile(chain: EngineChain.Chain, titleOf: (String) -> String): VlessProfile {
+    fun profile(chain: EngineChain.Chain, nodeTitles: Map<String, String> = emptyMap(), titleOf: (String) -> String): VlessProfile {
         val hops = org.json.JSONArray()
         chain.hops.forEach { hop ->
             val o = org.json.JSONObject().put("engine", hop.engineId)
             if (hop.region.isNotBlank()) o.put("region", hop.region)
             if (hop.bridges.isNotBlank()) o.put("bridges", hop.bridges)
+            if (hop.profileId.isNotBlank()) o.put("profileId", hop.profileId)
             hops.put(o)
         }
         val extras = org.json.JSONObject().put(KEY_CHAIN, hops)
         return VlessProfile(
-            name = EngineChain.describe(chain, titleOf),
+            name = chain.hops.joinToString("  →  ") { hop -> nodeTitles[hop.profileId] ?: titleOf(hop.engineId) },
             address = "chain",
             port = 0,
             uuid = "",
@@ -127,7 +139,7 @@ object ChainRunner {
         val hops = (0 until array.length()).mapNotNull { i ->
             val o = array.optJSONObject(i) ?: return@mapNotNull null
             val engine = o.optString("engine").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            EngineChain.Hop(engine, o.optString("region").trim(), o.optString("bridges").trim())
+            EngineChain.Hop(engine, o.optString("region").trim(), o.optString("bridges").trim(), o.optString("profileId").trim())
         }
         return EngineChain.Chain(hops).takeIf { it.hops.size == array.length() && EngineChain.problem(it) == null }
     }

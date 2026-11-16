@@ -57,11 +57,12 @@ object Sidecars {
     /** True when this build carries the engine's program for this phone's CPU. */
     fun isBundled(engine: SidecarEngine): Boolean = executable(engine) != null
 
-    fun forProfile(profile: VlessProfile): SidecarEngine? = ENGINES.firstOrNull { it.handles(profile) }
+    fun forProfile(profile: VlessProfile): SidecarEngine? =
+        if (com.example.vpn.engine.AmneziaNativeEngine.handles(profile)) null else ENGINES.firstOrNull { it.handles(profile) }
 
     /** True when [profile] runs on a bundled engine: a lone sidecar, or a chain of them. */
     fun isEngineProfile(profile: VlessProfile): Boolean =
-        forProfile(profile) != null || ChainRunner.isChain(profile)
+        com.example.vpn.engine.AmneziaNativeEngine.handles(profile) || forProfile(profile) != null || ChainRunner.isChain(profile)
 
     fun freeLoopbackPort(): Int = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
 
