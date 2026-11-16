@@ -302,9 +302,17 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
             val ui = _state.value.chain
             val chain = com.example.vpn.sidecar.EngineChain.Chain(ui.order.hops.map { hop(it, ui.region) })
             val profile = com.example.vpn.sidecar.ChainRunner.profile(chain) { titleOf(it) }
-            withContext(Dispatchers.IO) { runCatching { RayApplication.instance.serverRepository.insert(profile) } }
-            local.update { it.copy(chain = it.chain.copy(saving = false, savedName = profile.name)) }
-            lab.showMessage("Saved the chain \"${profile.name}\". Connect to it on the Servers screen.")
+            try {
+                withContext(Dispatchers.IO) { RayApplication.instance.serverRepository.insert(profile) }
+                local.update { it.copy(chain = it.chain.copy(savedName = profile.name)) }
+                lab.showMessage("Saved the chain \"${profile.name}\". Connect to it on the Servers screen.")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                lab.showMessage("Could not save the engine chain.")
+            } finally {
+                local.update { it.copy(chain = it.chain.copy(saving = false)) }
+            }
         }
     }
 
