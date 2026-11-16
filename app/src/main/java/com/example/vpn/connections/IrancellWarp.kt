@@ -34,6 +34,7 @@ import com.example.vpn.sidecar.AetherSidecar
 object IrancellWarp {
     /** Whole direct WARP attempt on Irancell, engine preparation to readiness. */
     const val BUDGET_MS = 20_000L
+    const val MANUAL_BUDGET_MS = 60_000L
 
     /**
      * Aether retries the account call on its fallback routes by itself; a registration failure still reported this
@@ -65,8 +66,8 @@ object IrancellWarp {
      * Readiness wait for the attempt: the engine's own [windowMs], cut to what is left of [BUDGET_MS] since
      * [startedAt], never below [MIN_WAIT_MS].
      */
-    fun waitMs(windowMs: Long, startedAt: Long, now: Long): Long =
-        minOf(windowMs, maxOf(MIN_WAIT_MS, BUDGET_MS - (now - startedAt)))
+    fun waitMs(windowMs: Long, startedAt: Long, now: Long, budgetMs: Long = BUDGET_MS): Long =
+        minOf(windowMs, maxOf(MIN_WAIT_MS, budgetMs - (now - startedAt)))
 
     /** The attempt's account API route: Aether's own (native) unless the user picked a route. */
     fun withNativeApi(candidate: VlessProfile): VlessProfile {
