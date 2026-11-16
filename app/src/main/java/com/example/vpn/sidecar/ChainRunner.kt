@@ -71,7 +71,14 @@ object ChainRunner {
                 val next = step.upstreamHop
                 val nextContext = next?.let { contexts[it] }
                 val nextAuth = next?.let { launches[it]?.socksAuth } == true
-                val ctx = context.create(step.hop.engineId, port, upstream).copy(
+                val base = context.create(step.hop.engineId, port, upstream)
+                val workDir = if (step.hop.engineId == SingBoxSidecar.id) {
+                    File(base.workDir, "hop-${step.index}").apply {
+                        check(isDirectory || mkdirs()) { "Could not create the saved-node working directory." }
+                    }
+                } else base.workDir
+                val ctx = base.copy(
+                    workDir = workDir,
                     upstreamUser = if (nextAuth) nextContext?.socksUser else null,
                     upstreamPass = if (nextAuth) nextContext?.socksPass else null
                 )
@@ -105,7 +112,7 @@ object ChainRunner {
      * A saved profile standing for a chain. Each hop keeps only its own knobs (Psiphon's region, Tor's
      * bridges), so the hop engines are rebuilt from them at run time.
      */
-    fun profile(chain: EngineChain.Chain, titleOf: (String) -> String): VlessProfile {
+    fun profile(chain: EngineChain.Chain, nodeTitles: Map<String, String> = emptyMap(), titleOf: (String) -> String): VlessProfile {
         val hops = org.json.JSONArray()
         chain.hops.forEach { hop ->
             val o = org.json.JSONObject().put("engine", hop.engineId)
@@ -116,7 +123,7 @@ object ChainRunner {
         }
         val extras = org.json.JSONObject().put(KEY_CHAIN, hops)
         return VlessProfile(
-            name = EngineChain.describe(chain, titleOf),
+            name = chain.hops.joinToString("  →  ") { hop -> nodeTitles[hop.profileId] ?: titleOf(hop.engineId) },
             address = "chain",
             port = 0,
             uuid = "",
