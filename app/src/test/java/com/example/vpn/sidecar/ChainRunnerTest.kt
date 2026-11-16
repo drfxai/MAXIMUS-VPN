@@ -110,6 +110,43 @@ class ChainRunnerTest {
         assertEquals("saved-profile-id", EngineChain.plan(chain).last().hop.profileId)
     }
 
+    @Test fun twoSavedNodesUseSeparateConfigsAndForwardCredentials() {
+        val entry = EngineChain.Hop(SingBoxSidecar.id, profileId = "entry")
+        val exit = EngineChain.Hop(SingBoxSidecar.id, profileId = "exit")
+        val chain = EngineChain.Chain(listOf(entry, exit))
+        val serialized = ChainRunner.profile(chain, mapOf("entry" to "Entry", "exit" to "Exit")) { it }
+        assertEquals("Entry  →  Exit", serialized.name)
+        assertEquals(chain, ChainRunner.readChain(serialized))
+        val original = BuiltinExitNode.loadProfile
+        val workDir = java.nio.file.Files.createTempDirectory("maximus-chain-test").toFile()
+        try {
+            BuiltinExitNode.loadProfile = { id ->
+                VlessProfile(id = id, name = id, address = "example.invalid", port = 443, uuid = "test-credential")
+            }
+            val contexts = mutableListOf<SidecarContext>()
+            var port = 1000
+            val running = ChainRunner.start(
+                chain, { FakeEngine(it) }, { port++ },
+                { _, socks, upstream ->
+                    SidecarContext(workDir, File(workDir, "bin"), socks, "user-$socks", "pass-$socks",
+                        OperationalMode.DAILY, upstream)
+                },
+                { _, _, context ->
+                    contexts += context
+                    FakeRunning() to SidecarLaunch(command = emptyList(), socksAuth = true)
+                }
+            )
+            assertEquals(listOf("hop-1", "hop-0"), contexts.map { it.workDir.name })
+            assertEquals(1000, contexts.last().upstreamSocks)
+            assertEquals("user-1000", contexts.last().upstreamUser)
+            assertEquals("entry", running.entryProfile.id)
+            running.stop()
+        } finally {
+            BuiltinExitNode.loadProfile = original
+            workDir.deleteRecursively()
+        }
+    }
+
     @Test fun anOrdinaryProfileIsNotAChain() {
         assertFalse(ChainRunner.isChain(VlessProfile(name = "s", address = "1.2.3.4", port = 443, uuid = "x")))
         assertNull(ChainRunner.readChain(VlessProfile(name = "s", address = "1.2.3.4", port = 443, uuid = "x")))
