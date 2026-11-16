@@ -1585,23 +1585,31 @@ class RayVpnService : VpnService() {
             if (safeMtu != configuredMtu) XrayLogManager.i("VPN", "Tunnel MTU $safeMtu on this network instead of $configuredMtu: " +
                 "a bulk transfer stalled here before (testing whether MTU is the cause).")
             tunMtu = Triple(routeNetwork, safeMtu, configuredMtu)
-            val primaryDns = com.example.vpn.safety.VpnRoutePolicy.DNS_SERVER
+            val amnezia = com.example.vpn.engine.AmneziaNativeEngine.takeIf { it.handles(profile) }
+            val nativeConfig = amnezia?.config(profile)
+            val primaryDns = nativeConfig?.dns?.first() ?: com.example.vpn.safety.VpnRoutePolicy.DNS_SERVER
+            val interfaceIp = nativeConfig?.addresses?.first()?.ip ?: "172.19.0.1"
             val builder = Builder()
                 .setSession("Maximus - ${profile.name}")
                 .setMtu(safeMtu)
                 .setBlocking(true)
-                .addDnsServer(primaryDns)
-            // IPv4 and IPv6 are always captured (VpnRoutePolicy); unsupported engines drop IPv6 inside the TUN.
-            com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { builder.addAddress(it.address, it.prefix) }
+            if (nativeConfig == null) {
+                builder.addDnsServer(primaryDns)
+                com.example.vpn.safety.VpnRoutePolicy.ADDRESSES.forEach { builder.addAddress(it.address, it.prefix) }
+            } else {
+                nativeConfig.dns.forEach { builder.addDnsServer(it) }
+                nativeConfig.addresses.forEach { builder.addAddress(it.ip, it.prefix) }
+            }
+            // Capture both families; the native engine only accepts traffic allowed by its peer.
             com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { builder.addRoute(it.address, it.prefix) }
-            val sidecarEngine = com.example.vpn.sidecar.Sidecars.forProfile(profile)
+            val sidecarEngine = if (amnezia == null) com.example.vpn.sidecar.Sidecars.forProfile(profile) else null
             val engineChain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
             appOutsideVpn = sidecarEngine != null || engineChain != null
             // A separate engine program cannot ask Android to keep its own sockets out of the VPN, so the app's
             // own traffic is left out then. The user's per-app routing (Settings › Routing & DNS) is applied too.
             com.example.vpn.routing.SplitTunnelStore.apply(this@RayVpnService, builder, excludeSelf = appOutsideVpn, interfaceName = "tunnel")
 
-            XrayLogManager.i("VPN", "[DIAGNOSTICS] 4. Builder.establish() invoked (MTU=$safeMtu, Address=172.19.0.1/30, DNS=$primaryDns).")
+            XrayLogManager.i("VPN", "[DIAGNOSTICS] 4. Builder.establish() invoked (MTU=$safeMtu, Address=$interfaceIp, DNS=$primaryDns).")
             val pfd = try {
                 builder.establish()
             } catch (e: Exception) {
@@ -1649,7 +1657,7 @@ class RayVpnService : VpnService() {
             updateState(_vpnState.value.copy(
                 status = ConnectionStatus.VPN_INTERFACE_ESTABLISHED,
                 activeProfile = requestedProfile,
-                vpnIp = "172.19.0.1",
+                vpnIp = interfaceIp,
                 errorMessage = null,
                 uploadBytes = 0,
                 downloadBytes = 0,
@@ -1679,19 +1687,20 @@ class RayVpnService : VpnService() {
             sidecarNetwork = ledgerNetwork().takeIf { sidecar != null }
             sidecarOwnerFingerprint = requestedProfile.effectiveFingerprint.takeIf { sidecar != null }
             val runtime = EngineSelectionPolicy.select(profile)
-            val engineId = com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
+            val engineId = if (amnezia != null) com.example.vpn.engine.AmneziaNativeEngine.ID
+                else com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
             if (!engineBreaker.allows(engineId)) {
                 // Each profile has one engine today, so this only reports; with a second engine for
                 // the same protocol the selection will skip an open breaker.
                 XrayLogManager.w("VPN", "Engine $engineId failed to start several times in a row; trying it again.")
             }
-            activeEngine = when (runtime) {
+            activeEngine = amnezia ?: when (runtime) {
                 EngineSelectionPolicy.Runtime.KOTLIN_TUNNEL -> com.example.vpn.engine.KotlinTunnelEngine.instance
                 EngineSelectionPolicy.Runtime.XRAY -> XrayEngineImpl.instance
             }
 
             updateState(_vpnState.value.copy(activeEngineName = activeEngine.engineVersion))
-            notificationCore = ConnectedNotification.coreLabel(
+            notificationCore = amnezia?.engineVersion ?: ConnectedNotification.coreLabel(
                 kotlinTunnel = runtime == EngineSelectionPolicy.Runtime.KOTLIN_TUNNEL,
                 sidecarId = sidecarEngine?.id, chain = engineChain != null)
 
@@ -1769,7 +1778,7 @@ class RayVpnService : VpnService() {
                 }
             )
             tunnelManager?.start()
-            XrayLogManager.i("VPN", "[DIAGNOSTICS] 8. ${if (activeEngine is NativeTunVpnEngine) "Native Xray TUN loop started" else "TUN packet loop started"}.")
+            XrayLogManager.i("VPN", "[DIAGNOSTICS] 8. ${if (activeEngine is NativeTunVpnEngine) "Native TUN loop started" else "TUN packet loop started"}.")
 
             if (!coroutineContext.isActive) {
                 disconnectResources()
@@ -1782,7 +1791,7 @@ class RayVpnService : VpnService() {
             // goes through, the state says the tunnel is up but unverified.
             val startTime = System.currentTimeMillis()
             mutateState {
-                if (it.attemptId == attemptId) it.copy(status = ConnectionStatus.VERIFYING, vpnIp = "172.19.0.1", errorMessage = null,
+                if (it.attemptId == attemptId) it.copy(status = ConnectionStatus.VERIFYING, vpnIp = interfaceIp, errorMessage = null,
                     revived = activeRecovery != null) else it
             }
             showForegroundNotification("Verifying traffic through ${profile.name}...")
