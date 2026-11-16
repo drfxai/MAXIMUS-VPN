@@ -107,11 +107,11 @@ object EngineRegistry {
 
     /**
      * Native files required in release APKs: sidecars, the Tor library, and the AmneziaWG
-     * executable. AmneziaWG stays unavailable in the engine registry until it can run with Android TUN.
+     * executable and Android TUN library.
      * A test keeps this list in sync with scripts/check-apk.py.
      */
     fun requiredNativePrograms(): Set<String> =
-        com.example.vpn.sidecar.Sidecars.ENGINES.map { it.binary }.toSet() + TOR_LIBRARY + AMNEZIAWG.id
+        com.example.vpn.sidecar.Sidecars.ENGINES.map { it.binary }.toSet() + TOR_LIBRARY + AMNEZIAWG.id + "amneziawg_android"
 
     /** The Tor library inside the APK (libtor.so); the lyrebird program is TorSidecar's. */
     const val TOR_LIBRARY = "tor"
