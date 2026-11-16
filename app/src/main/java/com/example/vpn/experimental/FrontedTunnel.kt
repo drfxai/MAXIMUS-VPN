@@ -29,14 +29,15 @@ object FrontedTunnel {
         return address.hostAddress ?: error("Invalid IP address")
     }
 
+    fun canUseBase(base: VlessProfile): Boolean =
+        base.profileType == ProfileType.VLESS &&
+            base.protocolType in setOf(ProtocolType.VLESS, ProtocolType.VMESS, ProtocolType.TROJAN) &&
+            base.security.equals("tls", true) && base.transport.equals("ws", true) &&
+            base.rawConfig.isBlank() && !base.allowInsecure &&
+            base.verifyPeerCertByName.isBlank() && base.pinnedPeerCertSha256.isBlank()
+
     fun build(base: VlessProfile, endpoint: String, tlsName: String, originHost: String, splitHello: Boolean = false): VlessProfile {
-        require(base.profileType == ProfileType.VLESS && base.protocolType in setOf(ProtocolType.VLESS, ProtocolType.VMESS, ProtocolType.TROJAN) &&
-            base.security.equals("tls", true) && base.transport.equals("ws", true) && base.rawConfig.isBlank()) {
-            "Choose a VLESS, VMess or Trojan WebSocket TLS profile"
-        }
-        require(!base.allowInsecure && base.verifyPeerCertByName.isBlank() && base.pinnedPeerCertSha256.isBlank()) {
-            "Use a profile with normal CA and host-name verification"
-        }
+        require(canUseBase(base)) { "Choose a VLESS, VMess or Trojan WebSocket TLS profile with normal certificate verification" }
         var fronted = base.copy(id = UUID.randomUUID().toString(), canonicalFingerprint = "", name = "Fronted · ${base.name}",
             address = publicAddress(endpoint), sni = domain(tlsName), host = domain(originHost),
             echConfigList = "", echSockopt = "", allowInsecure = false,
