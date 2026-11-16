@@ -16,6 +16,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import com.example.vpn.sidecar.EngineChain
+import com.example.vpn.sidecar.SingBoxSidecar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +55,7 @@ data class ChainUi(
     /** Psiphon egress country, or empty for any. */
     val region: String = "",
     val savedNodeId: String? = null,
+    val customHops: List<String>? = null,
     val psiphonReady: Boolean = true,
     val torReady: Boolean = true,
     val masqueReady: Boolean = false,
@@ -60,7 +64,15 @@ data class ChainUi(
     val saving: Boolean = false,
     /** Name of the chain last saved this session, for the confirmation line. */
     val savedName: String? = null
-)
+) {
+    val hopIds: List<String> get() = customHops ?:
+        (listOfNotNull(SingBoxSidecar.id.takeIf { savedNodeId != null }) + order.hops)
+
+    fun engineChain() = EngineChain.Chain(hopIds.map { id ->
+        EngineChain.Hop(id, region = if (id == "psiphon") region else "",
+            profileId = if (id == SingBoxSidecar.id) savedNodeId.orEmpty() else "")
+    })
+}
 
 /** Egress countries offered for the Psiphon hop; the first is "any". */
 internal val CHAIN_REGIONS = listOf("" to "Any", "US" to "US", "DE" to "DE", "NL" to "NL", "GB" to "GB", "FR" to "FR", "CA" to "CA")
@@ -69,7 +81,8 @@ internal val CHAIN_REGIONS = listOf("" to "Any", "US" to "US", "DE" to "DE", "NL
 internal fun ChainPage(
     c: LabColors, s: ChainUi, configs: List<LabConfigOption>, onNode: (String?) -> Unit,
     onOrder: (ChainOrder) -> Unit, onRegion: (String) -> Unit, onSave: () -> Unit,
-    onPsiphonSettings: (String) -> Unit = {}
+    onPsiphonSettings: (String) -> Unit = {},
+    onCustomHops: (List<String>?) -> Unit = {}
 ) {
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -135,8 +148,49 @@ internal fun ChainPage(
                 )
             }
         }
-        item { GroupLabel(c, "Psiphon exit country") }
         item {
+            Panel(c) {
+                val hops = s.hopIds
+                val savedTitle = configs.firstOrNull { it.id == s.savedNodeId }?.name ?: "Saved node"
+                fun title(id: String) = when (id) {
+                    SingBoxSidecar.id -> savedTitle
+                    "aether" -> "Aether HTTP/2"
+                    "masque" -> "WARP MASQUE"
+                    "matrix-transport" -> "Matrix Transport"
+                    else -> id.replaceFirstChar { it.uppercase() }
+                }
+                var adding by remember { mutableStateOf(false) }
+                LabText("Custom order", c.text, 14.sp, FontWeight.SemiBold)
+                if (s.customHops == null) {
+                    TextButton(onClick = { onCustomHops(hops) }) { Text("Customize hop order") }
+                } else {
+                    hops.forEachIndexed { index, id ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("${index + 1}. ${title(id)}", modifier = Modifier.weight(1f))
+                            TextButton(onClick = {
+                                onCustomHops(hops.toMutableList().apply { add(index - 1, removeAt(index)) })
+                            }, enabled = index > 0) { Text("Up") }
+                            TextButton(onClick = { onCustomHops(hops.filterIndexed { at, _ -> at != index }) }) {
+                                Text("Remove")
+                            }
+                        }
+                    }
+                    TextButton(onClick = { adding = true }, enabled = hops.size < EngineChain.MAX_HOPS) { Text("Add hop") }
+                    DropdownMenu(expanded = adding, onDismissRequest = { adding = false }) {
+                        EngineChain.CHAINABLE.filter { it !in hops && (it != SingBoxSidecar.id || s.savedNodeId != null) }
+                            .forEach { id ->
+                                DropdownMenuItem(text = { Text(title(id)) }, onClick = {
+                                    onCustomHops(hops + id)
+                                    adding = false
+                                })
+                            }
+                    }
+                    TextButton(onClick = { onCustomHops(null) }) { Text("Use preset order") }
+                }
+            }
+        }
+        if ("psiphon" in s.hopIds) item { GroupLabel(c, "Psiphon exit country") }
+        if ("psiphon" in s.hopIds) item {
             Column(Modifier.padding(horizontal = Gutter)) {
                 Segmented(c, CHAIN_REGIONS.map { it.first }, s.region, { code -> CHAIN_REGIONS.first { it.first == code }.second }, onRegion)
                 LabText("Where Psiphon leaves to. Any lets it pick the fastest.", c.text3, 12.sp,
@@ -144,13 +198,15 @@ internal fun ChainPage(
             }
         }
         val missing = buildList {
-            val hops = s.order.hops
+            val hops = s.hopIds
             if ("psiphon" in hops && !s.psiphonReady) add("Psiphon")
             if ("tor" in hops && !s.torReady) add("Tor")
             if ("matrix-transport" in hops && !s.matrixReady) add("Matrix Transport")
             if ("masque" in hops && !s.masqueReady) add("WARP MASQUE")
             if ("aether" in hops && !s.aetherReady) add("Aether")
         }
+        val chainProblem = EngineChain.problem(s.engineChain())
+        if (chainProblem != null) item { Footnote(c, chainProblem) }
         if (missing.isNotEmpty()) item {
             Panel(c) {
                 Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -161,8 +217,8 @@ internal fun ChainPage(
         }
         item {
             Column(Modifier.padding(horizontal = Gutter)) {
-                PrimaryButton(c, if (s.saving) "Saving..." else "Save this chain", Icons.Rounded.Save, Modifier.fillMaxWidth(), enabled = !s.saving && missing.isEmpty() &&
-                    (s.savedNodeId == null || configs.any { it.id == s.savedNodeId && it.supportsSavedNodeChain }), onClick = onSave)
+                PrimaryButton(c, if (s.saving) "Saving..." else "Save this chain", Icons.Rounded.Save, Modifier.fillMaxWidth(), enabled = !s.saving && missing.isEmpty() && chainProblem == null &&
+                    (SingBoxSidecar.id !in s.hopIds || configs.any { it.id == s.savedNodeId && it.supportsSavedNodeChain }), onClick = onSave)
                 s.savedName?.let { name ->
                     Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         androidx.compose.material3.Icon(Icons.Rounded.CheckCircle, null, tint = c.good, modifier = Modifier.width(18.dp))
