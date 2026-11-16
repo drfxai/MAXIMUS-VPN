@@ -20,7 +20,7 @@ cp "$root/scripts/radiance/main.go" "$source_dir/cmd/maximus/main.go"
 
 # The upstream mixed listener has no users in novpn mode. Require the local
 # credentials supplied by the parent process; fail the build if upstream moved.
-python3 - "$source_dir/vpn/boxoptions_novpn.go" <<'PY'
+python3 - "$source_dir/vpn/boxoptions_novpn.go" "$source_dir/vpn/boxoptions.go" <<'PY'
 from pathlib import Path
 import sys
 
@@ -31,6 +31,14 @@ assert source.count(needle) == 1
 source = source.replace('import (', 'import (\n\t"os"\n\t"github.com/sagernet/sing/common/auth"', 1)
 source = source.replace(needle, needle + '\n\t\t\t\tUsers: []auth.User{{Username: os.Getenv("MAXIMUS_SOCKS_USER"), Password: os.Getenv("MAXIMUS_SOCKS_PASS")}},')
 path.write_text(source)
+
+# MAXIMUS owns Android's TUN and excludes its UID while the sidecar runs.
+# A SOCKS-only Android child must not require native interface detection.
+path = Path(sys.argv[2])
+source = path.read_text()
+needle = 'AutoDetectInterface: true,'
+assert source.count(needle) == 1
+path.write_text(source.replace(needle, 'AutoDetectInterface: common.Platform != "android" || hasTunInbound(inbounds),'))
 PY
 mkdir -p "$OUT"
 output="$(cd "$OUT" && pwd)"
