@@ -77,9 +77,10 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         val psiphonReady = ready("psiphon", true)
         val matrixReady = ready("matrix-transport", false)
         val masqueReady = ready("masque", false)
+        val aetherReady = ready("aether", false)
         val torReady = ready("tor", true)
         local.update { it.copy(revival = it.revival.copy(eligible = eligible, detected = detected),
-            chain = it.chain.copy(psiphonReady = psiphonReady, torReady = torReady, masqueReady = masqueReady, matrixReady = matrixReady)) }
+            chain = it.chain.copy(psiphonReady = psiphonReady, torReady = torReady, masqueReady = masqueReady, matrixReady = matrixReady, aetherReady = aetherReady)) }
         local.value = local.value.copy(configs = configs.map { p ->
             LabConfigOption(p.id, p.name.ifBlank { "Config" }, listOf(p.protocolType.displayName, p.transport.uppercase().ifBlank { null }, p.security.uppercase().ifBlank { null })
                 .filterNotNull().filter { it != "NONE" }.joinToString(" · "))
@@ -299,8 +300,7 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         local.update { it.copy(chain = it.chain.copy(saving = true)) }
         viewModelScope.launch {
             val ui = _state.value.chain
-            val chain = com.example.vpn.sidecar.EngineChain.Chain(listOf(
-                hop(ui.order.first, ui.region), hop(ui.order.second, ui.region)))
+            val chain = com.example.vpn.sidecar.EngineChain.Chain(ui.order.hops.map { hop(it, ui.region) })
             val profile = com.example.vpn.sidecar.ChainRunner.profile(chain) { titleOf(it) }
             withContext(Dispatchers.IO) { runCatching { RayApplication.instance.serverRepository.insert(profile) } }
             local.update { it.copy(chain = it.chain.copy(saving = false, savedName = profile.name)) }
@@ -311,7 +311,7 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     private fun hop(engineId: String, region: String) =
         com.example.vpn.sidecar.EngineChain.Hop(engineId, region = if (engineId == "psiphon") region else "")
 
-    private fun titleOf(engineId: String) = when (engineId) { "psiphon" -> "Psiphon"; "masque" -> "WARP MASQUE"; "matrix-transport" -> "Matrix Transport"; else -> "Tor" }
+    private fun titleOf(engineId: String) = when (engineId) { "psiphon" -> "Psiphon"; "masque" -> "WARP MASQUE"; "matrix-transport" -> "Matrix Transport"; "aether" -> "Aether"; else -> "Tor" }
     fun chooseFirewall(f: com.example.vpn.connectivity.NetworkFirewalls.Firewall?) = local.update { it.copy(revival = it.revival.copy(chosen = f)) }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }
