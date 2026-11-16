@@ -99,7 +99,7 @@ enum class LabSection(val title: String, val icon: ImageVector) {
 }
 
 /** A saved config the user can run an experiment on. Names only; no address or credential reaches the screen. */
-data class LabConfigOption(val id: String, val name: String, val detail: String, val supportsDomainFronting: Boolean = false)
+data class LabConfigOption(val id: String, val name: String, val detail: String, val supportsDomainFronting: Boolean = false, val supportsSavedNodeChain: Boolean = false)
 
 /** A research card (Phase 7). Never shown as verified until LAB measured it on this phone. */
 data class LabResearchItem(val id: String, val title: String, val state: String, val source: String, val compatibility: String, val at: Long)
@@ -151,6 +151,7 @@ class NetworkLabActions(
     val onRunShadowLink: () -> Unit = {},
     val onStopShadowLink: () -> Unit = {},
     val onChainOrder: (ChainOrder) -> Unit = {},
+    val onChainNode: (String?) -> Unit = {},
     val onChainRegion: (String) -> Unit = {},
     val onSaveChain: () -> Unit = {},
     val onScanEndpoints: (String) -> Unit = {},
@@ -183,7 +184,8 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
                     LabSection.REVIVE -> RevivePage(c, state.revival, state.vpnOn, state.snapshot.running != null || state.snapshot.analysisRunning,
                         actions.onRevive, actions.onStopRevive, relativeTime, actions.onFirewall)
                     LabSection.SERVICES -> ServicesPage(c, state.services, state.vpnOn, actions.onCheckServices, actions.onStopServices, relativeTime)
-                    LabSection.CHAIN -> ChainPage(c, state.chain, actions.onChainOrder, actions.onChainRegion, actions.onSaveChain, actions.onPsiphonSettings)
+                    LabSection.CHAIN -> ChainPage(c, state.chain, state.configs, actions.onChainNode, actions.onChainOrder,
+                        actions.onChainRegion, actions.onSaveChain, actions.onPsiphonSettings)
                 }
             }
         }
