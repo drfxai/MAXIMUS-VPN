@@ -33,7 +33,7 @@ object BuiltinConnections {
             AETHER_WARP -> AetherSidecar.profile()
             TOR_SNOWFLAKE -> TorSidecar.profile(name = title)
             SERVERLESS -> ServerlessSidecar.profile()
-            PSIPHON -> PsiphonSidecar.profile(tcpOnly = true)
+            PSIPHON -> PsiphonSidecar.profile()
             RADIANCE -> RadianceSidecar.profile()
             else -> AetherSidecar.profile(
                 transport = requireNotNull(aetherTransport),
