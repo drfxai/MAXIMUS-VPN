@@ -99,6 +99,7 @@ class PsiphonSidecarTest {
 
             val config = JSONObject(configFile.readText())
             assertEquals(40123, config.getInt("LocalSocksProxyPort"))
+            assertFalse(config.has("ListenInterface"))
             assertTrue(config.getBoolean("DisableLocalHTTPProxy"))
             assertFalse(config.has("LocalHttpProxyPort"))
             assertFalse("the build's settings must not route Psiphon through another proxy", config.has("UpstreamProxyURL"))
