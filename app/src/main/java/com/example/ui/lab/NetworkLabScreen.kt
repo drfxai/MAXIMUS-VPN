@@ -84,7 +84,8 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         local.value = local.value.copy(configs = configs.map { p ->
             LabConfigOption(p.id, p.name.ifBlank { "Config" }, listOf(p.protocolType.displayName, p.transport.uppercase().ifBlank { null }, p.security.uppercase().ifBlank { null })
                 .filterNotNull().filter { it != "NONE" }.joinToString(" · "),
-                supportsDomainFronting = com.example.vpn.experimental.FrontedTunnel.canUseBase(p))
+                supportsDomainFronting = com.example.vpn.experimental.FrontedTunnel.canUseBase(p),
+                supportsSavedNodeChain = com.example.vpn.sidecar.EngineChain.canUseSavedNode(p))
         })
     }
 
@@ -293,6 +294,10 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun chainOrder(order: ChainOrder) = local.update { it.copy(chain = it.chain.copy(order = order, savedName = null)) }
+    fun chainNode(id: String?) = local.update {
+        val order = if (id == null) ChainOrder.PSIPHON_TOR else ChainOrder.SAVED_TOR
+        it.copy(chain = it.chain.copy(savedNodeId = id, order = order, savedName = null))
+    }
     fun chainRegion(code: String) = local.update { it.copy(chain = it.chain.copy(region = code, savedName = null)) }
 
     /** Saves the built chain as a server profile the user can connect to. */
@@ -301,10 +306,23 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         local.update { it.copy(chain = it.chain.copy(saving = true)) }
         viewModelScope.launch {
             val ui = _state.value.chain
-            val chain = com.example.vpn.sidecar.EngineChain.Chain(ui.order.hops.map { hop(it, ui.region) })
-            val profile = com.example.vpn.sidecar.ChainRunner.profile(chain) { titleOf(it) }
             try {
-                withContext(Dispatchers.IO) { RayApplication.instance.serverRepository.insert(profile) }
+                val profile = withContext(Dispatchers.IO) {
+                    val hops = buildList {
+                        ui.savedNodeId?.let {
+                            add(com.example.vpn.sidecar.EngineChain.Hop(com.example.vpn.sidecar.SingBoxSidecar.id, profileId = it))
+                        }
+                        addAll(ui.order.hops.map { hop(it, ui.region) })
+                    }
+                    val chain = com.example.vpn.sidecar.EngineChain.Chain(hops)
+                    com.example.vpn.sidecar.EngineChain.problem(chain)?.let { error(it) }
+                    val nodeName = ui.savedNodeId?.let { com.example.vpn.sidecar.EngineChain.hopProfile(hops.first()).name }
+                    val profile = com.example.vpn.sidecar.ChainRunner.profile(chain) {
+                        if (it == com.example.vpn.sidecar.SingBoxSidecar.id) nodeName.orEmpty() else titleOf(it)
+                    }
+                    RayApplication.instance.serverRepository.insert(profile)
+                    profile
+                }
                 local.update { it.copy(chain = it.chain.copy(savedName = profile.name)) }
                 lab.showMessage("Saved the chain \"${profile.name}\". Connect to it on the Servers screen.")
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -410,7 +428,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onRunShadowLink = viewModel::runShadowLink, onStopShadowLink = viewModel::stopShadowLink,
                 onScanEndpoints = viewModel::scanEndpoints, onStopEndpoints = viewModel::stopEndpoints,
                 onSaveFronted = viewModel::saveFronted, onWarpSplit = viewModel::setWarpSplit,
-                onChainOrder = viewModel::chainOrder, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings,
+                onChainOrder = viewModel::chainOrder, onChainNode = viewModel::chainNode, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings,
                 onBuiltinConnection = onBuiltinConnection
             )
         },
