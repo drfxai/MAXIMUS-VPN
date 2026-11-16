@@ -51,6 +51,11 @@ class SidecarProcess(
                             "missing authenticated loopback settings",
                             "missing app-private Radiance data directory",
                             "Radiance initialization failed",
+                            "Radiance connection was canceled",
+                            "Radiance connection timed out",
+                            "Radiance could not resolve a connection host",
+                            "Radiance loopback port is already in use",
+                            "Radiance connection permission denied",
                             "Radiance could not start a Lantern route" -> startupFailure = "Radiance startup failed: $reason"
                         }
                     }
