@@ -764,3 +764,8 @@ Radiance's SOCKS-only mode, the entry point and loopback authentication change u
 SHA-256 `487a7a0546437d46a06a8f14ad6fdf2d6857456755d4408dc805e23ba15d7fc0`.
 [LML credits the profile and bootstrap data to MehrON](https://github.com/nukesamp-crypto/LML-VPN/blob/v1.0.2-preview/THIRD-PARTY-NOTICES.md)
 under GPL-3.0. Network availability depends on the upstream service.
+
+## AmneziaWG userspace executable
+
+The Android release builds [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go/tree/735cffbcb3030644c519b2934bf2e199f19bbc98) from the pinned upstream revision.
+The executable retains upstream's MIT license. The corresponding copyright and permission notice is included in this repository at `app/src/main/assets/licenses/amneziawg-go.LICENSE`.
