@@ -6,7 +6,7 @@ import com.example.vpn.sidecar.AetherApiBridge
 import com.example.vpn.sidecar.AetherSidecar
 
 /**
- * Automatic WARP (Aether) on Irancell: one short MASQUE-over-HTTP/2 attempt, then the next Smart Connect stage.
+ * Automatic WARP (Aether) on Irancell: one short MASQUE-over-HTTP/2 attempt, then the next Smart Connect stage. A manual run can try a second H2 variant.
  *
  * Irancell diagnostics (2026-11-14): the WARP identity registration failed with a TLS handshake failure, so the
  * H3 + WireGuard race never ran (it needs both identities stored) and H3 then waited out its whole 75 s window.
@@ -35,6 +35,7 @@ object IrancellWarp {
     /** Whole direct WARP attempt on Irancell, engine preparation to readiness. */
     const val BUDGET_MS = 20_000L
     const val MANUAL_BUDGET_MS = 60_000L
+    const val MANUAL_FIRST_ATTEMPT_MS = 30_000L
 
     /**
      * Aether retries the account call on its fallback routes by itself; a registration failure still reported this
@@ -58,6 +59,15 @@ object IrancellWarp {
      */
     fun pick(methods: List<String>, preferred: String?): String? =
         preferred?.takeIf { it in ALLOWED && it in methods } ?: ALLOWED.firstOrNull { it in methods }
+
+    /** An explicit connect can use a second H2 variant within the same overall budget. */
+    fun plan(methods: List<String>, preferred: String?, manual: Boolean): List<String> {
+        val first = pick(methods, preferred) ?: return emptyList()
+        if (!manual) return listOf(first)
+        val alternate = listOf(ConnectionEngineRunner.H2_SPLIT, "h2", ConnectionEngineRunner.CLEAN_H2)
+            .firstOrNull { it != first && it in methods }
+        return listOfNotNull(first, alternate)
+    }
 
     /** The methods left out of the plan, in their original order, for the log. */
     fun skipped(methods: List<String>, picked: String?): List<String> = methods.filter { it != picked }
