@@ -21,12 +21,12 @@ import com.example.data.model.VlessProfile
  */
 object EngineChain {
     /** One hop: the engine and its few knobs (Psiphon's egress region, Tor's bridges). */
-    data class Hop(val engineId: String, val region: String = "", val bridges: String = "")
+    data class Hop(val engineId: String, val region: String = "", val bridges: String = "", val profileId: String = "")
 
     data class Chain(val hops: List<Hop>)
 
     /** Engine ids that can be chained, in a stable order for the picker. */
-    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque", "matrix-transport", "aether")
+    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque", "matrix-transport", "aether", SingBoxSidecar.id)
 
     const val MIN_HOPS = 2
     const val MAX_HOPS = 3
@@ -37,9 +37,14 @@ object EngineChain {
         if (hops.size < MIN_HOPS) return "A chain needs at least $MIN_HOPS engines."
         if (hops.size > MAX_HOPS) return "A chain can hold at most $MAX_HOPS engines."
         if (hops.map { it.engineId }.distinct().size != hops.size) return "Each engine can appear once in a chain."
+        val saved = hops.firstOrNull { it.engineId == SingBoxSidecar.id }
+        if (saved != null && (hops.first() != saved || saved.profileId.isBlank())) {
+            return "Choose a saved node as the first hop."
+        }
+        if (hops.any { it.engineId != SingBoxSidecar.id && it.profileId.isNotEmpty() }) return "Unexpected saved node reference."
         val carrier = hops.firstOrNull { it.engineId in setOf("masque", "matrix-transport") }
-        if (carrier != null && (hops.last() != carrier || hops.first().engineId != "psiphon")) {
-            return "A WARP carrier can only be the outer carrier for Psiphon."
+        if (carrier != null && (hops.last() != carrier || hops[hops.lastIndex - 1].engineId !in setOf("psiphon", SingBoxSidecar.id))) {
+            return "A WARP carrier can only carry Psiphon or a compatible saved node."
         }
         if (hops.dropLast(1).any { it.engineId == "aether" }) {
             return "Aether must be the last hop in this chain."
@@ -50,6 +55,9 @@ object EngineChain {
         return null
     }
 
+    fun canUseSavedNode(profile: VlessProfile): Boolean =
+        !ChainRunner.isChain(profile) && SingBoxSidecar.autoSelectProblem(profile) == null
+
     /** The saved profile that stands for one hop's engine (Psiphon with its region, Tor with its bridges). */
     fun hopProfile(hop: Hop): VlessProfile = when (hop.engineId) {
         "psiphon" -> PsiphonSidecar.profile(hop.region)
@@ -57,6 +65,12 @@ object EngineChain {
         "masque" -> MasqueSidecar.profile()
         "matrix-transport" -> MatrixTransportSidecar.profile("h2")
         "aether" -> AetherSidecar.profile(transport = "h2")
+        SingBoxSidecar.id -> {
+            val node = BuiltinExitNode.loadProfile?.invoke(hop.profileId)
+                ?: error("The saved node is no longer available.")
+            require(canUseSavedNode(node)) { "The saved node no longer supports this chain." }
+            SingBoxSidecar.select(node)
+        }
         else -> throw IllegalArgumentException("${hop.engineId} cannot be part of a chain.")
     }
 
