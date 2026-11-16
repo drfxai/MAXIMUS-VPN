@@ -52,7 +52,7 @@ object WireGuardConf {
         val endpoint = peer["endpoint"].orEmpty()
         require(endpoint.isNotBlank()) { "The WireGuard file has no peer Endpoint" }
         val (host, port) = splitEndpoint(endpoint)
-        return build(
+        val profile = build(
             name = name?.takeIf { it.isNotBlank() } ?: "WireGuard-$host",
             host = host,
             port = port,
@@ -65,6 +65,7 @@ object WireGuardConf {
             reserved = "",
             amnezia = iface.filterKeys { it in AMNEZIA_KEYS }
         )
+        return AmneziaNativeEngine.preferNative(profile, iface, peer, peers)
     }
 
     /** A Clash/Mihomo `type: wireguard` proxy, including its `amnezia-wg-option`. */
