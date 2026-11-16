@@ -1047,9 +1047,9 @@ private fun SmartConnectButton(state: SmartButtonState, onClick: () -> Unit) {
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = when (state) {
-                    SmartButtonState.OFF -> "Smart connect"
+                    SmartButtonState.OFF -> "Auto Connect"
                     SmartButtonState.CONNECTING -> "Connecting…"
-                    SmartButtonState.ON -> "Smart connect on"
+                    SmartButtonState.ON -> "Auto Connect on"
                 },
                 color = content,
                 fontSize = 13.sp,
@@ -1163,7 +1163,7 @@ private fun formatDuration(seconds: Long): String {
 
 
 private enum class ConfigFreeStatus(val detail: String) {
-    READY("MAXIMUS searches for a working route."),
+    READY(""),
     CHECKING("Checking connection and device traffic…"),
     RECONNECTING("Reconnecting…"),
     VERIFIED("Connected · Device traffic verified"),
@@ -1214,45 +1214,45 @@ private fun ConfigFreeConnectButton(
     }
     val glow by androidx.compose.animation.animateColorAsState(target, label = "configFreeStatus")
     val shape = RoundedCornerShape(24.dp)
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).clip(shape)
+    OutlinedButton(
+        onClick = {
+            if (active) onStop()
+            else {
+                requested = true
+                onAutoConnect()
+            }
+        },
+        enabled = status != ConfigFreeStatus.STOPPING && (enabled || active),
+        shape = shape,
+        border = BorderStroke(1.dp, glow),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = glow),
+        modifier = Modifier.fillMaxWidth().clip(shape)
             .background(Brush.horizontalGradient(listOf(glow.copy(alpha = .15f),
                 MaterialTheme.colorScheme.surface, glow.copy(alpha = .08f))))
-            .border(1.dp, glow.copy(alpha = .8f), shape)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag("config_free_auto_connect")
     ) {
-        Text("Connect without a config", fontWeight = FontWeight.SemiBold)
-        Text(status.detail, style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        OutlinedButton(
-            onClick = {
-                if (active) onStop()
-                else {
-                    requested = true
-                    onAutoConnect()
-                }
-            },
-            enabled = status != ConfigFreeStatus.STOPPING && (enabled || active),
-            border = BorderStroke(1.dp, glow),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = glow),
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("config_free_auto_connect")
-        ) {
-            if (status == ConfigFreeStatus.CHECKING || status == ConfigFreeStatus.RECONNECTING) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp), color = glow, strokeWidth = 2.dp)
-            } else {
-                Icon(Icons.Filled.Link, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(when {
-                status == ConfigFreeStatus.STOPPING -> "Disconnecting…"
-                active && state.status == ConnectionStatus.CONNECTED -> "Disconnect"
-                active -> "Cancel"
-                status == ConfigFreeStatus.INTERRUPTED -> "Retry automatic connection"
-                else -> "Auto connect"
-            }, fontWeight = FontWeight.SemiBold)
+        if (status == ConfigFreeStatus.CHECKING || status == ConfigFreeStatus.RECONNECTING) {
+            androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier.size(16.dp), color = glow, strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Filled.Link, contentDescription = null, modifier = Modifier.size(18.dp))
         }
-        TextButton(onClick = { open = true }, enabled = enabled) { Text("Advanced options") }
+        Spacer(Modifier.width(8.dp))
+        Text(when {
+            status == ConfigFreeStatus.STOPPING -> "Disconnecting…"
+            active && state.status == ConnectionStatus.CONNECTED -> "Disconnect"
+            active -> "Cancel"
+            status == ConfigFreeStatus.INTERRUPTED -> "Retry without a config"
+            else -> "Connect without a config"
+        }, fontWeight = FontWeight.SemiBold)
+    }
+    if (status != ConfigFreeStatus.READY) {
+        Text(status.detail, style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp))
+    }
+    TextButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        Text("Advanced options")
     }
 
     if (open) {
