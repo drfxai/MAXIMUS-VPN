@@ -576,7 +576,13 @@ fun HomeScreen(
 
         if (settings.operationalMode != com.example.data.model.OperationalMode.TRADE) {
             ConfigFreeConnectButton(
-                enabled = !connectionState.isTunnelUp && !connectionState.isBusy,
+                state = connectionState,
+                onAutoConnect = {
+                    vpnViewModel.startOrRequestPermission(context, ConfigFreeMethod.AETHER_WARP.profile(), smart = true) {
+                        onRequestVpnPermission()
+                    }
+                },
+                onStop = { com.example.vpn.VpnController.stopVpn(context) },
                 onConfigureEngines = onConfigureConnectionEngines,
                 onConfigureAether = onConfigureAether,
                 onConnect = { method ->
@@ -1156,33 +1162,97 @@ private fun formatDuration(seconds: Long): String {
 }
 
 
+private enum class ConfigFreeStatus(val detail: String) {
+    READY("MAXIMUS searches for a working route."),
+    CHECKING("Checking connection and device traffic…"),
+    RECONNECTING("Reconnecting…"),
+    VERIFIED("Connected · Device traffic verified"),
+    LIMITED("Engine connected · Device traffic awaits verification"),
+    INTERRUPTED("Connection interrupted"),
+    STOPPING("Disconnecting…")
+}
+
 @Composable
 private fun ConfigFreeConnectButton(
-    enabled: Boolean,
+    state: com.example.data.model.ConnectionState,
+    onAutoConnect: () -> Unit,
+    onStop: () -> Unit,
     onConfigureEngines: () -> Unit,
     onConfigureAether: () -> Unit,
     onConnect: (ConfigFreeMethod) -> Unit
 ) {
     var open by rememberSaveable { mutableStateOf(false) }
+    var requested by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.status) {
+        if (state.status == ConnectionStatus.DISCONNECTED) requested = false
+    }
+    val enabled = !state.isTunnelUp && !state.isBusy
+    val active = requested && (state.isTunnelUp || state.isBusy)
+    val verified = state.trafficEvidence?.takeIf { it.appliesTo(state) }?.let {
+        it.path == com.example.vpn.verify.ProbePath.TUN && it.bidirectional
+    } == true
     val dark = AppTheme.colors.isDark
     val accent = if (dark) Color(0xFF70EFF3) else Color(0xFF00646D)
-    val shape = RoundedCornerShape(28.dp)
-    val border = if (enabled) accent.copy(alpha = .82f) else MaterialTheme.colorScheme.outlineVariant
-    OutlinedButton(
-        onClick = { open = true },
-        enabled = enabled,
-        shape = shape,
-        border = BorderStroke(1.dp, border),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+    val status = when {
+        !requested -> ConfigFreeStatus.READY
+        state.status in setOf(ConnectionStatus.FAILED, ConnectionStatus.DEGRADED) -> ConfigFreeStatus.INTERRUPTED
+        state.status in setOf(ConnectionStatus.RECONNECTING, ConnectionStatus.SWITCHING,
+            ConnectionStatus.NETWORK_CHANGED) -> ConfigFreeStatus.RECONNECTING
+        state.status == ConnectionStatus.DISCONNECTING -> ConfigFreeStatus.STOPPING
+        state.status == ConnectionStatus.CONNECTED && verified -> ConfigFreeStatus.VERIFIED
+        state.status == ConnectionStatus.CONNECTED -> ConfigFreeStatus.LIMITED
+        state.isTunnelUp || state.isBusy -> ConfigFreeStatus.CHECKING
+        else -> ConfigFreeStatus.READY
+    }
+    val target = when (status) {
+        ConfigFreeStatus.READY -> accent
+        ConfigFreeStatus.CHECKING, ConfigFreeStatus.LIMITED -> if (dark) Color(0xFFFFC568) else Color(0xFF805000)
+        ConfigFreeStatus.RECONNECTING -> if (dark) Color(0xFFC8AAFF) else Color(0xFF6533AA)
+        ConfigFreeStatus.VERIFIED -> if (dark) Color(0xFF6DF5BC) else Color(0xFF006B4C)
+        ConfigFreeStatus.INTERRUPTED -> if (dark) Color(0xFFFF8888) else Color(0xFFA02336)
+        ConfigFreeStatus.STOPPING -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val glow by androidx.compose.animation.animateColorAsState(target, label = "configFreeStatus")
+    val shape = RoundedCornerShape(24.dp)
+    Column(
         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).clip(shape)
-            .background(
-                Brush.horizontalGradient(listOf(accent.copy(alpha = if (enabled) .12f else .03f),
-                    MaterialTheme.colorScheme.surface, accent.copy(alpha = if (enabled) .07f else .02f)))
-            )
+            .background(Brush.horizontalGradient(listOf(glow.copy(alpha = .15f),
+                MaterialTheme.colorScheme.surface, glow.copy(alpha = .08f))))
+            .border(1.dp, glow.copy(alpha = .8f), shape)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Icon(Icons.Filled.Link, contentDescription = null, modifier = Modifier.size(21.dp))
-        Spacer(Modifier.width(10.dp))
         Text("Connect without a config", fontWeight = FontWeight.SemiBold)
+        Text(status.detail, style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(
+            onClick = {
+                if (active) onStop()
+                else {
+                    requested = true
+                    onAutoConnect()
+                }
+            },
+            enabled = status != ConfigFreeStatus.STOPPING && (enabled || active),
+            border = BorderStroke(1.dp, glow),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = glow),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("config_free_auto_connect")
+        ) {
+            if (status == ConfigFreeStatus.CHECKING || status == ConfigFreeStatus.RECONNECTING) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp), color = glow, strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Filled.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(when {
+                status == ConfigFreeStatus.STOPPING -> "Disconnecting…"
+                active && state.status == ConnectionStatus.CONNECTED -> "Disconnect"
+                active -> "Cancel"
+                status == ConfigFreeStatus.INTERRUPTED -> "Retry automatic connection"
+                else -> "Auto connect"
+            }, fontWeight = FontWeight.SemiBold)
+        }
+        TextButton(onClick = { open = true }, enabled = enabled) { Text("Advanced options") }
     }
 
     if (open) {
@@ -1232,7 +1302,7 @@ private fun ConfigFreeConnectButton(
                             enabled = ready,
                             modifier = Modifier.fillMaxWidth(),
                             contentPadding = PaddingValues(vertical = 11.dp),
-                            onClick = { open = false; onConnect(method) }
+                            onClick = { open = false; requested = true; onConnect(method) }
                         ) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(13.dp)) {
