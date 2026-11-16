@@ -19,6 +19,7 @@ object ChainRunner {
     class Running(
         val entryContext: SidecarContext,
         val entryLaunch: SidecarLaunch,
+        val entryProfile: VlessProfile,
         val engines: List<RunningEngine>,
         private val onStop: () -> Unit
     ) : RunningEngine {
@@ -60,6 +61,7 @@ object ChainRunner {
             val launches = arrayOfNulls<SidecarLaunch>(chain.hops.size)
             var entryContext: SidecarContext? = null
             var entryLaunch: SidecarLaunch? = null
+            var entryProfile: VlessProfile? = null
             for (step in EngineChain.plan(chain)) {
                 val engine = engineFor(step.hop.engineId)
                     ?: throw IllegalStateException("The ${step.hop.engineId} engine is not included in this build for this phone")
@@ -74,15 +76,17 @@ object ChainRunner {
                     upstreamPass = if (nextAuth) nextContext?.socksPass else null
                 )
                 contexts[step.index] = ctx
-                val (running, launch) = start.start(engine, EngineChain.hopProfile(step.hop), ctx)
+                val profile = EngineChain.hopProfile(step.hop)
+                val (running, launch) = start.start(engine, profile, ctx)
                 started += running
                 launches[step.index] = launch
                 if (step.index == 0) {
                     entryContext = ctx
                     entryLaunch = launch
+                    entryProfile = profile
                 }
             }
-            return Running(entryContext!!, entryLaunch!!, started.toList(), ::stopAll)
+            return Running(entryContext!!, entryLaunch!!, entryProfile!!, started.toList(), ::stopAll)
         } catch (t: Throwable) {
             stopAll()
             throw t
@@ -107,6 +111,7 @@ object ChainRunner {
             val o = org.json.JSONObject().put("engine", hop.engineId)
             if (hop.region.isNotBlank()) o.put("region", hop.region)
             if (hop.bridges.isNotBlank()) o.put("bridges", hop.bridges)
+            if (hop.profileId.isNotBlank()) o.put("profileId", hop.profileId)
             hops.put(o)
         }
         val extras = org.json.JSONObject().put(KEY_CHAIN, hops)
@@ -127,7 +132,7 @@ object ChainRunner {
         val hops = (0 until array.length()).mapNotNull { i ->
             val o = array.optJSONObject(i) ?: return@mapNotNull null
             val engine = o.optString("engine").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            EngineChain.Hop(engine, o.optString("region").trim(), o.optString("bridges").trim())
+            EngineChain.Hop(engine, o.optString("region").trim(), o.optString("bridges").trim(), o.optString("profileId").trim())
         }
         return EngineChain.Chain(hops).takeIf { it.hops.size == array.length() && EngineChain.problem(it) == null }
     }
