@@ -84,6 +84,7 @@ import com.example.vpn.lab.VerifiedNetworkProfile
 /** The LAB's pages: a minimal home and five detail sections (spec sections 40-46), plus Research. */
 enum class LabSection(val title: String, val icon: ImageVector) {
     TRANSPORT_TOOLS("Transport tools", Icons.Rounded.Science),
+    DOMAIN_FRONTING("Domain Fronting", Icons.Rounded.Public),
     SHADOWLINK("ShadowLink", Icons.Rounded.Shield),
     REPORT("Analysis report", Icons.Rounded.Insights),
     NETWORKS("Networks", Icons.Rounded.CellTower),
@@ -98,7 +99,7 @@ enum class LabSection(val title: String, val icon: ImageVector) {
 }
 
 /** A saved config the user can run an experiment on. Names only; no address or credential reaches the screen. */
-data class LabConfigOption(val id: String, val name: String, val detail: String)
+data class LabConfigOption(val id: String, val name: String, val detail: String, val supportsDomainFronting: Boolean = false)
 
 /** A research card (Phase 7). Never shown as verified until LAB measured it on this phone. */
 data class LabResearchItem(val id: String, val title: String, val state: String, val source: String, val compatibility: String, val at: Long)
@@ -170,6 +171,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
                 TitleBar(c, s.title, sectionSubtitle(s, state), Icons.AutoMirrored.Rounded.ArrowBack, { actions.onOpen(null) })
                 when (s) {
                     LabSection.TRANSPORT_TOOLS -> TransportToolsPage(state, actions)
+                    LabSection.DOMAIN_FRONTING -> TransportToolsPage(state, actions, frontingOnly = true)
                     LabSection.SHADOWLINK -> ShadowLinkPage(c, state.shadowLink, state.vpnOn, actions.onRunShadowLink, actions.onStopShadowLink, actions.onUseRecommended, relativeTime)
                     LabSection.REPORT -> ReportPage(c, state, actions, relativeTime)
                     LabSection.NETWORKS -> NetworksPage(c, state.snapshot, relativeTime)
@@ -191,6 +193,7 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
 
 private fun sectionSubtitle(s: LabSection, state: NetworkLabUiState): String = when (s) {
     LabSection.TRANSPORT_TOOLS -> "Measured routes and explicit TLS front settings"
+    LabSection.DOMAIN_FRONTING -> "Test a TLS WebSocket front and proxy origin"
     LabSection.SHADOWLINK -> state.shadowLink.report?.let { "${it.networkLabel} · ${it.egress.title}" } ?: "One fused read of the network and the path to try"
     LabSection.REPORT -> state.snapshot.analysis?.let { "${it.networkLabel} · ${it.state}" } ?: "No full analysis on this network yet"
     LabSection.NETWORKS -> "Only the current network is measured live"
@@ -439,6 +442,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                             else -> Triple(LabSection.SERVICES, "", null)
                         }
                     },
+                    Triple(LabSection.DOMAIN_FRONTING, "Experimental", null),
                     Triple(LabSection.TRANSPORT_TOOLS, "Experimental", null),
                     Triple(LabSection.CHAIN, state.chain.order.title, null),
                     Triple(LabSection.RESEARCH, "${state.research.size}", null)
