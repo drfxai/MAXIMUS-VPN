@@ -66,11 +66,12 @@ data class ChainUi(
     val savedName: String? = null
 ) {
     val hopIds: List<String> get() = customHops ?:
-        (listOfNotNull(SingBoxSidecar.id.takeIf { savedNodeId != null }) + order.hops)
+        (listOfNotNull(savedNodeId?.let { "saved:$it" }) + order.hops)
 
     fun engineChain() = EngineChain.Chain(hopIds.map { id ->
-        EngineChain.Hop(id, region = if (id == "psiphon") region else "",
-            profileId = if (id == SingBoxSidecar.id) savedNodeId.orEmpty() else "")
+        if (id.startsWith("saved:")) {
+            EngineChain.Hop(SingBoxSidecar.id, profileId = id.removePrefix("saved:"))
+        } else EngineChain.Hop(id, region = if (id == "psiphon") region else "")
     })
 }
 
@@ -151,12 +152,12 @@ internal fun ChainPage(
         item {
             Panel(c) {
                 val hops = s.hopIds
-                val savedTitle = configs.firstOrNull { it.id == s.savedNodeId }?.name ?: "Saved node"
-                fun title(id: String) = when (id) {
-                    SingBoxSidecar.id -> savedTitle
-                    "aether" -> "Aether HTTP/2"
-                    "masque" -> "WARP MASQUE"
-                    "matrix-transport" -> "Matrix Transport"
+                val candidates = configs.filter { it.supportsSavedNodeChain }
+                fun title(id: String) = when {
+                    id.startsWith("saved:") -> candidates.firstOrNull { it.id == id.removePrefix("saved:") }?.name ?: "Saved node unavailable"
+                    id == "aether" -> "Aether HTTP/2"
+                    id == "masque" -> "WARP MASQUE"
+                    id == "matrix-transport" -> "Matrix Transport"
                     else -> id.replaceFirstChar { it.uppercase() }
                 }
                 var adding by remember { mutableStateOf(false) }
@@ -177,8 +178,9 @@ internal fun ChainPage(
                     }
                     TextButton(onClick = { adding = true }, enabled = hops.size < EngineChain.MAX_HOPS) { Text("Add hop") }
                     DropdownMenu(expanded = adding, onDismissRequest = { adding = false }) {
-                        EngineChain.CHAINABLE.filter { it !in hops && (it != SingBoxSidecar.id || s.savedNodeId != null) }
-                            .forEach { id ->
+                        val options = EngineChain.CHAINABLE.filterNot { it == SingBoxSidecar.id } +
+                            candidates.map { "saved:${it.id}" }
+                        options.filterNot { it in hops }.forEach { id ->
                                 DropdownMenuItem(text = { Text(title(id)) }, onClick = {
                                     onCustomHops(hops + id)
                                     adding = false
@@ -218,7 +220,9 @@ internal fun ChainPage(
         item {
             Column(Modifier.padding(horizontal = Gutter)) {
                 PrimaryButton(c, if (s.saving) "Saving..." else "Save this chain", Icons.Rounded.Save, Modifier.fillMaxWidth(), enabled = !s.saving && missing.isEmpty() && chainProblem == null &&
-                    (SingBoxSidecar.id !in s.hopIds || configs.any { it.id == s.savedNodeId && it.supportsSavedNodeChain }), onClick = onSave)
+                    s.hopIds.filter { it.startsWith("saved:") }.all { entry ->
+                        configs.any { "saved:${it.id}" == entry && it.supportsSavedNodeChain }
+                    }, onClick = onSave)
                 s.savedName?.let { name ->
                     Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         androidx.compose.material3.Icon(Icons.Rounded.CheckCircle, null, tint = c.good, modifier = Modifier.width(18.dp))
