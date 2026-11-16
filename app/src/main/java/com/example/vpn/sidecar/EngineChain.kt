@@ -36,9 +36,11 @@ object EngineChain {
         val hops = chain.hops
         if (hops.size < MIN_HOPS) return "A chain needs at least $MIN_HOPS engines."
         if (hops.size > MAX_HOPS) return "A chain can hold at most $MAX_HOPS engines."
-        if (hops.map { it.engineId }.distinct().size != hops.size) return "Each engine can appear once in a chain."
-        val saved = hops.firstOrNull { it.engineId == SingBoxSidecar.id }
-        if (saved != null && saved.profileId.isBlank()) return "Choose a saved node for the chain."
+        val relays = hops.filterNot { it.engineId == SingBoxSidecar.id }
+        if (relays.distinctBy { it.engineId }.size != relays.size) return "Each relay can appear once in a chain."
+        val saved = hops.filter { it.engineId == SingBoxSidecar.id }
+        if (saved.any { it.profileId.isBlank() }) return "Choose a saved node for each saved-node hop."
+        if (saved.distinctBy { it.profileId }.size != saved.size) return "Each saved node can appear once in a chain."
         if (hops.any { it.engineId != SingBoxSidecar.id && it.profileId.isNotEmpty() }) return "Unexpected saved node reference."
         val carrier = hops.firstOrNull { it.engineId in setOf("masque", "matrix-transport") }
         if (carrier != null && (hops.last() != carrier || hops[hops.lastIndex - 1].engineId !in setOf("psiphon", SingBoxSidecar.id))) {
