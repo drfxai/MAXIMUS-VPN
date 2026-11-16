@@ -19,6 +19,10 @@ import org.json.JSONObject
 
 /** V1.0.1 step 5: the engine registry, the capability matrix and the per-engine circuit breaker. */
 class EngineRegistryTest {
+    @Test fun directPsiphonLetsTheCoreChooseTransport() {
+        assertFalse(JSONObject(ConfigFreeMethod.PSIPHON.profile().extraSettings).optBoolean("tcpOnly"))
+    }
+
     @Test fun aetherPresetsKeepTheirTransportAndRelayDirection() {
         val presets = mapOf(
             ConfigFreeMethod.AETHER_H2 to "h2",

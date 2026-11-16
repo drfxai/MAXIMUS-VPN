@@ -11,6 +11,12 @@ import org.junit.Test
  * and H3 burned its whole 75 s window. Now: one MASQUE HTTP/2 attempt, 15 s cap, registration failure ends it.
  */
 class IrancellWarpTest {
+    @Test fun manualPlanReservesAnAlternateHttp2Variant() {
+        val methods = listOf("h3", "h2", ConnectionEngineRunner.H2_SPLIT, "wireguard")
+        assertEquals(listOf("h2"), IrancellWarp.plan(methods, null, manual = false))
+        assertEquals(listOf("h2", ConnectionEngineRunner.H2_SPLIT), IrancellWarp.plan(methods, null, manual = true))
+    }
+
     private val irancellMethods = listOf("h3", "wireguard", "h2", ConnectionEngineRunner.H2_SPLIT)
 
     @Test fun onlyAutomaticForegroundAetherOnIrancell() {
