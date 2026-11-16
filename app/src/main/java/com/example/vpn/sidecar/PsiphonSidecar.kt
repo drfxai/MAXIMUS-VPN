@@ -252,7 +252,8 @@ class PsiphonSidecar(
             val owned = LOCAL_FIELDS.map { it.lowercase() }.toSet()
             config.keys().asSequence().filter { it.lowercase() in owned }.toList().forEach { config.remove(it) }
             config.put("LocalSocksProxyPort", socksPort)
-            config.put("ListenInterface", "lo")
+            // ConsoleClient defaults to 127.0.0.1 when ListenInterface is absent.
+            // Avoid enumerating Android interfaces just to bind that same address.
             config.put("ClientPlatform", "Android")
             config.put("EmitDiagnosticNetworkParameters", false)
             // Xray only needs SOCKS; an HTTP proxy would be one more open local port.
