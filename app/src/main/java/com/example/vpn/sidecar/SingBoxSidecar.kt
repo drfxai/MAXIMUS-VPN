@@ -22,8 +22,16 @@ object SingBoxSidecar : SidecarEngine {
     /** Refuse lossy conversions. In particular a leaf certificate pin is NOT an SPKI pin. */
     fun conversionProblem(p: VlessProfile): String? = when {
         p.profileType != ProfileType.VLESS || p.rawConfig.isNotBlank() -> "Raw engine configurations cannot be converted to sing-box."
-        p.protocolType !in setOf(ProtocolType.VLESS, ProtocolType.VMESS, ProtocolType.TROJAN, ProtocolType.SHADOWSOCKS) -> "This protocol has no normalized sing-box adapter."
-        p.address.isBlank() || p.port !in 1..65535 || p.uuid.isBlank() -> "Missing sing-box server, port or credentials."
+        p.protocolType !in setOf(ProtocolType.VLESS, ProtocolType.VMESS, ProtocolType.TROJAN, ProtocolType.SHADOWSOCKS,
+            ProtocolType.HTTP, ProtocolType.SOCKS5) -> "This protocol has no normalized sing-box adapter."
+        p.address.isBlank() || p.port !in 1..65535 ||
+            (p.uuid.isBlank() && p.protocolType !in setOf(ProtocolType.HTTP, ProtocolType.SOCKS5)) -> "Missing sing-box server, port or credentials."
+        p.protocolType in setOf(ProtocolType.HTTP, ProtocolType.SOCKS5) && !p.transport.equals("tcp", true) ->
+            "HTTP and SOCKS proxies require a TCP transport."
+        p.protocolType == ProtocolType.SOCKS5 && p.security.lowercase() !in setOf("", "none") ->
+            "SOCKS5 proxy TLS requires the original engine."
+        p.protocolType == ProtocolType.HTTP && p.security.equals("reality", true) ->
+            "HTTP proxies do not support REALITY in this adapter."
         p.transport.lowercase() !in setOf("tcp", "ws", "grpc", "httpupgrade") -> "This transport must remain on its original engine."
         p.security.lowercase() !in setOf("", "none", "tls", "reality") -> "Unsupported sing-box security mode."
         p.allowInsecure || p.pinnedPeerCertSha256.isNotBlank() || p.verifyPeerCertByName.isNotBlank() -> "Certificate pin semantics require the original Xray engine."
@@ -81,6 +89,8 @@ object SingBoxSidecar : SidecarEngine {
             ProtocolType.VMESS -> "vmess"
             ProtocolType.TROJAN -> "trojan"
             ProtocolType.SHADOWSOCKS -> "shadowsocks"
+            ProtocolType.HTTP -> "http"
+            ProtocolType.SOCKS5 -> "socks"
             else -> error("Unsupported sing-box protocol")
         }
         val outbound = JSONObject().put("type", type).put("tag", "node")
@@ -93,6 +103,13 @@ object SingBoxSidecar : SidecarEngine {
                 outbound.put("alter_id", ProfileExtras.read(p).optInt("alterId", 0))
             }
             ProtocolType.SHADOWSOCKS -> outbound.put("method", p.encryption).put("password", p.uuid)
+            ProtocolType.HTTP, ProtocolType.SOCKS5 -> {
+                if (p.protocolType == ProtocolType.SOCKS5) outbound.put("version", "5")
+                if (p.uuid.isNotBlank()) {
+                    outbound.put("username", p.uuid.substringBefore(':'))
+                        .put("password", p.uuid.substringAfter(':', ""))
+                }
+            }
             else -> outbound.put("password", p.uuid)
         }
         if (p.security.equals("tls", true) || p.security.equals("reality", true)) {
