@@ -2548,7 +2548,7 @@ class RayVpnService : VpnService() {
             }
         }
         return com.example.vpn.sidecar.SidecarChain.xrayProfile(
-            chain.hops.first().let { com.example.vpn.sidecar.EngineChain.hopProfile(it) },
+            running.entryProfile,
             running.entryContext, running.entryLaunch
         )
     }
