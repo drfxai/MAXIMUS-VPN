@@ -7,6 +7,11 @@ import com.example.data.model.VlessProfile
 /** Import compatibility is broader than the Xray-core and Kotlin forwarding runtimes. */
 object RuntimeCapabilities {
     fun unsupportedReason(profile: VlessProfile): String? {
+        if (AmneziaNativeEngine.handles(profile)) {
+            if (!AmneziaNativeEngine.available()) return "The AmneziaWG native library is not included for this device."
+            return runCatching { AmneziaNativeEngine.config(profile); null }
+                .getOrElse { "The native AmneziaWG profile is invalid." }
+        }
         if (com.example.vpn.sidecar.ChainRunner.isChain(profile)) {
             val chain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
                 ?: return "The engine chain is invalid."
