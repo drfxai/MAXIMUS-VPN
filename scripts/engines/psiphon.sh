@@ -16,6 +16,33 @@ REV=4d6eb0e8a7e91d3f9a615f70ef65668b8b3595ec
 SRC="$(fetch_module "$MODULE" "$VERSION" "$SUM")"
 trap 'rm -rf "$SRC"' EXIT
 
+# ConsoleClient only wires a DNS provider in its standalone TUN mode. MAXIMUS owns
+# the Android TUN and supplies DNS from the underlying link to the SOCKS worker.
+python3 - "$SRC/ConsoleClient/main.go" <<'PYTHON'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+source = path.read_text()
+anchor = "\t// All config fields should be set before calling Commit."
+if source.count(anchor) != 1:
+    raise SystemExit("Psiphon DNS provider patch no longer matches ConsoleClient")
+source = source.replace(anchor, """\tif config.DNSServerGetter == nil {
+\t\tvar linkDNS []string
+\t\tfor _, address := range strings.Split(os.Getenv("MAXIMUS_PSIPHON_LINK_DNS"), ",") {
+\t\t\tif ip := net.ParseIP(address); ip != nil && !ip.IsUnspecified() && !ip.IsLoopback() {
+\t\t\t\tlinkDNS = append(linkDNS, ip.String())
+\t\t\t}
+\t\t}
+\t\tif len(linkDNS) > 0 {
+\t\t\tconfig.DNSServerGetter = &tunProvider{dnsServers: linkDNS}
+\t\t}
+\t}
+
+""" + anchor)
+path.write_text(source.replace('\t"io/ioutil"\n', '\t"io/ioutil"\n\t"net"\n', 1))
+PYTHON
+
 # go.mod points github.com/pion/dtls/v2 at ./replace/dtls, a nested module that the published
 # module zip does not contain. That patched copy only matters with the
 # PSIPHON_ENABLE_REFRACTION_NETWORKING build tag, which this build does not set, so the upstream

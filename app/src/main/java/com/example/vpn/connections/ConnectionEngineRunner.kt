@@ -554,7 +554,7 @@ object ConnectionEngineRunner {
         // otherwise one quick recheck of the first method.
         if (relayOnly && relays.isEmpty()) throw NoVerifiedPath(listOf("relay: no saved server to carry WARP through"), null)
         val queue = ArrayDeque(when {
-            irancellHttp2 -> irancellPlan.map(IrancellWarp::withNativeApi)
+            irancellHttp2 -> if (manual) irancellPlan else irancellPlan.map(IrancellWarp::withNativeApi)
             relayOnly -> relays
             recheckOnly && relays.isNotEmpty() -> relays
             recheckOnly -> ordered.take(1)
@@ -845,6 +845,7 @@ object ConnectionEngineRunner {
                 checkCancellation()
                 stage = "local proxy did not become ready"
                 val window = if (name == CLEAN_H2) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
+                    else if (!automatic && name == WIREGUARD_MTU) minOf(launch.readyTimeoutMs, 45_000L)
                     else readinessBudgetMs(
                     engine.id, automatic, preferWireGuard, carrier, launch.readyTimeoutMs,
                     failedHere = name in recentlyFailed
@@ -919,7 +920,15 @@ object ConnectionEngineRunner {
                 if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
                 // A relayed carrier has no direct follow-ups of its own.
                 if (extras.optBoolean(RELAY_FOLLOW_UP)) continue
-                onNoData(name, candidate, extras, carrier)
+                if (!automatic && reducedMtuWireGuardFollowUp(engine.id, true, carrier,
+                        AetherSettings.read(extras).mtu, alreadyQueued = mtuQueued, reverseRelay = reverseRelay)) {
+                    mtuQueued = true
+                    record(WIREGUARD_MTU, "queue", "START",
+                        "WireGuard started but HTTPS failed; retrying with MTU ${AetherSettings.MTU_RETRY}")
+                    queue.addFirst(reducedMtuWireGuard(candidate))
+                } else {
+                    onNoData(name, candidate, extras, carrier)
+                }
             } catch (e: Exception) {
                 if (e is InterruptedException || e is CancellationException) throw e
                 checkCancellation()

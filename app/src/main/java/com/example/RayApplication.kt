@@ -256,6 +256,15 @@ class RayApplication : Application() {
         com.example.vpn.sidecar.Sidecars.privatePsiphonSettings = { id ->
             com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)
         }
+        com.example.vpn.sidecar.Sidecars.psiphonLinkDns = {
+            val manager = getSystemService(android.net.ConnectivityManager::class.java)
+            val link = manager?.let { cm ->
+                com.example.vpn.smart.NetworkCapabilityDetector.physical(cm)?.let(cm::getLinkProperties)
+            }
+            link?.takeUnless { android.os.Build.VERSION.SDK_INT >= 28 && it.isPrivateDnsActive }?.dnsServers.orEmpty()
+                .filterNot { it.isAnyLocalAddress || it.isLoopbackAddress || it.isLinkLocalAddress }
+                .mapNotNull { it.hostAddress?.substringBefore('%') }.distinct()
+        }
         com.example.vpn.sidecar.Sidecars.psiphonSettings = {
             com.example.data.security.SecureStorage(this).getAndDecrypt(com.example.vpn.sidecar.PsiphonSidecar.SETTINGS_STORAGE_KEY)?.takeIf { it.isNotBlank() }
         }
