@@ -34,8 +34,12 @@ class TorSidecar(
 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
         val bridges = bridges(profile)
-        File(context.workDir, TORRC).writeText(torrc(bridges, context.socksPort, context.executable, context.upstreamSocks))
-        File(context.workDir, BRIDGES_FILE).writeText(bridges.joinToString("\n"))
+        val chained = context.upstreamSocks != null
+        val throughProxy = chained && extras(profile).optString(KEY_BRIDGES).isBlank()
+        val config = if (throughProxy) proxiedTorrc(context) else
+            torrc(bridges, context.socksPort, context.executable, context.upstreamSocks)
+        PrivateEngineFile.write(File(context.workDir, TORRC), config)
+        File(context.workDir, BRIDGES_FILE).writeText(if (throughProxy) "" else bridges.joinToString("\n"))
         // Tor reads the name and password of a SOCKS request as circuit isolation, not as a login.
         return SidecarLaunch(command = emptyList(), readyTimeoutMs = READY_TIMEOUT_MS, socksAuth = false)
     }
@@ -44,12 +48,20 @@ class TorSidecar(
         val start = starter ?: error("Tor needs Android to run")
         // The app runs lyrebird itself and hands Tor its SOCKS ports (see PluggableTransports).
         val saved = File(context.workDir, BRIDGES_FILE).readLines().filter { it.isNotBlank() }
+        if (saved.isEmpty() && context.upstreamSocks != null) {
+            return start(File(context.workDir, TORRC).readText(), context.socksPort)
+        }
         // A chained transport delegates DNS to its upstream hop. Direct WebTunnel needs the same
         // poison-resistant resolution as ordinary proxy profiles, while retaining its URL and SNI.
         val bridges = if (context.upstreamSocks != null) saved else WebTunnelEndpoints.resolve(saved,
             privateDns = com.example.vpn.safety.OperatingModePolicy.of(context.mode).privateServerLookup)
         bridges.forEach { EngineSignals.publish("tor-bridge", it) }
-        val pt = PluggableTransports.start(context.executable, transportsOf(bridges), File(context.workDir, "pt_state"), context.upstreamSocks)
+        val transports = transportsOf(bridges)
+        require(context.upstreamSocks == null || "snowflake" !in transports) {
+            "A custom Snowflake bridge cannot be used behind a chain hop."
+        }
+        val pt = PluggableTransports.start(context.executable, transports, File(context.workDir, "pt_state"),
+            context.upstreamSocks, upstreamUser = context.upstreamUser, upstreamPass = context.upstreamPass)
         val tor = try {
             start(torrcWithPorts(bridges, context.socksPort, pt.methods, context.upstreamSocks), context.socksPort)
         } catch (e: Exception) {
@@ -122,6 +134,23 @@ class TorSidecar(
                 require(line.none { it.isISOControl() } && line.length <= 2_000) { "A bridge line is malformed." }
             }
             return lines
+        }
+
+        internal fun proxiedTorrc(context: SidecarContext): String = buildString {
+            val port = requireNotNull(context.upstreamSocks)
+            require(port in 1..65535)
+            require((context.upstreamUser == null) == (context.upstreamPass == null))
+            appendLine("SocksPort 127.0.0.1:${context.socksPort}")
+            appendLine("ClientOnly 1")
+            appendLine("AvoidDiskWrites 1")
+            appendLine("Socks5Proxy 127.0.0.1:$port")
+            context.upstreamUser?.let { user ->
+                val pass = requireNotNull(context.upstreamPass)
+                val token = Regex("[A-Za-z0-9_-]{1,255}")
+                require(token.matches(user) && token.matches(pass)) { "Invalid carrier credentials" }
+                appendLine("Socks5ProxyUsername $user")
+                appendLine("Socks5ProxyPassword $pass")
+            }
         }
 
         fun torrc(bridges: List<String>, socksPort: Int, lyrebird: File, upstreamSocks: Int? = null): String = buildString {

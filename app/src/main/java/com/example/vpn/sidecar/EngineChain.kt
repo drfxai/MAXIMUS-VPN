@@ -3,21 +3,8 @@ package com.example.vpn.sidecar
 import com.example.data.model.VlessProfile
 
 /**
- * A chain of bundled relay engines, so traffic passes through more than one before it reaches the
- * internet (spec item 8). The hops are listed entry first (closest to the phone) and exit last: the
- * phone's traffic enters [Chain.hops]`[0]`, which dials the next hop, and so on, and the last hop
- * reaches the site.
- *
- * Only engines that both accept a local SOCKS5 inbound (Xray proxies to it) and can dial out through
- * an upstream SOCKS5 proxy can be chained. Here that is Psiphon (`UpstreamProxyURL`) and Tor
- * (`Socks5Proxy`), so either may sit at either position: Psiphon then Tor, or Tor then Psiphon.
- * WARP MASQUE offers an authenticated SOCKS port and may carry Psiphon as the final proxy hop.
- * Aether can carry Tor or Psiphon. These carriers cannot dial another chain hop.
- *
- * Nothing about security changes: each hop still offers its SOCKS port on 127.0.0.1 with a random
- * per-connection login, Xray still owns the TUN, the DNS and the kill switch, and every hop's own
- * server authentication is unchanged. Chaining only sets each hop's existing upstream-proxy option to
- * the next hop's loopback port.
+ * Stored in local SOCKS order: the first hop accepts application traffic, and the last hop
+ * connects directly to its server. The on-wire route from the phone is read in reverse.
  */
 object EngineChain {
     /** One hop: the engine and its few knobs (Psiphon's egress region, Tor's bridges). */
@@ -26,7 +13,9 @@ object EngineChain {
     data class Chain(val hops: List<Hop>)
 
     /** Engine ids that can be chained, in a stable order for the picker. */
-    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque", "matrix-transport", "aether", SingBoxSidecar.id)
+    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque", "matrix-transport", "aether", ServerlessSidecar.ID, RadianceSidecar.id, SingBoxSidecar.id)
+
+    private val carrierOnly = setOf("aether", "masque", "matrix-transport", ServerlessSidecar.ID, RadianceSidecar.id)
 
     const val MIN_HOPS = 2
     const val MAX_HOPS = 3
@@ -44,10 +33,10 @@ object EngineChain {
         if (hops.any { it.engineId != SingBoxSidecar.id && it.profileId.isNotEmpty() }) return "Unexpected saved node reference."
         val carrier = hops.firstOrNull { it.engineId in setOf("masque", "matrix-transport") }
         if (carrier != null && (hops.last() != carrier || hops[hops.lastIndex - 1].engineId !in setOf("psiphon", SingBoxSidecar.id))) {
-            return "A WARP carrier can only carry Psiphon or a compatible saved node."
+            return "${titleOf(carrier.engineId)} must be the first hop, followed by Psiphon or a compatible saved config."
         }
-        if (hops.dropLast(1).any { it.engineId == "aether" }) {
-            return "Aether must be the last hop in this chain."
+        hops.dropLast(1).firstOrNull { it.engineId in carrierOnly }?.let {
+            return "${titleOf(it.engineId)} must be last in the engine order. Move it to the first hop on the route."
         }
         for (hop in hops) {
             if (hop.engineId !in CHAINABLE) return "${hop.engineId} cannot be part of a chain."
@@ -65,6 +54,8 @@ object EngineChain {
         "masque" -> MasqueSidecar.profile()
         "matrix-transport" -> MatrixTransportSidecar.profile("h2")
         "aether" -> AetherSidecar.profile(transport = "h2")
+        ServerlessSidecar.ID -> ServerlessSidecar.profile()
+        RadianceSidecar.id -> RadianceSidecar.profile()
         SingBoxSidecar.id -> {
             val node = BuiltinExitNode.loadProfile?.invoke(hop.profileId)
                 ?: error("The saved node is no longer available.")
@@ -93,6 +84,18 @@ object EngineChain {
         return hops.indices.reversed().map { i ->
             Step(index = i, hop = hops[i], upstreamHop = if (i == hops.lastIndex) null else i + 1)
         }
+    }
+
+    fun titleOf(id: String): String = when (id) {
+        "psiphon" -> "Psiphon"
+        "tor" -> "Tor"
+        "masque" -> "WARP MASQUE"
+        "matrix-transport" -> "Matrix Transport"
+        "aether" -> "Aether HTTP/2"
+        ServerlessSidecar.ID -> "Direct Serverless"
+        RadianceSidecar.id -> "Lantern / Radiance"
+        SingBoxSidecar.id -> "Saved config"
+        else -> id
     }
 
     /** A short human description of the path, e.g. "Psiphon → Tor". */

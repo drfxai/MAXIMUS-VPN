@@ -26,6 +26,18 @@ class SingBoxIntegrationTest {
         assertEquals("example.com", tls.getString("server_name"))
     }
 
+    @Test fun chainSendsServerLookupsAndNodeTrafficThroughTheSameCarrier() {
+        val context = context().copy(upstreamSocks = 19081, upstreamUser = "carrier", upstreamPass = "secret")
+        val config = SingBoxSidecar.config(SingBoxSidecar.select(node().copy(address = "node.example.com")), context)
+        val outbounds = config.getJSONArray("outbounds")
+        assertEquals("carrier", outbounds.getJSONObject(0).getString("detour"))
+        assertEquals("carrier", outbounds.getJSONObject(1).getString("username"))
+        assertEquals("carrier", config.getJSONObject("dns").getJSONArray("servers").getJSONObject(0).getString("detour"))
+        System.getenv("MAXIMUS_SINGBOX_FIXTURES")?.let {
+            File(File(it).apply { mkdirs() }, "chain-vless.json").writeText(config.toString())
+        }
+    }
+
     @Test fun allNormalizedAdaptersProduceNativeValidationFixtures() {
         val output = System.getenv("MAXIMUS_SINGBOX_FIXTURES")?.let { File(it).apply { mkdirs() } }
         for ((protocol, type) in listOf(ProtocolType.VLESS to "vless", ProtocolType.VMESS to "vmess",

@@ -31,8 +31,12 @@ class PluggableTransports private constructor(
          * Starts [binary] for [transports] and waits until it reports its SOCKS ports. Throws with
          * lyrebird's own reason when it cannot offer them.
          */
-        fun start(binary: File, transports: Set<String>, stateDir: File, upstreamSocks: Int?, timeoutMs: Long = 15_000): PluggableTransports {
+        fun start(
+            binary: File, transports: Set<String>, stateDir: File, upstreamSocks: Int?,
+            timeoutMs: Long = 15_000, upstreamUser: String? = null, upstreamPass: String? = null
+        ): PluggableTransports {
             require(transports.isNotEmpty())
+            require((upstreamUser == null) == (upstreamPass == null))
             stateDir.mkdirs()
             val builder = ProcessBuilder(binary.absolutePath).directory(stateDir).redirectErrorStream(true)
             builder.environment().apply {
@@ -40,7 +44,11 @@ class PluggableTransports private constructor(
                 put("TOR_PT_CLIENT_TRANSPORTS", transports.joinToString(","))
                 put("TOR_PT_STATE_LOCATION", stateDir.absolutePath + "/")
                 put("TOR_PT_EXIT_ON_STDIN_CLOSE", "1")
-                if (upstreamSocks != null) put("TOR_PT_PROXY", "socks5://127.0.0.1:$upstreamSocks")
+                remove("TOR_PT_PROXY")
+                if (upstreamSocks != null) {
+                    val credentials = upstreamUser?.let { "$it:$upstreamPass" }
+                    put("TOR_PT_PROXY", java.net.URI("socks5", credentials, "127.0.0.1", upstreamSocks, null, null, null).toASCIIString())
+                }
             }
             val process = builder.start()
             val lines = LinkedBlockingQueue<String>(128)
@@ -63,6 +71,7 @@ class PluggableTransports private constructor(
 
             try {
             val methods = mutableMapOf<String, Int>()
+            var proxyAccepted = upstreamSocks == null
             val deadline = System.currentTimeMillis() + timeoutMs
             while (true) {
                 val left = deadline - System.currentTimeMillis()
@@ -71,6 +80,8 @@ class PluggableTransports private constructor(
                     EngineProcessStop.stop(process)
                     error(if (line == null) "Tor's bridge program did not report in time" else "Tor's bridge program stopped before it was ready")
                 }
+                if (line == "PROXY DONE") proxyAccepted = true
+                check(!line.startsWith("PROXY-ERROR")) { "Tor's bridge program rejected the carrier proxy" }
                 when (val r = parse(line)) {
                     is Reply.Method -> methods[r.transport] = r.port
                     is Reply.Failed -> { EngineProcessStop.stop(process); error("Tor's bridge program: ${r.reason.take(200)}") }
@@ -78,6 +89,7 @@ class PluggableTransports private constructor(
                     null -> Unit
                 }
             }
+            check(proxyAccepted) { "Tor's bridge program did not accept the carrier proxy" }
             if (methods.isEmpty()) { EngineProcessStop.stop(process); error("Tor's bridge program offered none of: ${transports.joinToString()}") }
             XrayLogManager.i(TAG, "Bridge program ready: ${methods.keys.joinToString()}")
             return PluggableTransports(process, methods)

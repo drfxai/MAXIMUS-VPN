@@ -12,6 +12,7 @@ import java.io.File
 object MatrixTransportSidecar : SidecarEngine {
     override val id = "matrix-transport"
     override val binary = "matrixtransport"
+    @Volatile var identityDirectory: (() -> File)? = null
     val MODES = setOf("h2", "h3", "wireguard", "gool")
     fun mode(profile: VlessProfile): String = ProfileExtras.read(profile).optString("carrier", "h2")
     override fun handles(profile: VlessProfile) = ProfileExtras.read(profile).optString("engine") == id
@@ -32,8 +33,10 @@ object MatrixTransportSidecar : SidecarEngine {
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
         problem(profile)?.let { error(it) }
         require(context.upstreamSocks == null) { "Matrix Transport must be the outer carrier." }
-        configurationProblem(context.workDir)?.let { error(it) }
-        val identity = File(context.workDir, "identity.toml")
+        val directory = if (configurationProblem(context.workDir) == null) context.workDir
+            else identityDirectory?.invoke() ?: context.workDir
+        configurationProblem(directory)?.let { error(it) }
+        val identity = File(directory, "identity.toml")
         val command = mutableListOf(context.executable.absolutePath,
             "--bind", "127.0.0.1:${context.socksPort}", "--config", identity.absolutePath,
             "--masque-config", identity.absolutePath, "--wg-config", identity.absolutePath,

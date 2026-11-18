@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -94,7 +95,7 @@ enum class LabSection(val title: String, val icon: ImageVector) {
     VERIFIED("Verified Profiles", Icons.Rounded.Verified),
     REVIVE("Revive configs", Icons.Rounded.Healing),
     SERVICES("Service check", Icons.Rounded.Public),
-    CHAIN("Engine chain", Icons.Rounded.Hub),
+    CHAIN("Connection chain", Icons.Rounded.Hub),
     RESEARCH("Research", Icons.Rounded.TravelExplore)
 }
 
@@ -150,9 +151,8 @@ class NetworkLabActions(
     val onStopServices: () -> Unit = {},
     val onRunShadowLink: () -> Unit = {},
     val onStopShadowLink: () -> Unit = {},
-    val onChainOrder: (ChainOrder) -> Unit = {},
-    val onChainNode: (String?) -> Unit = {},
-    val onCustomChainHops: (List<String>?) -> Unit = {},
+    val onChainHops: (List<String>) -> Unit = {},
+    val onTestChain: () -> Unit = {},
     val onChainRegion: (String) -> Unit = {},
     val onSaveChain: () -> Unit = {},
     val onScanEndpoints: (String) -> Unit = {},
@@ -169,7 +169,11 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
     Box(Modifier.fillMaxSize().background(c.bg)) {
         when (val s = state.section) {
             null -> LabHome(c, state, actions, relativeTime)
-            else -> Column(Modifier.fillMaxSize()) {
+            else -> Column(Modifier.fillMaxSize().then(
+                if (s == LabSection.CHAIN) Modifier.background(
+                    Brush.verticalGradient(listOf(c.glow.copy(alpha = if (c.dark) .32f else .75f), c.bg), endY = 380f)
+                ) else Modifier
+            )) {
                 TitleBar(c, s.title, sectionSubtitle(s, state), Icons.AutoMirrored.Rounded.ArrowBack, { actions.onOpen(null) })
                 when (s) {
                     LabSection.TRANSPORT_TOOLS -> TransportToolsPage(state, actions)
@@ -185,8 +189,8 @@ fun NetworkLabContent(state: NetworkLabUiState, actions: NetworkLabActions, rela
                     LabSection.REVIVE -> RevivePage(c, state.revival, state.vpnOn, state.snapshot.running != null || state.snapshot.analysisRunning,
                         actions.onRevive, actions.onStopRevive, relativeTime, actions.onFirewall)
                     LabSection.SERVICES -> ServicesPage(c, state.services, state.vpnOn, actions.onCheckServices, actions.onStopServices, relativeTime)
-                    LabSection.CHAIN -> ChainPage(c, state.chain, state.configs, actions.onChainNode, actions.onChainOrder,
-                        actions.onChainRegion, actions.onSaveChain, actions.onPsiphonSettings, actions.onCustomChainHops)
+                    LabSection.CHAIN -> ChainPage(c, state.chain, state.configs, state.vpnOn, actions.onChainHops,
+                        actions.onChainRegion, actions.onTestChain, actions.onSaveChain, actions.onPsiphonSettings)
                 }
             }
         }
@@ -208,7 +212,7 @@ private fun sectionSubtitle(s: LabSection, state: NetworkLabUiState): String = w
     LabSection.RESEARCH -> "Public sources, checked against the core"
     LabSection.REVIVE -> "Brings dead Cloudflare configs back"
     LabSection.SERVICES -> "Gemini, YouTube, Telegram and more, opened for real"
-    LabSection.CHAIN -> "Run through two relays, Psiphon and Tor"
+    LabSection.CHAIN -> "Build a route from saved configs and engines."
 }
 
 // ---------------------------------------------------------------- shared wording
@@ -447,7 +451,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                     },
                     Triple(LabSection.DOMAIN_FRONTING, "Experimental", null),
                     Triple(LabSection.TRANSPORT_TOOLS, "Experimental", null),
-                    Triple(LabSection.CHAIN, state.chain.order.title, null),
+                    Triple(LabSection.CHAIN, "${state.chain.hopIds.size} hops", null),
                     Triple(LabSection.RESEARCH, "${state.research.size}", null)
                 )
                 rows.forEachIndexed { i, (sec, trailing, color) ->

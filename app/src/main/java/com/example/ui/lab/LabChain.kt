@@ -1,241 +1,410 @@
 package com.example.ui.lab
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.CellTower
+import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.DragIndicator
+import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.VpnKey
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import com.example.vpn.sidecar.EngineChain
-import com.example.vpn.sidecar.SingBoxSidecar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.protocols.LabColors
 import com.example.ui.protocols.LabText
+import com.example.vpn.sidecar.EngineChain
+import com.example.vpn.sidecar.SingBoxSidecar
+import kotlin.math.roundToInt
 
-/** Supported relay orders shown in the chain picker. */
-enum class ChainOrder(val first: String, val second: String?, val title: String, val third: String? = null) {
-    PSIPHON_TOR("psiphon", "tor", "Psiphon → Tor"),
-    TOR_PSIPHON("tor", "psiphon", "Tor → Psiphon"),
-    PSIPHON_MASQUE("psiphon", "masque", "Psiphon / WARP"),
-    PSIPHON_MATRIX("psiphon", "matrix-transport", "Psiphon / HTTP2"),
-    TOR_AETHER("tor", "aether", "Tor / Aether"),
-    PSIPHON_AETHER("psiphon", "aether", "Psiphon / Aether"),
-    TOR_PSIPHON_AETHER("tor", "psiphon", "Tor / Psiphon / Aether", "aether"),
-    SAVED_TOR("tor", null, "Tor"),
-    SAVED_WARP("masque", null, "WARP MASQUE"),
-    SAVED_AETHER("aether", null, "Aether HTTP/2"),
-    SAVED_PSIPHON("psiphon", null, "Psiphon");
-
-    val hops: List<String> get() = listOfNotNull(first, second, third)
-}
-
-/** LAB "Engine chain": builds a relay chain and saves it as a server to connect to. */
 data class ChainUi(
-    val order: ChainOrder = ChainOrder.PSIPHON_TOR,
-    /** Psiphon egress country, or empty for any. */
+    val hopIds: List<String> = listOf("tor", "psiphon"),
     val region: String = "",
-    val savedNodeId: String? = null,
-    val customHops: List<String>? = null,
-    val psiphonReady: Boolean = true,
-    val torReady: Boolean = true,
-    val masqueReady: Boolean = false,
-    val matrixReady: Boolean = false,
-    val aetherReady: Boolean = false,
+    val readyEngines: Set<String> = emptySet(),
+    val availabilityLoaded: Boolean = false,
     val saving: Boolean = false,
-    /** Name of the chain last saved this session, for the confirmation line. */
+    val testing: Boolean = false,
+    val testPassed: Boolean? = null,
+    val testMessage: String? = null,
     val savedName: String? = null
 ) {
-    val hopIds: List<String> get() = customHops ?:
-        (listOfNotNull(savedNodeId?.let { "saved:$it" }) + order.hops)
+    val busy: Boolean get() = saving || testing
 
-    fun engineChain() = EngineChain.Chain(hopIds.map { id ->
+    // The editor shows the wire path from the device; saved profiles keep the existing local SOCKS order.
+    fun engineChain() = EngineChain.Chain(hopIds.asReversed().map { id ->
         if (id.startsWith("saved:")) {
             EngineChain.Hop(SingBoxSidecar.id, profileId = id.removePrefix("saved:"))
         } else EngineChain.Hop(id, region = if (id == "psiphon") region else "")
     })
+
+    fun problem(configs: List<LabConfigOption>): String? {
+        if (!availabilityLoaded) return "Checking installed engines…"
+        val chain = engineChain()
+        EngineChain.problem(chain)?.let { return it }
+        for (hop in chain.hops) {
+            if (hop.engineId !in readyEngines) return "${EngineChain.titleOf(hop.engineId)} is unavailable on this device."
+            if (hop.profileId.isNotEmpty() && configs.none { it.id == hop.profileId && it.supportsSavedNodeChain }) {
+                return "A saved config is unavailable or incompatible with chaining."
+            }
+        }
+        return null
+    }
 }
 
-/** Egress countries offered for the Psiphon hop; the first is "any". */
-internal val CHAIN_REGIONS = listOf("" to "Any", "US" to "US", "DE" to "DE", "NL" to "NL", "GB" to "GB", "FR" to "FR", "CA" to "CA")
+private val chainRegions = listOf("", "US", "DE", "NL", "GB", "FR", "CA")
+
+private enum class HopSource(val title: String, val icon: ImageVector, val ids: List<String> = emptyList()) {
+    SAVED("Saved configs", Icons.Rounded.Layers),
+    WARP("WARP", Icons.Rounded.CellTower, listOf("masque", "aether")),
+    PSIPHON("Psiphon", Icons.Rounded.VpnKey, listOf("psiphon")),
+    TOR("Tor", Icons.Rounded.Hub, listOf("tor")),
+    SERVERLESS("Serverless", Icons.Rounded.Dns, listOf("serverless")),
+    MORE("More", Icons.Rounded.MoreHoriz, listOf("matrix-transport", "radiance"))
+}
+
+private val panelShape = RoundedCornerShape(18.dp)
+private val rowShape = RoundedCornerShape(12.dp)
 
 @Composable
 internal fun ChainPage(
-    c: LabColors, s: ChainUi, configs: List<LabConfigOption>, onNode: (String?) -> Unit,
-    onOrder: (ChainOrder) -> Unit, onRegion: (String) -> Unit, onSave: () -> Unit,
-    onPsiphonSettings: (String) -> Unit = {},
-    onCustomHops: (List<String>?) -> Unit = {}
+    c: LabColors,
+    s: ChainUi,
+    configs: List<LabConfigOption>,
+    vpnOn: Boolean,
+    onHops: (List<String>) -> Unit,
+    onRegion: (String) -> Unit,
+    onTest: () -> Unit,
+    onSave: () -> Unit,
+    onPsiphonSettings: (String) -> Unit
 ) {
-    LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            Panel(c) {
-                Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                    LabText("Send your traffic through multiple relays", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
-                    LabText("Your traffic enters the first engine, which dials the second, and the second reaches the site. " +
-                        "Choose the order in which the relays carry your traffic.",
-                        c.text2, 12.5.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 4, lineHeight = 17.sp)
+    var source by rememberSaveable { mutableStateOf<HopSource?>(null) }
+    var checkingCompatibility by rememberSaveable { mutableStateOf(false) }
+    var psiphonSettings by rememberSaveable { mutableStateOf(false) }
+    val problem = s.problem(configs)
+    val optionsAvailable = !s.busy && s.hopIds.size < EngineChain.MAX_HOPS
+
+    fun move(from: Int, to: Int) {
+        if (from != to && to in s.hopIds.indices && !s.busy) {
+            onHops(s.hopIds.toMutableList().apply { add(to, removeAt(from)) })
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Gutter)
+            .padding(top = 12.dp, bottom = 24.dp).testTag("connection_chain"),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        ChainPanel(c) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LabText("Traffic route", c.text, 20.sp, FontWeight.Bold, Modifier.weight(1f))
+                val (label, color) = when {
+                    s.testing -> "Testing…" to c.accent
+                    s.testPassed == true -> "Verified" to c.good
+                    s.testPassed == false -> "Test failed" to c.bad
+                    else -> "Not tested" to c.text2
+                }
+                val pill = RoundedCornerShape(50)
+                LabText(label, color, 11.sp, modifier = Modifier.border(1.dp, color.copy(alpha = .55f), pill)
+                    .padding(horizontal = 9.dp, vertical = 4.dp), maxLines = 1)
+            }
+            Endpoint(c, Icons.Rounded.Smartphone, "This device")
+            s.hopIds.forEachIndexed { index, id ->
+                val node = configs.firstOrNull { "saved:${it.id}" == id }
+                val isSaved = id.startsWith("saved:")
+                val position = when {
+                    index == 0 -> "Entry"
+                    index == s.hopIds.lastIndex -> "Exit"
+                    else -> "Relay"
+                }
+                ChainConnector(c)
+                key(id) {
+                    HopRow(c, node?.name ?: if (isSaved) "Saved config unavailable" else EngineChain.titleOf(id),
+                        "${if (isSaved) "Saved config" else "Engine"} · $position",
+                        if (isSaved) Icons.Rounded.Layers else HopSource.entries.firstOrNull { id in it.ids }?.icon
+                            ?: Icons.Rounded.Hub,
+                        index, s.hopIds.lastIndex, s.busy, onMove = { move(index, it) },
+                        onRemove = { onHops(s.hopIds.filterIndexed { at, _ -> at != index }) },
+                        onOptions = if (id == "psiphon") ({ source = HopSource.PSIPHON }) else null)
                 }
             }
+            if (s.hopIds.isEmpty()) LabText("Add at least two hops to build a route.", c.text2, 13.sp)
+            ChainConnector(c)
+            Endpoint(c, Icons.Rounded.Public, "Internet")
         }
-        item {
-            Panel(c) {
-                val settings = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
-                LabText("Psiphon network settings", c.text, 14.sp, FontWeight.SemiBold)
-                LabText("Import your authorized JSON settings. They are stored encrypted on this phone.", c.text3, 12.sp)
-                androidx.compose.material3.OutlinedTextField(value = settings.value, onValueChange = { settings.value = it },
-                    modifier = Modifier.fillMaxWidth(), label = { androidx.compose.material3.Text("Settings JSON") },
-                    minLines = 2, maxLines = 5)
-                SecondaryButton(c, "Save Psiphon settings", Icons.Rounded.Save, enabled = settings.value.isNotBlank()) {
-                    onPsiphonSettings(settings.value)
-                }
+
+        ChainPanel(c) {
+            Row(Modifier.fillMaxWidth().clip(rowShape)
+                .clickable(enabled = optionsAvailable, role = Role.Button) { source = HopSource.SAVED },
+                verticalAlignment = Alignment.CenterVertically) {
+                LabText("Add a hop", c.text, 20.sp, FontWeight.Bold, Modifier.weight(1f))
+                Icon(Icons.Rounded.Add, null, tint = c.accent, modifier = Modifier.size(24.dp))
+            }
+            HopSource.entries.forEach { item ->
+                ChainRow(c, item.title, item.icon, enabled = optionsAvailable) { source = item }
+            }
+            if (s.hopIds.size == EngineChain.MAX_HOPS) {
+                LabText("This route has the maximum of ${EngineChain.MAX_HOPS} hops.", c.text2, 12.sp)
             }
         }
-        item { GroupLabel(c, "Saved node") }
-        item {
-            val candidates = configs.filter { it.supportsSavedNodeChain }
-            var expanded by remember { mutableStateOf(false) }
-            Column(Modifier.padding(horizontal = Gutter)) {
-                OutlinedButton(onClick = { expanded = true }, enabled = candidates.isNotEmpty() || s.savedNodeId != null) {
-                    Text(candidates.firstOrNull { it.id == s.savedNodeId }?.name
-                        ?: if (s.savedNodeId == null) "Choose a saved node (optional)" else "Saved node unavailable")
-                }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    DropdownMenuItem(text = { Text("Relays only") }, onClick = { onNode(null); expanded = false })
-                    candidates.forEach { node ->
-                        DropdownMenuItem(text = { Text(node.name) }, onClick = { onNode(node.id); expanded = false })
-                    }
-                }
-                if (candidates.isEmpty()) LabText("No compatible saved nodes.", c.text3, 12.sp)
-            }
+
+        ChainRow(c, "Compatibility", Icons.Rounded.Security, subtitle = when {
+            !s.availabilityLoaded -> "Checking installed engines…"
+            problem != null -> "Review route"
+            else -> "Ready to test"
+        }) { checkingCompatibility = true }
+        s.testMessage?.let {
+            LabText(it, if (s.testPassed == true) c.good else c.text2, 13.sp, modifier = Modifier.padding(horizontal = 2.dp),
+                lineHeight = 18.sp, maxLines = 5)
         }
-        item { GroupLabel(c, "Order") }
-        item {
-            Column(Modifier.padding(horizontal = Gutter)) {
-                ChainOrder.entries.filter { if (s.savedNodeId == null) it.second != null else it.hops.size < 3 }
-                    .chunked(2).forEach { choices ->
-                    Segmented(c, choices, s.order, { it.title }, onOrder)
-                }
-                LabText(
-                    when (s.order) {
-                        ChainOrder.PSIPHON_TOR -> "Psiphon is the way in; Tor is the exit the site sees."
-                        ChainOrder.TOR_PSIPHON -> "Tor is the way in; Psiphon is the exit the site sees."
-                        ChainOrder.PSIPHON_MATRIX -> "Psiphon reaches its servers through a pinned MASQUE HTTP/2 carrier. The final exit is Psiphon."
-                        ChainOrder.PSIPHON_MASQUE -> "Psiphon reaches its servers through WARP MASQUE (HTTP/3). The final exit is Psiphon."
-                        ChainOrder.TOR_AETHER -> "Tor reaches its bridges through Aether HTTP/2."
-                        ChainOrder.PSIPHON_AETHER -> "Psiphon reaches its servers through Aether HTTP/2."
-                        ChainOrder.TOR_PSIPHON_AETHER -> "Tor reaches its bridges through Psiphon, which connects through Aether HTTP/2."
-                        else -> "The selected relay carries the connection to your saved node."
-                    },
-                    c.text3, 12.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp), maxLines = 2, lineHeight = 16.sp
-                )
-            }
+        if (vpnOn) LabText("Disconnect the active VPN to run an isolated chain test.", c.text2, 12.sp)
+        Box(
+            Modifier.fillMaxWidth().heightIn(min = 51.dp).clip(rowShape)
+                .background(Brush.horizontalGradient(if (!vpnOn && problem == null && !s.busy)
+                    listOf(c.accent, c.accent2) else listOf(c.cardAlt, c.card)))
+                .clickable(enabled = !vpnOn && problem == null && !s.busy, role = Role.Button, onClick = onTest)
+                .testTag("test_connection_chain"),
+            contentAlignment = Alignment.Center
+        ) {
+            if (s.testing) CircularProgressIndicator(Modifier.size(20.dp), color = c.accent, strokeWidth = 2.dp)
+            else LabText("Test chain", if (!vpnOn && problem == null) c.onAccent else c.text2, 15.sp, FontWeight.Bold)
         }
-        item {
-            Panel(c) {
-                val hops = s.hopIds
-                val candidates = configs.filter { it.supportsSavedNodeChain }
-                fun title(id: String) = when {
-                    id.startsWith("saved:") -> candidates.firstOrNull { it.id == id.removePrefix("saved:") }?.name ?: "Saved node unavailable"
-                    id == "aether" -> "Aether HTTP/2"
-                    id == "masque" -> "WARP MASQUE"
-                    id == "matrix-transport" -> "Matrix Transport"
-                    else -> id.replaceFirstChar { it.uppercase() }
+        OutlinedButton(onClick = onSave, enabled = problem == null && !s.busy,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 51.dp).testTag("save_connection_chain"), shape = rowShape,
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (problem == null) c.accent else c.stroke)) {
+            LabText(if (s.saving) "Saving…" else "Save chain", c.text, 15.sp, FontWeight.Bold)
+        }
+        s.savedName?.let { LabText("Saved to Nodes as “$it”.", c.good, 13.sp, maxLines = 3) }
+    }
+
+    source?.let { item ->
+        HopPicker(c, item, s, configs, onDismiss = { source = null }, onRegion = onRegion,
+            onPsiphonSettings = { source = null; psiphonSettings = true },
+            onAdd = { id -> onHops(s.hopIds + id); source = null })
+    }
+    if (checkingCompatibility) AlertDialog(
+        onDismissRequest = { checkingCompatibility = false },
+        title = { Text("Compatibility") },
+        text = { Text(problem ?: "The selected hops can be run in this order. Test the chain to verify traffic on this network.") },
+        confirmButton = { TextButton(onClick = { checkingCompatibility = false }) { Text("Done") } }
+    )
+    if (psiphonSettings) {
+        var json by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { psiphonSettings = false },
+            title = { Text("Psiphon network settings") },
+            text = { OutlinedTextField(json, { json = it }, label = { Text("Authorized settings JSON") }, minLines = 2, maxLines = 5) },
+            confirmButton = {
+                TextButton(enabled = json.isNotBlank(), onClick = { onPsiphonSettings(json); psiphonSettings = false }) {
+                    Text("Save securely")
                 }
-                var adding by remember { mutableStateOf(false) }
-                LabText("Custom order", c.text, 14.sp, FontWeight.SemiBold)
-                if (s.customHops == null) {
-                    TextButton(onClick = { onCustomHops(hops) }) { Text("Customize hop order") }
-                } else {
-                    hops.forEachIndexed { index, id ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("${index + 1}. ${title(id)}", modifier = Modifier.weight(1f))
-                            TextButton(onClick = {
-                                onCustomHops(hops.toMutableList().apply { add(index - 1, removeAt(index)) })
-                            }, enabled = index > 0) { Text("Up") }
-                            TextButton(onClick = { onCustomHops(hops.filterIndexed { at, _ -> at != index }) }) {
-                                Text("Remove")
+            },
+            dismissButton = { TextButton(onClick = { psiphonSettings = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+private fun ChainPanel(c: LabColors, content: @Composable () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(panelShape)
+            .background(Brush.verticalGradient(listOf(c.cardAlt, c.card)))
+            .border(1.dp, c.accent.copy(alpha = if (c.dark) .32f else .22f), panelShape)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp)
+    ) { content() }
+}
+
+@Composable
+private fun ChainRow(c: LabColors, label: String, icon: ImageVector, enabled: Boolean = true,
+                     subtitle: String? = null, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(rowShape).background(c.cardAlt)
+        .border(1.dp, c.stroke, rowShape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(icon, null, tint = if (enabled) c.accent else c.text3, modifier = Modifier.size(24.dp))
+        Column(Modifier.weight(1f)) {
+            LabText(label, if (enabled) c.text else c.text2, 14.sp, FontWeight.SemiBold, maxLines = 2)
+            subtitle?.let { LabText(it, c.text2, 12.sp, maxLines = 3) }
+        }
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = c.accent, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun Endpoint(c: LabColors, icon: ImageVector, title: String) {
+    Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Icon(icon, null, tint = c.text, modifier = Modifier.size(22.dp))
+        LabText(title, c.text, 14.sp, FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun ChainConnector(c: LabColors) {
+    Icon(Icons.Rounded.ArrowDownward, null, tint = c.accent,
+        modifier = Modifier.padding(start = 13.dp).size(20.dp))
+}
+
+@Composable
+private fun HopRow(
+    c: LabColors, name: String, subtitle: String, icon: ImageVector, index: Int, last: Int, busy: Boolean,
+    onMove: (Int) -> Unit, onRemove: () -> Unit, onOptions: (() -> Unit)?
+) {
+    var menu by remember { mutableStateOf(false) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    var rowHeight by remember { mutableStateOf(0) }
+    val gap = with(LocalDensity.current) { 34.dp.toPx() }
+    val travel = rowHeight + gap
+    val shape = rowShape
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 59.dp).onSizeChanged { rowHeight = it.height }
+            .zIndex(if (dragOffset == 0f) 0f else 1f).graphicsLayer { translationY = dragOffset }
+            .clip(shape).background(c.cardAlt)
+            .border(1.dp, c.accent.copy(alpha = .38f), shape).padding(start = 12.dp, top = 5.dp, bottom = 5.dp, end = 3.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(icon, null, tint = c.accent, modifier = Modifier.size(25.dp))
+        Column(Modifier.weight(1f)) {
+            LabText(name, c.text, 15.sp, FontWeight.Bold, maxLines = 2)
+            LabText(subtitle, c.text2, 12.sp, maxLines = 2)
+        }
+        Box {
+            Box(
+                Modifier.size(48.dp).clip(shape)
+                    .pointerInput(index, last, busy, travel) {
+                        if (!busy) {
+                            detectVerticalDragGestures(
+                                onDragStart = { dragOffset = 0f },
+                                onDragCancel = { dragOffset = 0f },
+                                onDragEnd = {
+                                    val destination = (index + (dragOffset / travel).roundToInt()).coerceIn(0, last)
+                                    dragOffset = 0f
+                                    onMove(destination)
+                                }
+                            ) { change, amount ->
+                                change.consume()
+                                dragOffset = (dragOffset + amount).coerceIn(-index * travel, (last - index) * travel)
                             }
                         }
                     }
-                    TextButton(onClick = { adding = true }, enabled = hops.size < EngineChain.MAX_HOPS) { Text("Add hop") }
-                    DropdownMenu(expanded = adding, onDismissRequest = { adding = false }) {
-                        val options = EngineChain.CHAINABLE.filterNot { it == SingBoxSidecar.id } +
-                            candidates.map { "saved:${it.id}" }
-                        options.filterNot { it in hops }.forEach { id ->
-                                DropdownMenuItem(text = { Text(title(id)) }, onClick = {
-                                    onCustomHops(hops + id)
-                                    adding = false
-                                })
-                            }
-                    }
-                    TextButton(onClick = { onCustomHops(null) }) { Text("Use preset order") }
+                    .clickable(enabled = !busy, role = Role.Button, onClickLabel = "Edit ${name} hop") { menu = true },
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Rounded.DragIndicator, "Reorder $name", tint = c.text2) }
+            DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("Move up") }, enabled = index > 0, onClick = { menu = false; onMove(index - 1) })
+                DropdownMenuItem(text = { Text("Move down") }, enabled = index < last, onClick = { menu = false; onMove(index + 1) })
+                onOptions?.let {
+                    DropdownMenuItem(text = { Text("Psiphon options") }, onClick = { menu = false; it() })
                 }
+                DropdownMenuItem(text = { Text("Remove hop") }, onClick = { menu = false; onRemove() })
             }
-        }
-        if ("psiphon" in s.hopIds) item { GroupLabel(c, "Psiphon exit country") }
-        if ("psiphon" in s.hopIds) item {
-            Column(Modifier.padding(horizontal = Gutter)) {
-                Segmented(c, CHAIN_REGIONS.map { it.first }, s.region, { code -> CHAIN_REGIONS.first { it.first == code }.second }, onRegion)
-                LabText("Where Psiphon leaves to. Any lets it pick the fastest.", c.text3, 12.sp,
-                    modifier = Modifier.padding(start = 4.dp, top = 8.dp), maxLines = 1)
-            }
-        }
-        val missing = buildList {
-            val hops = s.hopIds
-            if ("psiphon" in hops && !s.psiphonReady) add("Psiphon")
-            if ("tor" in hops && !s.torReady) add("Tor")
-            if ("matrix-transport" in hops && !s.matrixReady) add("Matrix Transport")
-            if ("masque" in hops && !s.masqueReady) add("WARP MASQUE")
-            if ("aether" in hops && !s.aetherReady) add("Aether")
-        }
-        val chainProblem = EngineChain.problem(s.engineChain())
-        if (chainProblem != null) item { Footnote(c, chainProblem) }
-        if (missing.isNotEmpty()) item {
-            Panel(c) {
-                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    LabText("${missing.joinToString(" and ")} ${if (missing.size == 1) "is" else "are"} not ready in this build, so this chain can't run yet.",
-                        c.okay, 12.5.sp, maxLines = 3, lineHeight = 16.sp)
-                }
-            }
-        }
-        item {
-            Column(Modifier.padding(horizontal = Gutter)) {
-                PrimaryButton(c, if (s.saving) "Saving..." else "Save this chain", Icons.Rounded.Save, Modifier.fillMaxWidth(), enabled = !s.saving && missing.isEmpty() && chainProblem == null &&
-                    s.hopIds.filter { it.startsWith("saved:") }.all { entry ->
-                        configs.any { "saved:${it.id}" == entry && it.supportsSavedNodeChain }
-                    }, onClick = onSave)
-                s.savedName?.let { name ->
-                    Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        androidx.compose.material3.Icon(Icons.Rounded.CheckCircle, null, tint = c.good, modifier = Modifier.width(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        LabText("Saved “$name”. Connect to it on the Servers screen.", c.text2, 12.5.sp, maxLines = 2, lineHeight = 16.sp)
-                    }
-                }
-            }
-        }
-        item {
-            Footnote(c, "Each hop runs as its own engine on the phone with a private local login. Xray still owns the " +
-                "tunnel, the DNS and the kill switch, and every engine's own server check is unchanged. A chain is " +
-                "slower than one hop.")
         }
     }
+}
+
+@Composable
+private fun HopPicker(
+    c: LabColors, source: HopSource, state: ChainUi, configs: List<LabConfigOption>, onDismiss: () -> Unit,
+    onRegion: (String) -> Unit, onPsiphonSettings: () -> Unit, onAdd: (String) -> Unit
+) {
+    var search by remember { mutableStateOf("") }
+    fun offer(id: String, label: String, detail: String?, engineId: String, compatible: Boolean): Triple<String, String, Boolean> {
+        val reason = when {
+            id in state.hopIds -> "Already in this route"
+            !compatible -> "This config needs its original engine"
+            engineId !in state.readyEngines -> "Unavailable on this device"
+            state.hopIds.size >= EngineChain.MAX_HOPS -> "Route is full"
+            else -> null
+        }
+        return Triple(label, reason ?: detail.orEmpty(), reason == null && !state.busy)
+    }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(source.title) }, text = {
+        Column(Modifier.widthIn(min = 220.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            if (source == HopSource.SAVED) {
+                OutlinedTextField(search, { search = it }, label = { Text("Search configs") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                val visible = configs.filter { it.name.contains(search.trim(), true) || it.detail.contains(search.trim(), true) }
+                    .sortedByDescending { it.supportsSavedNodeChain }
+                if (visible.isEmpty()) Text("No saved configs found.")
+                visible.forEach { config ->
+                    val id = "saved:${config.id}"
+                    val (title, detail, enabled) = offer(id, config.name, config.detail, SingBoxSidecar.id, config.supportsSavedNodeChain)
+                    ChainRow(c, title, source.icon, enabled = enabled, subtitle = detail) { onAdd(id) }
+                }
+            } else {
+                source.ids.forEach { id ->
+                    val (title, detail, enabled) = offer(id, EngineChain.titleOf(id), null, id, true)
+                    ChainRow(c, title, source.icon, enabled = enabled, subtitle = detail.ifBlank { null }) { onAdd(id) }
+                }
+            }
+            if (source == HopSource.PSIPHON) {
+                var regions by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { regions = true }) { Text("Exit country · ${state.region.ifBlank { "Any" }}") }
+                    DropdownMenu(regions, onDismissRequest = { regions = false }) {
+                        chainRegions.forEach { code ->
+                            DropdownMenuItem(text = { Text(code.ifBlank { "Any" }) }, onClick = {
+                                onRegion(code)
+                                regions = false
+                            })
+                        }
+                    }
+                }
+                TextButton(onClick = onPsiphonSettings) { Text("Psiphon network settings") }
+            }
+        }
+    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } })
 }

@@ -73,7 +73,8 @@ class ChainRunnerTest {
             )
             throw AssertionError("expected the failure to propagate")
         } catch (e: IllegalStateException) {
-            assertEquals("psiphon failed", e.message)
+            assertEquals("psiphon failed", e.cause?.message)
+            assertEquals("psiphon", (e as ChainRunner.HopStartFailure).engineId)
         }
         // The exit (tor), already started, was stopped.
         assertEquals(1, runs.size)
