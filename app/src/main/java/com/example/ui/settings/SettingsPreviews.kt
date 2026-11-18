@@ -30,7 +30,8 @@ internal fun SettingsHubSample() = SettingsHub(
     update = SettingsSamples.update,
     onOpen = {},
     onOpenAiAgent = {},
-    onUpdateChip = {}
+    onUpdateChip = {},
+    onFreeConfigsChanged = {}
 )
 
 @Composable
@@ -78,7 +79,7 @@ internal fun UpdatesPageSample() = UpdatesSettingsPage(
     update = SettingsSamples.update,
     data = UpdatesDataUi(),
     onCheckForUpdates = {},
-    onCoreManager = {},
+    installedBuild = 0,
     onUpdateResolvers = {},
     onRollbackResolvers = {},
     onRefreshCleanIps = {},
