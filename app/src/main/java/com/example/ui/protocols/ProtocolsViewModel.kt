@@ -16,7 +16,10 @@ import com.example.vpn.lab.LabResult
 import com.example.vpn.lab.ProtocolLab
 import com.example.xray.RealDelayProbe
 import com.example.xray.XrayLogManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,14 +53,14 @@ class ProtocolsViewModel(app: Application) : AndroidViewModel(app) {
                     it.type == PanelType.XUI && it.host.isNotBlank() && (it.password.isNotBlank() || it.apiToken.isNotBlank())
                 }
             }
-            val cdn = withContext(Dispatchers.IO) {
-                serverRepository.getAllProfilesOnce().count { LabFamily.of(it) == LabFamily.CDN }
+            val savedFamilyCounts = withContext(Dispatchers.IO) {
+                savedProfiles().groupingBy(LabFamily::of).eachCount()
             }
             _state.update { s ->
                 s.copy(
                     panels = panels,
                     panel = if (!s.usePanel) null else s.panel?.takeIf { p -> panels.any { it.id == p.id } } ?: panels.firstOrNull(),
-                    savedCdnCount = cdn,
+                    savedFamilyCounts = savedFamilyCounts,
                     autoFailover = settingsRepository.getSettings().autoFailoverEnabled
                 )
             }
@@ -65,7 +68,11 @@ class ProtocolsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Null tests the configs already saved in the app instead of creating new ones on a server. */
-    fun selectPanel(panel: ManagedPanel?) = _state.update { it.copy(panel = panel, usePanel = panel != null) }
+    fun selectPanel(panel: ManagedPanel?) = _state.update { current ->
+        if ((current.panel?.id == panel?.id && current.usePanel == (panel != null)) || current.phase is LabPhase.Running || current.applying) current
+        else current.copy(panel = panel, usePanel = panel != null, phase = LabPhase.Idle, results = emptyList(),
+            selected = null, testedAt = 0L, error = "")
+    }
 
     fun toggleFamily(family: LabFamily) = _state.update { s ->
         val next = if (family in s.families) s.families - family else s.families + family
@@ -89,38 +96,45 @@ class ProtocolsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun runTest() {
         val s = _state.value
-        if (s.phase is LabPhase.Running) return
+        if (s.phase is LabPhase.Running || s.applying) return
         if (VpnController.connectionState.value.let { it.isTunnelUp || it.isBusy }) {
             _state.update { it.copy(error = "Disconnect the VPN first. The test needs your direct connection to see what your network blocks.") }
             return
         }
-        _state.update { it.copy(phase = LabPhase.Running("Getting ready", 0, 1), error = "", selected = null) }
+        _state.update { it.copy(phase = LabPhase.Running("Getting ready", 0, 1), results = emptyList(), error = "", selected = null) }
         viewModelScope.launch {
             try {
                 discardPending()
                 val panel = s.panel
                 val lab = ProtocolLab(
                     measure = ::measure,
-                    provision = panel?.let { p -> { family: LabFamily -> generator.generateInbound(p, family.serverProtocol!!, family.serverSecurity!!) } }
+                    provision = panel?.let { p -> { family: LabFamily -> generator.generateInbound(p, family.serverProtocol!!, family.serverSecurity!!) } },
+                    discard = panel?.let { p -> { config -> generator.deleteInbound(p, config.inboundId) } }
                 )
-                val progress: (ProtocolLab.Progress) -> Unit = { p ->
-                    _state.update { it.copy(phase = LabPhase.Running(p.step, p.done, p.total)) }
-                }
                 val results = withContext(Dispatchers.IO) {
+                    val progress: (ProtocolLab.Progress) -> Unit = { p ->
+                        ensureActive()
+                        _state.update { it.copy(phase = LabPhase.Running(p.step, p.done, p.total)) }
+                    }
                     if (panel != null) {
                         lab.runOnServer(LabFamily.serverFamilies.filter { it in s.families }, priority = s.priority, onProgress = progress)
+                            .also { results -> pendingTestConfigs = results.filter { it.generated != null }.map { panel to it } }
                     } else {
-                        // Configs carried by their own engine (Tor, Psiphon, DNS tunnels) cannot be measured here.
-                        val saved = serverRepository.getAllProfilesOnce().filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }
+                        val saved = savedProfiles()
                         require(saved.isNotEmpty()) { "Add a server or some configs first, then run the test." }
                         lab.runOnSaved(saved, priority = s.priority, onProgress = progress)
                     }
                 }
-                if (panel != null) pendingTestConfigs = results.filter { it.generated != null }.map { panel to it }
                 XrayLogManager.i("PROTOCOLS", "Test finished: " + results.joinToString { "${it.family.displayName}=${it.score}" })
                 _state.update {
-                    it.copy(phase = LabPhase.Done, results = results, serverRun = panel != null, testedAt = System.currentTimeMillis())
+                    val ranked = if (it.priority == s.priority) results else ProtocolLab.rank(results.map { result ->
+                        result.copy(score = ProtocolLab.score(result, it.priority))
+                    })
+                    it.copy(phase = LabPhase.Done, results = ranked, serverRun = panel != null, testedAt = System.currentTimeMillis())
                 }
+            } catch (e: CancellationException) {
+                withContext(NonCancellable) { discardPending() }
+                throw e
             } catch (e: Exception) {
                 XrayLogManager.w("PROTOCOLS", "Test failed: ${e.message}")
                 _state.update { it.copy(phase = if (it.results.isEmpty()) LabPhase.Idle else LabPhase.Done, error = e.message ?: "The test failed") }
@@ -134,6 +148,7 @@ class ProtocolsViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun applyChoice(keepBackups: Boolean, cleanUp: Boolean, onReady: (VlessProfile) -> Unit) {
         val s = _state.value
+        if (s.phase != LabPhase.Done || s.applying) return
         val chosen = s.chosen ?: return
         val profile = chosen.profile ?: return
         _state.update { it.copy(applying = true) }
@@ -157,19 +172,19 @@ class ProtocolsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun measure(profiles: List<VlessProfile>): List<Long?> {
-        val outcomes = RealDelayProbe.measure(profiles, PROBE_TIMEOUT_SEC)
-        // Nothing measured at all (core busy, library missing) is not the same as "blocked".
-        if (outcomes.isNotEmpty() && outcomes.all { it is RealDelayProbe.Outcome.NotRun }) {
-            error("The test could not run: ${(outcomes.first() as RealDelayProbe.Outcome.NotRun).reason}")
-        }
-        return outcomes.map { (it as? RealDelayProbe.Outcome.Delay)?.latencyMs }
-    }
+    private suspend fun savedProfiles(): List<VlessProfile> =
+        serverRepository.getAllProfilesOnce().filterNot { com.example.vpn.sidecar.Sidecars.isEngineProfile(it) }
+
+    private fun measure(profiles: List<VlessProfile>): List<RealDelayProbe.Outcome> =
+        RealDelayProbe.measure(profiles, PROBE_TIMEOUT_SEC)
+
+    @Synchronized
+    private fun takePending(): List<Pair<ManagedPanel, LabResult>> =
+        pendingTestConfigs.also { pendingTestConfigs = emptyList() }
 
     /** Removes test configs from an earlier run the user never kept. */
     private suspend fun discardPending() {
-        val pending = pendingTestConfigs
-        pendingTestConfigs = emptyList()
+        val pending = takePending()
         if (pending.isEmpty()) return
         withContext(Dispatchers.IO) {
             pending.forEach { (p, r) -> runCatching { generator.deleteInbound(p, r.generated!!.inboundId) } }
@@ -177,8 +192,7 @@ class ProtocolsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        val pending = pendingTestConfigs
-        pendingTestConfigs = emptyList()
+        val pending = takePending()
         if (pending.isNotEmpty()) {
             // The scope is gone; a short-lived thread still frees the server's test ports.
             Thread {

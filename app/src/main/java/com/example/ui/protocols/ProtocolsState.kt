@@ -16,7 +16,7 @@ data class ProtocolsUiState(
     val panel: ManagedPanel? = null,
     val priority: LabPriority = LabPriority.BALANCED,
     val families: Set<LabFamily> = LabFamily.serverFamilies.toSet(),
-    val savedCdnCount: Int = 0,
+    val savedFamilyCounts: Map<LabFamily, Int> = emptyMap(),
     val phase: LabPhase = LabPhase.Idle,
     val results: List<LabResult> = emptyList(),
     /** True when [results] came from the user's server rather than saved configs. */
@@ -29,7 +29,7 @@ data class ProtocolsUiState(
     val usePanel: Boolean = true
 ) {
     val working: List<LabResult> get() = results.filter { it.works }
-    val blocked: List<LabResult> get() = results.filterNot { it.works }
+    val notTestedCount: Int get() = results.count { !it.wasMeasured }
     val best: LabResult? get() = working.firstOrNull()
     val chosen: LabResult? get() = working.firstOrNull { it.family == selected } ?: best
 }
