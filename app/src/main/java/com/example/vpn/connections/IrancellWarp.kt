@@ -83,13 +83,17 @@ object IrancellWarp {
         val routed = if (manual) candidate else withNativeApi(candidate)
         val extras = ProfileExtras.read(routed)
         val options = AetherSettings.read(extras)
-        if (extras.optString("carrier") != "h2" || options.scan != "balanced" ||
+        if (extras.optString("carrier") != "h2" ||
             options.endpoint.isNotBlank() || options.tor != "off" || options.psiphon != "off" ||
             AetherSidecar.cleanH2Peer(extras, "h2", options) != null) return routed
 
         // Balanced may keep searching for a better gateway after already proving one.
         // Turbo returns the first gateway that passes the same transport validation.
-        return routed.copy(extraSettings = extras.put("scan", "turbo").toString())
+        if (options.scan == "balanced") extras.put("scan", "turbo")
+        // PattNG disables quick reconnect when requesting a fresh scan. Apply
+        // that policy to the split retry so the previous gateway ring cannot consume its window.
+        if (extras.optBoolean(AetherSidecar.SNI_SPLIT)) extras.put("rescan", true)
+        return routed.copy(extraSettings = extras.toString())
     }
 
     internal fun manualAttemptMs(candidate: VlessProfile): Long {

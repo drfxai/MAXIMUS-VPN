@@ -78,6 +78,20 @@ class IrancellWarpTest {
         assertEquals("balanced", ProfileExtras.read(h2).optString("scan"))
     }
 
+    @Test fun splitRetryScansFreshWithoutReplacingPinnedEndpoints() {
+        val base = AetherSidecar.profile("h2", advanced = AetherSettings(scan = "verified"))
+        val split = ConnectionEngineRunner.operatorVariants(listOf(base), irancell = true, mci = false).last()
+        val attempt = ProfileExtras.read(IrancellWarp.forAttempt(split, manual = true))
+        assertTrue(attempt.optBoolean("rescan"))
+        assertEquals("verified", attempt.optString("scan"))
+        assertFalse(ProfileExtras.read(split).optBoolean("rescan"))
+        assertFalse(ProfileExtras.read(IrancellWarp.forAttempt(base, manual = true)).optBoolean("rescan"))
+
+        val pinned = AetherSidecar.profile("h2", advanced = AetherSettings(endpoint = "192.0.2.1:443"))
+        val pinnedSplit = ConnectionEngineRunner.operatorVariants(listOf(pinned), irancell = true, mci = false).last()
+        assertFalse(ProfileExtras.read(IrancellWarp.forAttempt(pinnedSplit, manual = true)).optBoolean("rescan"))
+    }
+
     @Test fun aRouteTheUserChoseIsKept() {
         val oob = AetherSidecar.profile("h2", advanced = AetherSettings(apiRoute = "oob"))
         assertEquals("oob", ProfileExtras.read(IrancellWarp.withNativeApi(oob)).optString("apiRoute"))
