@@ -66,7 +66,7 @@ object EngineRegistry {
         com.example.vpn.sidecar.SingBoxSidecar.VERSION, "GPL-3.0-or-later", bundled = true, runtime = null)
 
     val AETHER = EngineDescriptor("aether", "Aether / WARP", "2.4.0 / authenticated", "AGPL-3.0-only", true, null)
-    val SERVERLESS = EngineDescriptor("serverless", "Direct Serverless (Patterniha Xray)", "v57 / f9903959b9ae", "MPL-2.0", true, null)
+    val SERVERLESS = EngineDescriptor("serverless", "Direct Serverless (Patterniha Xray)", "v62 / 26.11.21", "MPL-2.0", true, null)
     val ENGINES = listOf(AETHER, SERVERLESS, XRAY, KOTLIN_TUNNEL, BYEDPI, MIHOMO, SING_BOX, AMNEZIAWG, WARP, PSIPHON, RADIANCE, TOR, NAIVE, DNS_TUNNEL, COTTEN_DNS, SOAR, SLIPSTREAM, MASQUE, MATRIX_TRANSPORT)
 
     fun descriptorFor(runtime: EngineSelectionPolicy.Runtime): EngineDescriptor =

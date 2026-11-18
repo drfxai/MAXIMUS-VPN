@@ -16,16 +16,32 @@ class ServerlessConnectionsTest {
             val result = ServerlessSidecar.config(source, 12345, "session-user", "session-secret", "auto")
             val inbound = result.getJSONArray("inbounds").getJSONObject(0)
             assertEquals("127.0.0.1", inbound.getString("listen"))
-            assertEquals("password", inbound.getJSONObject("settings").getString("auth"))
             assertEquals(12345, inbound.getInt("port"))
-            val original = JSONObject(source).getJSONArray("outbounds")
-            if (variant == "fragB") {
-                val mask = original.getJSONObject(5).getJSONObject("streamSettings")
-                    .getJSONObject("finalmask").getJSONArray("tcp").getJSONObject(1)
-                assertEquals("[\"0\",\"105\",\"1\"]", mask.getJSONObject("settings").getJSONArray("lengths").toString())
-                mask.getJSONObject("settings").put("lengths", org.json.JSONArray(listOf("1", "104", "1")))
+            assertTrue(inbound.getJSONObject("sniffing").getBoolean("routeOnly"))
+            assertEquals("password", inbound.getJSONObject("settings").getString("auth"))
+            assertEquals("session-user", inbound.getJSONObject("settings").getJSONArray("accounts")
+                .getJSONObject(0).getString("user"))
+            val outbounds = result.getJSONArray("outbounds")
+            val tagPrefix = if (variant == "oob") "tcp-oob" else "tcp-fragment-tls"
+            val byTag = (0 until outbounds.length()).map { outbounds.getJSONObject(it) }
+                .associateBy { it.getString("tag") }
+            val masked = byTag.getValue(tagPrefix).getJSONObject("streamSettings")
+            val firstTry = byTag.getValue("$tagPrefix-try").getJSONObject("streamSettings")
+            assertEquals(tagPrefix, firstTry.getJSONObject("sockopt").getJSONObject("fallback")
+                .getString("noResponseFallbackDialerProxy"))
+            assertEquals("merge", firstTry.getJSONObject("finalmask").getJSONArray("tcp")
+                .getJSONObject(0).getString("type"))
+            val mask = masked.getJSONObject("finalmask").getJSONArray("tcp").getJSONObject(1)
+            assertEquals("fragment", mask.getString("type"))
+            when (variant) {
+                "fragA" -> assertEquals("[\"6\",\"32\",\"1\"]",
+                    mask.getJSONObject("settings").getJSONArray("lengths").toString())
+                "fragB" -> assertEquals("[\"1\",\"37\",\"1\"]",
+                    mask.getJSONObject("settings").getJSONArray("lengths").toString())
+                "oob" -> assertEquals("oob.0,0", masked.getJSONObject("sockopt").getString("dialMode"))
             }
-            assertEquals(original.toString(), result.getJSONArray("outbounds").toString())
+            assertFalse(result.toString().contains("fromMitM"))
+            assertFalse(result.toString().contains("\"redirect\""))
             assertFalse(result.toString().contains("geosite:"))
             assertFalse(result.toString().contains("geoip:"))
             assertFalse(result.toString().contains("localhost"))
@@ -38,10 +54,13 @@ class ServerlessConnectionsTest {
             assertEquals("https+one://dns.google/dns-query", servers.getJSONObject(1).getString("address"))
             assertTrue(servers.getJSONObject(1).getBoolean("finalQuery"))
             val rules = result.getJSONObject("routing").getJSONArray("rules")
-            assertTrue((0 until rules.length()).any { index ->
-                val tags = rules.getJSONObject(index).optJSONArray("inboundTag")
-                tags?.optString(0) == "no-filter-dns" && tags.optString(1) == "no-filter-dns-ip"
-            })
+            val routes = (0 until rules.length()).map { rules.getJSONObject(it) }
+            assertTrue(routes.all { it.getString("outboundTag") in byTag })
+            val doh = routes.single { it.optJSONArray("inboundTag")?.optString(0) == "no-filter-dns" }
+            assertEquals("no-filter-dns-ip", doh.getJSONArray("inboundTag").getString(1))
+            assertEquals(tagPrefix, doh.getString("outboundTag"))
+            val retry = routes.single { it.getString("outboundTag") == "$tagPrefix-try" }
+            assertEquals("tls", retry.getJSONArray("protocol").getString(0))
             System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.let { directory ->
                 File(directory).mkdirs()
                 File(directory, "$variant.json").writeText(result.toString())
@@ -64,6 +83,7 @@ class ServerlessConnectionsTest {
             }
             assertTrue("The pinned source uses direct outbounds", linked > 0)
             assertEquals("serverless-exit", out.getJSONObject(out.length() - 1).getString("tag"))
+            assertFalse(root.toString().contains("noResponseFallbackDialerProxy"))
             assertTrue("DPI masks must stay on the original direct outbounds", root.toString().contains("finalmask"))
             System.getenv("MAXIMUS_SERVERLESS_FIXTURES")?.let { directory ->
                 val exitFixtures = File(directory, "exit").apply { mkdirs() }

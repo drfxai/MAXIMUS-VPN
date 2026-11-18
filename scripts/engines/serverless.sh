@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Patterniha's separate Xray fork: required for v57 finalmask and OOB semantics.
+# Patterniha's separate Xray fork: required for v62 profiles and TCP fallback semantics.
 set -euo pipefail
 export GOTOOLCHAIN=go1.27.0
 source "$(dirname "$0")/common.sh"
 TASK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REV=f9903959b9ae47538f5c7100f6416fb9fbcd2317
-source_dir="$TASK_ROOT/build/serverless-source"
+REV=135f782bc238b3f7b043fe752c635c02592434c8
+source_dir="$TASK_ROOT/build/serverless-source-$REV"
 if [[ ! -f "$source_dir/UPSTREAM_REVISION" ]]; then
  mkdir -p "$source_dir"
  git -C "$source_dir" init -q
