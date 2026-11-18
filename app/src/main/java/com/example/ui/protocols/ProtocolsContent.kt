@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.SettingsEthernet
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.SyncAlt
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Add
