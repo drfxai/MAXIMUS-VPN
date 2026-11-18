@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #236 (c98544bf3789ad95280cf3186742e559893e1264).
-Includes Psiphon Android DNS and Aether MASQUE discovery and recovery fixes.
+V1.0.4 signed Android rebuild after PR #237 (ca82cb6ef7df4e1ba693994bbf8cf9afc33364cd).
+Includes Patterniha Serverless-for-Iran v62 profiles and the separate Xray v26.11.21 engine.
