@@ -2,9 +2,12 @@ package com.example.vpn.diagnostics
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -46,16 +49,30 @@ internal object DnsProbePacket {
 internal object DnsPathTest {
     /** Tests the configured endpoint on Android's current app network. */
     suspend fun testResolver(context: Context, resolver: String): DnsPathResult = withContext(Dispatchers.IO) {
-        val value = DnsResolvers.literal(resolver)
-        if (!DnsResolvers.isUsable(value)) return@withContext DnsPathResult(false, "Invalid DNS resolver.")
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val network = manager.activeNetwork
             ?: return@withContext DnsPathResult(false, "No active network for the resolver test.")
+        testOnNetwork(manager, network, resolver)
+    }
+
+    /** Each probe uses the same Android network. Discard measurements if it changes. */
+    suspend fun compareResolvers(context: Context, resolvers: List<String>): List<DnsPathResult>? =
+        withContext(Dispatchers.IO) {
+            val manager = context.getSystemService(ConnectivityManager::class.java)
+            val network = manager.activeNetwork ?: return@withContext null
+            val measurements = resolvers.map { resolver -> async { testOnNetwork(manager, network, resolver) } }
+                .awaitAll()
+            measurements.takeIf { manager.activeNetwork == network }
+        }
+
+    private fun testOnNetwork(manager: ConnectivityManager, network: Network, resolver: String): DnsPathResult {
+        val value = DnsResolvers.literal(resolver)
+        if (!DnsResolvers.isUsable(value)) return DnsPathResult(false, "Invalid DNS resolver.")
         val vpn = manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
         val path = if (vpn) "VPN network" else "current network"
         val query = DnsProbePacket.query()
         val start = SystemClock.elapsedRealtime()
-        try {
+        return try {
             val answer = if (value.startsWith("https://", ignoreCase = true)) {
                 val connection = network.openConnection(URL(value), Proxy.NO_PROXY) as HttpsURLConnection
                 try {
@@ -97,7 +114,7 @@ internal object DnsPathTest {
                 }
             }
             if (manager.activeNetwork != network) {
-                return@withContext DnsPathResult(false, "Network changed during the resolver test.")
+                return DnsPathResult(false, "Network changed during the resolver test.")
             }
             check(DnsProbePacket.matches(query, answer))
             val elapsed = SystemClock.elapsedRealtime() - start
