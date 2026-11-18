@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #240 (390b65a7a7504c7625916b7457454f8e46a5ec81).
-Includes the Protocols screen inventory, network test reporting, and temporary configuration cleanup improvements.
+V1.0.4 signed Android rebuild after PR #241 (9d16275fbc82a840788733c18fc717558b1ab882).
+Includes the Protocols-only dark layout redesign.
