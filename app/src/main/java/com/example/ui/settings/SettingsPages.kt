@@ -1,5 +1,6 @@
 package com.example.ui.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,7 +28,6 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Lock
@@ -57,6 +57,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -68,6 +69,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -77,6 +81,9 @@ import com.example.data.model.AppSettings
 import com.example.data.model.DesyncProfile
 import com.example.data.model.ScoringProfile
 import com.example.ui.theme.AppTheme
+import com.example.vpn.lab.CoreCapabilityRegistry
+import com.example.vpn.sidecar.RadianceSidecar
+import com.example.vpn.sidecar.Sidecars
 
 /* ------------------------------------------------------------------ Connection */
 
@@ -696,8 +703,8 @@ fun UpdatesSettingsPage(
     versionName: String,
     update: UpdateUi,
     data: UpdatesDataUi,
+    installedBuild: Int,
     onCheckForUpdates: () -> Unit,
-    onCoreManager: () -> Unit,
     onUpdateResolvers: () -> Unit,
     onRollbackResolvers: () -> Unit,
     onRefreshCleanIps: () -> Unit,
@@ -706,20 +713,18 @@ fun UpdatesSettingsPage(
     onBack: () -> Unit
 ) {
     Column {
-        SettingsTopBar("Updates & data", onBack = onBack)
+        SettingsTopBar("App updates", onBack = onBack)
         SettingsPageColumn {
-            SettingsSectionLabel("App", first = true)
+            Spacer(Modifier.height(16.dp))
+            UpdateOverview(
+                title = "Maximus VPN",
+                subtitle = if (installedBuild > 0) "Installed build $installedBuild · $versionName" else "Installed version $versionName",
+                icon = Icons.Default.SystemUpdate,
+                update = update,
+                onCheckForUpdates = onCheckForUpdates
+            )
+            SettingsSectionLabel("Release preferences")
             SettingsGroup {
-                SettingsNavRow(
-                    title = "Check for updates",
-                    subtitle = "Version $versionName · stable channel",
-                    icon = Icons.Default.SystemUpdate,
-                    trailing = {
-                        if (update.checking) SmallSpinner() else UpdateChip(update, onCheckForUpdates)
-                    },
-                    onClick = onCheckForUpdates
-                )
-                SettingsDivider()
                 SettingsSwitchRow(
                     title = "VPN-only updates",
                     subtitle = "No direct fallback when the VPN is disconnected",
@@ -771,13 +776,143 @@ fun UpdatesSettingsPage(
             }
             listOfNotNull(data.resolverStatus, data.cleanIpStatus).forEach { SettingsFootnote(it) }
 
-            SettingsSectionLabel("Engines")
+        }
+    }
+}
+
+private val managedEngineNames = mapOf(
+    "sing-box" to "sing-box",
+    "mihomo" to "Mihomo",
+    "aether" to "Aether / WARP",
+    "psiphon" to "Psiphon",
+    "tor" to "Tor",
+    "radiance" to "Lantern / Radiance"
+)
+
+@Composable
+internal fun EngineUpdatesSettingsPage(
+    update: UpdateUi,
+    psiphonStatus: String?,
+    psiphonImporting: Boolean,
+    radianceStatus: String?,
+    onCheckForUpdates: () -> Unit,
+    onImportPsiphon: () -> Unit,
+    onAddRadiance: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column {
+        SettingsTopBar("Engine updates", onBack = onBack)
+        SettingsPageColumn {
+            Spacer(Modifier.height(16.dp))
+            UpdateOverview(
+                title = "Connection engines",
+                subtitle = "Engine upgrades are included in signed app releases.",
+                icon = Icons.Default.Memory,
+                update = update,
+                onCheckForUpdates = onCheckForUpdates
+            )
+            SettingsSectionLabel("Engine inventory")
+            SettingsGroup {
+                EngineInventoryRow(CoreCapabilityRegistry.CORE, "Included in the app")
+                Sidecars.ENGINES.forEach { engine ->
+                    managedEngineNames[engine.id]?.let { name ->
+                        SettingsDivider()
+                        EngineInventoryRow(name, if (Sidecars.isBundled(engine)) "Included in the app" else "Unavailable on this device")
+                    }
+                }
+            }
+            SettingsSectionLabel("Engine setup")
             SettingsGroup {
                 SettingsNavRow(
-                    title = "Core manager",
-                    subtitle = "Bundled engines, availability and update policy",
-                    icon = Icons.Default.Inventory2,
-                    onClick = onCoreManager
+                    title = "Import Psiphon.config",
+                    subtitle = psiphonStatus,
+                    icon = Icons.Default.Storage,
+                    enabled = !psiphonImporting,
+                    trailing = { if (psiphonImporting) SmallSpinner() else SettingsChevron() },
+                    onClick = onImportPsiphon
+                )
+                if (Sidecars.isBundled(RadianceSidecar)) {
+                    SettingsDivider()
+                    SettingsNavRow(
+                        title = "Add Lantern / Radiance to Nodes",
+                        icon = Icons.Default.Public,
+                        onClick = onAddRadiance
+                    )
+                }
+            }
+            radianceStatus?.let { SettingsFootnote(it) }
+        }
+    }
+}
+
+@Composable
+private fun EngineInventoryRow(name: String, status: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        SettingsIconTile(Icons.Default.Memory)
+        Column {
+            Text(name, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary)
+            Text(status, fontSize = 12.sp, color = AppTheme.colors.textSecondary)
+        }
+    }
+}
+
+@Composable
+private fun UpdateOverview(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    update: UpdateUi,
+    onCheckForUpdates: () -> Unit
+) {
+    val colors = AppTheme.colors
+    val status = when {
+        update.checking -> "Checking the official release…"
+        update.hasUpdate -> update.latestVersion?.let { "Version ${it} is available" } ?: "Update available"
+        update.checkFailed -> "Could not check for updates"
+        update.checked -> "You're up to date"
+        else -> "Stable channel"
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = SettingsGroupShape,
+        color = colors.surfaceCard,
+        border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.26f))
+    ) {
+        Column(
+            Modifier
+                .background(
+                    Brush.linearGradient(
+                        listOf(colors.primary.copy(alpha = if (colors.isDark) 0.18f else 0.10f), Color.Transparent)
+                    )
+                )
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                SettingsIconTile(icon, size = 44)
+                Column {
+                    Text(title, color = colors.textPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Text(subtitle, color = colors.textSecondary, fontSize = 13.sp)
+                }
+            }
+            Text(status, color = colors.textSecondary, fontSize = 13.sp)
+            Button(
+                modifier = Modifier.fillMaxWidth().testTag("settings_check_updates"),
+                onClick = onCheckForUpdates,
+                enabled = !update.checking,
+                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)
+            ) {
+                Text(
+                    when {
+                        update.checking -> "Checking…"
+                        update.hasUpdate -> "Review app update"
+                        update.checkFailed -> "Retry update check"
+                        else -> "Check for updates"
+                    }
                 )
             }
         }
