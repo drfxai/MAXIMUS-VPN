@@ -28,6 +28,15 @@ class ParallelEngineRoundTest {
         assertTrue(ParallelEngineRound.pick(ordered, emptySet(), 0).isEmpty())
     }
 
+    @Test fun chainsCannotConsumeTwoSlotsWithASharedEngine() {
+        val chain = Entry("chain", "chain:psiphon+matrix", false, setOf("psiphon", "matrix"))
+        val another = Entry("other", "chain:psiphon+masque", false, setOf("psiphon", "masque"))
+        val direct = Entry("psiphon", "psiphon", false)
+        val radiance = Entry("radiance", "radiance", false)
+        val chosen = ParallelEngineRound.pick(listOf(chain, another, direct, radiance), emptySet(), 3)
+        assertEquals(listOf(chain, radiance), chosen)
+    }
+
     @Test fun firstPassingResultWinsAndTheOthersAreInterrupted() {
         val interrupted = AtomicInteger()
         val slow = {

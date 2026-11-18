@@ -674,7 +674,10 @@ class LabController(
             val device = deviceState(userStarted = true)
             val plan = ExperimentPlanner.plan(reading, cap, ExperimentPlanner.budget(
                 ExperimentPlanner.Budget(true, device.batteryPercent, device.charging, device.metered)))
-            val saved = loadAllProfiles().filter { !it.allowInsecure && com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
+            val saved = loadAllProfiles().filter {
+                !it.allowInsecure && com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) &&
+                    com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null
+            }
             val fakeSni = if (rememberedOnly) emptyList() else withTimeoutOrNull(12_000L) {
                 kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
                     com.example.vpn.smart.FakeSniRecovery.candidates(saved, resolveForRecovery)
@@ -686,7 +689,9 @@ class LabController(
             val bridgeBook = com.example.vpn.smart.WebTunnelFailureBook.shared
             // WebTunnel bridges reset or misanswered repeatedly on this network in the last 6 h are left out.
             val seeds = bridgeBook.usable(currentIdentity, com.example.vpn.smart.RecoveryEngineCatalog.webTunnelSeeds())
-            val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(saved, seedBridges = seeds) + fakeSni
+            val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(
+                saved, seedBridges = seeds, tcpOnly = ExperimentPlanner.udpDead(cap)
+            ) + fakeSni
             val poolProfiles = if (rememberedOnly) com.example.vpn.smart.EngineRouteHints.preferred(context, currentIdentity, builtIn) else saved + builtIn
             val all = poolProfiles.distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
                 .filter { it.id !in exclude && com.example.vpn.connectivity.PathRef.of(it) !in exclude }
@@ -709,8 +714,11 @@ class LabController(
             val lowBattery = device.charging != true && (device.batteryPercent ?: 100) < 20
             val planner = AdaptivePlanner(plan, cap, AdaptivePlanner.Priors(memory = memory, recentlyFailed = recent),
                 AdaptivePlanner.Device(device.metered, lowBattery), AdaptivePlanner.Goal.CONNECT)
-            planner.add(pool.map { pk -> AdaptivePlanner.Candidate(pk.profile.id, pk.profile.name, pk.family, ipv6 = pk.profile.address.contains(':'),
-                provenHere = engineIds[pk.profile.id]?.let { ledger.verifiedHere(it, ledgerNetwork) } == true) })
+            val candidates = pool.associate { pk -> pk.profile.id to AdaptivePlanner.Candidate(
+                pk.profile.id, pk.profile.name, pk.family, ipv6 = pk.profile.address.contains(':'),
+                provenHere = engineIds[pk.profile.id]?.let { ledger.verifiedHere(it, ledgerNetwork) } == true
+            ) }
+            planner.add(candidates.values.toList())
             // Stop the moment the attempt is cancelled (the user pressed Stop, or a newer Connect arrived),
             // not only when the time limit is reached: otherwise recovery runs on for up to its full window
             // and the connect lock it holds blocks the disconnect behind it.
@@ -750,6 +758,11 @@ class LabController(
                 XrayLogManager.i("SMART", "Recovery irancell-warp: ${r.failure ?: r.stage.title}")
                 summary.add("irancell-warp", System.currentTimeMillis() - began,
                     if (r.outcomes.lastOrNull() == true) "carried traffic" else "failed (${r.failure ?: r.stage.title})")
+                if (com.example.vpn.smart.NetworkIdentity.current(context) != currentIdentity) {
+                    com.example.vpn.sidecar.EngineHandoff.clear()
+                    summaryOutcome = "network changed; results discarded"
+                    return FastRecoveryOutcome(null, 0, false, "network changed during recovery; results discarded", true)
+                }
                 if (r.outcomes.lastOrNull() == true) {
                     summaryOutcome = "connected via irancell-warp"
                     return FastRecoveryOutcome(FastRecoveryResult(irancellWarp, familyOf(irancellWarp), r.latencyMs, PathStatus.VERIFIED,
@@ -762,11 +775,17 @@ class LabController(
             val parallel = com.example.vpn.smart.ParallelEngineRound.concurrency(device.metered, lowBattery)
             val round = if (rememberedOnly) emptyList() else com.example.vpn.smart.ParallelEngineRound.pick(
                 pool.filter { Sidecars.isEngineProfile(it.profile) }
-                    .sortedByDescending { pk -> planner.score(AdaptivePlanner.Candidate(pk.profile.id, pk.profile.name, pk.family)) }
-                    .map { pk -> com.example.vpn.smart.ParallelEngineRound.Entry(pk.profile.id,
-                        com.example.vpn.sidecar.ChainRunner.readChain(pk.profile)?.hops?.joinToString("+", prefix = "chain:") { it.engineId }
-                            ?: engineIds[pk.profile.id] ?: pk.profile.id,
-                        tor = pk.family in PathFamily.TOR_FAMILIES || engineIds[pk.profile.id] == TorSidecar.ID) },
+                    .sortedByDescending { planner.score(candidates.getValue(it.profile.id)) }
+                    .map { pk ->
+                        val chain = com.example.vpn.sidecar.ChainRunner.readChain(pk.profile)
+                        val engines = chain?.hops?.map { it.engineId }.orEmpty()
+                            .ifEmpty { listOf(engineIds[pk.profile.id] ?: pk.profile.id) }
+                        com.example.vpn.smart.ParallelEngineRound.Entry(
+                            pk.profile.id, if (chain == null) engines.single() else engines.joinToString("+", prefix = "chain:"),
+                            tor = pk.family in PathFamily.TOR_FAMILIES || TorSidecar.ID in engines,
+                            engines = engines.toSet()
+                        )
+                    },
                 // Capped engines (ByeDPI on metered / cf=0 networks) run in the serial search, where their caps hold.
                 exclude = recent.keys + parallelExcluded(cap, pool) + (if (caps.constrained) pool.filter {
                     caps.left(engineIds[it.profile.id]) != null }.map { it.profile.id } else emptyList()), limit = parallel)

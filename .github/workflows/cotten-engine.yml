@@ -35,7 +35,7 @@ jobs:
           cache: false
       - name: Fetch and verify the exact CottenDNS revision
         run: |
-          revision=7db7b73658c791cce62300d29647e4d369d6e1e4
+          revision=ac8e86ed83a5006ab320468daaebe759d9574da6
           git init -q "$RUNNER_TEMP/cotten-source"
           git -C "$RUNNER_TEMP/cotten-source" fetch --depth=1 https://github.com/WhiteDNS/CottenDNS.git "$revision"
           git -C "$RUNNER_TEMP/cotten-source" checkout --detach FETCH_HEAD

@@ -24,7 +24,7 @@ object ParallelEngineRound {
     const val METERED_PARALLEL = 2
     const val WINDOW_MS = 60_000L
 
-    data class Entry(val id: String, val engineKey: String, val tor: Boolean)
+    data class Entry(val id: String, val engineKey: String, val tor: Boolean, val engines: Set<String> = setOf(engineKey))
 
     fun concurrency(metered: Boolean?, lowBattery: Boolean): Int = when {
         lowBattery -> 0
@@ -38,8 +38,10 @@ object ParallelEngineRound {
      */
     fun pick(ordered: List<Entry>, exclude: Set<String>, limit: Int): List<Entry> {
         if (limit < 2) return emptyList()
-        val chosen = ordered.asSequence().filter { !it.tor && it.id !in exclude }
-            .distinctBy { it.engineKey }.take(limit).toList()
+        val occupied = mutableSetOf<String>()
+        val chosen = ordered.asSequence().filter { entry ->
+            !entry.tor && entry.id !in exclude && entry.engines.none { it in occupied }
+        }.onEach { occupied.addAll(it.engines) }.take(limit).toList()
         return if (chosen.size >= 2) chosen else emptyList()
     }
 

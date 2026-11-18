@@ -38,7 +38,7 @@ class AdaptivePlanner(
     /** What a failure says about the network: methods in one domain tend to fail together. */
     enum class FailureDomain(val title: String) {
         TCP_TLS("TCP/TLS abroad"), UDP_QUIC("UDP/QUIC"), UDP_WIREGUARD("WireGuard-style UDP"), DNS("DNS tunnel"),
-        PSIPHON("Psiphon"), TOR("Tor"), MIHOMO("Mihomo"), OTHER("Other");
+        PSIPHON("Psiphon"), RADIANCE("Lantern / Radiance"), TOR("Tor"), MIHOMO("Mihomo"), OTHER("Other");
 
         companion object {
             fun of(f: PathFamily): FailureDomain = when (f) {
@@ -46,6 +46,7 @@ class AdaptivePlanner(
                 PathFamily.WIREGUARD, PathFamily.AMNEZIAWG, PathFamily.MATRIX_WG, PathFamily.MATRIX_GOOL -> UDP_WIREGUARD
                 PathFamily.DNS_TUNNEL -> DNS
                 PathFamily.PSIPHON, PathFamily.PSIPHON_MATRIX -> PSIPHON
+                PathFamily.RADIANCE -> RADIANCE
                 PathFamily.TOR, PathFamily.TOR_WEBTUNNEL, PathFamily.TOR_OBFS4, PathFamily.TOR_SNOWFLAKE -> TOR
                 PathFamily.MIHOMO -> MIHOMO
                 PathFamily.OTHER, PathFamily.ENGINE_CHAIN -> OTHER

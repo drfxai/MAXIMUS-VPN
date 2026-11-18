@@ -6,6 +6,7 @@ import com.example.vpn.sidecar.ChainRunner
 import com.example.vpn.sidecar.EngineChain
 import com.example.vpn.sidecar.MasqueSidecar
 import com.example.vpn.sidecar.PsiphonSidecar
+import com.example.vpn.sidecar.RadianceSidecar
 import com.example.vpn.sidecar.Sidecars
 import com.example.vpn.sidecar.TorSidecar
 
@@ -16,11 +17,16 @@ object RecoveryEngineCatalog {
     fun candidates(
         saved: List<VlessProfile>,
         seedBridges: List<String> = webTunnelSeeds(),
+        tcpOnly: Boolean = false,
         available: (VlessProfile) -> Boolean = { RuntimeCapabilities.unsupportedReason(it) == null }
     ): List<VlessProfile> {
         val defaults = listOf(
             MasqueSidecar.profile().copy(id = "recovery-masque"),
-            PsiphonSidecar.profile(tcpOnly = true).copy(id = "recovery-psiphon", name = "Psiphon direct (TCP)"),
+            PsiphonSidecar.profile(tcpOnly = tcpOnly).copy(
+                id = if (tcpOnly) "recovery-psiphon-tcp" else "recovery-psiphon",
+                name = if (tcpOnly) "Psiphon direct (TCP)" else "Psiphon direct"
+            ),
+            RadianceSidecar.profile().copy(id = "recovery-radiance"),
             TorSidecar.profile().copy(id = "recovery-tor-snowflake"),
             ChainRunner.profile(EngineChain.Chain(listOf(EngineChain.Hop("psiphon"), EngineChain.Hop("masque")))) {
                 if (it == "masque") "WARP MASQUE" else "Psiphon"

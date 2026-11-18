@@ -16,7 +16,8 @@ users can import their own bridges as alternatives.
 | Path | Outer transport | Requirements |
 | --- | --- | --- |
 | Saved Xray configs and ECH variants | Existing config transport | User's working server/config |
-| Psiphon direct | TCP-only automatic recipe; explicit saved configs retain their settings | Valid application network settings |
+| Psiphon direct | Automatic transport selection; TCP-only when current evidence shows UDP failure | Valid application network settings |
+| Lantern / Radiance | Lantern SOCKS-backed route | Bundled runtime and verified traffic |
 | Tor WebTunnel / obfs4 / meek | TCP/HTTPS bridge | Imported bridge lines or bundled unverified public seeds |
 | Tor Snowflake | Its own WebRTC transport, not advertised as TCP-only | Bundled lyrebird and reachable broker/volunteer |
 | WARP direct | WireGuard UDP | Registered device; protected API connection |

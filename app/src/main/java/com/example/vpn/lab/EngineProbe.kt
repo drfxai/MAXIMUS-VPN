@@ -97,6 +97,7 @@ object EngineProbe {
         val executable = Sidecars.executable(engine)
             ?: return Result(engine.id, ConnectionStage.NOT_TESTED, null, "the ${engine.id} engine is not in this build", notTested = true)
         engine.problem(profile)?.let { return Result(engine.id, ConnectionStage.NOT_TESTED, null, it, notTested = true) }
+        val network = networkIdentity(context)
         val workDir = File(context.noBackupFilesDir, "lab-engines/${engine.id}-${Sidecars.randomToken(6)}").apply { mkdirs() }
         try {
             val hints = runCatching {
@@ -105,7 +106,7 @@ object EngineProbe {
                     com.example.vpn.smart.NetworkIdentity.current(context), System.currentTimeMillis()))
             }.getOrDefault(com.example.vpn.connections.ConnectionEngineRunner.LinkHints())
             return runIsolated(engine, profile, executable, workDir, timeoutSec, requests, gapMs, mode, keep, hints)
-                .also { record(context, listOf(engine.id), it, failures = true) }
+                .also { record(context, network, listOf(engine.id), it, failures = true) }
         } finally {
             if (!EngineHandoff.holds(workDir)) cleanup(workDir)
         }
@@ -126,10 +127,11 @@ object EngineProbe {
         com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(profile)?.let {
             return Result("chain", ConnectionStage.NOT_TESTED, null, it, true)
         }
+        val network = networkIdentity(context)
         val workDir = File(context.noBackupFilesDir, "lab-engines/chain-${Sidecars.randomToken(6)}").apply { mkdirs() }
         var running: com.example.vpn.sidecar.ChainRunner.Running? = null
         try {
-            val settings = AppSettings()
+            val settings = AppSettings(operationalMode = mode)
             running = com.example.vpn.sidecar.ChainRunner.start(chain,
                 engineFor = { id -> Sidecars.ENGINES.firstOrNull { it.id == id } },
                 freePort = { Sidecars.freeLoopbackPort() },
@@ -155,7 +157,7 @@ object EngineProbe {
                 RealDelayProbe.measure(chained, timeoutSec) to (System.currentTimeMillis() - started)
             })
             // A passing chain proves every hop; a failing one does not say which hop failed.
-            return result.also { record(context, chain.hops.map { it.engineId }, it, failures = false) }
+            return result.also { record(context, network, chain.hops.map { it.engineId }, it, failures = false) }
         } catch (e: Exception) {
             if (e is InterruptedException || e is kotlinx.coroutines.CancellationException) throw e
             return Result("chain", ConnectionStage.NOT_TESTED, null, "chain start or request failed: ${e.javaClass.simpleName}", false)
@@ -213,11 +215,13 @@ object EngineProbe {
         }
     }
 
-    /** Writes what a test found into the shared engine ledger, which the LAB and diagnostics read. */
-    private fun record(context: Context, engineIds: List<String>, r: Result, failures: Boolean) {
-        if (r.notTested) return
-        val network = runCatching { com.example.vpn.smart.NetworkIdentity.current(context) }
+    private fun networkIdentity(context: Context): String =
+        runCatching { com.example.vpn.smart.NetworkIdentity.current(context) }
             .getOrElse { com.example.vpn.smart.NetworkKey.current(context) }
+
+    /** Writes what a test found into the shared engine ledger for the same network. */
+    private fun record(context: Context, network: String, engineIds: List<String>, r: Result, failures: Boolean) {
+        if (r.notTested || networkIdentity(context) != network) return
         val ledger = com.example.vpn.engine.registry.EngineLedger.shared
         engineIds.forEach { id ->
             if (r.outcomes.lastOrNull() == true) ledger.verified(id, network)
