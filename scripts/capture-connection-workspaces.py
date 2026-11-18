@@ -69,6 +69,17 @@ def main():
             ui.require('Connect')
             ui.adb('shell', 'input', 'keyevent', '4')
             time.sleep(2)
+        ui.require('LAB')
+        scroll_to('Connection chain')
+        ui.require('Connection chain')
+        captures.append(ui.capture('connection-chain-' + theme.lower(), 'Traffic route'))
+        scroll_to('Compatibility')
+        ui.require('Compatibility')
+        ui.require('Done')
+        scroll_to('Test chain')
+        captures.append(ui.capture('connection-chain-actions-' + theme.lower(), 'Save chain'))
+        ui.adb('shell', 'input', 'keyevent', '4')
+        time.sleep(1)
         ui.goto_panels()
         open_manager()
         captures.append(ui.capture('smart-manager-' + theme.lower(), 'Connect your first VPS'))
@@ -80,7 +91,7 @@ def main():
         ui.adb('shell', 'input', 'keyevent', '4')
         time.sleep(1)
     (ui.OUT / 'captures.json').write_text(json.dumps(captures, indent=2))
-    print('PASS: Aether, Direct and Smart Manager navigation in dark and light themes')
+    print('PASS: Aether, Direct, Connection chain and Smart Manager navigation in dark and light themes')
 
 
 if __name__ == '__main__':
