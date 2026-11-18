@@ -9,7 +9,7 @@ import java.io.File
 /** Direct anti-DPI access. Never claims a foreign exit or silently enables a VPN fallback. */
 object ServerlessSidecar : SidecarEngine {
     const val ID = "serverless"
-    const val CONFIG_REVISION = "df113f5b0fafc5bbe552e903f43249110510bc34"
+    const val CONFIG_REVISION = "946ed8945c9202217376818db061bcb2e204a9e1"
     override val id = ID
     override val binary = ID
     val resolvers = listOf("auto", "cloudflare", "google")
@@ -27,7 +27,7 @@ object ServerlessSidecar : SidecarEngine {
             protocolType = ProtocolType.MIXED, extraSettings = advanced.write(JSONObject()).put("engine", ID)
                 .put("variant", variant).put("family", family).put("vpnFallback", vpnFallback).put("resolver", resolver).toString())
     }
-    /** Keep DPI masks, repairing fragB's empty TLS record; replace the inlet and geo classifications. */
+    /** Adapt the upstream profiles to an authenticated Android sidecar with end-to-end TLS. */
     fun config(source: String, port: Int, user: String, password: String, family: String, resolver: String = "auto", advanced: AetherSettings = AetherSettings(),
         exitOutbound: JSONObject? = null): JSONObject {
         require(port in 1..65535 && user.isNotBlank() && password.isNotBlank())
@@ -38,10 +38,33 @@ object ServerlessSidecar : SidecarEngine {
         inbound.put("listen", "127.0.0.1").put("port", port)
         inbound.getJSONObject("settings").put("auth", "password")
             .put("accounts", JSONArray().put(JSONObject().put("user", user).put("pass", password)))
-        // Geo categories require external mutable files and do not define the anti-DPI method.
-        // Explicit domains/IP blocks remain; DNS is always DoH through the fragmented path.
+        val routing = root.getJSONObject("routing")
+        val sourceOutbounds = root.getJSONArray("outbounds")
+        val out = JSONArray()
+        val removedTags = mutableSetOf("tls-repack-dns")
+        val fallbackTags = mutableMapOf<String, String>()
+        for (i in 0 until sourceOutbounds.length()) {
+            val outbound = sourceOutbounds.getJSONObject(i)
+            val tag = outbound.getString("tag")
+            // The desktop profile can redirect selected destinations to shared edges.
+            // Android uses the original destination and authenticates it end to end.
+            if (tag == "tls-repack-dns" || outbound.optJSONObject("settings")?.has("redirect") == true) {
+                removedTags.add(tag)
+                continue
+            }
+            val fallbackTag = outbound.optJSONObject("streamSettings")?.optJSONObject("sockopt")
+                ?.optJSONObject("fallback")?.optString("noResponseFallbackDialerProxy").orEmpty()
+            if (fallbackTag.isNotEmpty()) fallbackTags[tag] = fallbackTag
+            out.put(outbound)
+        }
+        root.put("outbounds", out)
+        val maskedTcpTag = fallbackTags.values.single()
+
         val dns = root.getJSONObject("dns")
-        val upstream = dns.getJSONArray("servers").getJSONObject(1)
+        dns.remove("useSystemHosts")
+        dns.remove("skipHostsWhenFakeEnable")
+        val upstream = JSONObject().put("tag", "no-filter-dns")
+            .put("address", "https+one://cloudflare-dns.com/dns-query")
         // A domain alias still needs DNS. With the domestic resolver removed,
         // resolving challenges.cloudflare.com recursively asked this very DoH
         // path. Pin bootstrap IPs while retaining the authenticated TLS hostname.
@@ -55,7 +78,6 @@ object ServerlessSidecar : SidecarEngine {
                 listOf("2606:4700:4700::1111", "2606:4700:4700::1001")))
             .put("dns.google", bootstrap(com.example.vpn.BundledResolvers.known("8.8.8.8", "8.8.4.4"),
                 listOf("2001:4860:4860::8888", "2001:4860:4860::8844"))))
-        upstream.remove("finalQuery")
         upstream.put("timeoutMs", 4_000)
         dns.put("servers", JSONArray().put(upstream).put(JSONObject().put("tag", "no-filter-dns-ip")
             .put("address", "https+one://dns.google/dns-query").put("finalQuery", true).put("timeoutMs", 4_000)))
@@ -67,13 +89,22 @@ object ServerlessSidecar : SidecarEngine {
             dns.put("servers", JSONArray().put(google).put(cloudflare))
         }
         dns.put("queryStrategy", when(family) { "ipv4" -> "UseIPv4"; "ipv6" -> "UseIPv6"; else -> "UseIP" })
-        val rules = root.getJSONObject("routing").getJSONArray("rules")
+        val rules = routing.getJSONArray("rules")
         val kept = JSONArray()
         for (i in 0 until rules.length()) {
             val r = rules.getJSONObject(i)
             val tags = r.optJSONArray("inboundTag")
             if (tags?.optString(0) == "domestic-dns") continue
-            if (tags?.optString(0) == "no-filter-dns") tags.put("no-filter-dns-ip")
+            if (tags?.optString(0) == "no-filter-dns") {
+                tags.put("no-filter-dns-ip")
+                r.put("outboundTag", maskedTcpTag)
+            }
+            val tag = r.getString("outboundTag")
+            if (tag in removedTags) continue
+            // Use the masked path immediately for port-only matches and for selected exits.
+            fallbackTags[tag]?.let { fallback ->
+                if (r.optJSONArray("protocol") == null || exitOutbound != null) r.put("outboundTag", fallback)
+            }
             for (key in listOf("domain", "ip")) r.optJSONArray(key)?.let { entries ->
                 val clean = JSONArray()
                 for (j in 0 until entries.length()) if (!entries.getString(j).startsWith("geo")) clean.put(entries.getString(j))
@@ -82,20 +113,18 @@ object ServerlessSidecar : SidecarEngine {
             if (listOf("domain", "ip").any { r.has(it) && r.getJSONArray(it).length() == 0 }) continue
             kept.put(r)
         }
-        root.getJSONObject("routing").put("rules", kept)
-        val out = root.getJSONArray("outbounds")
+        routing.put("rules", kept)
         for (i in 0 until out.length()) out.getJSONObject(i).optJSONObject("streamSettings")?.let { stream ->
-            // The pinned fragB pattern [0,105,1] emits an empty Handshake record.
-            // Standards-compliant TLS servers reject it with unexpected_message.
-            // Move one byte into that record, retaining the next split's offset.
+            // Move a byte into fragB's empty TLS record while preserving the next split offset.
             stream.optJSONObject("finalmask")?.optJSONArray("tcp")?.let { masks ->
                 for (j in 0 until masks.length()) {
                     val mask = masks.getJSONObject(j)
                     val config = mask.optJSONObject("settings")
                     val lengths = config?.optJSONArray("lengths")
                     if (mask.optString("type") == "fragment" && config?.optString("packets") == "tlshello" &&
-                        lengths?.optString(0) == "0" && lengths.optString(1) == "105") {
-                        lengths.put(0, "1").put(1, "104")
+                        lengths?.optString(0) == "0") {
+                        val nextLength = lengths.optInt(1)
+                        if (nextLength > 1) lengths.put(0, "1").put(1, (nextLength - 1).toString())
                     }
                 }
             }
@@ -111,6 +140,7 @@ object ServerlessSidecar : SidecarEngine {
                 if (outbound.optString("protocol") !in setOf("freedom", "direct")) continue
                 val stream = outbound.optJSONObject("streamSettings") ?: JSONObject().also { outbound.put("streamSettings", it) }
                 val sock = stream.optJSONObject("sockopt") ?: JSONObject().also { stream.put("sockopt", it) }
+                sock.remove("fallback")
                 sock.put("dialerProxy", exitTag)
             }
             out.put(exitOutbound)
