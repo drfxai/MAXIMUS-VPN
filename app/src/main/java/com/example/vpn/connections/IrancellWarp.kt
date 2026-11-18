@@ -3,6 +3,7 @@ package com.example.vpn.connections
 import com.example.data.model.VlessProfile
 import com.example.vpn.engine.ProfileExtras
 import com.example.vpn.sidecar.AetherApiBridge
+import com.example.vpn.sidecar.AetherSettings
 import com.example.vpn.sidecar.AetherSidecar
 
 /**
