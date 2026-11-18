@@ -271,6 +271,7 @@ fun RoutingDnsSettingsPage(
     onCustomDns: () -> Unit,
     onTestVpnDns: () -> Unit,
     onTestResolver: () -> Unit,
+    onCompareResolvers: () -> Unit,
     onOpenResolverData: () -> Unit,
     onBack: () -> Unit,
     splitTunnelSummary: String? = null,
@@ -317,7 +318,7 @@ fun RoutingDnsSettingsPage(
                 )
                 SettingsDivider()
                 SettingsNavRow(
-                    title = if (dnsTestRunning) "Testing VPN DNS…" else "Test current VPN DNS",
+                    title = "Test current VPN DNS",
                     icon = Icons.Default.NetworkCheck,
                     enabled = !dnsTestRunning,
                     trailing = { if (dnsTestRunning) SmallSpinner() },
@@ -331,8 +332,19 @@ fun RoutingDnsSettingsPage(
                     trailing = {},
                     onClick = onTestResolver
                 )
+                SettingsDivider()
+                SettingsNavRow(
+                    title = "Compare encrypted DNS",
+                    subtitle = "Measure Cloudflare, Google and Quad9 on this connection",
+                    icon = Icons.Default.Speed,
+                    enabled = !dnsTestRunning,
+                    onClick = onCompareResolvers
+                )
             }
-            SettingsFootnote(dnsTestResult ?: "DNS changes apply the next time you connect.")
+            SettingsFootnote(
+                if (dnsTestRunning) "Testing DNS on this connection…"
+                else dnsTestResult ?: "DNS changes apply the next time you connect."
+            )
 
             SettingsSectionLabel("Resolvers")
             SettingsGroup {
@@ -352,7 +364,7 @@ fun RoutingDnsSettingsPage(
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = AppTheme.colors.surfaceCard
         ) {
-            SheetTitle("DNS provider", "Upstream DNS or DNS-over-HTTPS")
+            SheetTitle("DNS provider", "DoH encrypts queries. UDP presets use plain DNS.")
             Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
                 val default = AppSettings().dnsServer
                 SettingsChoiceRow(
