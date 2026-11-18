@@ -64,11 +64,49 @@ class IrancellWarpTest {
         assertTrue("--fragment also splits the WARP API ClientHello in Aether 2.4.0", "--fragment" in args)
     }
 
+    @Test fun shortHttp2AttemptsUseTheFirstVerifiedGateway() {
+        val h2 = AetherSidecar.profile("h2")
+        for (manual in listOf(false, true)) {
+            val attempt = ProfileExtras.read(IrancellWarp.forAttempt(h2, manual))
+            assertEquals("turbo", attempt.optString("scan"))
+            assertEquals(if (manual) "auto" else "native", attempt.optString("apiRoute"))
+        }
+        val configured = AetherSidecar.profile("h2", advanced = AetherSettings(scan = "thorough"))
+        assertEquals("thorough", ProfileExtras.read(IrancellWarp.forAttempt(configured, manual = true)).optString("scan"))
+        val pinned = AetherSidecar.profile("h2", advanced = AetherSettings(endpoint = "192.0.2.1:443"))
+        assertEquals("balanced", ProfileExtras.read(IrancellWarp.forAttempt(pinned, manual = true)).optString("scan"))
+        assertEquals("balanced", ProfileExtras.read(h2).optString("scan"))
+    }
+
+    @Test fun splitRetryScansFreshWithoutReplacingPinnedEndpoints() {
+        val base = AetherSidecar.profile("h2", advanced = AetherSettings(scan = "verified"))
+        val split = ConnectionEngineRunner.operatorVariants(listOf(base), irancell = true, mci = false).last()
+        val attempt = ProfileExtras.read(IrancellWarp.forAttempt(split, manual = true))
+        assertTrue(attempt.optBoolean("rescan"))
+        assertEquals("verified", attempt.optString("scan"))
+        assertFalse(ProfileExtras.read(split).optBoolean("rescan"))
+        assertFalse(ProfileExtras.read(IrancellWarp.forAttempt(base, manual = true)).optBoolean("rescan"))
+
+        val pinned = AetherSidecar.profile("h2", advanced = AetherSettings(endpoint = "192.0.2.1:443"))
+        val pinnedSplit = ConnectionEngineRunner.operatorVariants(listOf(pinned), irancell = true, mci = false).last()
+        assertFalse(ProfileExtras.read(IrancellWarp.forAttempt(pinnedSplit, manual = true)).optBoolean("rescan"))
+    }
+
     @Test fun aRouteTheUserChoseIsKept() {
         val oob = AetherSidecar.profile("h2", advanced = AetherSettings(apiRoute = "oob"))
         assertEquals("oob", ProfileExtras.read(IrancellWarp.withNativeApi(oob)).optString("apiRoute"))
         val auto = AetherSidecar.profile("h2")
         assertEquals("native", ProfileExtras.read(IrancellWarp.withNativeApi(auto)).optString("apiRoute"))
+    }
+
+    @Test fun manualHttp2WaitIncludesDiscoveryAndTunnelStartup() {
+        val turbo = IrancellWarp.forAttempt(AetherSidecar.profile("h2"), manual = true)
+        val thorough = AetherSidecar.profile("h2", advanced = AetherSettings(scan = "thorough"))
+        val pinned = AetherSidecar.profile("h2", advanced = AetherSettings(endpoint = "192.0.2.1:443"))
+        assertEquals(110_000L, IrancellWarp.manualAttemptMs(turbo))
+        assertEquals(365_000L, IrancellWarp.manualAttemptMs(thorough))
+        assertEquals(65_000L, IrancellWarp.manualAttemptMs(pinned))
+        assertEquals(110_000L, IrancellWarp.waitMs(110_000L, 0L, 10_000L, 220_000L))
     }
 
     @Test fun readinessWaitFitsTheTwentySecondCap() {

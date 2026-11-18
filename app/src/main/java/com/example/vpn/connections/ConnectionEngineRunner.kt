@@ -501,7 +501,6 @@ object ConnectionEngineRunner {
             AetherSettings.read(ProfileExtras.read(profile)).let { it.tor == "reverse" || it.psiphon == "reverse" }
         // Irancell: restrict this ladder to HTTP/2 with a bounded extra variant for manual runs.
         val irancellHttp2 = IrancellWarp.applies(engine.id, automatic, onIrancell, relayOnly, reverseRelay)
-        val irancellBudgetMs = if (manual) IrancellWarp.MANUAL_BUDGET_MS else IrancellWarp.BUDGET_MS
         // Build 151: WARP's data plane is held on this network (gateway scan failed with Cloudflare filtered), or the same
         // ladder ran here under a minute ago: an automatic run stops at once so the search goes on.
         val ladderKind = if (relayOnly) "relay" else "ladder"
@@ -523,7 +522,8 @@ object ConnectionEngineRunner {
             " before any scan" + (cleanPeers.first().rttMs?.let { " (prewarm: $it ms)" }.orEmpty()))
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
         val irancellPlan = if (irancellHttp2) IrancellWarp.plan(ordered.map(::method), preferred, manual)
-            .map { name -> ordered.first { method(it) == name } } else emptyList()
+            .map { name -> IrancellWarp.forAttempt(ordered.first { method(it) == name }, manual) } else emptyList()
+        val irancellBudgetMs = if (manual) irancellPlan.sumOf(IrancellWarp::manualAttemptMs) else IrancellWarp.BUDGET_MS
         if (irancellHttp2 && irancellPlan.isEmpty()) attempts += "irancell: no MASQUE HTTP/2 carrier available"
         if (irancellHttp2) record("ladder", "queue", "START",
             "Irancell MASQUE HTTP/2: ${irancellPlan.joinToString(", ") { method(it) }.ifEmpty { "none available" }}; " +
@@ -554,7 +554,7 @@ object ConnectionEngineRunner {
         // otherwise one quick recheck of the first method.
         if (relayOnly && relays.isEmpty()) throw NoVerifiedPath(listOf("relay: no saved server to carry WARP through"), null)
         val queue = ArrayDeque(when {
-            irancellHttp2 -> irancellPlan.map(IrancellWarp::withNativeApi)
+            irancellHttp2 -> irancellPlan
             relayOnly -> relays
             recheckOnly && relays.isNotEmpty() -> relays
             recheckOnly -> ordered.take(1)
@@ -831,7 +831,8 @@ object ConnectionEngineRunner {
                 !AetherApiBridge.skipAfterBootstrapFailure(it, failedRegistrationKinds)
             }
             try {
-                record(name, "prepare", "START")
+                val scan = if (irancellHttp2 && name != CLEAN_H2) AetherSettings.read(extras).scan else null
+                record(name, "prepare", "START", scan?.let { "gateway scan: $it" }.orEmpty())
                 // Iranian mobile networks: Aether races its account calls through the OOB ClientHello lane (WarpApiLane).
                 val launched = if (engine.id == AetherSidecar.ID && automatic &&
                     WarpApiLane.applies(onIrancell, onMci, candidate)) WarpApiLane.mark(candidate).also {
@@ -845,19 +846,30 @@ object ConnectionEngineRunner {
                 checkCancellation()
                 stage = "local proxy did not become ready"
                 val window = if (name == CLEAN_H2) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
+                    else if (irancellHttp2 && manual) IrancellWarp.manualAttemptMs(candidate)
+                    else if (engine.id == AetherSidecar.ID && manual && !automatic && carrier in setOf("h2", "h3")) {
+                        val options = AetherSettings.read(extras)
+                        if (options.tor == "off" && options.psiphon == "off")
+                            AetherSidecar.manualMasqueReadinessMs(options.scan, pinned = options.endpoint.isNotBlank())
+                        else launch.readyTimeoutMs
+                    }
+                    else if (!automatic && name == WIREGUARD_MTU) minOf(launch.readyTimeoutMs, 45_000L)
                     else readinessBudgetMs(
                     engine.id, automatic, preferWireGuard, carrier, launch.readyTimeoutMs,
                     failedHere = name in recentlyFailed
                 )
                 // On a metered filtered link a direct carrier never runs past what is left of the ladder budget.
-                val left = ladderBudget?.takeIf { !extras.optBoolean(RELAY_FOLLOW_UP) }
+                val left = ladderBudget?.takeIf { !(irancellHttp2 && manual) && !extras.optBoolean(RELAY_FOLLOW_UP) }
                     ?.let { maxOf(LADDER_MIN_ATTEMPT_MS, it - (System.currentTimeMillis() - ladderStartedAt)) }
                 val capped = if (left != null) minOf(window, left) else window
                 val ready = if (irancellHttp2) {
-                    val windowWithFallback = if (queue.isNotEmpty()) minOf(capped, IrancellWarp.MANUAL_FIRST_ATTEMPT_MS) else capped
-                    val wait = IrancellWarp.waitMs(windowWithFallback, ladderStartedAt, System.currentTimeMillis(), irancellBudgetMs)
+                    val wait = IrancellWarp.waitMs(capped, ladderStartedAt, System.currentTimeMillis(), irancellBudgetMs)
                     val watch = IrancellWarp.RegistrationWatch()
-                    process.awaitReadyUnless(wait) { watch.shouldStop(process.startupFailure, System.currentTimeMillis()) }
+                    process.awaitReadyUnless(wait) {
+                        val failure = process.startupFailure
+                        failure == SidecarProcess.AETHER_SCAN_EXHAUSTED ||
+                            watch.shouldStop(failure, System.currentTimeMillis())
+                    }
                 } else if (reserveForNextRelay) {
                     val elapsedMs = (System.nanoTime() - attemptStartedNanos) / 1_000_000
                     val wait = AetherBackgroundRelay.startupWindowMs(capped, elapsedMs, metered, hasNext = true)
@@ -919,7 +931,15 @@ object ConnectionEngineRunner {
                 if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
                 // A relayed carrier has no direct follow-ups of its own.
                 if (extras.optBoolean(RELAY_FOLLOW_UP)) continue
-                onNoData(name, candidate, extras, carrier)
+                if (!automatic && reducedMtuWireGuardFollowUp(engine.id, true, carrier,
+                        AetherSettings.read(extras).mtu, alreadyQueued = mtuQueued, reverseRelay = reverseRelay)) {
+                    mtuQueued = true
+                    record(WIREGUARD_MTU, "queue", "START",
+                        "WireGuard started but HTTPS failed; retrying with MTU ${AetherSettings.MTU_RETRY}")
+                    queue.addFirst(reducedMtuWireGuard(candidate))
+                } else {
+                    onNoData(name, candidate, extras, carrier)
+                }
             } catch (e: Exception) {
                 if (e is InterruptedException || e is CancellationException) throw e
                 checkCancellation()

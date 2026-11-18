@@ -8,6 +8,7 @@ import java.io.File
 /** Separately built PattNG-pinned Aether, authenticated registration and native SOCKS authentication. */
 object AetherSidecar : SidecarEngine {
     const val ID = "aether"
+    private const val MASQUE_STARTUP_SECONDS = 45
     fun readyLine(port: Int) = Regex("^MAXIMUS_AETHER_SOCKS_READY:$port$")
     override val id = ID
     override val binary = ID
@@ -46,7 +47,7 @@ object AetherSidecar : SidecarEngine {
         val command = mutableListOf(context.executable.absolutePath, "--bind", "127.0.0.1:$ownPort",
             "--config", identity.absolutePath, "--masque-config", identity.absolutePath,
             "--wg-config", File(identityDir, "wireguard.toml").absolutePath,
-            "--scan", advanced.scan, if (e.optBoolean("rescan")) "--no-quick-reconnect" else "--quick-reconnect", "--tls-verify", "--startup-secs", "45", "--validate-secs", "12")
+            "--scan", advanced.scan, if (e.optBoolean("rescan")) "--no-quick-reconnect" else "--quick-reconnect", "--tls-verify", "--startup-secs", MASQUE_STARTUP_SECONDS.toString(), "--validate-secs", "12")
         command += when (carrier) {
             "h3" -> listOf("--masque", "--h3")
             "wireguard" -> listOf("--wg")
@@ -123,6 +124,23 @@ object AetherSidecar : SidecarEngine {
             try { api?.running?.stop() } finally { exit?.running?.stop() }
             throw e
         }
+    }
+
+    /**
+     * Like WhiteAesther's aether_hop_timeout, allow time for discovery, then
+     * for startup and account work. The pinned prober includes its quiet
+     * period inside the scan deadline.
+     * https://github.com/WhiteDNS/WhiteAesther/blob/4965e40432d4a17b5271c1a0ecb7959c4043cbe3/src-tauri/src/core_supervisor.rs
+     */
+    internal fun manualMasqueReadinessMs(scan: String, pinned: Boolean): Long {
+        val discoverySeconds = if (pinned) 0 else when (scan) {
+            "turbo" -> 45
+            "verified" -> 60
+            "thorough" -> 300
+            "ironclad" -> 180
+            else -> 120
+        }
+        return (discoverySeconds + MASQUE_STARTUP_SECONDS + 20) * 1_000L
     }
 
     /** Extras key: the remembered clean HTTP/2 gateway to dial (set only by the session runner). */

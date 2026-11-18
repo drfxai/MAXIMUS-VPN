@@ -3,6 +3,7 @@ package com.example.vpn.connections
 import com.example.data.model.VlessProfile
 import com.example.vpn.engine.ProfileExtras
 import com.example.vpn.sidecar.AetherApiBridge
+import com.example.vpn.sidecar.AetherSettings
 import com.example.vpn.sidecar.AetherSidecar
 
 /**
@@ -34,8 +35,6 @@ import com.example.vpn.sidecar.AetherSidecar
 object IrancellWarp {
     /** Whole direct WARP attempt on Irancell, engine preparation to readiness. */
     const val BUDGET_MS = 20_000L
-    const val MANUAL_BUDGET_MS = 60_000L
-    const val MANUAL_FIRST_ATTEMPT_MS = 30_000L
 
     /**
      * Aether retries the account call on its fallback routes by itself; a registration failure still reported this
@@ -78,6 +77,32 @@ object IrancellWarp {
      */
     fun waitMs(windowMs: Long, startedAt: Long, now: Long, budgetMs: Long = BUDGET_MS): Long =
         minOf(windowMs, maxOf(MIN_WAIT_MS, budgetMs - (now - startedAt)))
+
+    /** Use upstream Aether's first-verified-gateway scan within the short readiness window. */
+    internal fun forAttempt(candidate: VlessProfile, manual: Boolean): VlessProfile {
+        val routed = if (manual) candidate else withNativeApi(candidate)
+        val extras = ProfileExtras.read(routed)
+        val options = AetherSettings.read(extras)
+        if (extras.optString("carrier") != "h2" ||
+            options.endpoint.isNotBlank() || options.tor != "off" || options.psiphon != "off" ||
+            AetherSidecar.cleanH2Peer(extras, "h2", options) != null) return routed
+
+        // Balanced may keep searching for a better gateway after already proving one.
+        // Turbo returns the first gateway that passes the same transport validation.
+        if (options.scan == "balanced") extras.put("scan", "turbo")
+        // PattNG disables quick reconnect when requesting a fresh scan. Apply
+        // that policy to the split retry so the previous gateway ring cannot consume its window.
+        if (extras.optBoolean(AetherSidecar.SNI_SPLIT)) extras.put("rescan", true)
+        return routed.copy(extraSettings = extras.toString())
+    }
+
+    internal fun manualAttemptMs(candidate: VlessProfile): Long {
+        val extras = ProfileExtras.read(candidate)
+        val options = AetherSettings.read(extras)
+        if (AetherSidecar.cleanH2Peer(extras, "h2", options) != null)
+            return ConnectionEngineRunner.CLEAN_H2_BUDGET_MS
+        return AetherSidecar.manualMasqueReadinessMs(options.scan, pinned = options.endpoint.isNotBlank())
+    }
 
     /** The attempt's account API route: Aether's own (native) unless the user picked a route. */
     fun withNativeApi(candidate: VlessProfile): VlessProfile {

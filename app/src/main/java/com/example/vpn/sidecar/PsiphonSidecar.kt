@@ -28,8 +28,7 @@ import java.io.InputStream
  *   LocalSocksProxyPort as soon as the controller starts, before any tunnel exists, and prints a
  *   `ListeningSocksProxyPort` notice. If that port is taken it exits instead of picking another one.
  *   Until a `Tunnels` notice with count >= 1, every CONNECT fails ("no active tunnels"), so traffic
- *   stays blocked rather than leaking. The readiness check is a port check and therefore passes
- *   early; "ready" means "running", not "connected".
+ *   stays blocked until the SOCKS port and a positive tunnel notice are both observed.
  * - Without Android's DNS server list (only the Java library supplies one), its resolver falls back
  *   to Go's own, which on Android without cgo has no /etc/resolv.conf and asks 127.0.0.1:53. We
  *   therefore give it DNSResolverAlternateServers (plain IPs) unless the build's settings do.
@@ -72,6 +71,8 @@ class PsiphonSidecar(
             context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null)
         val configFile = File(context.workDir, CONFIG_FILE)
         configFile.writeText(config.toString())
+        val linkDns = if (context.upstreamSocks == null && !source.has("DNSResolverAlternateServers"))
+            runCatching { Sidecars.psiphonLinkDns?.invoke().orEmpty() }.getOrDefault(emptyList()) else emptyList()
         // The settings are not secret in the cryptographic sense, but no other app needs to read them.
         configFile.setReadable(false, false)
         configFile.setReadable(true, true)
@@ -82,6 +83,7 @@ class PsiphonSidecar(
                 "-dataRootDirectory", dataDir.absolutePath,
                 "-formatNotices"
             ),
+            environment = if (linkDns.isEmpty()) emptyMap() else mapOf("MAXIMUS_PSIPHON_LINK_DNS" to linkDns.joinToString(",")),
             readyTimeoutMs = READY_TIMEOUT_MS,
             // Psiphon's SOCKS server takes any user name and password as transport arguments; it
             // cannot check a login, so none is sent.

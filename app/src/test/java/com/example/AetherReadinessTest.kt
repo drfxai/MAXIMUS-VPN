@@ -62,6 +62,21 @@ class AetherReadinessTest {
         }
     }
 
+    @Test fun aCompletedGatewayScanReportsFailureWithoutWaitingForAnotherScan() {
+        ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
+            val child = PendingEngine()
+            val process = SidecarProcess("aether", child, listener.localPort, AetherSidecar.readyLine(listener.localPort), logOutput = false)
+            try {
+                child.line("MAXIMUS_AETHER_STAGE:scan")
+                child.line("MAXIMUS_AETHER_SCAN_EXHAUSTED")
+                assertFalse(process.awaitReadyUnless(2_000) {
+                    process.startupFailure == SidecarProcess.AETHER_SCAN_EXHAUSTED
+                })
+                assertEquals(SidecarProcess.AETHER_SCAN_EXHAUSTED, process.startupFailure)
+            } finally { process.stop() }
+        }
+    }
+
     @Test fun accountTimeoutRetainsCauseAndCannotPassAsReady() {
         ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { listener ->
             val child = PendingEngine()

@@ -726,6 +726,12 @@ The application's license does not restrict recipients' rights in this separate 
 
 * RegionHop 1.27.0, freeb5d/regionhop revision `d5798d80f77fa6f40406ba30886d810c3c462147`, MIT. The optional VPS installer downloads checksum-pinned upstream components. The upstream Psiphon and Xray binaries retain their respective upstream licenses; release and source provenance remain available from that upstream release. No user deployment config or API token is bundled.
 
+## Aether gateway discovery and retry references
+
+- [patterniha/PattNG at b968895](https://github.com/patterniha/PattNG/blob/b968895101455e2866be3994b3e4cb5265895972/V2rayNG/app/src/main/java/com/v2ray/ang/core/AetherCoreManager.kt) uses fresh discovery with quick reconnect disabled. MAXIMUS applies that behavior to the HTTP/2 split attempt with an unpinned gateway.
+- [WhiteDNS/WhiteAesther at 4965e40](https://github.com/WhiteDNS/WhiteAesther/blob/4965e40432d4a17b5271c1a0ecb7959c4043cbe3/src-tauri/src/core_supervisor.rs) provides the model for budgeting discovery and tunnel startup. [WhiteAestherMobile at f9003f5](https://github.com/WhiteDNS/WhiteAestherMobile/blob/f9003f5eb7010bfa74d5b59d8c429a045163827e/app/src/main/java/com/whitedns/whiteaesther/core/NativeEndpointDiscovery.kt) provides the model for reporting authenticated discovery separately from traffic confirmation.
+- [CluvexStudio/Aether v2.4.0](https://github.com/CluvexStudio/Aether/tree/v2.4.0) provides the bundled scanner, Turbo mode and transport validation. MAXIMUS exposes its exhausted-scan result to the Android connection plan.
+
 ## WhiteAestherMobile and ZedSecure — per-app routing (2026-11-15)
 
 - Upstream: https://github.com/WhiteDNS/WhiteAestherMobile at commit `6e2ade9e86c5f66194c66e6be1e23b40677c2db2`

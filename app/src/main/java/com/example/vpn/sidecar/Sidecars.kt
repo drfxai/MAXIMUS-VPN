@@ -32,6 +32,7 @@ object Sidecars {
 
     /** Starts the Tor library; set once by the VPN service. */
     /** Optional per-install settings, encrypted by the application; never written to an APK. */
+    @Volatile var psiphonLinkDns: (() -> List<String>)? = null
     @Volatile var psiphonSettings: (() -> String?)? = null
     /** Only encrypted per-user private server profiles; never falls back to public settings. */
     @Volatile var privatePsiphonSettings: ((String) -> String?)? = null
