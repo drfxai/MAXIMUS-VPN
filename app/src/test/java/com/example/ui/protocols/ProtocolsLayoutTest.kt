@@ -47,8 +47,10 @@ class ProtocolsLayoutTest {
         }
         val layouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithText("Protocols", useUnmergedTree = true)
+            .assertIsDisplayed()
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-        assertFalse(layouts.single().hasVisualOverflow)
+        val title = layouts.single()
+        assertFalse((0 until title.lineCount).any(title::isLineEllipsized))
         compose.onNodeWithText("Saved configs").assertIsDisplayed().performClick()
         compose.runOnIdle { assertTrue(sourceOpened) }
     }

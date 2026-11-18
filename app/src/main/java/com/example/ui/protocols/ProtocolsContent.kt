@@ -333,8 +333,8 @@ private fun Header(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActi
     }
     BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 12.dp, end = 16.dp, top = 10.dp, bottom = 14.dp)) {
         val stacked = maxWidth < 340.dp || LocalDensity.current.fontScale > 1.15f
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = actions.onBack),
                     contentAlignment = Alignment.Center
@@ -342,8 +342,11 @@ private fun Header(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActi
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = c.text, modifier = Modifier.size(22.dp))
                 }
                 Column(Modifier.weight(1f)) {
-                    LabText("Protocols", c.text, 28.sp, FontWeight.Bold, Modifier.semantics { heading() },
-                        letterSpacing = (-0.6).sp)
+                    Text(
+                        "Protocols", color = c.text, modifier = Modifier.semantics { heading() },
+                        style = TextStyle(fontFamily = InterFamily, fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.6).sp)
+                    )
                     LabText(subtitle, c.text2, 13.sp)
                 }
                 if (!stacked) {
