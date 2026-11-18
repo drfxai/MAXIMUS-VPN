@@ -5,6 +5,7 @@ import com.example.vpn.lab.ExperimentPlanner
 import com.example.vpn.lab.PathFamily
 import com.example.vpn.sidecar.ChainRunner
 import com.example.vpn.sidecar.TorSidecar
+import com.example.vpn.sidecar.PsiphonSidecar
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -22,7 +23,7 @@ class RecoveryEngineCatalogTest {
         val candidates = RecoveryEngineCatalog.candidates(listOf(saved), seedBridges = emptyList()) { true }
         assertTrue(candidates.any { it.id == saved.id })
         assertFalse(candidates.any { it.id == "recovery-tor-snowflake" })
-        assertEquals(9, candidates.size)
+        assertEquals(10, candidates.size)
     }
 
     @Test fun availabilityAndSecurityAreGates() {
@@ -30,6 +31,20 @@ class RecoveryEngineCatalogTest {
         val candidates = RecoveryEngineCatalog.candidates(listOf(insecure), seedBridges = emptyList()) { it.id == "recovery-masque" }
         assertEquals(listOf("recovery-masque"), candidates.map { it.id })
         assertTrue(RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList()) { false }.isEmpty())
+    }
+
+    @Test fun radianceIsAnIndependentRecoveryFamily() {
+        val candidates = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList()) { true }
+        val profile = candidates.single { it.id == "recovery-radiance" }
+        assertEquals(PathFamily.RADIANCE, PathFamily.of(profile, "radiance"))
+        assertTrue(PathFamily.RADIANCE in ExperimentPlanner.emergencyOrder(null))
+    }
+
+    @Test fun psiphonTransportFollowsTheCurrentNetwork() {
+        val normal = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList()) { true }
+        assertFalse(PsiphonSidecar.tcpOnly(normal.single { it.id == "recovery-psiphon" }))
+        val constrained = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList(), tcpOnly = true) { true }
+        assertTrue(PsiphonSidecar.tcpOnly(constrained.single { it.id == "recovery-psiphon-tcp" }))
     }
 
     @Test fun defaultIdentitiesStayStableBetweenSearches() {

@@ -74,6 +74,7 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
     /** AmneziaWG through the bundled Mihomo (amnezia-wg-option). */
     AMNEZIAWG("AmneziaWG", udp = true, engine = true),
     PSIPHON("Psiphon", engine = true),
+    RADIANCE("Lantern / Radiance", engine = true),
     MATRIX_H2("Matrix MASQUE HTTP/2", engine = true),
     MATRIX_H3("Matrix MASQUE HTTP/3", udp = true, engine = true),
     MATRIX_WG("Matrix WireGuard", udp = true, engine = true),
@@ -115,6 +116,7 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
                 else -> ENGINE_CHAIN
             }
             engineId == "psiphon" -> PSIPHON
+            engineId == "radiance" -> RADIANCE
             engineId == "tor" -> when (detail) {
                 "webtunnel" -> TOR_WEBTUNNEL
                 "obfs4" -> TOR_OBFS4
