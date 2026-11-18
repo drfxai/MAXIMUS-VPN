@@ -865,7 +865,11 @@ object ConnectionEngineRunner {
                 val ready = if (irancellHttp2) {
                     val wait = IrancellWarp.waitMs(capped, ladderStartedAt, System.currentTimeMillis(), irancellBudgetMs)
                     val watch = IrancellWarp.RegistrationWatch()
-                    process.awaitReadyUnless(wait) { watch.shouldStop(process.startupFailure, System.currentTimeMillis()) }
+                    process.awaitReadyUnless(wait) {
+                        val failure = process.startupFailure
+                        failure == SidecarProcess.AETHER_SCAN_EXHAUSTED ||
+                            watch.shouldStop(failure, System.currentTimeMillis())
+                    }
                 } else if (reserveForNextRelay) {
                     val elapsedMs = (System.nanoTime() - attemptStartedNanos) / 1_000_000
                     val wait = AetherBackgroundRelay.startupWindowMs(capped, elapsedMs, metered, hasNext = true)

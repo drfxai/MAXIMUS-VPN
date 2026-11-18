@@ -1,5 +1,7 @@
 package com.example.vpn.connections
 
+import com.example.vpn.sidecar.SidecarProcess
+
 /**
  * Per-network hold after WARP's data plane proved unreachable: the account API answered (registration works) but
  * Aether's gateway scan found no serving MASQUE tunnel while Cloudflare's TLS is filtered here (cf=0,
@@ -28,7 +30,8 @@ object WarpDataPlaneHold {
      * nothing about this network's own path to WARP.
      */
     fun startsHold(reason: String?, cloudflareBlocked: Boolean, relayed: Boolean): Boolean =
-        cloudflareBlocked && !relayed && reason?.contains(GATEWAY_SCAN_FAILURE, ignoreCase = true) == true
+        cloudflareBlocked && !relayed && (reason == SidecarProcess.AETHER_SCAN_EXHAUSTED ||
+            reason?.contains(GATEWAY_SCAN_FAILURE, ignoreCase = true) == true)
 
     const val GATEWAY_SCAN_FAILURE = "gateway scan did not reach a serving tunnel"
 

@@ -176,6 +176,15 @@ replace('lib.rs', '    let mode = wg_prober::WgScanMode::parse(mode_str);', ''' 
     let mode = wg_prober::WgScanMode::parse(mode_str);''')
 replace('lib.rs', '        log::info!("[+] using cloudflare edge {peer}");', '''        eprintln!("MAXIMUS_AETHER_STAGE:transport");
         log::info!("[+] using cloudflare edge {peer}");''')
+# WhiteAestherMobile reports authenticated discovery separately from tunnel startup.
+# Keep the bundled CluvexStudio scanner and expose its exhausted-scan result without endpoint data.
+replace('lib.rs', '    let best = prober::hunt_best_gateway_avoiding(&probe, mode, avoid).await?;', '''    let best = prober::hunt_best_gateway_avoiding(&probe, mode, avoid)
+        .await
+        .inspect_err(|error| {
+            if matches!(error, AetherError::NoCleanEndpoint) {
+                eprintln!("MAXIMUS_AETHER_SCAN_EXHAUSTED");
+            }
+        })?;''')
 # Mark the precise SOCKS listener only when it is being served.
 replace('socks.rs', '    let listen = listener.borrow().local_addr()?;', '''    let listen = listener.borrow().local_addr()?;
     eprintln!("MAXIMUS_AETHER_SOCKS_READY:{}", listen.port());''')

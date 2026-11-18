@@ -43,6 +43,10 @@ class SidecarProcess(
                         startupStage = stage
                         XrayLogManager.i("BUILTIN", "aether · $stage · pending; traffic unverified")
                     }
+                    if (name == AetherSidecar.ID && !ready && startupStage == "scan" &&
+                        line.trim() == "MAXIMUS_AETHER_SCAN_EXHAUSTED") {
+                        startupFailure = AETHER_SCAN_EXHAUSTED
+                    }
                     if (!sawReadyLine && readyLine?.containsMatchIn(line) == true) sawReadyLine = true
                     // Categorize first: a summary must not freeze an earlier, less specific cause.
                     if (name == RadianceSidecar.id) {
@@ -137,6 +141,9 @@ class SidecarProcess(
     }
 
     companion object {
+        internal const val AETHER_SCAN_EXHAUSTED =
+            "Aether gateway scan completed without a verified endpoint; traffic is unverified."
+
         /** Fixed native events only: never expose identity IDs, API bodies, endpoints or keys. */
         internal fun aetherStage(line: String): String? = line.trim()
             .removePrefix("MAXIMUS_AETHER_STAGE:")
