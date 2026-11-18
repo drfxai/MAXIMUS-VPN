@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #241 (9d16275fbc82a840788733c18fc717558b1ab882).
-Includes the Protocols-only dark layout redesign.
+V1.0.4 signed Android rebuild after PR #244 (4a510e6dfac13903ccd6c1de34adf907bc7391b5).
+Includes the Settings hub and update pages (#239, #242), verified DNS presets and DoH comparison (#243), and the visual Connection chain editor (#244). Retains the Protocols redesign (#240, #241).
