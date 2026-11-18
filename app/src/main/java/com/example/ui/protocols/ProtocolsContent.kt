@@ -43,7 +43,6 @@ import androidx.compose.material.icons.rounded.SettingsEthernet
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.SyncAlt
-import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Add
@@ -73,6 +72,7 @@ import com.example.panels.ManagedPanel
 import com.example.vpn.lab.LabFamily
 import com.example.vpn.lab.LabPriority
 import com.example.vpn.lab.LabResult
+import com.example.vpn.lab.ProtocolLab
 
 /** Everything the Protocols screen can ask for; the screen itself holds no state. */
 class ProtocolsActions(
@@ -112,7 +112,7 @@ internal fun LabFamily.icon(): ImageVector = when (this) {
     LabFamily.HTTPUPGRADE -> Icons.Rounded.SyncAlt
     LabFamily.WEBSOCKET -> Icons.Rounded.Language
     LabFamily.CDN -> Icons.Rounded.Cloud
-    LabFamily.OTHER -> Icons.Rounded.Dns
+    LabFamily.VLESS_TCP, LabFamily.VMESS, LabFamily.TROJAN, LabFamily.SHADOWSOCKS, LabFamily.OTHER -> Icons.Rounded.Dns
 }
 
 internal fun LabFamily.tint(c: LabColors): Color = when (this) {
@@ -120,24 +120,13 @@ internal fun LabFamily.tint(c: LabColors): Color = when (this) {
     LabFamily.XHTTP, LabFamily.REALITY -> c.accent
     LabFamily.WEBSOCKET, LabFamily.HTTPUPGRADE -> c.info
     LabFamily.WIREGUARD, LabFamily.CDN -> c.good
-    LabFamily.OTHER -> c.text2
+    LabFamily.VLESS_TCP, LabFamily.VMESS, LabFamily.TROJAN, LabFamily.SHADOWSOCKS, LabFamily.OTHER -> c.text2
 }
 
 /** Short name shown in tiles and rows. */
 internal val LabFamily.shortName: String get() = if (this == LabFamily.XHTTP) "XHTTP" else displayName
 
-internal val LabFamily.network: String get() = if (this == LabFamily.HYSTERIA2 || this == LabFamily.WIREGUARD) "UDP" else "TCP"
-
-internal val LabFamily.blurb: String get() = when (this) {
-    LabFamily.REALITY -> "Looks like a real website"
-    LabFamily.XHTTP -> "REALITY · split HTTP"
-    LabFamily.HYSTERIA2 -> "QUIC · fast on lossy links"
-    LabFamily.WIREGUARD -> "Classic VPN tunnel"
-    LabFamily.HTTPUPGRADE -> "CDN ready · lightweight"
-    LabFamily.WEBSOCKET -> "CDN ready"
-    LabFamily.CDN -> "TLS through Cloudflare"
-    LabFamily.OTHER -> "Plain TCP"
-}
+internal val LabFamily.blurb: String get() = transportLabel.substringAfter(" · ", transportLabel)
 
 internal fun scoreColor(c: LabColors, score: Int) = when {
     score >= 75 -> c.good
@@ -307,7 +296,7 @@ fun ProtocolsContent(state: ProtocolsUiState, actions: ProtocolsActions, relativ
                     }
                 }
             } else {
-                item { SectionLabel(c, "Supported protocols", if (state.panel != null && state.phase !is LabPhase.Running) "Customize" else "", actions.onOpenCustomize) }
+                item { SectionLabel(c, if (state.panel != null) "Server test protocols" else "Saved protocols", if (state.panel != null && state.phase !is LabPhase.Running) "Customize" else "", actions.onOpenCustomize) }
                 item { Catalog(c, state, actions) }
             }
         }
@@ -370,7 +359,7 @@ private fun ErrorBanner(c: LabColors, message: String, onDismiss: () -> Unit) {
 
 @Composable
 private fun StartCard(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActions) {
-    val count = if (state.panel != null) state.families.size else LabFamily.values().size - 1
+    val count = if (state.panel != null) state.families.size else state.savedFamilyCounts.size
     Column(Modifier.padding(horizontal = 16.dp).labCard(c, 24.dp).padding(20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Gauge(c, null, 96.dp, "$count", "protocols")
@@ -393,7 +382,7 @@ private fun StartCard(c: LabColors, state: ProtocolsUiState, actions: ProtocolsA
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             val third = if (state.panel != null) Icons.Rounded.CleaningServices to "Auto cleanup" else Icons.Rounded.Cloud to "No server needed"
-            listOf(Icons.Rounded.Timer to "About 1 min", Icons.Rounded.Repeat to "3 rounds", third).forEach { (icon, label) ->
+            listOf(Icons.Rounded.Repeat to "${ProtocolLab.DEFAULT_ROUNDS} rounds", third).forEach { (icon, label) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(icon, null, tint = c.text3, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(5.dp))
@@ -427,14 +416,10 @@ private fun RunningCard(c: LabColors, state: ProtocolsUiState, phase: LabPhase.R
 @Composable
 private fun BestCard(c: LabColors, state: ProtocolsUiState) {
     val r = state.chosen ?: return
-    val blockedNames = state.blocked.map { it.family.shortName }
+    val tested = state.results.count { it.wasMeasured }
     val summary = buildString {
-        append("${state.working.size} of ${state.results.size} protocols reachable.")
-        when (blockedNames.size) {
-            0 -> append(" Nothing is blocked on this network.")
-            1 -> append(" ${blockedNames[0]} is blocked on this network.")
-            else -> append(" ${blockedNames.dropLast(1).joinToString()} and ${blockedNames.last()} are blocked here.")
-        }
+        append("${state.working.size} of $tested tested protocols answered.")
+        if (state.notTestedCount > 0) append(" ${state.notTestedCount} not tested.")
     }
     Column(Modifier.padding(horizontal = 16.dp).labCard(c, 24.dp).padding(20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -452,7 +437,7 @@ private fun BestCard(c: LabColors, state: ProtocolsUiState) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Stat(c, "Latency", r.medianMs?.let { "$it ms" } ?: "–", Modifier.weight(1f))
             Stat(c, "Jitter", r.jitterMs?.let { "±$it ms" } ?: "–", Modifier.weight(1f))
-            Stat(c, "Success", "${r.successes} / ${r.latenciesMs.size}", Modifier.weight(1f))
+            Stat(c, "Success", "${r.successes} / ${r.measuredRounds}", Modifier.weight(1f))
         }
     }
 }
@@ -464,10 +449,14 @@ private fun NothingWorkedCard(c: LabColors, state: ProtocolsUiState, actions: Pr
             IconTile(Icons.Rounded.Block, c.bad, 52.dp)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                LabText("Nothing got through", c.text, 19.sp, FontWeight.Bold, maxLines = 1)
+                val anyMeasured = state.results.any { it.wasMeasured }
+                LabText(if (anyMeasured) "No config answered" else "No tests completed", c.text, 19.sp, FontWeight.Bold, maxLines = 1)
                 Spacer(Modifier.height(2.dp))
-                val hint = if (state.serverRun) "Your network blocks every protocol tested on this server. Try a CDN config or another server."
-                else "None of your saved configs answered. Add a server or a fresh subscription, then test again."
+                val hint = when {
+                    !anyMeasured -> "See the results below for details, then try again."
+                    state.serverRun -> "The tested configs on this server did not answer. Try saved configs or another server."
+                    else -> "The tested saved configs did not answer. Choose another source or retest."
+                }
                 LabText(hint, c.text2, 13.sp, lineHeight = 18.sp, maxLines = 4)
             }
         }
@@ -479,24 +468,17 @@ private fun NothingWorkedCard(c: LabColors, state: ProtocolsUiState, actions: Pr
 @Composable
 private fun Catalog(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActions) {
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        LabFamily.serverFamilies.chunked(2).forEach { row ->
+        val families = if (state.panel != null) LabFamily.serverFamilies else state.savedFamilyCounts.keys.sortedBy { it.ordinal }
+        families.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { f ->
                     val off = state.panel != null && f !in state.families
-                    ProtoTile(c, f, off, Modifier.weight(1f))
+                    ProtoTile(c, f, off, Modifier.weight(1f), state.savedFamilyCounts[f].takeIf { state.panel == null })
                 }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
-        Row(Modifier.fillMaxWidth().labCard(c, 18.dp).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(Icons.Rounded.Cloud, c.good)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                LabText("CDN & Workers", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
-                val sub = if (state.savedCdnCount > 0) "${state.savedCdnCount} saved · no server needed" else "From your saved configs · no server needed"
-                LabText(sub, c.text2, 12.sp, maxLines = 1)
-            }
-            Pill("FREE", c.good)
-        }
+        if (families.isEmpty()) LabText("Add a config in Nodes to test it here.", c.text2, 13.sp)
         if (state.panels.isEmpty()) {
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).border(1.dp, c.accent.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
@@ -507,7 +489,7 @@ private fun Catalog(c: LabColors, state: ProtocolsUiState, actions: ProtocolsAct
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     LabText("Add your server", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
-                    LabText("Install 3X-UI on a VPS to test and create every protocol", c.text2, 12.sp, maxLines = 2)
+                    LabText("Use a 3X-UI panel to create test configs", c.text2, 12.sp, maxLines = 2)
                 }
             }
         }
@@ -515,7 +497,7 @@ private fun Catalog(c: LabColors, state: ProtocolsUiState, actions: ProtocolsAct
 }
 
 @Composable
-private fun ProtoTile(c: LabColors, f: LabFamily, off: Boolean, modifier: Modifier) {
+private fun ProtoTile(c: LabColors, f: LabFamily, off: Boolean, modifier: Modifier, saved: Int?) {
     Column(modifier.labCard(c, 18.dp).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconTile(f.icon(), if (off) c.text3 else f.tint(c), 36.dp)
@@ -525,13 +507,17 @@ private fun ProtoTile(c: LabColors, f: LabFamily, off: Boolean, modifier: Modifi
         Spacer(Modifier.height(12.dp))
         LabText(f.shortName, if (off) c.text3 else c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
         Spacer(Modifier.height(2.dp))
-        LabText(f.blurb, c.text2, 12.sp, maxLines = 1)
+        LabText(saved?.let { if (it == 1) "1 saved config" else "$it saved configs" } ?: f.blurb, c.text2, 12.sp, maxLines = 2)
     }
 }
 
 @Composable
 private fun RankRow(c: LabColors, rank: Int, r: LabResult, selected: Boolean, onClick: () -> Unit) {
-    val sc = if (r.works) scoreColor(c, r.score) else c.bad
+    val sc = when {
+        r.works -> scoreColor(c, r.score)
+        r.wasMeasured -> c.okay
+        else -> c.text2
+    }
     Row(
         Modifier.fillMaxWidth().background(if (selected) c.accentSoft else Color.Transparent)
             .clickable(enabled = r.works, onClick = onClick).padding(horizontal = 16.dp, vertical = 13.dp),
@@ -550,22 +536,30 @@ private fun RankRow(c: LabColors, rank: Int, r: LabResult, selected: Boolean, on
                 }
             }
             Spacer(Modifier.height(2.dp))
-            val rounds = r.latenciesMs.size
+            val rounds = r.measuredRounds
             val detail = when {
-                !r.works -> r.note.ifBlank { "Blocked on this network" }
+                !r.works -> r.note
+                r.skippedRounds > 0 -> "${r.successes} of $rounds answered · ${r.skippedRounds} skipped"
                 r.successes == rounds -> "${r.medianMs} ms · ±${r.jitterMs ?: 0} ms · ${r.family.network}"
                 else -> "${r.medianMs} ms · ${r.successes} of $rounds answered · ${r.family.network}"
             }
-            LabText(detail, c.text2, 12.sp, maxLines = 1)
+            LabText(detail, c.text2, 12.sp, maxLines = 2)
         }
         if (r.works) {
             SignalBars(c, when { r.score >= 85 -> 4; r.score >= 70 -> 3; r.score >= 50 -> 2; else -> 1 }, sc)
             Spacer(Modifier.width(14.dp))
         }
         Box(
-            Modifier.width(44.dp).clip(RoundedCornerShape(10.dp)).background(sc.copy(alpha = 0.14f)).padding(vertical = 6.dp),
+            Modifier.widthIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).background(sc.copy(alpha = 0.14f)).padding(horizontal = 7.dp, vertical = 6.dp),
             contentAlignment = Alignment.Center
-        ) { LabText(if (r.works) "${r.score}" else "OFF", sc, if (r.works) 14.sp else 11.sp, FontWeight.Bold, maxLines = 1) }
+        ) {
+            val label = when {
+                r.works -> r.score.toString()
+                r.wasMeasured -> "No answer"
+                else -> "Not tested"
+            }
+            LabText(label, sc, if (r.works) 14.sp else 11.sp, FontWeight.Bold, maxLines = 1)
+        }
     }
 }
 

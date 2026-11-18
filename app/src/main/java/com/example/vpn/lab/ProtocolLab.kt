@@ -5,6 +5,8 @@ import com.example.data.model.VlessProfile
 import com.example.panels.InboundGenerationResult
 import com.example.panels.ThreeXUiProtocol
 import com.example.panels.ThreeXUiSecurity
+import com.example.xray.RealDelayProbe.Outcome
+import java.util.concurrent.CancellationException
 
 /**
  * A kind of traffic a censor sees differently from the others. The protocol test tries one config
@@ -15,16 +17,21 @@ enum class LabFamily(
     val transportLabel: String,
     /** How the family is created on a 3X-UI server; null for families that only come from saved configs. */
     val serverProtocol: ThreeXUiProtocol?,
-    val serverSecurity: ThreeXUiSecurity?
+    val serverSecurity: ThreeXUiSecurity?,
+    val network: String = "TCP"
 ) {
     REALITY("REALITY", "TCP · looks like a real website", ThreeXUiProtocol.REALITY, ThreeXUiSecurity.REALITY),
     XHTTP("XHTTP + REALITY", "TCP · split HTTP", ThreeXUiProtocol.XHTTP, ThreeXUiSecurity.REALITY),
-    HYSTERIA2("Hysteria2", "UDP · QUIC", ThreeXUiProtocol.HYSTERIA2, ThreeXUiSecurity.TLS),
-    WIREGUARD("WireGuard", "UDP · VPN tunnel", ThreeXUiProtocol.WIREGUARD, ThreeXUiSecurity.NONE),
+    HYSTERIA2("Hysteria2", "UDP · QUIC", ThreeXUiProtocol.HYSTERIA2, ThreeXUiSecurity.TLS, "UDP"),
+    WIREGUARD("WireGuard", "UDP · VPN tunnel", ThreeXUiProtocol.WIREGUARD, ThreeXUiSecurity.NONE, "UDP"),
     HTTPUPGRADE("HTTPUpgrade", "TCP · CDN ready", ThreeXUiProtocol.HTTPUPGRADE, ThreeXUiSecurity.NONE),
     WEBSOCKET("WebSocket", "TCP · CDN ready", ThreeXUiProtocol.WEBSOCKET, ThreeXUiSecurity.NONE),
-    CDN("CDN / Worker", "TLS through Cloudflare", null, null),
-    OTHER("Other", "TCP", null, null);
+    CDN("TLS Web / CDN", "TLS · WebSocket, HTTP or gRPC", null, null),
+    VLESS_TCP("VLESS TCP", "TCP · direct transport", null, null),
+    VMESS("VMess", "TCP · VMess", null, null),
+    TROJAN("Trojan", "TCP · TLS", null, null),
+    SHADOWSOCKS("Shadowsocks", "TCP · encrypted proxy", null, null),
+    OTHER("Other", "Saved proxy config", null, null);
 
     val canCreateOnServer: Boolean get() = serverProtocol != null
 
@@ -40,11 +47,15 @@ enum class LabFamily(
             return when {
                 profile.protocolType == ProtocolType.HYSTERIA2 -> HYSTERIA2
                 profile.protocolType == ProtocolType.WIREGUARD -> WIREGUARD
-                security == "reality" && transport == "xhttp" -> XHTTP
+                security == "reality" && transport in setOf("xhttp", "splithttp") -> XHTTP
                 security == "reality" -> REALITY
+                profile.protocolType == ProtocolType.TROJAN -> TROJAN
+                profile.protocolType == ProtocolType.VMESS -> VMESS
+                profile.protocolType == ProtocolType.SHADOWSOCKS -> SHADOWSOCKS
                 security == "tls" && transport in CDN_TRANSPORTS -> CDN
                 transport == "httpupgrade" -> HTTPUPGRADE
                 transport == "ws" -> WEBSOCKET
+                profile.protocolType == ProtocolType.VLESS && transport in setOf("", "tcp") -> VLESS_TCP
                 else -> OTHER
             }
         }
@@ -66,10 +77,13 @@ data class LabResult(
     val score: Int,
     val note: String = "",
     /** Set when the config was created on the user's server for this test. */
-    val generated: InboundGenerationResult? = null
+    val generated: InboundGenerationResult? = null,
+    val skippedRounds: Int = 0
 ) {
     val successes: Int get() = latenciesMs.count { it != null }
     val works: Boolean get() = successes > 0
+    val measuredRounds: Int get() = latenciesMs.size - skippedRounds
+    val wasMeasured: Boolean get() = measuredRounds > 0
     val medianMs: Long? get() = latenciesMs.filterNotNull().sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
     val jitterMs: Long? get() = latenciesMs.filterNotNull().let { if (it.size < 2) null else it.max() - it.min() }
 }
@@ -83,8 +97,7 @@ data class LabResult(
  * works only now and then ranks below one that always answers.
  */
 class ProtocolLab(
-    /** Real-request latency for each profile, null when the request failed. */
-    private val measure: (List<VlessProfile>) -> List<Long?>,
+    private val measure: (List<VlessProfile>) -> List<Outcome>,
     /** Creates a test config for [LabFamily] on the server. */
     private val provision: ((LabFamily) -> InboundGenerationResult)? = null,
     /** Removes a test config from the server. */
@@ -104,17 +117,34 @@ class ProtocolLab(
         val total = wanted.size + rounds
         val created = mutableListOf<Pair<LabFamily, InboundGenerationResult>>()
         val failed = mutableListOf<LabResult>()
-        wanted.forEachIndexed { i, family ->
-            onProgress(Progress("Creating ${family.displayName} on your server", i, total))
-            runCatching { create(family) }
-                .onSuccess { created += family to it }
-                .onFailure { failed += LabResult(family, null, emptyList(), 0, note = "Could not create it on the server: ${it.message}") }
+        try {
+            wanted.forEachIndexed { i, family ->
+                onProgress(Progress("Creating ${family.displayName} on your server", i, total))
+                try {
+                    created += family to create(family)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: InterruptedException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed += LabResult(family, null, emptyList(), 0, note = "Could not create it on the server: ${e.message}")
+                }
+            }
+            val measured = measureRounds(created.map { it.second.profile }, rounds, priority) { round ->
+                onProgress(Progress("Testing your internet, round ${round + 1} of $rounds", wanted.size + round, total))
+            }
+            onProgress(Progress("Ranking", total, total))
+            return rank(created.mapIndexed { i, (family, gen) -> measured[i].copy(family = family, generated = gen) } + failed)
+        } catch (e: Exception) {
+            val wasInterrupted = Thread.interrupted()
+            try {
+                val remove = discard
+                if (remove != null) created.forEach { (_, config) -> runCatching { remove(config) } }
+            } finally {
+                if (wasInterrupted) Thread.currentThread().interrupt()
+            }
+            throw e
         }
-        val measured = measureRounds(created.map { it.second.profile }, rounds, priority) { round ->
-            onProgress(Progress("Testing your internet, round ${round + 1} of $rounds", wanted.size + round, total))
-        }
-        onProgress(Progress("Ranking", total, total))
-        return rank(created.mapIndexed { i, (family, gen) -> measured[i].copy(family = family, generated = gen) } + failed)
     }
 
     /** Measures the user's saved configs, the best [perFamily] of each family, and returns the families best first. */
@@ -138,7 +168,7 @@ class ProtocolLab(
         onProgress(Progress("Ranking", rounds, rounds))
         // Each family is represented by its best config.
         val best = flat.indices.groupBy { LabFamily.of(flat[it]) }
-            .map { (family, indices) -> measured[indices.maxBy { measured[it].score }].copy(family = family) }
+            .map { (family, indices) -> rank(indices.map { measured[it] }).first().copy(family = family) }
         return rank(best)
     }
 
@@ -158,20 +188,32 @@ class ProtocolLab(
         priority: LabPriority,
         onRound: (Int) -> Unit
     ): List<LabResult> {
-        val samples = List(profiles.size) { mutableListOf<Long?>() }
+        val samples = List(profiles.size) { mutableListOf<Outcome>() }
         if (profiles.isNotEmpty()) {
             repeat(rounds) { round ->
                 onRound(round)
-                val delays = measure(profiles)
-                profiles.indices.forEach { samples[it] += delays.getOrNull(it) }
+                val outcomes = measure(profiles)
+                profiles.indices.forEach { i ->
+                    samples[i] += outcomes.getOrNull(i) ?: Outcome.NotRun("Probe returned no result")
+                }
             }
         }
         return profiles.mapIndexed { i, profile ->
-            val result = LabResult(LabFamily.of(profile), profile, samples[i], 0)
-            result.copy(
-                score = score(result, priority),
-                note = if (result.works) "" else "No answer on this network"
-            )
+            val outcomes = samples[i]
+            val reasons = outcomes.mapNotNull {
+                when (it) {
+                    is Outcome.NotRun -> it.reason
+                    is Outcome.Failed -> it.reason.takeUnless { _ -> it.request }
+                    is Outcome.Delay -> null
+                }
+            }
+            val result = LabResult(LabFamily.of(profile), profile,
+                outcomes.map { (it as? Outcome.Delay)?.latencyMs }, 0, skippedRounds = reasons.size)
+            result.copy(score = score(result, priority), note = when {
+                result.works -> ""
+                result.wasMeasured -> "No answer from this config"
+                else -> reasons.firstOrNull() ?: "Test did not run"
+            })
         }
     }
 
@@ -184,6 +226,7 @@ class ProtocolLab(
             results.sortedWith(
                 compareByDescending<LabResult> { it.works }
                     .thenByDescending { it.score }
+                    .thenByDescending { it.wasMeasured }
                     .thenBy { it.medianMs ?: Long.MAX_VALUE }
             )
 

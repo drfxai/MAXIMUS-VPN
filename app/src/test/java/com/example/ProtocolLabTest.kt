@@ -7,6 +7,7 @@ import com.example.vpn.lab.LabFamily
 import com.example.vpn.lab.LabPriority
 import com.example.vpn.lab.LabResult
 import com.example.vpn.lab.ProtocolLab
+import com.example.xray.RealDelayProbe.Outcome
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -24,9 +25,15 @@ class ProtocolLabTest {
             LabFamily.HTTPUPGRADE -> base.copy(transport = "httpupgrade", security = "none")
             LabFamily.WEBSOCKET -> base.copy(transport = "ws", security = "none")
             LabFamily.CDN -> base.copy(transport = "ws", security = "tls")
-            LabFamily.OTHER -> base.copy(transport = "tcp", security = "none")
+            LabFamily.VLESS_TCP -> base.copy(transport = "tcp", security = "none")
+            LabFamily.VMESS -> base.copy(protocolType = ProtocolType.VMESS)
+            LabFamily.TROJAN -> base.copy(protocolType = ProtocolType.TROJAN)
+            LabFamily.SHADOWSOCKS -> base.copy(protocolType = ProtocolType.SHADOWSOCKS)
+            LabFamily.OTHER -> base.copy(protocolType = ProtocolType.SOCKS5, transport = "tcp", security = "none")
         }
     }
+
+    private fun Long?.outcome(): Outcome = this?.let { Outcome.Delay(it) } ?: Outcome.Failed("Timed out")
 
     private fun generated(family: LabFamily) = InboundGenerationResult(
         profile = profile(family.name, family), inboundJson = "{}", clientUri = "", protocol = family.serverProtocol!!,
@@ -54,7 +61,7 @@ class ProtocolLabTest {
         )
         var round = -1
         val lab = ProtocolLab(
-            measure = { profiles -> round++; profiles.map { latency.getValue(it.uuid)[round] } },
+            measure = { profiles -> round++; profiles.map { latency.getValue(it.uuid)[round].outcome() } },
             provision = { generated(it) }
         )
         val results = lab.runOnServer()
@@ -76,7 +83,7 @@ class ProtocolLabTest {
     @Test
     fun aFamilyTheServerCannotCreateIsReportedNotDropped() {
         val lab = ProtocolLab(
-            measure = { profiles -> profiles.map { 100L } },
+            measure = { profiles -> profiles.map { Outcome.Delay(100L) } },
             provision = { if (it == LabFamily.HYSTERIA2) error("no certificate") else generated(it) }
         )
         val results = lab.runOnServer(listOf(LabFamily.REALITY, LabFamily.HYSTERIA2), rounds = 1)
@@ -89,7 +96,7 @@ class ProtocolLabTest {
     fun keepingOneConfigRemovesEveryOtherTestConfig() {
         val removed = mutableListOf<Int>()
         val lab = ProtocolLab(
-            measure = { profiles -> profiles.map { 100L } },
+            measure = { profiles -> profiles.map { Outcome.Delay(100L) } },
             provision = { generated(it) },
             discard = { removed += it.inboundId }
         )
@@ -105,7 +112,7 @@ class ProtocolLabTest {
         val fastReality = profile("reality-fast", LabFamily.REALITY)
         val worker = profile("bpb", LabFamily.CDN)
         val lab = ProtocolLab(measure = { profiles ->
-            profiles.map { when (it.uuid) { "reality-slow" -> 700L; "reality-fast" -> 120L; else -> null } }
+            profiles.map { (when (it.uuid) { "reality-slow" -> 700L; "reality-fast" -> 120L; else -> null }).outcome() }
         })
         val results = lab.runOnSaved(listOf(slowReality, worker, fastReality), rounds = 2)
         assertEquals(listOf(LabFamily.REALITY, LabFamily.CDN), results.map { it.family })
@@ -118,10 +125,41 @@ class ProtocolLabTest {
         val now = 10_000_000_000L
         val dead = (1..5).map { profile("dead$it", LabFamily.REALITY) }
         val alive = profile("alive", LabFamily.REALITY).copy(lastLatencyMs = 300, lastTestedTimestamp = now - 60_000)
-        val lab = ProtocolLab(measure = { profiles -> profiles.map { if (it.uuid == "alive") 300L else null } })
+        val lab = ProtocolLab(measure = { profiles -> profiles.map { (if (it.uuid == "alive") 300L else null).outcome() } })
         val results = lab.runOnSaved(dead + alive, rounds = 1, now = now)
         assertEquals("alive", results.single().profile?.uuid)
         assertTrue(results.single().works)
+    }
+
+    @Test
+    fun skippedOrInvalidConfigsDoNotCountAsNetworkFailures() {
+        val lab = ProtocolLab(measure = { profiles -> profiles.map {
+            when (it.uuid) {
+                "busy" -> Outcome.NotRun("Core busy")
+                "invalid" -> Outcome.Failed("Invalid config", request = false)
+                else -> Outcome.Failed("Timed out")
+            }
+        } })
+        val results = lab.runOnSaved(listOf(profile("busy", LabFamily.REALITY),
+            profile("timed-out", LabFamily.REALITY), profile("invalid", LabFamily.TROJAN)), rounds = 2)
+        assertEquals("timed-out", results.first().profile?.uuid)
+        assertEquals(2, results.first().measuredRounds)
+        assertEquals(0, results.last().measuredRounds)
+        assertEquals("Invalid config", results.last().note)
+    }
+
+    @Test
+    fun failedRunCleansUpCreatedInbounds() {
+        val removed = mutableListOf<Int>()
+        val lab = ProtocolLab(
+            measure = { throw IllegalStateException("Probe failed") },
+            provision = { generated(it) },
+            discard = { removed += it.inboundId }
+        )
+        org.junit.Assert.assertThrows(IllegalStateException::class.java) {
+            lab.runOnServer(listOf(LabFamily.REALITY, LabFamily.XHTTP))
+        }
+        assertEquals(listOf(generated(LabFamily.REALITY).inboundId, generated(LabFamily.XHTTP).inboundId), removed)
     }
 
     @Test
