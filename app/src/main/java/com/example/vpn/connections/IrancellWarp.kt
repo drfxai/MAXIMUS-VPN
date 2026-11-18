@@ -34,8 +34,6 @@ import com.example.vpn.sidecar.AetherSidecar
 object IrancellWarp {
     /** Whole direct WARP attempt on Irancell, engine preparation to readiness. */
     const val BUDGET_MS = 20_000L
-    const val MANUAL_BUDGET_MS = 60_000L
-    const val MANUAL_FIRST_ATTEMPT_MS = 30_000L
 
     /**
      * Aether retries the account call on its fallback routes by itself; a registration failure still reported this
@@ -91,6 +89,14 @@ object IrancellWarp {
         // Balanced may keep searching for a better gateway after already proving one.
         // Turbo returns the first gateway that passes the same transport validation.
         return routed.copy(extraSettings = extras.put("scan", "turbo").toString())
+    }
+
+    internal fun manualAttemptMs(candidate: VlessProfile): Long {
+        val extras = ProfileExtras.read(candidate)
+        val options = AetherSettings.read(extras)
+        if (AetherSidecar.cleanH2Peer(extras, "h2", options) != null)
+            return ConnectionEngineRunner.CLEAN_H2_BUDGET_MS
+        return AetherSidecar.manualMasqueReadinessMs(options.scan, pinned = options.endpoint.isNotBlank())
     }
 
     /** The attempt's account API route: Aether's own (native) unless the user picked a route. */

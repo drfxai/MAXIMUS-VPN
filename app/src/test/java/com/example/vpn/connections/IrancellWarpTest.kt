@@ -85,6 +85,16 @@ class IrancellWarpTest {
         assertEquals("native", ProfileExtras.read(IrancellWarp.withNativeApi(auto)).optString("apiRoute"))
     }
 
+    @Test fun manualHttp2WaitIncludesDiscoveryAndTunnelStartup() {
+        val turbo = IrancellWarp.forAttempt(AetherSidecar.profile("h2"), manual = true)
+        val thorough = AetherSidecar.profile("h2", advanced = AetherSettings(scan = "thorough"))
+        val pinned = AetherSidecar.profile("h2", advanced = AetherSettings(endpoint = "192.0.2.1:443"))
+        assertEquals(110_000L, IrancellWarp.manualAttemptMs(turbo))
+        assertEquals(365_000L, IrancellWarp.manualAttemptMs(thorough))
+        assertEquals(65_000L, IrancellWarp.manualAttemptMs(pinned))
+        assertEquals(110_000L, IrancellWarp.waitMs(110_000L, 0L, 10_000L, 220_000L))
+    }
+
     @Test fun readinessWaitFitsTheTwentySecondCap() {
         assertEquals(20_000L, IrancellWarp.BUDGET_MS)
         // The 75 s filtered window (what H3 burned) is cut to the cap.
