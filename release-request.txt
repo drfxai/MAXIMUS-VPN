@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #238 (0130759e7dfa9b90b500a80fbe8d1aab6bd9d130).
-Includes the CottenDNS runtime upgrade and Smart Connect recovery improvements.
+V1.0.4 signed Android rebuild after PR #240 (390b65a7a7504c7625916b7457454f8e46a5ec81).
+Includes the Protocols screen inventory, network test reporting, and temporary configuration cleanup improvements.
