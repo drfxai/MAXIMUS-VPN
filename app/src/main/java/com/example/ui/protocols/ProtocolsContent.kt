@@ -6,6 +6,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,11 +16,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -62,6 +68,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -205,15 +215,23 @@ internal fun SectionLabel(c: LabColors, text: String, trailing: String = "", onT
 
 @Composable
 private fun Segmented(c: LabColors, selected: LabPriority, onSelect: (LabPriority) -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.cardAlt).padding(4.dp)) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.cardAlt)
+        .selectableGroup().padding(4.dp)) {
         LabPriority.values().forEach { p ->
             val on = p == selected
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (on) c.card else Color.Transparent)
                     .then(if (on) Modifier.border(1.dp, c.stroke, RoundedCornerShape(11.dp)) else Modifier)
-                    .clickable { onSelect(p) }.padding(vertical = 9.dp),
+                    .heightIn(min = 44.dp)
+                    .selectable(selected = on, role = Role.RadioButton, onClick = { onSelect(p) })
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
-            ) { LabText(p.title, if (on) c.text else c.text2, 13.sp, if (on) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1) }
+            ) {
+                Text(p.title, color = if (on) c.text else c.text2,
+                    style = TextStyle(fontFamily = InterFamily, fontSize = 13.sp,
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center))
+            }
         }
     }
 }
@@ -267,77 +285,94 @@ internal fun sourceName(state: ProtocolsUiState) = state.panel?.let { it.name.if
 
 @Composable
 fun ProtocolsContent(state: ProtocolsUiState, actions: ProtocolsActions, relativeTime: (Long) -> String = { "" }) {
-    val c = labColors
+    val palette = labColors
+    val c = if (palette.dark) palette.copy(
+        bg = Color(0xFF0D0E12), card = Color(0xFF15151D), cardAlt = Color(0xFF1B1B25),
+        stroke = Color(0xFF2A2A36), text3 = Color(0xFF9293A6)
+    ) else palette
     val showDock = state.phase is LabPhase.Done && state.best != null
-    Box(Modifier.fillMaxSize().background(c.bg)) {
-        Box(
-            Modifier.fillMaxWidth().height(420.dp).background(
-                Brush.radialGradient(
-                    listOf(c.glow.copy(alpha = if (c.dark) 0.55f else 0.7f), Color.Transparent),
-                    center = Offset(900f, -60f), radius = 1300f
-                )
-            )
-        )
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = if (showDock) 170.dp else 28.dp)) {
-            item { Header(c, state, actions, relativeTime) }
-            if (state.error.isNotBlank()) item { ErrorBanner(c, state.error, actions.onDismissError) }
-            when (val phase = state.phase) {
-                is LabPhase.Running -> item { RunningCard(c, state, phase) }
-                LabPhase.Done -> if (state.best != null) item { BestCard(c, state) } else item { NothingWorkedCard(c, state, actions) }
-                LabPhase.Idle -> item { StartCard(c, state, actions) }
-            }
-            if (state.phase is LabPhase.Done && state.results.isNotEmpty()) {
-                item { SectionLabel(c, "Ranking", "Retest", actions.onRun) }
-                item {
-                    Column(Modifier.padding(horizontal = 16.dp).labCard(c, 20.dp)) {
-                        state.results.forEachIndexed { i, r ->
-                            RankRow(c, i + 1, r, r.works && r === state.chosen) { if (r.works) actions.onSelect(r.family) }
-                            if (i < state.results.lastIndex) Divider(c, 70.dp)
+    Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.fillMaxWidth().height(340.dp).background(
+            Brush.verticalGradient(listOf(c.glow.copy(alpha = if (c.dark) 0.35f else 0.6f), Color.Transparent))
+        ))
+        Column(Modifier.widthIn(max = 580.dp).fillMaxSize()) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                item { Header(c, state, actions, relativeTime) }
+                if (state.error.isNotBlank()) item { ErrorBanner(c, state.error, actions.onDismissError) }
+                when (val phase = state.phase) {
+                    is LabPhase.Running -> item { RunningCard(c, state, phase) }
+                    LabPhase.Done -> if (state.best != null) item { BestCard(c, state) } else item { NothingWorkedCard(c, state, actions) }
+                    LabPhase.Idle -> item { StartCard(c, state, actions) }
+                }
+                if (state.phase is LabPhase.Done && state.results.isNotEmpty()) {
+                    item { SectionLabel(c, "Ranking", "Retest", actions.onRun) }
+                    item {
+                        Column(Modifier.padding(horizontal = 16.dp).labCard(c, 20.dp)) {
+                            state.results.forEachIndexed { i, r ->
+                                RankRow(c, i + 1, r, r.works && r === state.chosen) { if (r.works) actions.onSelect(r.family) }
+                                if (i < state.results.lastIndex) Divider(c, 70.dp)
+                            }
                         }
                     }
+                } else {
+                    item { SectionLabel(c, if (state.panel != null) "Server test protocols" else "Saved protocols", if (state.panel != null && state.phase !is LabPhase.Running) "Customize" else "", actions.onOpenCustomize) }
+                    item { Catalog(c, state, actions) }
                 }
-            } else {
-                item { SectionLabel(c, if (state.panel != null) "Server test protocols" else "Saved protocols", if (state.panel != null && state.phase !is LabPhase.Running) "Customize" else "", actions.onOpenCustomize) }
-                item { Catalog(c, state, actions) }
             }
+            if (showDock) ActionDock(c, state, actions, Modifier.fillMaxWidth())
         }
-        if (showDock) ActionDock(c, state, actions, Modifier.align(Alignment.BottomCenter))
     }
 }
 
 @Composable
 private fun Header(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActions, relativeTime: (Long) -> String) {
+    val subtitle = when {
+        state.phase is LabPhase.Running -> "Testing your network"
+        state.phase is LabPhase.Done && state.testedAt > 0 -> "Tested ${relativeTime(state.testedAt)}"
+        else -> "Test your network"
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 12.dp, end = 16.dp, top = 10.dp, bottom = 14.dp)) {
+        val stacked = maxWidth < 340.dp || LocalDensity.current.fontScale > 1.15f
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = actions.onBack),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = c.text, modifier = Modifier.size(22.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    LabText("Protocols", c.text, 28.sp, FontWeight.Bold, Modifier.semantics { heading() },
+                        letterSpacing = (-0.6).sp)
+                    LabText(subtitle, c.text2, 13.sp)
+                }
+                if (!stacked) {
+                    Spacer(Modifier.width(8.dp))
+                    SourcePicker(c, state, actions, Modifier.widthIn(max = 148.dp))
+                }
+            }
+            if (stacked) {
+                Spacer(Modifier.height(8.dp))
+                SourcePicker(c, state, actions, Modifier.padding(start = 48.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourcePicker(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActions, modifier: Modifier) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 8.dp, end = 20.dp, top = 10.dp, bottom = 14.dp),
+        modifier.clip(CircleShape).background(c.cardAlt).border(1.dp, c.stroke, CircleShape)
+            .heightIn(min = 48.dp)
+            .clickable(enabled = state.phase !is LabPhase.Running, role = Role.Button, onClick = actions.onPickSource)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = actions.onBack), contentAlignment = Alignment.Center) {
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = c.text, modifier = Modifier.size(22.dp))
-        }
-        Spacer(Modifier.width(4.dp))
-        Column(Modifier.weight(1f)) {
-            LabText("Protocols", c.text, 30.sp, FontWeight.Bold, letterSpacing = (-0.6).sp, maxLines = 1)
-            Spacer(Modifier.height(2.dp))
-            val sub = when {
-                state.phase is LabPhase.Running -> "Testing your network"
-                state.phase is LabPhase.Done && state.testedAt > 0 -> "Tested ${relativeTime(state.testedAt)}"
-                else -> "Test your network"
-            }
-            LabText(sub, c.text2, 13.sp, maxLines = 1)
-        }
-        Spacer(Modifier.width(10.dp))
-        Row(
-            Modifier.clip(CircleShape).background(c.cardAlt).border(1.dp, c.stroke, CircleShape)
-                .clickable(enabled = state.phase !is LabPhase.Running, onClick = actions.onPickSource)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (state.panel != null) Box(Modifier.size(7.dp).clip(CircleShape).background(c.good))
-            else Icon(Icons.Rounded.Folder, null, tint = c.text2, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(7.dp))
-            LabText(sourceName(state), c.text, 12.sp, FontWeight.SemiBold, Modifier.padding(end = 2.dp).widthIn(max = 110.dp), maxLines = 1)
-            Icon(Icons.Rounded.ExpandMore, null, tint = c.text2, modifier = Modifier.size(16.dp))
-        }
+        if (state.panel != null) Box(Modifier.size(7.dp).clip(CircleShape).background(c.good))
+        else Icon(Icons.Rounded.Folder, null, tint = c.text2, modifier = Modifier.size(14.dp))
+        LabText(sourceName(state), c.text, 12.sp, FontWeight.SemiBold, Modifier.weight(1f, fill = false), maxLines = 2)
+        Icon(Icons.Rounded.ExpandMore, null, tint = c.text2, modifier = Modifier.size(16.dp))
     }
 }
 
@@ -358,6 +393,7 @@ private fun ErrorBanner(c: LabColors, message: String, onDismiss: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StartCard(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActions) {
     val count = if (state.panel != null) state.families.size else state.savedFamilyCounts.size
@@ -366,12 +402,12 @@ private fun StartCard(c: LabColors, state: ProtocolsUiState, actions: ProtocolsA
             Gauge(c, null, 96.dp, "$count", "protocols")
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f)) {
-                LabText("Network check", c.text, 19.sp, FontWeight.Bold, letterSpacing = (-0.3).sp, maxLines = 1)
+                LabText("Network check", c.text, 20.sp, FontWeight.Bold, letterSpacing = (-0.3).sp)
                 Spacer(Modifier.height(4.dp))
                 val body = if (state.panel != null) {
-                    "We set up a test connection for each protocol on your server and rank the ones that work best here."
+                    "Test each selected protocol on your server and rank the results."
                 } else {
-                    "We test the configs saved in the app, grouped by protocol, and rank the ones that work best here."
+                    "Test saved configs by protocol and rank the ones that answer."
                 }
                 LabText(body, c.text2, 13.sp, lineHeight = 18.sp, maxLines = 4)
             }
@@ -381,7 +417,8 @@ private fun StartCard(c: LabColors, state: ProtocolsUiState, actions: ProtocolsA
         Spacer(Modifier.height(14.dp))
         GradientButton(c, "Run network test", Icons.Rounded.PlayArrow, onClick = actions.onRun)
         Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val third = if (state.panel != null) Icons.Rounded.CleaningServices to "Auto cleanup" else Icons.Rounded.Cloud to "No server needed"
             listOf(Icons.Rounded.Repeat to "${ProtocolLab.DEFAULT_ROUNDS} rounds", third).forEach { (icon, label) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -469,21 +506,39 @@ private fun NothingWorkedCard(c: LabColors, state: ProtocolsUiState, actions: Pr
 @Composable
 private fun Catalog(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActions) {
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        val families = if (state.panel != null) LabFamily.serverFamilies else state.savedFamilyCounts.keys.sortedBy { it.ordinal }
-        families.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { f ->
-                    val off = state.panel != null && f !in state.families
-                    ProtoTile(c, f, off, Modifier.weight(1f), state.savedFamilyCounts[f].takeIf { state.panel == null })
+        val saved = state.panel == null
+        val families = if (saved) state.savedFamilyCounts.keys.sortedBy { it.ordinal } else LabFamily.serverFamilies
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val columns = if (maxWidth >= 280.dp && LocalDensity.current.fontScale <= 1.25f) 2 else 1
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                families.filterNot { saved && it == LabFamily.CDN }.chunked(columns).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        row.forEach { family ->
+                            ProtoTile(c, family, !saved && family !in state.families, Modifier.weight(1f),
+                                if (saved) state.savedFamilyCounts[family] else null)
+                        }
+                        if (row.size < columns) Spacer(Modifier.weight(1f))
+                    }
                 }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
+                if (saved && LabFamily.CDN in families) {
+                    Row(Modifier.fillMaxWidth().labCard(c, 18.dp).padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconTile(Icons.Rounded.Cloud, c.good)
+                        Column(Modifier.weight(1f)) {
+                            LabText(LabFamily.CDN.displayName, c.text, 15.sp, FontWeight.SemiBold)
+                            LabText(savedConfigLabel(state.savedFamilyCounts.getValue(LabFamily.CDN)), c.text2, 12.sp)
+                        }
+                        Pill("TLS", c.good)
+                    }
+                }
+                if (families.isEmpty()) LabText("Add a config in Nodes to test it here.", c.text2, 13.sp)
             }
         }
-        if (families.isEmpty()) LabText("Add a config in Nodes to test it here.", c.text2, 13.sp)
         if (state.panels.isEmpty()) {
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).border(1.dp, c.accent.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
-                    .clickable(onClick = actions.onAddServer).padding(14.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                    .border(1.dp, c.accent.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+                    .clickable(role = Role.Button, onClick = actions.onAddServer).padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconTile(Icons.Rounded.Add, c.accent)
@@ -497,18 +552,20 @@ private fun Catalog(c: LabColors, state: ProtocolsUiState, actions: ProtocolsAct
     }
 }
 
+private fun savedConfigLabel(count: Int): String = if (count == 1) "1 saved config" else "$count saved configs"
+
 @Composable
 private fun ProtoTile(c: LabColors, f: LabFamily, off: Boolean, modifier: Modifier, saved: Int?) {
-    Column(modifier.labCard(c, 18.dp).padding(14.dp)) {
+    Column(modifier.labCard(c, 18.dp).heightIn(min = 110.dp).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconTile(f.icon(), if (off) c.text3 else f.tint(c), 36.dp)
             Spacer(Modifier.weight(1f))
             Pill(if (off) "OFF" else f.network, c.text2, filled = false)
         }
         Spacer(Modifier.height(12.dp))
-        LabText(f.shortName, if (off) c.text3 else c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
+        LabText(f.shortName, if (off) c.text3 else c.text, 15.sp, FontWeight.SemiBold)
         Spacer(Modifier.height(2.dp))
-        LabText(saved?.let { if (it == 1) "1 saved config" else "$it saved configs" } ?: f.blurb, c.text2, 12.sp, maxLines = 2)
+        LabText(saved?.let(::savedConfigLabel) ?: f.blurb, c.text2, 12.sp, maxLines = 2)
     }
 }
 
@@ -576,8 +633,8 @@ private fun ActionDock(c: LabColors, state: ProtocolsUiState, actions: Protocols
     }
     Column(
         modifier.fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, c.bg, c.bg), startY = 0f, endY = 120f))
-            .padding(start = 16.dp, end = 16.dp, top = 28.dp, bottom = 22.dp)
+            .background(c.bg)
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp)
     ) {
         Row(Modifier.fillMaxWidth().labCard(c, 16.dp).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.AutoMirrored.Rounded.AltRoute, null, tint = c.accent, modifier = Modifier.size(20.dp))
