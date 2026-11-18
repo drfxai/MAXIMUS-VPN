@@ -53,6 +53,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -107,7 +109,8 @@ internal fun SettingsTopBar(title: String, subtitle: String? = null, onBack: () 
                 color = AppTheme.colors.textPrimary,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
+                modifier = Modifier.semantics { heading() },
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
             if (subtitle != null) {
@@ -125,7 +128,9 @@ internal fun SettingsSectionLabel(text: String, modifier: Modifier = Modifier, f
         color = AppTheme.colors.textSecondary,
         fontSize = 13.sp,
         fontWeight = FontWeight.Medium,
-        modifier = modifier.padding(start = 4.dp, end = 4.dp, top = if (first) 4.dp else 24.dp, bottom = 8.dp)
+        modifier = modifier
+            .semantics { heading() }
+            .padding(start = 4.dp, end = 4.dp, top = if (first) 4.dp else 24.dp, bottom = 8.dp)
     )
 }
 
@@ -195,7 +200,7 @@ private fun RowText(title: String, subtitle: String?, titleColor: Color, modifie
             Spacer(Modifier.height(2.dp))
             Text(
                 subtitle,
-                color = AppTheme.colors.textMuted,
+                color = AppTheme.colors.textSecondary,
                 fontSize = 12.5.sp,
                 lineHeight = 17.sp,
                 maxLines = 3,

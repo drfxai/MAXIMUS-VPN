@@ -315,7 +315,8 @@ fun SettingsScreen(
 
     val updateUi = UpdateUi(
         checking = updateChecking,
-        checked = updateChecked,
+        checked = updateChecked && latestPublished != null,
+        checkFailed = updateChecked && latestPublished == null,
         hasUpdate = updateRelease != null,
         latestVersion = updateRelease?.version
     )
@@ -324,7 +325,10 @@ fun SettingsScreen(
             if (!updateChecking) {
                 performUpdateCheck()
                 if (updateRelease != null) showUpdateDialog = true
-                else Toast.makeText(context, "No newer release available (or update check unavailable).", Toast.LENGTH_SHORT).show()
+                else {
+                    val message = if (latestPublished == null) "Could not check for updates." else "You're up to date."
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
