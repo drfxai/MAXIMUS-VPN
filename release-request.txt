@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PRs #233–#235 (63c42a465d9b89f0fd4f260d720cd5ec05497fbc).
-Includes native AmneziaWG TUN support and LAB multi-node chains, plus Psiphon, Aether and Lantern startup improvements.
+V1.0.4 signed Android rebuild after PR #236 (c98544bf3789ad95280cf3186742e559893e1264).
+Includes Psiphon Android DNS and Aether MASQUE discovery and recovery fixes.
