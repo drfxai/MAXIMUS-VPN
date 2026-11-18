@@ -1,16 +1,23 @@
 package com.example.ui.settings
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.RoborazziTaskType
 import com.github.takahirom.roborazzi.captureRoboImage
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -53,6 +60,33 @@ class SettingsScreenshotTest {
 
     @Test
     fun hub_light() = shoot("settings-hub-light", dark = false) { SettingsHubSample() }
+
+    @Test
+    fun compactHubKeepsNavigationAndUpdateRetryAccessible() {
+        val opened = mutableListOf<SettingsPage>()
+        var retried = false
+        shoot("settings-hub-compact", dark = false) {
+            Box(Modifier.width(320.dp)) {
+                SettingsHub(
+                    settings = SettingsSamples.settings,
+                    versionName = SettingsSamples.VERSION,
+                    update = UpdateUi(checkFailed = true),
+                    onOpen = { opened.add(it) },
+                    onOpenAiAgent = {},
+                    onUpdateChip = { retried = true }
+                )
+            }
+        }
+        compose.onNodeWithText("Retry update check").assertIsDisplayed()
+        compose.onNodeWithTag("settings_update_chip").performClick()
+        compose.onNodeWithTag("settings_connection").performClick()
+        compose.onNodeWithTag("settings_routing_dns").performClick()
+        compose.onNodeWithTag("settings_about").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(true, retried)
+            assertEquals(listOf(SettingsPage.CONNECTION, SettingsPage.ROUTING_DNS, SettingsPage.ABOUT), opened)
+        }
+    }
 
     @Test
     fun connection_dark() {

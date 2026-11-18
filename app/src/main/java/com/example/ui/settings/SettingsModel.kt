@@ -51,7 +51,8 @@ data class UpdateUi(
     val checking: Boolean = false,
     val checked: Boolean = false,
     val hasUpdate: Boolean = false,
-    val latestVersion: String? = null
+    val latestVersion: String? = null,
+    val checkFailed: Boolean = false
 )
 
 /** The local SOCKS5 proxy, as the Connection page shows it. */
@@ -197,6 +198,7 @@ internal object SettingsLabels {
         SettingsPage.UPDATES -> when {
             update.checking -> "Checking for updates…"
             update.hasUpdate -> "Update available" + (update.latestVersion?.let { " · v$it" } ?: "")
+            update.checkFailed -> "Update check unavailable · v$versionName"
             update.checked -> "Up to date · v$versionName"
             else -> "Version $versionName · cores, resolvers, clean IPs"
         }
