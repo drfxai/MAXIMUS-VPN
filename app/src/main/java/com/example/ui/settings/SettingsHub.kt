@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Route
@@ -67,7 +69,8 @@ private val protectionEntries = listOf(
 )
 private val appEntries = listOf(
     HubEntry(SettingsPage.APPEARANCE, "Appearance", Icons.Default.Palette),
-    HubEntry(SettingsPage.UPDATES, "Updates & data", Icons.Default.SystemUpdate),
+    HubEntry(SettingsPage.UPDATES, "App updates", Icons.Default.SystemUpdate),
+    HubEntry(SettingsPage.ENGINES, "Engine updates", Icons.Default.Memory),
     HubEntry(SettingsPage.DIAGNOSTICS, "Diagnostics", Icons.Default.Terminal)
 )
 private val aboutEntry = HubEntry(SettingsPage.ABOUT, "About & community", Icons.Default.Info)
@@ -81,11 +84,23 @@ fun SettingsHub(
     onOpen: (SettingsPage) -> Unit,
     onOpenAiAgent: () -> Unit,
     onUpdateChip: () -> Unit,
+    onFreeConfigsChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     SettingsPageColumn(modifier.testTag("settings_screen")) {
         Spacer(Modifier.height(16.dp))
         HubHeader(versionName, update, onUpdateChip)
+        Spacer(Modifier.height(12.dp))
+        SettingsGroup {
+            SettingsSwitchRow(
+                title = "Free configs",
+                subtitle = "Show free Maximus servers in Nodes",
+                icon = Icons.Default.Public,
+                checked = settings.freeConfigsEnabled,
+                onCheckedChange = onFreeConfigsChanged,
+                modifier = Modifier.testTag("settings_free_configs")
+            )
+        }
 
         SettingsSectionLabel("Network")
         val connectionSummary = SettingsLabels.hub(settings, connectionEntry.page, update, versionName)
