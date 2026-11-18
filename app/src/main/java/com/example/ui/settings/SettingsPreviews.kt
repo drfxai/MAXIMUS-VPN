@@ -54,6 +54,7 @@ internal fun RoutingDnsPageSample() = RoutingDnsSettingsPage(
     onCustomDns = {},
     onTestVpnDns = {},
     onTestResolver = {},
+    onCompareResolvers = {},
     onOpenResolverData = {},
     onBack = {}
 )

@@ -383,6 +383,28 @@ fun SettingsScreen(
                         }
                     }
                 },
+                onCompareResolvers = {
+                    dnsTestRunning = true
+                    dnsTestResult = null
+                    scope.launch {
+                        try {
+                            val resolvers = SettingsLabels.dnsBenchmarkResolvers
+                            val results = DnsPathTest.compareResolvers(context, resolvers.map { it.first })
+                            dnsTestResult = if (results == null) {
+                                "DNS comparison unavailable. Check that the connection is stable and retry."
+                            } else {
+                                resolvers.zip(results)
+                                    .sortedBy { (_, result) -> result.latencyMs ?: Long.MAX_VALUE }
+                                    .joinToString("\n") { (resolver, result) ->
+                                        val speed = result.latencyMs?.let { "$it ms" } ?: "no valid response"
+                                        "${resolver.second} · $speed"
+                                    }
+                            }
+                        } finally {
+                            dnsTestRunning = false
+                        }
+                    }
+                },
                 onOpenResolverData = { open(SettingsPage.UPDATES) },
                 onBack = back,
                 splitTunnelSummary = splitTunnel?.summary(),

@@ -131,25 +131,37 @@ internal object SettingsLabels {
     /** Order shown in the routing list (unchanged from the previous screen). */
     val routingModes = listOf(RoutingMode.RULE_BYPASS_LAN, RoutingMode.GLOBAL, RoutingMode.BYPASS_SELECTED)
 
-    /** The DNS presets offered before; values are the exact strings stored before. */
+    /** Literal endpoints keep DNS bootstrap independent of the ISP resolver. */
     val dnsPresets = listOf(
         "https://1.1.1.1/dns-query" to "Cloudflare DoH (Encrypted)",
         "https://8.8.8.8/dns-query" to "Google DoH (Encrypted)",
         "https://9.9.9.9/dns-query" to "Quad9 DoH (Secure)",
         "1.1.1.1" to "Cloudflare UDP (1.1.1.1)",
         "8.8.8.8" to "Google DNS UDP (8.8.8.8)",
-        "9.9.9.9" to "Quad9 Secure UDP (9.9.9.9)"
+        "9.9.9.9" to "Quad9 Secure UDP (9.9.9.9)",
+        "1.0.0.1" to "Cloudflare UDP (1.0.0.1)",
+        "1.1.1.2" to "Cloudflare UDP · Malware filter (1.1.1.2)",
+        "1.1.1.3" to "Cloudflare UDP · Malware and adult filters (1.1.1.3)",
+        "8.8.4.4" to "Google DNS UDP (8.8.4.4)",
+        "9.9.9.10" to "Quad9 UDP · No threat blocking (9.9.9.10)",
+        "149.112.112.10" to "Quad9 UDP · No threat blocking (149.112.112.10)",
+        "208.67.222.222" to "OpenDNS UDP (208.67.222.222)",
+        "208.67.220.220" to "OpenDNS UDP (208.67.220.220)"
     )
 
-    fun dns(dns: String): String = when (dns) {
-        "1.1.1.1" -> "Cloudflare UDP (1.1.1.1)"
-        "8.8.8.8" -> "Google DNS UDP (8.8.8.8)"
-        "9.9.9.9" -> "Quad9 Secure UDP (9.9.9.9)"
-        "https://1.1.1.1/dns-query" -> "Cloudflare DoH (Encrypted)"
-        "https://8.8.8.8/dns-query", "https://dns.google/dns-query" -> "Google DoH (Encrypted)"
-        "https://9.9.9.9/dns-query", "https://dns.quad9.net/dns-query" -> "Quad9 DoH (Secure)"
-        else -> "Custom DNS"
-    }
+    val dnsBenchmarkResolvers = listOf(
+        "https://1.1.1.1/dns-query" to "Cloudflare",
+        "https://8.8.8.8/dns-query" to "Google",
+        "https://9.9.9.9/dns-query" to "Quad9"
+    )
+
+    private val dnsAliases = mapOf(
+        "https://dns.google/dns-query" to "https://8.8.8.8/dns-query",
+        "https://dns.quad9.net/dns-query" to "https://9.9.9.9/dns-query"
+    )
+
+    fun dns(dns: String): String =
+        dnsPresets.firstOrNull { it.first == (dnsAliases[dns] ?: dns) }?.second ?: "Custom DNS"
 
     fun dnsShort(dns: String): String = when (dns) {
         "1.1.1.1" -> "Cloudflare DNS"
@@ -158,7 +170,7 @@ internal object SettingsLabels {
         "https://1.1.1.1/dns-query" -> "Cloudflare DoH"
         "https://8.8.8.8/dns-query", "https://dns.google/dns-query" -> "Google DoH"
         "https://9.9.9.9/dns-query", "https://dns.quad9.net/dns-query" -> "Quad9 DoH"
-        else -> "Custom DNS"
+        else -> dns(dns)
     }
 
     /** The four desync presets offered before, and the method each one selects (unchanged). */
