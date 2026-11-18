@@ -554,7 +554,7 @@ object ConnectionEngineRunner {
         // otherwise one quick recheck of the first method.
         if (relayOnly && relays.isEmpty()) throw NoVerifiedPath(listOf("relay: no saved server to carry WARP through"), null)
         val queue = ArrayDeque(when {
-            irancellHttp2 -> if (manual) irancellPlan else irancellPlan.map(IrancellWarp::withNativeApi)
+            irancellHttp2 -> irancellPlan.map { IrancellWarp.forAttempt(it, manual) }
             relayOnly -> relays
             recheckOnly && relays.isNotEmpty() -> relays
             recheckOnly -> ordered.take(1)
@@ -831,7 +831,8 @@ object ConnectionEngineRunner {
                 !AetherApiBridge.skipAfterBootstrapFailure(it, failedRegistrationKinds)
             }
             try {
-                record(name, "prepare", "START")
+                val scan = if (irancellHttp2 && name != CLEAN_H2) AetherSettings.read(extras).scan else null
+                record(name, "prepare", "START", scan?.let { "gateway scan: $it" }.orEmpty())
                 // Iranian mobile networks: Aether races its account calls through the OOB ClientHello lane (WarpApiLane).
                 val launched = if (engine.id == AetherSidecar.ID && automatic &&
                     WarpApiLane.applies(onIrancell, onMci, candidate)) WarpApiLane.mark(candidate).also {

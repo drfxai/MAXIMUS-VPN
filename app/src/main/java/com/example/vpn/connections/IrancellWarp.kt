@@ -79,6 +79,20 @@ object IrancellWarp {
     fun waitMs(windowMs: Long, startedAt: Long, now: Long, budgetMs: Long = BUDGET_MS): Long =
         minOf(windowMs, maxOf(MIN_WAIT_MS, budgetMs - (now - startedAt)))
 
+    /** Use upstream Aether's first-verified-gateway scan within the short readiness window. */
+    internal fun forAttempt(candidate: VlessProfile, manual: Boolean): VlessProfile {
+        val routed = if (manual) candidate else withNativeApi(candidate)
+        val extras = ProfileExtras.read(routed)
+        val options = AetherSettings.read(extras)
+        if (extras.optString("carrier") != "h2" || options.scan != "balanced" ||
+            options.endpoint.isNotBlank() || options.tor != "off" || options.psiphon != "off" ||
+            AetherSidecar.cleanH2Peer(extras, "h2", options) != null) return routed
+
+        // Balanced may keep searching for a better gateway after already proving one.
+        // Turbo returns the first gateway that passes the same transport validation.
+        return routed.copy(extraSettings = extras.put("scan", "turbo").toString())
+    }
+
     /** The attempt's account API route: Aether's own (native) unless the user picked a route. */
     fun withNativeApi(candidate: VlessProfile): VlessProfile {
         val e = ProfileExtras.read(candidate)

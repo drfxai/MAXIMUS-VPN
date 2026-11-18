@@ -64,6 +64,20 @@ class IrancellWarpTest {
         assertTrue("--fragment also splits the WARP API ClientHello in Aether 2.4.0", "--fragment" in args)
     }
 
+    @Test fun shortHttp2AttemptsUseTheFirstVerifiedGateway() {
+        val h2 = AetherSidecar.profile("h2")
+        for (manual in listOf(false, true)) {
+            val attempt = ProfileExtras.read(IrancellWarp.forAttempt(h2, manual))
+            assertEquals("turbo", attempt.optString("scan"))
+            assertEquals(if (manual) "auto" else "native", attempt.optString("apiRoute"))
+        }
+        val configured = AetherSidecar.profile("h2", advanced = AetherSettings(scan = "thorough"))
+        assertEquals("thorough", ProfileExtras.read(IrancellWarp.forAttempt(configured, manual = true)).optString("scan"))
+        val pinned = AetherSidecar.profile("h2", advanced = AetherSettings(endpoint = "192.0.2.1:443"))
+        assertEquals("balanced", ProfileExtras.read(IrancellWarp.forAttempt(pinned, manual = true)).optString("scan"))
+        assertEquals("balanced", ProfileExtras.read(h2).optString("scan"))
+    }
+
     @Test fun aRouteTheUserChoseIsKept() {
         val oob = AetherSidecar.profile("h2", advanced = AetherSettings(apiRoute = "oob"))
         assertEquals("oob", ProfileExtras.read(IrancellWarp.withNativeApi(oob)).optString("apiRoute"))
