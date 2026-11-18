@@ -17,6 +17,7 @@ class ServerlessConnectionsTest {
             val inbound = result.getJSONArray("inbounds").getJSONObject(0)
             assertEquals("127.0.0.1", inbound.getString("listen"))
             assertEquals(12345, inbound.getInt("port"))
+            assertTrue(inbound.getJSONObject("sniffing").getBoolean("routeOnly"))
             assertEquals("password", inbound.getJSONObject("settings").getString("auth"))
             assertEquals("session-user", inbound.getJSONObject("settings").getJSONArray("accounts")
                 .getJSONObject(0).getString("user"))

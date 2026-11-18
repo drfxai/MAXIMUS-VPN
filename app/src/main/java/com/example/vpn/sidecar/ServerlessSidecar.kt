@@ -36,6 +36,10 @@ object ServerlessSidecar : SidecarEngine {
         root.remove("__Credits__"); root.remove("remarks"); root.remove("version")
         val inbound = root.getJSONArray("inbounds").getJSONObject(0)
         inbound.put("listen", "127.0.0.1").put("port", port)
+        // The outer tunnel restores names before SOCKS. Sniff here for routing without
+        // replacing the destination explicitly requested by the authenticated client.
+        inbound.getJSONObject("sniffing").put("routeOnly", true)
+            .put("destOverride", JSONArray(listOf("tls", "http", "quic")))
         inbound.getJSONObject("settings").put("auth", "password")
             .put("accounts", JSONArray().put(JSONObject().put("user", user).put("pass", password)))
         val routing = root.getJSONObject("routing")
@@ -61,13 +65,10 @@ object ServerlessSidecar : SidecarEngine {
         val maskedTcpTag = fallbackTags.values.single()
 
         val dns = root.getJSONObject("dns")
-        dns.remove("useSystemHosts")
         dns.remove("skipHostsWhenFakeEnable")
         val upstream = JSONObject().put("tag", "no-filter-dns")
             .put("address", "https+one://cloudflare-dns.com/dns-query")
-        // A domain alias still needs DNS. With the domestic resolver removed,
-        // resolving challenges.cloudflare.com recursively asked this very DoH
-        // path. Pin bootstrap IPs while retaining the authenticated TLS hostname.
+        // Pin bootstrap IPs to avoid needing another resolver to reach either DoH service.
         fun bootstrap(v4: List<String>, v6: List<String>) = JSONArray(when (family) {
             "ipv4" -> v4
             "ipv6" -> v6
