@@ -17,7 +17,7 @@ import com.example.data.model.ScoringProfile
 
 /** Settings sub-pages. The hub lists them; each opens as its own page inside the Settings tab. */
 enum class SettingsPage {
-    CONNECTION, ROUTING_DNS, ANTI_CENSORSHIP, PRIVACY, SHARING, APPEARANCE, UPDATES, DIAGNOSTICS, ABOUT
+    CONNECTION, ROUTING_DNS, ANTI_CENSORSHIP, PRIVACY, SHARING, APPEARANCE, UPDATES, ENGINES, DIAGNOSTICS, ABOUT
 }
 
 /**
@@ -202,6 +202,7 @@ internal object SettingsLabels {
             update.checked -> "Up to date · v$versionName"
             else -> "Version $versionName · cores, resolvers, clean IPs"
         }
+        SettingsPage.ENGINES -> "Bundled engines and configuration"
         SettingsPage.DIAGNOSTICS -> "Live logs, engine config, reset"
         SettingsPage.ABOUT -> "DrFXAi · community and support"
     }

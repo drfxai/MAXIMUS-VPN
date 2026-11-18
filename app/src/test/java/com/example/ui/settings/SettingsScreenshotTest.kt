@@ -65,6 +65,7 @@ class SettingsScreenshotTest {
     fun compactHubKeepsNavigationAndUpdateRetryAccessible() {
         val opened = mutableListOf<SettingsPage>()
         var retried = false
+        var freeConfigs: Boolean? = null
         shoot("settings-hub-compact", dark = false) {
             Box(Modifier.width(320.dp)) {
                 SettingsHub(
@@ -73,18 +74,26 @@ class SettingsScreenshotTest {
                     update = UpdateUi(checkFailed = true),
                     onOpen = { opened.add(it) },
                     onOpenAiAgent = {},
-                    onUpdateChip = { retried = true }
+                    onUpdateChip = { retried = true },
+                    onFreeConfigsChanged = { freeConfigs = it }
                 )
             }
         }
         compose.onNodeWithText("Retry update check").assertIsDisplayed()
         compose.onNodeWithTag("settings_update_chip").performClick()
-        compose.onNodeWithTag("settings_connection").performClick()
-        compose.onNodeWithTag("settings_routing_dns").performClick()
+        compose.onNodeWithTag("settings_free_configs").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_connection").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_routing_dns").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_updates").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_engines").performScrollTo().performClick()
         compose.onNodeWithTag("settings_about").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(true, retried)
-            assertEquals(listOf(SettingsPage.CONNECTION, SettingsPage.ROUTING_DNS, SettingsPage.ABOUT), opened)
+            assertEquals(!SettingsSamples.settings.freeConfigsEnabled, freeConfigs)
+            assertEquals(
+                listOf(SettingsPage.CONNECTION, SettingsPage.ROUTING_DNS, SettingsPage.UPDATES, SettingsPage.ENGINES, SettingsPage.ABOUT),
+                opened
+            )
         }
     }
 

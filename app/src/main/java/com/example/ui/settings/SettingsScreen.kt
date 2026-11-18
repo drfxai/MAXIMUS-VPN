@@ -143,7 +143,10 @@ fun SettingsScreen(
     var cleanIpStatus by remember { mutableStateOf<String?>(null) }
     var resolverStatus by remember { mutableStateOf<String?>(null) }
     var vpnOnlyUpdates by remember { mutableStateOf(UpdateNetworkPolicy.vpnOnly(context)) }
-    var showCoreInventory by rememberSaveable(openCoreInventory) { mutableStateOf(openCoreInventory) }
+    var pageName by rememberSaveable(openCoreInventory) {
+        mutableStateOf(if (openCoreInventory) SettingsPage.ENGINES.name else null)
+    }
+    val page = pageName?.let { name -> SettingsPage.values().firstOrNull { it.name == name } }
     var showUpdateDialog by remember { mutableStateOf(false) }
     var updateDownloading by remember { mutableStateOf(false) }
     var updateJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -205,8 +208,8 @@ fun SettingsScreen(
             }
         }
     }
-    LaunchedEffect(showCoreInventory) {
-        if (showCoreInventory && psiphonStatus == null) {
+    LaunchedEffect(page) {
+        if (page == SettingsPage.ENGINES && psiphonStatus == null) {
             psiphonStatus = withContext(Dispatchers.IO) {
                 Sidecars.psiphon().problem(PsiphonSidecar.profile()) ?: "Psiphon settings configured."
             }
@@ -214,45 +217,6 @@ fun SettingsScreen(
     }
 
     var radianceStatus by remember { mutableStateOf<String?>(null) }
-    if (showCoreInventory) {
-        AlertDialog(
-            onDismissRequest = { showCoreInventory = false },
-            title = { Text("Core & resource manager") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(com.example.vpn.lab.CoreCapabilityRegistry.CORE + " • inside the signed APK")
-                    com.example.vpn.sidecar.Sidecars.ENGINES
-                        .filter { it.id in setOf("sing-box", "mihomo", "aether", "psiphon", "tor", "radiance") }
-                        .forEach { engine ->
-                            val present = com.example.vpn.sidecar.Sidecars.isBundled(engine)
-                            Text("${engine.id}: " + if (present) "Installed in APK" else "Not present on this device")
-                        }
-                    if (Sidecars.isBundled(RadianceSidecar)) {
-                        TextButton(onClick = {
-                            scope.launch {
-                                radianceStatus = runCatching {
-                                    val profile = RadianceSidecar.profile()
-                                    val repository = com.example.RayApplication.instance.serverRepository
-                                    if (repository.getProfileById(profile.id) == null) repository.insert(profile)
-                                }.fold(
-                                    onSuccess = { "Open Nodes and select Lantern / Radiance to connect." },
-                                    onFailure = { "Could not add the Lantern / Radiance profile." }
-                                )
-                            }
-                        }) { Text("Add Lantern / Radiance to Nodes") }
-                        radianceStatus?.let { Text(it) }
-                    }
-                    Text("Executable engine upgrades are released as signed APKs, not remotely executable code.")
-                    psiphonStatus?.let { Text(it) }
-                    TextButton(enabled = !psiphonImporting, onClick = { psiphonImporter.launch(arrayOf("*/*")) }) {
-                        Text(if (psiphonImporting) "Importing…" else "Import Psiphon.config")
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showCoreInventory = false }) { Text("Close") } }
-        )
-    }
-
     if (showUpdateDialog && updateRelease != null) {
         val release = updateRelease!!
         com.example.ui.popups.VerifiedUpdateDialog(
@@ -301,8 +265,6 @@ fun SettingsScreen(
 
 
     val actions = remember(viewModel) { ViewModelSettingsActions(viewModel) }
-    var pageName by rememberSaveable { mutableStateOf<String?>(null) }
-    val page = pageName?.let { name -> SettingsPage.values().firstOrNull { it.name == name } }
     BackHandler(enabled = page != null) { pageName = null }
     val open: (SettingsPage) -> Unit = { pageName = it.name }
     val back: () -> Unit = { pageName = null }
@@ -332,6 +294,9 @@ fun SettingsScreen(
             }
         }
     }
+    val reviewUpdate: () -> Unit = {
+        if (updateRelease != null) showUpdateDialog = true else checkForUpdates()
+    }
     val versionName = BuildConfig.VERSION_NAME
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
 
@@ -353,7 +318,8 @@ fun SettingsScreen(
                 update = updateUi,
                 onOpen = open,
                 onOpenAiAgent = onNavigateToAiAgent,
-                onUpdateChip = checkForUpdates
+                onUpdateChip = reviewUpdate,
+                onFreeConfigsChanged = actions::setFreeConfigs
             )
 
             SettingsPage.CONNECTION -> ConnectionSettingsPage(
@@ -476,8 +442,8 @@ fun SettingsScreen(
                     cleanIpStatus = cleanIpStatus,
                     vpnOnlyUpdates = vpnOnlyUpdates
                 ),
-                onCheckForUpdates = checkForUpdates,
-                onCoreManager = { showCoreInventory = true },
+                installedBuild = BuildConfig.RELEASE_BUILD,
+                onCheckForUpdates = reviewUpdate,
                 onUpdateResolvers = {
                     if (!resolverBusy) {
                         resolverBusy = true
@@ -522,6 +488,28 @@ fun SettingsScreen(
                     vpnOnlyUpdates = value
                 },
                 onChangelog = { uriHandler.openUri(AppUpdateChecker.RELEASES_URL) },
+                onBack = back
+            )
+
+            SettingsPage.ENGINES -> EngineUpdatesSettingsPage(
+                update = updateUi,
+                psiphonStatus = psiphonStatus,
+                psiphonImporting = psiphonImporting,
+                radianceStatus = radianceStatus,
+                onCheckForUpdates = reviewUpdate,
+                onImportPsiphon = { psiphonImporter.launch(arrayOf("*/*")) },
+                onAddRadiance = {
+                    scope.launch {
+                        radianceStatus = runCatching {
+                            val profile = RadianceSidecar.profile()
+                            val repository = com.example.RayApplication.instance.serverRepository
+                            if (repository.getProfileById(profile.id) == null) repository.insert(profile)
+                        }.fold(
+                            onSuccess = { "Open Nodes and select Lantern / Radiance to connect." },
+                            onFailure = { "Could not add the Lantern / Radiance profile." }
+                        )
+                    }
+                },
                 onBack = back
             )
 
