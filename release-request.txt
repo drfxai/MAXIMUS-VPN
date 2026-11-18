@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #237 (ca82cb6ef7df4e1ba693994bbf8cf9afc33364cd).
-Includes Patterniha Serverless-for-Iran v62 profiles and the separate Xray v26.11.21 engine.
+V1.0.4 signed Android rebuild after PR #238 (0130759e7dfa9b90b500a80fbe8d1aab6bd9d130).
+Includes the CottenDNS runtime upgrade and Smart Connect recovery improvements.
