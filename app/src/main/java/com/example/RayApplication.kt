@@ -249,6 +249,7 @@ class RayApplication : Application() {
             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { serverRepository.getProfileById(id) }
         }
         com.example.vpn.sidecar.AetherSidecar.identityDirectory = { java.io.File(noBackupFilesDir, "identities/aether") }
+        com.example.vpn.sidecar.MatrixTransportSidecar.identityDirectory = { java.io.File(noBackupFilesDir, "engines/matrix-transport") }
         com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
         com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
         com.example.vpn.BundledResolvers.updatedAsset = { part -> com.example.update.ResolverPackUpdater.open(this, part) }

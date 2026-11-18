@@ -69,6 +69,35 @@ class EngineChainTest {
         assertEquals(listOf(1, 0), EngineChain.plan(chain("psiphon", "masque")).map { it.index })
     }
 
+    @Test fun editorShowsWireOrderAndPersistsTheExistingDialOrder() {
+        val editor = com.example.ui.lab.ChainUi(hopIds = listOf("saved:node", "tor"))
+        val chain = editor.engineChain()
+        assertEquals("tor", chain.hops.first().engineId)
+        assertEquals("node", chain.hops.last().profileId)
+        val persisted = ChainRunner.profile(chain, mapOf("node" to "VLESS"), EngineChain::titleOf)
+        assertEquals(chain, ChainRunner.readChain(persisted))
+    }
+
+    @Test fun serverlessAndRadianceCanCarrySavedConfigsWithoutSkippingAnotherHop() {
+        val saved = EngineChain.Hop(SingBoxSidecar.id, profileId = "node")
+        for (id in listOf("serverless", "radiance")) {
+            val carrier = EngineChain.Hop(id)
+            assertNull(EngineChain.problem(EngineChain.Chain(listOf(saved, carrier))))
+            assertTrue(EngineChain.problem(EngineChain.Chain(listOf(carrier, saved)))!!.contains("first hop"))
+        }
+    }
+
+    @Test fun torDialsThroughTheAuthenticatedCarrier() {
+        val context = SidecarContext(java.io.File("."), java.io.File("lyrebird"), 9010, "user", "pass",
+            com.example.data.model.OperationalMode.DAILY, upstreamSocks = 9011,
+            upstreamUser = "carrier-user", upstreamPass = "carrier-pass")
+        val config = TorSidecar.proxiedTorrc(context)
+        assertTrue(config.contains("Socks5Proxy 127.0.0.1:9011\n"))
+        assertTrue(config.contains("Socks5ProxyUsername carrier-user\n"))
+        assertTrue(config.contains("Socks5ProxyPassword carrier-pass\n"))
+        assertTrue(!config.contains("UseBridges"))
+    }
+
     @Test fun upstreamCredentialsAreEncodedInThePrivatePsiphonConfig() {
         val config = PsiphonSidecar.buildConfig(org.json.JSONObject(), "", 9010, java.io.File("/tmp/data"),
             9011, "u@ser", "p:a ss")

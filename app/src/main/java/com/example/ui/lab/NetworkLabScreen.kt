@@ -1,6 +1,8 @@
 package com.example.ui.lab
 
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -20,7 +22,12 @@ import com.example.data.model.ConnectionStatus
 import com.example.ui.ai.relative
 import com.example.vpn.RayVpnService
 import com.example.vpn.engine.registry.EngineState
+import com.example.vpn.lab.EngineProbe
 import com.example.vpn.lab.LabBrief
+import com.example.vpn.engine.RuntimeCapabilities
+import com.example.vpn.sidecar.ChainRunner
+import com.example.vpn.sidecar.EngineChain
+import com.example.vpn.share.LocalProxyService
 import com.example.vpn.lab.research.GitHubReleaseSource
 import com.example.vpn.lab.research.ResearchPipeline
 import com.example.vpn.lab.research.ResearchStore
@@ -34,6 +41,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
 /** Holds the LAB screen's state: the controller's snapshot plus the saved configs (names only) and research. */
@@ -41,6 +49,7 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     private val lab = RayApplication.instance.lab
     private val revival = RayApplication.instance.configRevival
     private var revivalJob: Job? = null
+    private var chainTest: Job? = null
     private val gateway = AiGatewayHolder.get(app)
     private val chat = AiChat { consumer, request -> gateway.chat(consumer, request) }
     private val research = run {
@@ -54,8 +63,10 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            combine(lab.state, local, RayVpnService.vpnState) { snap, l, vpn ->
-                l.copy(snapshot = snap, vpnOn = vpn.status != ConnectionStatus.DISCONNECTED, aiReady = gateway.isConfigured())
+            combine(lab.state, local, RayVpnService.vpnState, LocalProxyService.state) { snap, l, vpn, proxy ->
+                val vpnOn = vpn.status != ConnectionStatus.DISCONNECTED
+                if (vpnOn || proxy.running || proxy.starting) chainTest?.cancel()
+                l.copy(snapshot = snap, vpnOn = vpnOn, aiReady = gateway.isConfigured())
             }.collect { _state.value = it }
         }
         loadConfigs()
@@ -71,22 +82,17 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         // The same engine states diagnostics and the report read: bundled, configured, and what ran here.
         val network = runCatching { com.example.vpn.smart.NetworkIdentity.current(getApplication<Application>()) }.getOrDefault("other")
         val engines = runCatching { com.example.vpn.engine.registry.EngineRegistry.statuses(network) }.getOrDefault(emptyList())
-        fun ready(id: String, unknown: Boolean) = engines.firstOrNull { it.engineId == id }?.state?.let {
-            it !in setOf(EngineState.UNSUPPORTED, EngineState.NOT_BUNDLED, EngineState.NOT_CONFIGURED)
-        } ?: unknown
-        val psiphonReady = ready("psiphon", true)
-        val matrixReady = ready("matrix-transport", false)
-        val masqueReady = ready("masque", false)
-        val aetherReady = ready("aether", false)
-        val torReady = ready("tor", true)
-        local.update { it.copy(revival = it.revival.copy(eligible = eligible, detected = detected),
-            chain = it.chain.copy(psiphonReady = psiphonReady, torReady = torReady, masqueReady = masqueReady, matrixReady = matrixReady, aetherReady = aetherReady)) }
-        local.value = local.value.copy(configs = configs.map { p ->
+        val unavailable = setOf(EngineState.UNSUPPORTED, EngineState.NOT_BUNDLED, EngineState.NOT_CONFIGURED)
+        val chainEngines = engines.filter { it.engineId in EngineChain.CHAINABLE && it.state !in unavailable }
+            .mapTo(mutableSetOf()) { it.engineId }
+        val options = configs.map { p ->
             LabConfigOption(p.id, p.name.ifBlank { "Config" }, listOf(p.protocolType.displayName, p.transport.uppercase().ifBlank { null }, p.security.uppercase().ifBlank { null })
                 .filterNotNull().filter { it != "NONE" }.joinToString(" · "),
                 supportsDomainFronting = com.example.vpn.experimental.FrontedTunnel.canUseBase(p),
-                supportsSavedNodeChain = com.example.vpn.sidecar.EngineChain.canUseSavedNode(p))
-        })
+                supportsSavedNodeChain = EngineChain.canUseSavedNode(p))
+        }
+        local.update { it.copy(revival = it.revival.copy(eligible = eligible, detected = detected), configs = options,
+            chain = it.chain.copy(readyEngines = chainEngines, availabilityLoaded = true)) }
     }
 
     private var endpointJob: Job? = null
@@ -167,7 +173,11 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
 
-    fun open(section: LabSection?) { local.value = local.value.copy(section = section) }
+    fun open(section: LabSection?) {
+        if (section != LabSection.CHAIN) chainTest?.cancel()
+        local.update { it.copy(section = section) }
+        if (section == LabSection.CHAIN) loadConfigs()
+    }
 
     /** Revives the dead Cloudflare configs (VPN off); results stay on the Revive page. */
     fun revive() {
@@ -293,49 +303,99 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun chainOrder(order: ChainOrder) = local.update { it.copy(chain = it.chain.copy(order = order, customHops = null, savedName = null)) }
-    fun chainNode(id: String?) = local.update {
-        val order = if (id == null) ChainOrder.PSIPHON_TOR else ChainOrder.SAVED_TOR
-        it.copy(chain = it.chain.copy(savedNodeId = id, order = order, customHops = null, savedName = null))
-    }
-    fun customChainHops(hops: List<String>?) = local.update {
-        it.copy(chain = it.chain.copy(customHops = hops, savedName = null))
-    }
-    fun chainRegion(code: String) = local.update { it.copy(chain = it.chain.copy(region = code, savedName = null)) }
+    fun chainHops(hops: List<String>) = editChain { it.copy(hopIds = hops) }
 
-    /** Saves the built chain as a server profile the user can connect to. */
-    fun saveChain() {
-        if (_state.value.chain.saving) return
-        local.update { it.copy(chain = it.chain.copy(saving = true)) }
-        viewModelScope.launch {
-            val ui = _state.value.chain
+    fun chainRegion(code: String) = editChain { it.copy(region = code) }
+
+    private fun editChain(edit: (ChainUi) -> ChainUi) = local.update {
+        if (it.chain.busy) it else it.copy(chain = edit(it.chain).copy(savedName = null, testPassed = null, testMessage = null))
+    }
+
+    private fun chainProfile(ui: ChainUi, configs: List<LabConfigOption>): com.example.data.model.VlessProfile {
+        ui.problem(configs)?.let { error(it) }
+        val chain = ui.engineChain()
+        val names = configs.associate { it.id to it.name }
+        val profile = ChainRunner.profile(chain, names, EngineChain::titleOf).copy(
+            name = chain.hops.asReversed().joinToString("  →  ") { names[it.profileId] ?: EngineChain.titleOf(it.engineId) }
+        )
+        RuntimeCapabilities.unsupportedReason(profile)?.let { error(it) }
+        return profile
+    }
+
+    fun testChain() {
+        val app = getApplication<Application>()
+        val draft = local.value
+        if (draft.chain.busy || RayVpnService.vpnState.value.status != ConnectionStatus.DISCONNECTED) return
+        if (LocalProxyService.state.value.let { it.running || it.starting }) {
+            lab.showMessage("Stop the local proxy before testing this chain.")
+            return
+        }
+        val snap = lab.state.value
+        if (snap.running != null || snap.analysisRunning) {
+            lab.showMessage("Finish the active LAB test before testing this chain.")
+            return
+        }
+        val manager = app.getSystemService(ConnectivityManager::class.java) ?: return
+        val network = manager.activeNetwork
+        val capabilities = network?.let { manager.getNetworkCapabilities(it) }
+        if (capabilities == null || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+            lab.showMessage("A physical connection without an active VPN is required to test the chain.")
+            return
+        }
+        local.update { it.copy(chain = it.chain.copy(testing = true, testPassed = null, testMessage = null)) }
+        chainTest = viewModelScope.launch {
             try {
-                val profile = withContext(Dispatchers.IO) {
-                    val chain = ui.engineChain()
-                    com.example.vpn.sidecar.EngineChain.problem(chain)?.let { error(it) }
-                    val nodeTitles = chain.hops.filter { it.profileId.isNotBlank() }.associate { hop ->
-                        hop.profileId to com.example.vpn.sidecar.EngineChain.hopProfile(hop).name
-                    }
-                    val profile = com.example.vpn.sidecar.ChainRunner.profile(chain, nodeTitles, ::titleOf)
-                    RayApplication.instance.serverRepository.insert(profile)
-                    profile
+                val result = runInterruptible(Dispatchers.IO) {
+                    val profile = chainProfile(draft.chain, draft.configs)
+                    val mode = RayApplication.instance.settingsRepository.getSettings().operationalMode
+                    EngineProbe.testProfile(app, profile, timeoutSec = 12, requests = 2, mode = mode)
                 }
-                local.update { it.copy(chain = it.chain.copy(savedName = profile.name)) }
-                lab.showMessage("Saved the chain \"${profile.name}\". Connect to it on the Servers screen.")
+                if (manager.activeNetwork != network) {
+                    local.update { it.copy(chain = it.chain.copy(testMessage = "The connection changed. Run the test again.")) }
+                    return@launch
+                }
+                val passed = result.stage.carriesTraffic && result.outcomes.size >= 2 && result.outcomes.all { it }
+                val status = when {
+                    passed -> "Traffic verified through the whole chain" + (result.latencyMs?.let { " · $it ms" } ?: "")
+                    result.stage.carriesTraffic -> "One request passed, but the chain was not stable."
+                    else -> result.failure?.let { "Traffic unverified. $it" } ?: "Traffic did not reach the internet through this chain."
+                }
+                local.update { it.copy(chain = it.chain.copy(testPassed = passed, testMessage = status)) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: Exception) {
-                lab.showMessage("Could not save the engine chain.")
+                local.update { it.copy(chain = it.chain.copy(testPassed = false, testMessage = "Could not start the chain.")) }
+            } finally {
+                local.update { it.copy(chain = it.chain.copy(testing = false)) }
+            }
+        }
+    }
+
+    /** Saves the chain as a node without starting or switching the active VPN. */
+    fun saveChain() {
+        val draft = local.value
+        if (draft.chain.busy) return
+        local.update { it.copy(chain = it.chain.copy(saving = true)) }
+        viewModelScope.launch {
+            try {
+                val profile = withContext(Dispatchers.IO) {
+                    val profile = chainProfile(draft.chain, draft.configs)
+                    val repository = RayApplication.instance.serverRepository
+                    repository.getProfileByFingerprint(profile.canonicalFingerprint)
+                        ?: profile.copy(id = "chain-${profile.canonicalFingerprint}").also { repository.insert(it) }
+                }
+                local.update { it.copy(chain = it.chain.copy(savedName = profile.name)) }
+                lab.showMessage("Saved the chain “${profile.name}” to Nodes.")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                lab.showMessage("Could not save the connection chain.")
             } finally {
                 local.update { it.copy(chain = it.chain.copy(saving = false)) }
             }
         }
     }
 
-    private fun hop(engineId: String, region: String) =
-        com.example.vpn.sidecar.EngineChain.Hop(engineId, region = if (engineId == "psiphon") region else "")
-
-    private fun titleOf(engineId: String) = when (engineId) { "psiphon" -> "Psiphon"; "masque" -> "WARP MASQUE"; "matrix-transport" -> "Matrix Transport"; "aether" -> "Aether"; else -> "Tor" }
     fun chooseFirewall(f: com.example.vpn.connectivity.NetworkFirewalls.Firewall?) = local.update { it.copy(revival = it.revival.copy(chosen = f)) }
     fun pick(show: Boolean) { local.value = local.value.copy(picking = show); if (show) loadConfigs() }
     fun run(profileId: String) { pick(false); open(LabSection.LIVE); lab.experiment(profileId, userStarted = true) }
@@ -425,7 +485,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onRunShadowLink = viewModel::runShadowLink, onStopShadowLink = viewModel::stopShadowLink,
                 onScanEndpoints = viewModel::scanEndpoints, onStopEndpoints = viewModel::stopEndpoints,
                 onSaveFronted = viewModel::saveFronted, onWarpSplit = viewModel::setWarpSplit,
-                onChainOrder = viewModel::chainOrder, onChainNode = viewModel::chainNode, onCustomChainHops = viewModel::customChainHops, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings,
+                onChainHops = viewModel::chainHops, onTestChain = viewModel::testChain, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings,
                 onBuiltinConnection = onBuiltinConnection
             )
         },

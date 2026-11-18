@@ -28,6 +28,9 @@ object ChainRunner {
         override fun stop() = onStop()
     }
 
+    class HopStartFailure(val engineId: String, cause: Exception) :
+        IllegalStateException("Could not start ${EngineChain.titleOf(engineId)} in this chain.", cause)
+
     /** Builds one hop's work directory, SOCKS port and login; [upstreamSocks] is the next hop's port. */
     fun interface ContextFactory {
         fun create(engineId: String, socksPort: Int, upstreamSocks: Int?): SidecarContext
@@ -84,7 +87,12 @@ object ChainRunner {
                 )
                 contexts[step.index] = ctx
                 val profile = EngineChain.hopProfile(step.hop)
-                val (running, launch) = start.start(engine, profile, ctx)
+                val (running, launch) = try {
+                    start.start(engine, profile, ctx)
+                } catch (e: Exception) {
+                    if (e is InterruptedException || e is kotlinx.coroutines.CancellationException) throw e
+                    throw HopStartFailure(engine.id, e)
+                }
                 started += running
                 launches[step.index] = launch
                 if (step.index == 0) {

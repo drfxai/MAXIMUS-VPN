@@ -160,7 +160,10 @@ object EngineProbe {
             return result.also { record(context, network, chain.hops.map { it.engineId }, it, failures = false) }
         } catch (e: Exception) {
             if (e is InterruptedException || e is kotlinx.coroutines.CancellationException) throw e
-            return Result("chain", ConnectionStage.NOT_TESTED, null, "chain start or request failed: ${e.javaClass.simpleName}", false)
+            val failure = if (e is com.example.vpn.sidecar.ChainRunner.HopStartFailure)
+                e.message ?: "A chain hop did not start."
+            else "Chain start or request failed: ${e.javaClass.simpleName}"
+            return Result("chain", ConnectionStage.NOT_TESTED, null, failure, false)
         } finally {
             try { running?.stop() } finally { cleanup(workDir) }
         }
