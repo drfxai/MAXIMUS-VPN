@@ -76,7 +76,9 @@ def main():
         scroll_to('Compatibility')
         ui.require('Compatibility')
         ui.require('Done')
-        scroll_to('Test chain')
+        scroll_to('Save chain')
+        if not ui.contains('Test chain'):
+            raise AssertionError('Chain test action is missing')
         captures.append(ui.capture('connection-chain-actions-' + theme.lower(), 'Save chain'))
         ui.adb('shell', 'input', 'keyevent', '4')
         time.sleep(1)

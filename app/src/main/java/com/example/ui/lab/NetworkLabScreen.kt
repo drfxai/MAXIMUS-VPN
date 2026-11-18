@@ -379,7 +379,10 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val profile = withContext(Dispatchers.IO) {
-                    chainProfile(draft.chain, draft.configs).also { RayApplication.instance.serverRepository.insert(it) }
+                    val profile = chainProfile(draft.chain, draft.configs)
+                    val repository = RayApplication.instance.serverRepository
+                    repository.getProfileByFingerprint(profile.canonicalFingerprint)
+                        ?: profile.copy(id = "chain-${profile.canonicalFingerprint}").also { repository.insert(it) }
                 }
                 local.update { it.copy(chain = it.chain.copy(savedName = profile.name)) }
                 lab.showMessage("Saved the chain “${profile.name}” to Nodes.")

@@ -33,9 +33,7 @@ class SingBoxIntegrationTest {
         assertEquals("carrier", outbounds.getJSONObject(0).getString("detour"))
         assertEquals("carrier", outbounds.getJSONObject(1).getString("username"))
         assertEquals("carrier", config.getJSONObject("dns").getJSONArray("servers").getJSONObject(0).getString("detour"))
-        System.getenv("MAXIMUS_SINGBOX_FIXTURES")?.let {
-            File(File(it).apply { mkdirs() }, "chain-vless.json").writeText(config.toString())
-        }
+        assertEquals("bootstrap", config.getJSONObject("route").getString("default_domain_resolver"))
     }
 
     @Test fun allNormalizedAdaptersProduceNativeValidationFixtures() {

@@ -142,12 +142,16 @@ object SingBoxSidecar : SidecarEngine {
         }
         val resolver = JSONObject().put("type", "https").put("tag", "bootstrap")
             .put("server", "1.1.1.1").put("path", "/dns-query")
-        if (c.upstreamSocks != null) resolver.put("detour", "carrier")
+        val route = JSONObject().put("final", "node")
+        if (c.upstreamSocks != null) {
+            resolver.put("detour", "carrier")
+            route.put("default_domain_resolver", "bootstrap")
+        }
         return JSONObject().put("log", JSONObject().put("level", "warn"))
             .put("inbounds", JSONArray().put(JSONObject().put("type", "socks").put("tag", "local")
                 .put("listen", "127.0.0.1").put("listen_port", c.socksPort)
                 .put("users", JSONArray().put(JSONObject().put("username", c.socksUser).put("password", c.socksPass)))))
             .put("dns", JSONObject().put("servers", JSONArray().put(resolver)))
-            .put("outbounds", outbounds).put("route", JSONObject().put("final", "node"))
+            .put("outbounds", outbounds).put("route", route)
     }
 }
