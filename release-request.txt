@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #244 (4a510e6dfac13903ccd6c1de34adf907bc7391b5).
-Includes the Settings hub and update pages (#239, #242), verified DNS presets and DoH comparison (#243), and the visual Connection chain editor (#244). Retains the Protocols redesign (#240, #241).
+V1.0.4 signed Android rebuild after PR #245 (335b32cd846a237735c98590231ce1afe73c4608).
+Includes the updated Aether startup settings and Psiphon TCP retry, built-in connection picker, chain compatibility, redesigned Protocols screen, and live connection Analytics.
