@@ -53,14 +53,28 @@ object BuiltinConnections {
     }
 
     fun resolve(context: Context, id: String): VlessProfile? {
-        ConfigFreeMethod.entries.firstOrNull { it.id == id }?.let { return it.profile() }
+        ConfigFreeMethod.entries.firstOrNull { it.id == id }?.let { method ->
+            return when (method) {
+                ConfigFreeMethod.AETHER_WARP -> resolve(context, AETHER)?.copy(id = id)
+                ConfigFreeMethod.SERVERLESS -> resolve(context, DIRECT)?.copy(id = id)
+                else -> method.profile()
+            }
+        }
         if (id != AETHER && id != DIRECT) return null
         val p = context.getSharedPreferences("galaxy_connections", Context.MODE_PRIVATE)
-        val family = p.getString(if (id == DIRECT) "direct_family" else "aether_family", p.getString("family", "auto")).takeIf { it in AetherSidecar.families } ?: "auto"
-        return if (id == AETHER) AetherSidecar.profile(
-            p.getString("transport", "auto").takeIf { it in AetherSidecar.transports } ?: "auto",
-            family, p.getBoolean("fragment", true), AetherSettings.read(org.json.JSONObject(p.getString("aether_advanced", "{}") ?: "{}")))
-        else ServerlessSidecar.profile(p.getString("variant", "auto").takeIf { it in ServerlessSidecar.variants } ?: "auto", family, p.getBoolean("vpnFallback", false), p.getString("direct_resolver", "auto").takeIf { it in ServerlessSidecar.resolvers } ?: "auto",
-            AetherSettings.read(org.json.JSONObject(p.getString("direct_advanced", "{}") ?: "{}")))
+        return runCatching {
+            val family = p.getString(if (id == DIRECT) "direct_family" else "aether_family", p.getString("family", "auto"))
+                .takeIf { it in AetherSidecar.families } ?: "auto"
+            fun advanced(key: String) = AetherSettings.read(org.json.JSONObject(p.getString(key, "{}") ?: "{}"))
+            if (id == AETHER) AetherSidecar.profile(
+                p.getString("transport", "auto").takeIf { it in AetherSidecar.transports } ?: "auto",
+                family, p.getBoolean("fragment", true), advanced("aether_advanced")
+            ) else ServerlessSidecar.profile(
+                p.getString("variant", "auto").takeIf { it in ServerlessSidecar.variants } ?: "auto",
+                family, p.getBoolean("vpnFallback", false),
+                p.getString("direct_resolver", "auto").takeIf { it in ServerlessSidecar.resolvers } ?: "auto",
+                advanced("direct_advanced")
+            )
+        }.getOrElse { if (id == AETHER) AetherSidecar.profile() else ServerlessSidecar.profile() }
     }
 }

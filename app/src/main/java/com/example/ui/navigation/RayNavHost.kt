@@ -32,6 +32,14 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.analytics.ConnectionAnalytics
+import com.example.ui.analytics.ConnectionAnalyticsScreen
+import com.example.ui.lab.LabSection
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import com.example.data.model.VlessProfile
@@ -145,6 +153,13 @@ fun MainApp(
         SubscriptionViewModel(app.subscriptionRepository, app.subscriptionManager)
     }
     val panelManagerViewModel: PanelManagerViewModel = viewModel()
+    val analytics = remember(vpnViewModel) { ConnectionAnalytics() }
+    LaunchedEffect(vpnViewModel) {
+        while (isActive) {
+            analytics.record(vpnViewModel.connectionState.value)
+            delay(5_000L)
+        }
+    }
 
     Scaffold(
         containerColor = AppTheme.colors.background,
@@ -218,7 +233,9 @@ fun MainApp(
                     onNavigateToGodBrowser = { navController.navigate(Screen.GodBrowser.route) },
                     onNavigateToAiAgent = { navController.navigate(Screen.AiAgent.route) },
                     onConfigureConnectionEngines = { navController.navigate("settings/core-engines") },
-                    onConfigureAether = { navController.navigate("lab/aether") }
+                    onConfigureAether = { navController.navigate("lab/aether") },
+                    onConfigureChain = { navController.navigate("lab/chain") },
+                    onOpenAnalytics = { navController.navigate("analytics") }
                 )
             }
             composable(Screen.Top10.route) {
@@ -394,6 +411,16 @@ fun MainApp(
             }
             composable(Screen.AiSettings.route) {
                 com.example.ui.ai.AiSettingsScreen(onNavigateBack = { navController.popBackStack() })
+            }
+            composable("analytics") {
+                val connection by vpnViewModel.connectionState.collectAsStateWithLifecycle()
+                ConnectionAnalyticsScreen(analytics, connection) { navController.popBackStack() }
+            }
+            composable("lab/chain") {
+                com.example.ui.lab.NetworkLabScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    initialSection = LabSection.CHAIN
+                )
             }
             composable("lab/aether") {
                 com.example.ui.lab.BuiltinConnectionScreen(false, vpnViewModel, onRequestVpnPermission) {

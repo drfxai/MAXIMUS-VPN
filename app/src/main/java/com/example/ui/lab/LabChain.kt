@@ -125,6 +125,7 @@ internal fun ChainPage(
     onHops: (List<String>) -> Unit,
     onRegion: (String) -> Unit,
     onTest: () -> Unit,
+    onCancelTest: () -> Unit,
     onSave: () -> Unit,
     onPsiphonSettings: (String) -> Unit
 ) {
@@ -220,6 +221,9 @@ internal fun ChainPage(
             if (s.testing) CircularProgressIndicator(Modifier.size(20.dp), color = c.accent, strokeWidth = 2.dp)
             else LabText("Test chain", if (!vpnOn && problem == null) c.onAccent else c.text2, 15.sp, FontWeight.Bold)
         }
+        if (s.testing) TextButton(onClick = onCancelTest, modifier = Modifier.fillMaxWidth()) {
+            Text("Cancel chain test")
+        }
         OutlinedButton(onClick = onSave, enabled = problem == null && !s.busy,
             modifier = Modifier.fillMaxWidth().heightIn(min = 51.dp).testTag("save_connection_chain"), shape = rowShape,
             border = androidx.compose.foundation.BorderStroke(1.dp, if (problem == null) c.accent else c.stroke)) {
@@ -231,7 +235,10 @@ internal fun ChainPage(
     source?.let { item ->
         HopPicker(c, item, s, configs, onDismiss = { source = null }, onRegion = onRegion,
             onPsiphonSettings = { source = null; psiphonSettings = true },
-            onAdd = { id -> onHops(s.hopIds + id); source = null })
+            onAdd = { id ->
+                onHops(if (EngineChain.entryOnly(id)) listOf(id) + s.hopIds else s.hopIds + id)
+                source = null
+            })
     }
     if (checkingCompatibility) AlertDialog(
         onDismissRequest = { checkingCompatibility = false },
@@ -364,6 +371,7 @@ private fun HopPicker(
         val reason = when {
             id in state.hopIds -> "Already in this route"
             !compatible -> "This config needs its original engine"
+            EngineChain.entryOnly(id) && state.hopIds.any(EngineChain::entryOnly) -> "This route already has an entry-only carrier"
             engineId !in state.readyEngines -> "Unavailable on this device"
             state.hopIds.size >= EngineChain.MAX_HOPS -> "Route is full"
             else -> null
@@ -386,7 +394,7 @@ private fun HopPicker(
                 }
             } else {
                 source.ids.forEach { id ->
-                    val (title, detail, enabled) = offer(id, EngineChain.titleOf(id), null, id, true)
+                    val (title, detail, enabled) = offer(id, EngineChain.titleOf(id), if (EngineChain.entryOnly(id)) "First hop from this device" else null, id, true)
                     ChainRow(c, title, source.icon, enabled = enabled, subtitle = detail.ifBlank { null }) { onAdd(id) }
                 }
             }

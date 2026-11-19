@@ -2400,30 +2400,50 @@ class RayVpnService : VpnService() {
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,
                 relayExitRoute = relayExitRoute, metered = metered, manual = exactSession, cloudflareBlocked = cfBlocked,
                 cancelled = { connectionOwner?.isActive == false }) else null
-            val launch = started?.launch ?: engine.prepare(profile, settings, context)
+            var runningProfile = started?.profile ?: profile
+            var engineContext = started?.context ?: context
+            var launch = started?.launch ?: engine.prepare(runningProfile, settings, engineContext)
             if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
             showForegroundNotification("Starting the ${engine.id} engine...")
-            val process = started?.running ?: com.example.vpn.sidecar.EngineReaper.track(engine.startPrepared(profile, settings, launch, context)
-                ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, context.socksPort))
+
+            fun launchProcess() = com.example.vpn.sidecar.EngineReaper.track(
+                engine.startPrepared(runningProfile, settings, launch, engineContext)
+                    ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, workDir, engineContext.socksPort)
+            )
+            var process = started?.running ?: launchProcess()
             sidecar = process
-            // A raced carrier (Irancell H3 + WireGuard) may have won on its own loopback port.
-            val engineContext = started?.context ?: context
-            if (!process.awaitReady(launch.readyTimeoutMs)) {
+            var ready = started != null || process.awaitReady(launch.readyTimeoutMs)
+            val retry = if (!ready && engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
+                connectionOwner?.isActive != false) com.example.vpn.sidecar.PsiphonSidecar.tcpStartupRetry(profile) else null
+            if (retry != null) {
+                process.stop()
+                sidecar = null
+                XrayLogManager.w("VPN", "Psiphon did not establish a tunnel. Retrying once with TCP transports.")
+                showForegroundNotification("Retrying Psiphon over TCP…")
+                runningProfile = retry
+                // A stopped process can still be releasing its listener. Never reuse its port.
+                engineContext = context.copy(socksPort = com.example.vpn.sidecar.Sidecars.freeLoopbackPort())
+                launch = engine.prepare(runningProfile, settings, engineContext)
+                process = launchProcess()
+                sidecar = process
+                ready = process.awaitReady(launch.readyTimeoutMs)
+            }
+            if (!ready) {
                 process.stop()
                 sidecar = null
                 val hint = process.startupFailure ?: "No readiness signal; inspect redacted engine logs"
-                com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "startup failed: ${hint}")
+                com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "startup failed: $hint")
                 com.example.vpn.diagnostics.events.EventLog.event("engine.startup.failure",
                     com.example.vpn.diagnostics.events.Severity.ERROR,
                     attributes = mapOf("engine.name" to engine.id, "reason" to hint),
                     stage = com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED, result = "FAIL")
-                error("The ${engine.id} engine did not start: ${hint}")
+                error("The ${engine.id} engine did not start: $hint")
             }
             com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
             XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
             watchSidecar(engine, process)
             registerWarpThroughCarrier(engine.id, process, engineContext, launch, settings)
-            return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(started?.profile ?: profile, engineContext, launch)
+            return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(runningProfile, engineContext, launch)
     }
 
     /**

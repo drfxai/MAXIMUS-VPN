@@ -44,14 +44,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.example.vpn.connections.BuiltinConnections
 import com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod
 import com.example.vpn.engine.RuntimeCapabilities
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +64,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.FilterChip
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -103,7 +107,9 @@ fun HomeScreen(
     onNavigateToAiAgent: () -> Unit = {},
     modifier: Modifier = Modifier,
     onConfigureConnectionEngines: () -> Unit = {},
-    onConfigureAether: () -> Unit = {}
+    onConfigureAether: () -> Unit = {},
+    onConfigureChain: () -> Unit = {},
+    onOpenAnalytics: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val connectionState by vpnViewModel.connectionState.collectAsStateWithLifecycle()
@@ -484,6 +490,13 @@ fun HomeScreen(
                 }
             }
         }
+        TextButton(onClick = onOpenAnalytics, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) {
+            Icon(Icons.Filled.BarChart, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Connection analytics")
+            Spacer(Modifier.width(5.dp))
+            Icon(Icons.Filled.ChevronRight, null, modifier = Modifier.size(16.dp))
+        }
         // Android's own kill switch: suggested only while connected and only when it is measured off.
         LeakProtectionCard(connected = connectionState.isConnected)
         if (connectionState.isConnected && (directRoute || (connectedProfile?.let {
@@ -578,15 +591,16 @@ fun HomeScreen(
             ConfigFreeConnectButton(
                 state = connectionState,
                 onAutoConnect = {
-                    vpnViewModel.startOrRequestPermission(context, ConfigFreeMethod.AETHER_WARP.profile(), smart = true) {
+                    vpnViewModel.startOrRequestPermission(context, BuiltinConnections.resolve(context, ConfigFreeMethod.AETHER_WARP.id) ?: ConfigFreeMethod.AETHER_WARP.profile(), smart = true) {
                         onRequestVpnPermission()
                     }
                 },
                 onStop = { com.example.vpn.VpnController.stopVpn(context) },
                 onConfigureEngines = onConfigureConnectionEngines,
                 onConfigureAether = onConfigureAether,
+                onConfigureChain = onConfigureChain,
                 onConnect = { method ->
-                    vpnViewModel.startOrRequestPermission(context, method.profile(), exact = true) {
+                    vpnViewModel.startOrRequestPermission(context, BuiltinConnections.resolve(context, method.id) ?: method.profile(), exact = true) {
                         onRequestVpnPermission()
                     }
                 }
@@ -1179,6 +1193,7 @@ private fun ConfigFreeConnectButton(
     onStop: () -> Unit,
     onConfigureEngines: () -> Unit,
     onConfigureAether: () -> Unit,
+    onConfigureChain: () -> Unit,
     onConnect: (ConfigFreeMethod) -> Unit
 ) {
     var open by rememberSaveable { mutableStateOf(false) }
@@ -1256,81 +1271,112 @@ private fun ConfigFreeConnectButton(
     }
 
     if (open) {
-        var showAetherModes by rememberSaveable { mutableStateOf(false) }
-        var availability by remember { mutableStateOf<Map<ConfigFreeMethod, String?>?>(null) }
-        LaunchedEffect(Unit) {
-            availability = withContext(Dispatchers.IO) {
-                ConfigFreeMethod.entries.associateWith { method ->
-                    RuntimeCapabilities.unsupportedReason(method.profile()) ?: method.missingDependency()
-                }
+        ConfigFreeMethodPicker(
+            accent = accent,
+            onDismiss = { open = false },
+            onSetup = { open = false; onConfigureEngines() },
+            onAetherSettings = { open = false; onConfigureAether() },
+            onChain = { open = false; onConfigureChain() },
+            onSelect = { method -> open = false; requested = true; onConnect(method) }
+        )
+    }
+}
+
+@Composable
+private fun ConfigFreeMethodPicker(
+    accent: Color,
+    onDismiss: () -> Unit,
+    onSetup: () -> Unit,
+    onAetherSettings: () -> Unit,
+    onChain: () -> Unit,
+    onSelect: (ConfigFreeMethod) -> Unit
+) {
+    val context = LocalContext.current
+    var transports by rememberSaveable { mutableStateOf(false) }
+    var availability by remember { mutableStateOf<Map<ConfigFreeMethod, String?>?>(null) }
+    LaunchedEffect(Unit) {
+        availability = withContext(Dispatchers.IO) {
+            ConfigFreeMethod.entries.associateWith { method ->
+                runCatching {
+                    val profile = BuiltinConnections.resolve(context, method.id) ?: method.profile()
+                    RuntimeCapabilities.unsupportedReason(profile) ?: method.missingDependency()
+                }.getOrElse { "Check this method’s settings." }
             }
         }
-        AlertDialog(
-            onDismissRequest = { open = false },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = if (dark) Color(0xFF192535) else MaterialTheme.colorScheme.surface,
-            title = { Text("Connect without a config", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    if (availability == null) Text("Checking installed engines…")
-                    if (availability != null) {
-                        TextButton(onClick = { showAetherModes = !showAetherModes }) {
-                            Text(if (showAetherModes) "All connection methods" else "Aether transports and chains")
+    }
+    val colors = MaterialTheme.colorScheme
+    val dark = AppTheme.colors.isDark
+    val shape = RoundedCornerShape(26.dp)
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = shape, color = colors.surface, border = BorderStroke(1.dp, colors.outlineVariant)) {
+            Column(Modifier.widthIn(max = 480.dp).fillMaxWidth().heightIn(max = 680.dp)) {
+                Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(
+                    accent.copy(alpha = if (dark) .16f else .10f), Color.Transparent)))
+                    .padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Connect without a config", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(if (transports) "Select a WARP transport or build a chain." else "Choose a built-in connection method.",
+                        style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                }
+                Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    FilterChip(selected = !transports, onClick = { transports = false }, label = { Text("Methods") })
+                    FilterChip(selected = transports, onClick = { transports = true }, label = { Text("Aether & chains") })
+                }
+                androidx.compose.runtime.key(transports) {
+                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (transports) {
+                            ConfigMethodRow("Build a connection chain", "Combine saved nodes and built-in engines", Icons.Filled.Link, accent, onChain)
+                            ConfigMethodRow("Aether settings", "Configure transport and registration", Icons.Filled.Cloud, accent, onAetherSettings)
                         }
-                    }
-                    if (showAetherModes) {
-                        TextButton(onClick = { open = false; onConfigureAether() }) {
-                            Text("Configure a chain with a saved node")
-                        }
-                    }
-                    val methods = availability?.filterKeys { showAetherModes == (it.aetherTransport != null) }
-                    methods?.entries?.forEachIndexed { index, (method, problem) ->
-                        if (index > 0) HorizontalDivider(
-                            modifier = Modifier.padding(start = 53.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)
-                        )
-                        val ready = enabled && problem == null
-                        val icon = when (method) {
-                            ConfigFreeMethod.AETHER_WARP -> Icons.Filled.Cloud
-                            ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Filled.Public
-                            ConfigFreeMethod.SERVERLESS -> Icons.Filled.Bolt
-                            ConfigFreeMethod.PSIPHON -> Icons.Filled.Shield
-                            ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
-                            else -> Icons.Filled.Cloud
-                        }
-                        TextButton(
-                            enabled = ready,
-                            modifier = Modifier.fillMaxWidth(),
-                            contentPadding = PaddingValues(vertical = 11.dp),
-                            onClick = { open = false; requested = true; onConnect(method) }
-                        ) {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                                Box(
-                                    Modifier.size(40.dp).clip(RoundedCornerShape(12.dp))
-                                        .background(accent.copy(alpha = if (ready) .12f else .04f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp),
-                                        tint = if (ready) accent else MaterialTheme.colorScheme.onSurfaceVariant)
+                        val methods = availability
+                        if (methods == null) Text("Checking installed engines…", color = colors.onSurfaceVariant)
+                        else {
+                            methods.filterKeys { (it.aetherTransport != null) == transports }.forEach { (method, problem) ->
+                                val icon = when (method) {
+                                    ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Filled.Public
+                                    ConfigFreeMethod.SERVERLESS -> Icons.Filled.Bolt
+                                    ConfigFreeMethod.PSIPHON, ConfigFreeMethod.AETHER_PSIPHON -> Icons.Filled.Shield
+                                    ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
+                                    ConfigFreeMethod.AETHER_TOR -> Icons.Filled.Link
+                                    else -> Icons.Filled.Cloud
                                 }
-                                Column(Modifier.weight(1f)) {
-                                    Text(method.title, fontWeight = FontWeight.SemiBold,
-                                        color = if (ready) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(problem ?: method.description, style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                                ConfigMethodRow(method.title, problem ?: method.description, icon, accent,
+                                    if (problem == null) ({ onSelect(method) }) else null)
                             }
                         }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = { open = false }) { Text("Close", color = accent) } },
-            dismissButton = {
-                if (availability?.get(ConfigFreeMethod.PSIPHON) != null) {
-                    TextButton(onClick = { open = false; onConfigureEngines() }) { Text("Set up Psiphon") }
+                Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.End) {
+                    if (availability?.get(ConfigFreeMethod.PSIPHON) != null) {
+                        TextButton(onClick = onSetup) { Text("Psiphon setup") }
+                    }
+                    TextButton(onClick = onDismiss) { Text("Close") }
                 }
             }
-        )
+        }
+    }
+}
+
+@Composable
+private fun ConfigMethodRow(
+    title: String, detail: String, icon: androidx.compose.ui.graphics.vector.ImageVector, accent: Color,
+    onClick: (() -> Unit)?
+) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(13.dp)
+    Row(Modifier.fillMaxWidth().clip(shape).background(colors.surfaceVariant.copy(alpha = .42f))
+        .border(1.dp, colors.outlineVariant, shape)
+        .then(if (onClick == null) Modifier else Modifier.clickable(onClick = onClick))
+        .heightIn(min = 56.dp).padding(10.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(accent.copy(alpha = .13f)),
+            contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, color = colors.onSurface, style = MaterialTheme.typography.bodyMedium)
+            Text(detail, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
+        if (onClick != null) Icon(Icons.Filled.ChevronRight, null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
     }
 }
