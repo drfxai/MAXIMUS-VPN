@@ -70,12 +70,9 @@ class PsiphonSidecar(
             context.socksPort, dataDir, context.upstreamSocks, context.upstreamUser,
             context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null)
         val configFile = File(context.workDir, CONFIG_FILE)
-        configFile.writeText(config.toString())
+        PrivateEngineFile.write(configFile, config.toString())
         val linkDns = if (context.upstreamSocks == null && !source.has("DNSResolverAlternateServers"))
             runCatching { Sidecars.psiphonLinkDns?.invoke().orEmpty() }.getOrDefault(emptyList()) else emptyList()
-        // The settings are not secret in the cryptographic sense, but no other app needs to read them.
-        configFile.setReadable(false, false)
-        configFile.setReadable(true, true)
         return SidecarLaunch(
             command = listOf(
                 context.executable.absolutePath,
@@ -123,7 +120,7 @@ class PsiphonSidecar(
         val TUNNEL_UP = Regex("Tunnels.*\"count\":\\s*[1-9]")
 
         const val MISSING_SETTINGS =
-            "Psiphon needs this build's Psiphon network settings, which are not included. Import a Psiphon.config file in Settings → Core & resource manager."
+            "Psiphon needs this build's Psiphon network settings, which are not included. Import a Psiphon.config file in Settings → Engine updates."
 
         /** Plain DNS servers Psiphon may use to find its server lists when Android gives it none. */
         val DEFAULT_DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")
@@ -188,6 +185,10 @@ class PsiphonSidecar(
         }
 
         fun tcpOnly(profile: VlessProfile): Boolean = ProfileExtras.read(profile).optBoolean("tcpOnly")
+
+        internal fun tcpStartupRetry(profile: VlessProfile): VlessProfile? =
+            if (privateId(profile).isEmpty() && !tcpOnly(profile)) ProfileExtras.with(profile, "tcpOnly", true)
+            else null
 
         // Protocol identifiers from the pinned Psiphon common/protocol source. QUIC and refraction
         // transports are deliberately absent from the TCP-only / upstream-SOCKS recipe.

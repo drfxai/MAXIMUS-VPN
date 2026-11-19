@@ -371,6 +371,12 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun cancelChainTest() {
+        if (chainTest?.isActive != true) return
+        chainTest?.cancel()
+        local.update { it.copy(chain = it.chain.copy(testMessage = "Chain test cancelled.")) }
+    }
+
     /** Saves the chain as a node without starting or switching the active VPN. */
     fun saveChain() {
         val draft = local.value
@@ -465,18 +471,25 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
 
 @Composable
 fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel = viewModel(),
-    onBuiltinConnection: (Boolean) -> Unit = {}) {
+    onBuiltinConnection: (Boolean) -> Unit = {}, initialSection: LabSection? = null) {
     val state by viewModel.state.collectAsState()
     val lab = RayApplication.instance.lab
-    BackHandler(enabled = state.section != null || state.picking) {
-        if (state.picking) viewModel.pick(false) else viewModel.open(null)
+    val closeSection: () -> Unit = {
+        viewModel.open(null)
+        if (initialSection != null) onNavigateBack()
     }
-    LaunchedEffect(Unit) { viewModel.refreshNetwork() }
+    BackHandler(enabled = state.section != null || state.picking || initialSection != null) {
+        if (state.picking) viewModel.pick(false) else closeSection()
+    }
+    LaunchedEffect(initialSection) {
+        if (initialSection != null) viewModel.open(initialSection)
+        viewModel.refreshNetwork()
+    }
     NetworkLabContent(
-        state = state,
-        actions = remember(viewModel, onBuiltinConnection) {
+        state = if (initialSection == null) state else state.copy(section = initialSection),
+        actions = remember(viewModel, onBuiltinConnection, initialSection, onNavigateBack) {
             NetworkLabActions(
-                onOpen = viewModel::open, onPick = viewModel::pick, onRun = viewModel::run, onFullAnalysis = viewModel::fullAnalysis, onCancel = lab::cancel,
+                onOpen = { if (it == null) closeSection() else viewModel.open(it) }, onPick = viewModel::pick, onRun = viewModel::run, onFullAnalysis = viewModel::fullAnalysis, onCancel = lab::cancel,
                 onAutomation = lab::setAutomation, onRefreshNetwork = { viewModel.refreshNetwork() }, onRetest = { viewModel.open(LabSection.LIVE); lab.retest(it) },
                 onDisable = lab::setDisabled, onRetire = lab::retire, onDismissMessage = lab::dismissMessage,
                 onResearchRefresh = { viewModel.refreshResearch() }, onAskAgent = viewModel::askAgent, onTestSuggestion = viewModel::testSuggestion,
@@ -485,7 +498,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onRunShadowLink = viewModel::runShadowLink, onStopShadowLink = viewModel::stopShadowLink,
                 onScanEndpoints = viewModel::scanEndpoints, onStopEndpoints = viewModel::stopEndpoints,
                 onSaveFronted = viewModel::saveFronted, onWarpSplit = viewModel::setWarpSplit,
-                onChainHops = viewModel::chainHops, onTestChain = viewModel::testChain, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings,
+                onChainHops = viewModel::chainHops, onTestChain = viewModel::testChain, onCancelChainTest = viewModel::cancelChainTest, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings,
                 onBuiltinConnection = onBuiltinConnection
             )
         },

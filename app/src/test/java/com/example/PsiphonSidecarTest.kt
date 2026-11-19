@@ -78,6 +78,16 @@ class PsiphonSidecarTest {
     }
 
     @Test
+    fun tcpRetryKeepsTheSelectedProfileAndDoesNotLoop() {
+        val profile = PsiphonSidecar.profile("ca").copy(id = "selected")
+        val retry = checkNotNull(PsiphonSidecar.tcpStartupRetry(profile))
+        assertEquals(profile.id, retry.id)
+        assertEquals("CA", PsiphonSidecar.region(retry))
+        assertTrue(PsiphonSidecar.tcpOnly(retry))
+        assertNull(PsiphonSidecar.tcpStartupRetry(retry))
+    }
+
+    @Test
     fun prepareWritesTheConfigAndCommandLine() {
         val dir = Files.createTempDirectory("psiphon").toFile()
         try {

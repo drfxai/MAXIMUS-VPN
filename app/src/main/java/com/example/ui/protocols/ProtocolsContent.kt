@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,11 +26,12 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.automirrored.rounded.AltRoute
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Dns
@@ -43,14 +43,11 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SettingsEthernet
 import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material.icons.rounded.Timer
-import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.Icon
@@ -116,21 +113,21 @@ internal fun Modifier.labCard(c: LabColors, radius: Dp = 20.dp) =
 internal fun accentBrush(c: LabColors) = Brush.linearGradient(listOf(c.accent, c.accent2))
 
 internal fun LabFamily.icon(): ImageVector = when (this) {
-    LabFamily.REALITY -> Icons.Rounded.Shield
-    LabFamily.XHTTP -> Icons.Rounded.Speed
+    LabFamily.REALITY -> Icons.Rounded.Layers
+    LabFamily.XHTTP -> Icons.Rounded.SyncAlt
     LabFamily.HYSTERIA2 -> Icons.Rounded.Bolt
-    LabFamily.WIREGUARD -> Icons.Rounded.VpnKey
-    LabFamily.HTTPUPGRADE -> Icons.Rounded.SyncAlt
-    LabFamily.WEBSOCKET -> Icons.Rounded.Language
+    LabFamily.WIREGUARD -> Icons.Rounded.Shield
+    LabFamily.HTTPUPGRADE -> Icons.Rounded.Language
+    LabFamily.WEBSOCKET -> Icons.Rounded.Hub
     LabFamily.CDN -> Icons.Rounded.Cloud
     LabFamily.VLESS_TCP, LabFamily.VMESS, LabFamily.TROJAN, LabFamily.SHADOWSOCKS, LabFamily.OTHER -> Icons.Rounded.Dns
 }
 
 internal fun LabFamily.tint(c: LabColors): Color = when (this) {
     LabFamily.HYSTERIA2 -> c.okay
-    LabFamily.XHTTP, LabFamily.REALITY -> c.accent
-    LabFamily.WEBSOCKET, LabFamily.HTTPUPGRADE -> c.info
-    LabFamily.WIREGUARD, LabFamily.CDN -> c.good
+    LabFamily.XHTTP -> if (c.dark) Color(0xFF009DA7) else Color(0xFF007C86)
+    LabFamily.REALITY, LabFamily.WEBSOCKET, LabFamily.CDN -> c.accent
+    LabFamily.WIREGUARD, LabFamily.HTTPUPGRADE -> c.info
     LabFamily.VLESS_TCP, LabFamily.VMESS, LabFamily.TROJAN, LabFamily.SHADOWSOCKS, LabFamily.OTHER -> c.text2
 }
 
@@ -153,14 +150,15 @@ internal fun scoreWord(score: Int) = when {
 }
 
 @Composable
-internal fun Gauge(c: LabColors, value: Int?, size: Dp, label: String, sub: String) {
+internal fun Gauge(c: LabColors, value: Int?, size: Dp, label: String, sub: String, protocolCount: Boolean = false) {
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val sw = size.toPx() * 0.075f
             val inset = sw / 2
             val arcSize = Size(this.size.width - sw, this.size.height - sw)
             drawArc(
-                c.text3.copy(alpha = if (c.dark) 0.18f else 0.14f), 135f, 270f, false, Offset(inset, inset), arcSize,
+                if (protocolCount) c.text2.copy(alpha = .84f) else c.text3.copy(alpha = if (c.dark) 0.18f else 0.14f),
+                if (protocolCount) 180f else 135f, if (protocolCount) 315f else 270f, false, Offset(inset, inset), arcSize,
                 style = Stroke(sw, cap = StrokeCap.Round)
             )
             if (value != null && value > 0) drawArc(
@@ -220,14 +218,14 @@ private fun Segmented(c: LabColors, selected: LabPriority, onSelect: (LabPriorit
         LabPriority.values().forEach { p ->
             val on = p == selected
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (on) c.card else Color.Transparent)
-                    .then(if (on) Modifier.border(1.dp, c.stroke, RoundedCornerShape(11.dp)) else Modifier)
+                Modifier.weight(1f).clip(RoundedCornerShape(11.dp))
+                    .then(if (on) Modifier.background(accentBrush(c)) else Modifier)
                     .heightIn(min = 44.dp)
                     .selectable(selected = on, role = Role.RadioButton, onClick = { onSelect(p) })
                     .padding(horizontal = 4.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(p.title, color = if (on) c.text else c.text2,
+                Text(p.title, color = if (on) c.onAccent else c.text2,
                     style = TextStyle(fontFamily = InterFamily, fontSize = 13.sp,
                         fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center))
@@ -365,7 +363,7 @@ private fun Header(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActi
 @Composable
 private fun SourcePicker(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActions, modifier: Modifier) {
     Row(
-        modifier.clip(CircleShape).background(c.cardAlt).border(1.dp, c.stroke, CircleShape)
+        modifier.clip(RoundedCornerShape(12.dp)).background(c.cardAlt).border(1.dp, c.stroke, RoundedCornerShape(12.dp))
             .heightIn(min = 48.dp)
             .clickable(enabled = state.phase !is LabPhase.Running, role = Role.Button, onClick = actions.onPickSource)
             .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -400,10 +398,12 @@ private fun ErrorBanner(c: LabColors, message: String, onDismiss: () -> Unit) {
 @Composable
 private fun StartCard(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActions) {
     val count = if (state.panel != null) state.families.size else state.savedFamilyCounts.size
-    Column(Modifier.padding(horizontal = 16.dp).labCard(c, 24.dp).padding(20.dp)) {
+    Column(Modifier.padding(horizontal = 16.dp).labCard(c, 18.dp).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Gauge(c, null, 96.dp, "$count", "protocols")
-            Spacer(Modifier.width(18.dp))
+            Gauge(c, null, 92.dp, "$count", "protocols", protocolCount = true)
+            Spacer(Modifier.width(12.dp))
+            Box(Modifier.width(1.dp).height(77.dp).background(c.stroke))
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 LabText("Network check", c.text, 20.sp, FontWeight.Bold, letterSpacing = (-0.3).sp)
                 Spacer(Modifier.height(4.dp))
@@ -420,16 +420,9 @@ private fun StartCard(c: LabColors, state: ProtocolsUiState, actions: ProtocolsA
         Spacer(Modifier.height(14.dp))
         GradientButton(c, "Run network test", Icons.Rounded.PlayArrow, onClick = actions.onRun)
         Spacer(Modifier.height(12.dp))
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
-            verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            val third = if (state.panel != null) Icons.Rounded.CleaningServices to "Auto cleanup" else Icons.Rounded.Cloud to "No server needed"
-            listOf(Icons.Rounded.Repeat to "${ProtocolLab.DEFAULT_ROUNDS} rounds", third).forEach { (icon, label) ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, tint = c.text3, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(5.dp))
-                    LabText(label, c.text2, 12.sp, FontWeight.Medium, maxLines = 1)
-                }
-            }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            LabText("${ProtocolLab.DEFAULT_ROUNDS} rounds", c.text2, 12.sp)
+            LabText(if (state.panel != null) "Auto cleanup" else "No server needed", c.text2, 12.sp)
         }
     }
 }
@@ -526,7 +519,7 @@ private fun Catalog(c: LabColors, state: ProtocolsUiState, actions: ProtocolsAct
                 if (saved && LabFamily.CDN in families) {
                     Row(Modifier.fillMaxWidth().labCard(c, 18.dp).padding(14.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconTile(Icons.Rounded.Cloud, c.good)
+                        ProtocolTileIcon(Icons.Rounded.Cloud, c.accent)
                         Column(Modifier.weight(1f)) {
                             LabText(LabFamily.CDN.displayName, c.text, 15.sp, FontWeight.SemiBold)
                             LabText(savedConfigLabel(state.savedFamilyCounts.getValue(LabFamily.CDN)), c.text2, 12.sp)
@@ -559,16 +552,23 @@ private fun savedConfigLabel(count: Int): String = if (count == 1) "1 saved conf
 
 @Composable
 private fun ProtoTile(c: LabColors, f: LabFamily, off: Boolean, modifier: Modifier, saved: Int?) {
-    Column(modifier.labCard(c, 18.dp).heightIn(min = 110.dp).padding(14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconTile(f.icon(), if (off) c.text3 else f.tint(c), 36.dp)
-            Spacer(Modifier.weight(1f))
-            Pill(if (off) "OFF" else f.network, c.text2, filled = false)
+    Row(modifier.labCard(c, 12.dp).heightIn(min = 62.dp).padding(horizontal = 9.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+        ProtocolTileIcon(f.icon(), if (off) c.text3 else f.tint(c))
+        Column(Modifier.weight(1f)) {
+            LabText(f.shortName, if (off) c.text3 else c.text, 13.sp, FontWeight.Bold, maxLines = 2)
+            LabText(saved?.let(::savedConfigLabel) ?: f.blurb, c.text2, 10.sp, maxLines = 2)
         }
-        Spacer(Modifier.height(12.dp))
-        LabText(f.shortName, if (off) c.text3 else c.text, 15.sp, FontWeight.SemiBold)
-        Spacer(Modifier.height(2.dp))
-        LabText(saved?.let(::savedConfigLabel) ?: f.blurb, c.text2, 12.sp, maxLines = 2)
+        Pill(if (off) "OFF" else f.network, c.text2)
+    }
+}
+
+@Composable
+private fun ProtocolTileIcon(icon: ImageVector, tint: Color) {
+    Box(Modifier.size(33.dp).clip(RoundedCornerShape(9.dp))
+        .background(Brush.linearGradient(listOf(tint, tint.copy(alpha = .68f)))),
+        contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(18.dp))
     }
 }
 

@@ -17,6 +17,8 @@ object EngineChain {
 
     private val carrierOnly = setOf("aether", "masque", "matrix-transport", ServerlessSidecar.ID, RadianceSidecar.id)
 
+    fun entryOnly(engineId: String): Boolean = engineId in carrierOnly
+
     const val MIN_HOPS = 2
     const val MAX_HOPS = 3
 

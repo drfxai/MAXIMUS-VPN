@@ -52,6 +52,22 @@ def main():
                      for node in ui.hierarchy().iter('node'))
         if not active:
             ui.require(theme + ' Theme')
+        scroll_to('Connection analytics')
+        ui.require('Connection analytics')
+        captures.append(ui.capture('connection-analytics-' + theme.lower(), 'Connection latency'))
+        ui.adb('shell', 'input', 'keyevent', '4')
+        time.sleep(1)
+        scroll_to('Advanced options')
+        ui.require('Advanced options')
+        captures.append(ui.capture('config-free-methods-' + theme.lower(), 'Choose a built-in connection method.'))
+        ui.require('Aether & chains')
+        captures.append(ui.capture('config-free-transports-' + theme.lower(), 'Build a connection chain'))
+        ui.require('Close')
+        ui.require('Nodes')
+        ui.require('Protocols')
+        captures.append(ui.capture('protocols-' + theme.lower(), 'Network check'))
+        ui.adb('shell', 'input', 'keyevent', '4')
+        time.sleep(1)
         for link, title, name in [('Aether / WARP', 'Aether WARP', 'aether'),
                                   ('Serverless Direct', 'Serverless Direct', 'direct')]:
             ui.require('LAB')
@@ -93,7 +109,7 @@ def main():
         ui.adb('shell', 'input', 'keyevent', '4')
         time.sleep(1)
     (ui.OUT / 'captures.json').write_text(json.dumps(captures, indent=2))
-    print('PASS: Aether, Direct, Connection chain and Smart Manager navigation in dark and light themes')
+    print('PASS: Analytics, connection methods, Protocols and LAB workspaces in both themes')
 
 
 if __name__ == '__main__':
