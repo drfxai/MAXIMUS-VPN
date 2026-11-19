@@ -44,9 +44,10 @@ def main():
     ui.adb('shell', 'pm', 'grant', ui.PACKAGE, 'android.permission.POST_NOTIFICATIONS', check=False)
     ui.adb('shell', 'wm', 'size', '1080x2400')
     ui.adb('shell', 'wm', 'density', '420')
-    ui.relaunch()
     captures = []
     for theme in ('Dark', 'Light'):
+        # Start at the top of Home instead of restoring its previous scroll position.
+        ui.relaunch()
         ui.require('Tunnel')
         active = any((node.get('content-desc') or '').startswith(theme + ' mode active.')
                      for node in ui.hierarchy().iter('node'))
