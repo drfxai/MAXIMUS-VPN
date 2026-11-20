@@ -40,9 +40,11 @@ class IrancellWarpTest {
         // A remembered clean HTTP/2 gateway goes before any scan.
         assertEquals(ConnectionEngineRunner.CLEAN_H2,
             IrancellWarp.pick(listOf(ConnectionEngineRunner.CLEAN_H2) + order, null))
-        // A MASQUE HTTP/2 method verified here before is kept first.
-        assertEquals(ConnectionEngineRunner.H2_SPLIT,
+        // A remembered gateway gets its short check before a fresh scan, even if split H2 last worked.
+        assertEquals(ConnectionEngineRunner.CLEAN_H2,
             IrancellWarp.pick(listOf(ConnectionEngineRunner.CLEAN_H2) + order, ConnectionEngineRunner.H2_SPLIT))
+        assertEquals(listOf(ConnectionEngineRunner.CLEAN_H2, ConnectionEngineRunner.H2_SPLIT),
+            IrancellWarp.plan(listOf(ConnectionEngineRunner.CLEAN_H2) + order, ConnectionEngineRunner.H2_SPLIT, manual = true))
         // H3, WireGuard and their follow-ups are never picked, even when remembered as verified.
         for (blocked in listOf("h3", "wireguard", ConnectionEngineRunner.WIREGUARD_MTU, ConnectionEngineRunner.WIREGUARD_NOIZE, "wiw"))
             assertEquals(blocked, ConnectionEngineRunner.H2_SPLIT, IrancellWarp.pick(order + blocked, blocked))

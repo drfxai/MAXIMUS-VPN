@@ -816,13 +816,16 @@ class LabController(
                     outcome?.winner?.let { "won by ${engineIds[it.first] ?: it.first}" } ?: "nothing carried traffic")
                 outcome?.winner?.let { (id, _) -> XrayLogManager.i("SMART", "Recovery: ${byId[id]?.profile?.name?.let(com.example.core.SecretRedactor::redact)} won the parallel check") }
             }
+            var lastFailure: String? = null
             loop@ while (currentCoroutineContext().isActive && System.currentTimeMillis() < deadlineMs) {
                 when (val d = planner.decide(System.currentTimeMillis())) {
                     is AdaptivePlanner.Decision.Stop -> break@loop
                     is AdaptivePlanner.Decision.Wait -> { delay((d.untilMs - System.currentTimeMillis()).coerceIn(100, 3_000)); continue@loop }
                     is AdaptivePlanner.Decision.Test -> {
                         val pk = byId[d.candidate.id] ?: continue@loop
-                        onProgress("${pk.family.title}: ${if (d.recheck) "rechecking" else "testing"} ${pk.profile.name}")
+                        val checking = "${if (d.recheck) "Rechecking" else "Testing"} ${pk.family.title}"
+                        onProgress(listOfNotNull(checking, lastFailure).joinToString(" · "))
+                        lastFailure = null
                         val engine = Sidecars.forProfile(pk.profile)
                         val dependencies = com.example.vpn.sidecar.ChainRunner.readChain(pk.profile)?.hops?.map { it.engineId }
                             ?: listOfNotNull(engine?.id)
@@ -886,7 +889,8 @@ class LabController(
                             })
                             recordEngine(pk, result)
                             if (result.outcomes.lastOrNull() != true && result.failure != null) {
-                                onProgress("Trying another route · ${com.example.core.SecretRedactor.redact(result.failure).take(140)}")
+                                lastFailure = com.example.core.SecretRedactor.redact(result.failure).take(140)
+                                onProgress("Trying another route · $lastFailure")
                             }
                         } else {
                             val began = System.currentTimeMillis()

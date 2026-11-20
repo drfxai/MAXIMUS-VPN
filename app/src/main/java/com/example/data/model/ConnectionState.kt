@@ -114,7 +114,8 @@ data class ConnectionState(
 
     /** Short words for the status, never "connected" before traffic was verified. */
     val statusLabel: String get() = when (status) {
-        ConnectionStatus.CONNECTED -> "VPN CONNECTED"
+        ConnectionStatus.CONNECTED -> if (verification == com.example.vpn.verify.RouteVerification.ENGINE_PROXY_VERIFIED)
+            "ENGINE PROXY VERIFIED" else "VPN CONNECTED"
         ConnectionStatus.DEGRADED -> "CONNECTED · CHECKS FAILING"
         ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED -> "TUNNEL UP · NO TRAFFIC YET"
         ConnectionStatus.VERIFYING -> "VERIFYING TRAFFIC"
