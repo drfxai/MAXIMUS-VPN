@@ -23,7 +23,7 @@ class RecoveryEngineCatalogTest {
         val candidates = RecoveryEngineCatalog.candidates(listOf(saved), seedBridges = emptyList()) { true }
         assertTrue(candidates.any { it.id == saved.id })
         assertFalse(candidates.any { it.id == "recovery-tor-snowflake" })
-        assertEquals(10, candidates.size)
+        assertEquals(11, candidates.size)
     }
 
     @Test fun availabilityAndSecurityAreGates() {
@@ -38,6 +38,15 @@ class RecoveryEngineCatalogTest {
         val profile = candidates.single { it.id == "recovery-radiance" }
         assertEquals(PathFamily.RADIANCE, PathFamily.of(profile, "radiance"))
         assertTrue(PathFamily.RADIANCE in ExperimentPlanner.emergencyOrder(null))
+    }
+
+    @Test fun psiphonCanUseRadianceAsItsEntryWithoutReplacingDirectRadiance() {
+        val candidates = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList()) { true }
+        val chained = candidates.single { it.id == "recovery-psiphon-radiance" }
+        val chain = checkNotNull(ChainRunner.readChain(chained))
+        assertEquals(listOf("psiphon", "radiance"), chain.hops.map { it.engineId })
+        assertEquals(PathFamily.PSIPHON_RADIANCE, PathFamily.of(chained, "chain", "psiphon,radiance"))
+        assertTrue(candidates.any { it.id == "recovery-radiance" })
     }
 
     @Test fun psiphonTransportFollowsTheCurrentNetwork() {

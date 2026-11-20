@@ -30,13 +30,15 @@ object Sidecars {
         )
     }
 
-    /** Starts the Tor library; set once by the VPN service. */
-    /** Optional per-install settings, encrypted by the application; never written to an APK. */
+    /** This app uses the same local physical network identity as LAB for Psiphon tactics. */
+    @Volatile var psiphonNetworkIdentity: (() -> String)? = null
     @Volatile var psiphonLinkDns: (() -> List<String>)? = null
+    /** Optional per-install settings, encrypted by the application; never written to an APK. */
     @Volatile var psiphonSettings: (() -> String?)? = null
     /** Only encrypted per-user private server profiles; never falls back to public settings. */
     @Volatile var privatePsiphonSettings: ((String) -> String?)? = null
 
+    /** Starts the Tor library; set once by the app. */
     @Volatile var torStarter: ((String, Int) -> RunningEngine)? = null
 
     /** Directory Android extracted the APK's native libraries to; set once by the app. */

@@ -2402,8 +2402,10 @@ class RayVpnService : VpnService() {
                 cancelled = { connectionOwner?.isActive == false }) else null
             var runningProfile = started?.profile ?: profile
             var engineContext = started?.context ?: context
+            if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) {
+                runningProfile = prioritizeDnsTunnelResolvers(engine, runningProfile)
+            }
             var launch = started?.launch ?: engine.prepare(runningProfile, settings, engineContext)
-            if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) checkDnsTunnelResolvers(engine, profile)
             showForegroundNotification("Starting the ${engine.id} engine...")
 
             fun launchProcess() = com.example.vpn.sidecar.EngineReaper.track(
@@ -2488,10 +2490,10 @@ class RayVpnService : VpnService() {
      * reaches; the engine itself reports an unreachable one only as "UPLOAD_MTU value=0". When none can even
      * be sent to, the connect stops here instead of after the engine's 45 s start-up limit.
      */
-    private fun checkDnsTunnelResolvers(engine: com.example.vpn.sidecar.SidecarEngine, profile: VlessProfile) {
-        val s = runCatching { com.example.vpn.sidecar.CottenDnsSidecar.settings(profile) }.getOrNull() ?: return
+    private fun prioritizeDnsTunnelResolvers(engine: com.example.vpn.sidecar.SidecarEngine, profile: VlessProfile): VlessProfile {
+        val s = runCatching { com.example.vpn.sidecar.CottenDnsSidecar.settings(profile) }.getOrNull() ?: return profile
         // The question goes over UDP/53: it says nothing about a TCP, DoT or DoH resolver.
-        if (s.transport !in setOf("auto", "udp")) return
+        if (s.transport !in setOf("auto", "udp")) return profile
         val resolvers = s.resolvers.take(4)
         val pool = java.util.concurrent.Executors.newFixedThreadPool(resolvers.size)
         val outcomes = try {
@@ -2505,11 +2507,19 @@ class RayVpnService : VpnService() {
             val line = com.example.vpn.sidecar.ResolverReach.describe(r, o)
             if (o is com.example.vpn.sidecar.ResolverReach.Outcome.Answered) XrayLogManager.i("DNS", line) else XrayLogManager.w("DNS", line)
         }
-        if (outcomes.all { it is com.example.vpn.sidecar.ResolverReach.Outcome.Blocked }) {
+        if (s.transport == "udp" && s.resolvers.size == resolvers.size &&
+            outcomes.all { it is com.example.vpn.sidecar.ResolverReach.Outcome.Blocked }) {
             com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "resolvers unreachable")
             error("None of this config's DNS resolvers can be reached from this phone " +
                 "(${(outcomes.first() as com.example.vpn.sidecar.ResolverReach.Outcome.Blocked).reason}), so the ${engine.id} engine cannot start")
         }
+        val responsive = resolvers.zip(outcomes).mapNotNull { (resolver, outcome) ->
+            (outcome as? com.example.vpn.sidecar.ResolverReach.Outcome.Answered)
+                ?.takeIf { it.rcode == 0 }?.let { resolver to it.ms }
+        }.sortedBy { it.second }.map { it.first }
+        val ordered = (responsive + s.resolvers).distinct()
+        return if (ordered == s.resolvers) profile
+            else com.example.vpn.sidecar.CottenDnsSidecar.withSettings(profile, s.copy(resolvers = ordered))
     }
 
     /** The network key the engine ledger files evidence under (the same one route memory uses). */

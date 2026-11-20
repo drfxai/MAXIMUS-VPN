@@ -6,7 +6,8 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.PortUnreachableException
 import java.net.SocketTimeoutException
-import kotlin.random.Random
+import java.security.SecureRandom
+import java.util.concurrent.TimeUnit
 
 /**
  * One ordinary DNS question (an A record for the tunnel domain) to each resolver of a DNS tunnel, sent from
@@ -15,6 +16,7 @@ import kotlin.random.Random
  * The CottenDNS engine reports that case only as "UPLOAD_MTU value=0" for every resolver.
  */
 object ResolverReach {
+    private val random = SecureRandom()
     sealed class Outcome {
         data class Answered(val ms: Long, val rcode: Int) : Outcome()
         /** Sent, but nothing came back in time (dropped or filtered on the way). */
@@ -46,24 +48,33 @@ object ResolverReach {
         return out.toByteArray()
     }
 
+    internal fun responseCode(question: ByteArray, response: ByteArray, length: Int): Int? {
+        if (length !in question.size..response.size || response[0] != question[0] ||
+            response[1] != question[1] || (response[2].toInt() and 0xf8) != 0x80 ||
+            response[4] != 0.toByte() || response[5] != 1.toByte()) return null
+        // Match QNAME, QTYPE and QCLASS as echoed by the resolver.
+        fun asciiLower(byte: Byte): Int = byte.toInt().let { if (it in 65..90) it + 32 else it }
+        if ((12 until question.size).any { asciiLower(response[it]) != asciiLower(question[it]) }) return null
+        return response[3].toInt() and 0x0f
+    }
+
     fun check(resolver: String, name: String, timeoutMs: Int = 3_000, open: () -> DatagramSocket = { DatagramSocket() }): Outcome {
-        val id = Random.nextInt(0, 0x10000)
-        val started = System.currentTimeMillis()
+        val started = System.nanoTime()
+        val limit = TimeUnit.MILLISECONDS.toNanos(timeoutMs.toLong())
         return try {
             open().use { socket ->
-                socket.soTimeout = timeoutMs
                 socket.connect(address(resolver))
-                val q = query(id, name)
+                val q = query(random.nextInt(0x10000), name)
                 socket.send(DatagramPacket(q, q.size))
                 val buf = ByteArray(1500)
-                // Only the answer to this question counts (same id, response bit set); a few strays are skipped.
                 repeat(4) {
+                    val remaining = limit - (System.nanoTime() - started)
+                    if (remaining <= 0) return Outcome.Silent
+                    socket.soTimeout = TimeUnit.NANOSECONDS.toMillis(remaining).coerceAtLeast(1).toInt()
                     val packet = DatagramPacket(buf, buf.size)
                     socket.receive(packet)
-                    if (packet.length >= 12 && ((buf[0].toInt() and 0xff) shl 8 or (buf[1].toInt() and 0xff)) == id &&
-                        buf[2].toInt() and 0x80 != 0) {
-                        return Outcome.Answered(System.currentTimeMillis() - started, buf[3].toInt() and 0x0f)
-                    }
+                    val rcode = responseCode(q, buf, packet.length)
+                    if (rcode != null) return Outcome.Answered(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started), rcode)
                 }
                 Outcome.Silent
             }

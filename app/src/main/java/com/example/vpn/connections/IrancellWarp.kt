@@ -16,7 +16,7 @@ import com.example.vpn.sidecar.AetherSidecar
  * fails, and `--fragment` (passed only to the TCP carriers) now also splits the account API ClientHello. So:
  *
  * - one attempt only, best first: a MASQUE HTTP/2 method verified on this network before, a remembered clean
- *   HTTP/2 gateway, plain HTTP/2 (TCP; Aether's gateway scan dials port 443 first), then split-hello HTTP/2;
+ *   HTTP/2 gateway, then split-hello HTTP/2, then plain HTTP/2. Field reports from build 164 verified only the split path;
  * - WireGuard, H3, WARP-in-WARP and every WireGuard follow-up are skipped, and so is the H3 + WireGuard race;
  * - the account API goes through Aether's own route (`apiRoute` native, unless the user chose a route), so its
  *   name/edge fallback and the API ClientHello fragment apply, and no Direct OOB helper start eats the budget;
@@ -46,7 +46,7 @@ object IrancellWarp {
     const val MIN_WAIT_MS = 1_000L
 
     /** Methods the single attempt may use, in order of preference when none was verified here before. */
-    val ALLOWED = listOf(ConnectionEngineRunner.CLEAN_H2, "h2", ConnectionEngineRunner.H2_SPLIT)
+    val ALLOWED = listOf(ConnectionEngineRunner.CLEAN_H2, ConnectionEngineRunner.H2_SPLIT, "h2")
 
     /** Only automatic Aether in the foreground: never a relay-only background run or a reverse Tor/Psiphon relay. */
     fun applies(engineId: String, automatic: Boolean, irancell: Boolean, relayOnly: Boolean, reverseRelay: Boolean): Boolean =

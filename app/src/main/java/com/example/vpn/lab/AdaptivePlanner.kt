@@ -45,7 +45,7 @@ class AdaptivePlanner(
                 PathFamily.HYSTERIA2, PathFamily.TUIC, PathFamily.MASQUE, PathFamily.PSIPHON_MASQUE, PathFamily.MATRIX_H3 -> UDP_QUIC
                 PathFamily.WIREGUARD, PathFamily.AMNEZIAWG, PathFamily.MATRIX_WG, PathFamily.MATRIX_GOOL -> UDP_WIREGUARD
                 PathFamily.DNS_TUNNEL -> DNS
-                PathFamily.PSIPHON, PathFamily.PSIPHON_MATRIX -> PSIPHON
+                PathFamily.PSIPHON, PathFamily.PSIPHON_MATRIX, PathFamily.PSIPHON_RADIANCE -> PSIPHON
                 PathFamily.RADIANCE -> RADIANCE
                 PathFamily.TOR, PathFamily.TOR_WEBTUNNEL, PathFamily.TOR_OBFS4, PathFamily.TOR_SNOWFLAKE -> TOR
                 PathFamily.MIHOMO -> MIHOMO

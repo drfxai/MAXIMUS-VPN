@@ -60,8 +60,8 @@ class AutonomousLabTest {
         assertTrue(PathFamily.HYSTERIA2 in p.skip && PathFamily.WIREGUARD in p.skip && PathFamily.TUIC in p.skip)
         assertEquals(PathFamily.VLESS_REALITY, p.prefer.first())
         // Independent engine candidates go before chains and Tor, after the saved TCP families.
-        val expectedEngines = listOf(PathFamily.PSIPHON, PathFamily.RADIANCE, PathFamily.MATRIX_H2,
-            PathFamily.PSIPHON_MATRIX) + PathFamily.TOR_FAMILIES
+        val expectedEngines = listOf(PathFamily.RADIANCE, PathFamily.PSIPHON, PathFamily.MATRIX_H2,
+            PathFamily.PSIPHON_RADIANCE, PathFamily.PSIPHON_MATRIX) + PathFamily.TOR_FAMILIES
         assertEquals(expectedEngines, p.prefer.takeLast(expectedEngines.size))
         // QUIC answering means UDP is not dead: UDP families are not skipped.
         val quic = open.copy(udpAvailable = false, quicStatus = "QUIC_AVAILABLE")

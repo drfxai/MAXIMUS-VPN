@@ -18,6 +18,13 @@ import java.io.FileNotFoundException
 import java.nio.file.Files
 
 class PsiphonSidecarTest {
+    @Test fun psiphonKeepsTacticsSeparateForWifiMobileAndRelays() {
+        assertEquals("MOBILE-43235-direct", PsiphonSidecar.networkId("cell:43235", relayed = false))
+        assertEquals("WIFI-abcdef123456-relay", PsiphonSidecar.networkId("wifi:abcdef123456", relayed = true))
+        assertNull(PsiphonSidecar.networkId("wifi:raw-network-name", relayed = false))
+        assertNull(PsiphonSidecar.networkId(null, relayed = false))
+    }
+
     @Test fun publicSettingsValidateDecodedTransferUrlsAtLaunch() {
         val valid = JSONObject(settings)
         assertNull(PsiphonSidecar.validateNetworkSettings(valid.toString()))

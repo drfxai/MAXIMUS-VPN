@@ -42,6 +42,15 @@ class ResolverReachTest {
         }
     }
 
+    @Test fun matchingIdAloneCannotMakeAnotherDnsQuestionCount() {
+        val question = ResolverReach.query(0x1234, "one.example.com")
+        val other = ResolverReach.query(0x1234, "two.example.com").also { it[2] = 0x81.toByte() }
+        assertNull(ResolverReach.responseCode(question, other, other.size))
+        val reply = question.copyOf().also { it[2] = 0x81.toByte(); it[13] = 'O'.code.toByte() }
+        assertEquals(0, ResolverReach.responseCode(question, reply, reply.size))
+        assertNull(ResolverReach.responseCode(question, reply, reply.size - 1))
+    }
+
     @Test fun noReplyIsSilentAndALocalRefusalIsBlocked() {
         DatagramSocket(0, InetAddress.getLoopbackAddress()).use { server ->
             assertEquals(ResolverReach.Outcome.Silent, ResolverReach.check("127.0.0.1:${server.localPort}", "t.example.com", timeoutMs = 300))

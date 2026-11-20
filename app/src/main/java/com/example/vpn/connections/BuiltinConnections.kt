@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.data.model.VlessProfile
 import com.example.vpn.sidecar.AetherSettings
 import com.example.vpn.sidecar.AetherSidecar
+import com.example.vpn.sidecar.ChainRunner
+import com.example.vpn.sidecar.EngineChain
 import com.example.vpn.sidecar.ServerlessSidecar
 import com.example.vpn.sidecar.PsiphonSidecar
 import com.example.vpn.sidecar.RadianceSidecar
@@ -18,6 +20,8 @@ object BuiltinConnections {
         TOR_SNOWFLAKE("config-free-tor", "Tor / Snowflake", "Tor through the built-in Snowflake bridge"),
         SERVERLESS("config-free-direct", "Serverless Direct", "Direct access with your ISP exit IP"),
         PSIPHON("config-free-psiphon", "Psiphon", "Uses configured Psiphon network settings"),
+        PSIPHON_RADIANCE("config-free-psiphon-radiance", "Psiphon over Lantern",
+            "Lantern carries the connection to the Psiphon network"),
         RADIANCE("config-free-radiance", "Lantern / Radiance", "Uses the Lantern network when the engine is installed"),
         AETHER_H2("config-free-aether-h2", "MASQUE HTTP/2", "TCP transport", "h2"),
         AETHER_H3("config-free-aether-h3", "MASQUE HTTP/3", "QUIC over UDP", "h3"),
@@ -34,6 +38,9 @@ object BuiltinConnections {
             TOR_SNOWFLAKE -> TorSidecar.profile(name = title)
             SERVERLESS -> ServerlessSidecar.profile()
             PSIPHON -> PsiphonSidecar.profile()
+            PSIPHON_RADIANCE -> ChainRunner.profile(EngineChain.Chain(listOf(
+                EngineChain.Hop(PsiphonSidecar.ID), EngineChain.Hop(RadianceSidecar.id)
+            )), titleOf = EngineChain::titleOf).copy(name = title)
             RADIANCE -> RadianceSidecar.profile()
             else -> AetherSidecar.profile(
                 transport = requireNotNull(aetherTransport),
