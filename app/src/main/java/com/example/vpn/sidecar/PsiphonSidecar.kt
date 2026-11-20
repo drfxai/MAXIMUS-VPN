@@ -69,6 +69,10 @@ class PsiphonSidecar(
         val config = buildConfig(source, if (privateId.isNotEmpty()) "" else region(profile),
             context.socksPort, dataDir, context.upstreamSocks, context.upstreamUser,
             context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null)
+        // ConsoleClient otherwise shares tactics and dial history under UNKNOWN across
+        // unrelated networks. Upstream uses this identifier locally and logs its prefix.
+        val link = runCatching { Sidecars.psiphonNetworkIdentity?.invoke() }.getOrNull()
+        networkId(link, context.upstreamSocks != null)?.let { config.put("NetworkID", it) }
         val configFile = File(context.workDir, CONFIG_FILE)
         PrivateEngineFile.write(configFile, config.toString())
         val linkDns = if (context.upstreamSocks == null && !source.has("DNSResolverAlternateServers"))
@@ -135,7 +139,7 @@ class PsiphonSidecar(
             "DataRootDirectory", "MigrateDataStoreDirectory", "ListenInterface", "UseUnixDomainSockets",
             "LocalSocksProxyUnixPath", "LocalHttpProxyUnixPath", "EgressRegion", "EnableUpgradeDownload",
             "UpgradeDownloadURLs", "UpgradeDownloadClientVersionHeader", "UseNoticeFiles", "DisableTunnels",
-            "UpstreamProxyURL", "UpstreamProxyUrl", "ClientPlatform", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters"
+            "UpstreamProxyURL", "UpstreamProxyUrl", "ClientPlatform", "NetworkID", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters"
         )
 
         /** A new Psiphon profile; [region] is a two-letter country code, or empty for any. */
@@ -194,6 +198,21 @@ class PsiphonSidecar(
         // transports are deliberately absent from the TCP-only / upstream-SOCKS recipe.
         val TCP_PROTOCOLS = setOf("SSH", "OSSH", "TLS-OSSH", "SHADOWSOCKS-OSSH", "UNFRONTED-MEEK-OSSH",
             "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH")
+
+        internal fun networkId(link: String?, relayed: Boolean): String? {
+            link ?: return null
+            val prefix = when (link.substringBefore(':')) {
+                "wifi" -> "WIFI"
+                "cell" -> "MOBILE"
+                "ethernet" -> "ETHERNET"
+                else -> return null
+            }
+            val identity = link.substringAfter(':', "unknown")
+                .takeIf { it == "unknown" || it.matches(Regex("[0-9a-f]{5,12}")) }
+                ?: return null
+            val route = if (relayed) "relay" else "direct"
+            return "$prefix-$identity-$route"
+        }
 
         fun region(profile: VlessProfile): String =
             ProfileExtras.read(profile).optString(KEY_REGION).trim().uppercase()

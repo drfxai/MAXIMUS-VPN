@@ -257,6 +257,7 @@ class RayApplication : Application() {
         com.example.vpn.sidecar.Sidecars.privatePsiphonSettings = { id ->
             com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)
         }
+        com.example.vpn.sidecar.Sidecars.psiphonNetworkIdentity = { com.example.vpn.smart.NetworkIdentity.current(this) }
         com.example.vpn.sidecar.Sidecars.psiphonLinkDns = {
             val manager = getSystemService(android.net.ConnectivityManager::class.java)
             val link = manager?.let { cm ->
