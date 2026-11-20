@@ -21,7 +21,7 @@ class PsiphonSidecarTest {
     @Test fun reportsLastObservedStartupStageWithoutUsingRawNoticeData() {
         val progress = PsiphonSidecar.StartupProgress()
         assertTrue(progress.failureAfter(60_000).contains("discovery"))
-        progress.observe("""2026-11-21 Network notice {"noticeType":"AvailableEgressRegions","data":{"regions":["US"]}}""")
+        progress.observe("""2026-11-20T08:00:00.000Z AvailableEgressRegions {"regions":["US"]}""")
         assertTrue(progress.failureAfter(60_000).contains("candidates"))
         progress.observe("""{"noticeType":"ConnectingServer","data":{"ipAddress":"example-secret"}}""")
         assertTrue(progress.failureAfter(60_000).contains("dialing"))

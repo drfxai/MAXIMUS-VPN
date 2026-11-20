@@ -103,8 +103,11 @@ class PsiphonSidecar(
             val start = line.indexOf('{')
             if (start < 0) return
             val notice = runCatching { JSONObject(line.substring(start)) }.getOrNull() ?: return
-            val kind = notice.optString("noticeType")
-            val data = notice.optJSONObject("data") ?: return
+            // ConsoleClient can emit either raw JSON or a timestamp, notice name, then its JSON data.
+            val kind = notice.optString("noticeType").ifBlank {
+                line.substring(0, start).trimEnd().substringAfterLast(' ')
+            }
+            val data = notice.optJSONObject("data") ?: notice
             val observed = when (kind) {
                 "AvailableEgressRegions" -> if ((data.optJSONArray("regions")?.length() ?: 0) > 0) 1 else 0
                 "ConnectingServer" -> 2
