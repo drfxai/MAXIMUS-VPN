@@ -104,6 +104,7 @@ object DiagnosticReportBuilder {
             }
         })
         // Small HTTPS proof and full bidirectional proof are separate, including the probe route.
+        root.put("routeVerification", c.verification.name)
         root.put("bulkTraffic", c.trafficEvidence?.takeIf { it.appliesTo(c) }?.let { e ->
             JSONObject().put("path", e.path.name)
                 .put("bidirectional", e.bidirectional)

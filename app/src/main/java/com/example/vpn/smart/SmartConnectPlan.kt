@@ -223,6 +223,10 @@ class SearchTracker(
         update(st) { it.copy(tested = it.tested + paths, verified = it.verified + if (carried) 1 else 0) }
     }
 
+    fun note(stage: SearchStage, reason: String) = change {
+        if (running == stage) update(stage) { it.copy(note = reason) }
+    }
+
     /** Adds results measured elsewhere (the LAB's recovery, revival) to [stage]. */
     fun add(stage: SearchStage, tested: Int, verified: Int) = change {
         update(stage) { it.copy(tested = it.tested + tested, verified = it.verified + verified) }

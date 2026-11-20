@@ -251,7 +251,7 @@ object ConnectionEngineRunner {
     /** Method name of MASQUE over HTTP/2 with the first TLS write split inside the server name. */
     const val H2_SPLIT = "h2-split"
     /** A remembered gateway either answers quickly or not at all: no scan runs behind it. */
-    const val CLEAN_H2_BUDGET_MS = 35_000L
+    const val CLEAN_H2_BUDGET_MS = 15_000L
     /** Remembered gateways tried per connect before the normal carriers (UAC keeps its speed pick small too). */
     const val CLEAN_H2_TRIES = 2
 

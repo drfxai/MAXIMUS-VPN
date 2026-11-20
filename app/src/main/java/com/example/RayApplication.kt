@@ -133,18 +133,19 @@ class RayApplication : Application() {
                     } finally { c.disconnect() }
                 }
             },
-            findCleanIps = { profile, network ->
+            findCleanIps = { profile, _ ->
                 // Edge addresses that pass TCP, TLS (with the config's SNI) and the config's own WebSocket or
                 // HTTP exchange; each one found is recorded for this network, which is what makes it a recipe.
-                val scanNetwork = com.example.vpn.smart.NetworkKey.current(this)
+                val scanNetwork = com.example.vpn.smart.NetworkIdentity.current(this)
+                val scope = com.example.vpn.connectivity.EndpointScoringEngine.destinationScope(scanNetwork, profile)
                 val found = kotlinx.coroutines.runBlocking {
                     com.example.panels.CleanIpOptimizer().scan(profile, targetPort = profile.port, enableSpeedTest = false, candidateCount = 64,
-                        preferred = endpointScores.remembered(network),
-                        assertNetwork = { check(com.example.vpn.smart.NetworkKey.current(this@RayApplication) == scanNetwork) { "Network changed during clean-IP scan" } }) { }
+                        preferred = endpointScores.remembered(scope, limit = 4), enough = 6,
+                        assertNetwork = { check(com.example.vpn.smart.NetworkIdentity.current(this@RayApplication) == scanNetwork) { "Network changed during clean-IP scan" } }) { }
                 }.take(6)
-                check(com.example.vpn.smart.NetworkKey.current(this) == scanNetwork) { "Network changed during clean-IP scan" }
+                check(com.example.vpn.smart.NetworkIdentity.current(this) == scanNetwork) { "Network changed during clean-IP scan" }
                 val now = System.currentTimeMillis()
-                endpointScores.record(found.map { com.example.vpn.connectivity.EndpointScoringEngine.Measurement(it.ip, network, now, true, it.medianMs) })
+                endpointScores.record(found.filter { it.originVerified }.map { com.example.vpn.connectivity.EndpointScoringEngine.Measurement(it.ip, scope, now, true, it.medianMs) })
                 found.map { it.ip }
             }
         )

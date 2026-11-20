@@ -89,6 +89,15 @@ object ResolverReach {
         }
     }
 
+    /** Prefer resolvers with repeated successful replies, preserving every configured fallback. */
+    internal fun prioritize(resolvers: List<String>, trials: List<Pair<String, List<Outcome>>>): List<String> {
+        val ranked = trials.mapNotNull { (resolver, results) ->
+            val replies = results.filterIsInstance<Outcome.Answered>().filter { it.rcode == 0 }.map { it.ms }.sorted()
+            if (replies.size < 2) null else Triple(resolver, replies.size, replies[replies.size / 2])
+        }.sortedWith(compareByDescending<Triple<String, Int, Long>> { it.second }.thenBy { it.third })
+        return (ranked.map { it.first } + resolvers).distinct()
+    }
+
     /** The log line for one result. */
     fun describe(resolver: String, outcome: Outcome): String = when (outcome) {
         is Outcome.Answered -> "Resolver $resolver answered a plain DNS question in ${outcome.ms} ms" +

@@ -18,6 +18,16 @@ import java.io.FileNotFoundException
 import java.nio.file.Files
 
 class PsiphonSidecarTest {
+    @Test fun reportsLastObservedStartupStageWithoutUsingRawNoticeData() {
+        val progress = PsiphonSidecar.StartupProgress()
+        assertTrue(progress.failureAfter(60_000).contains("discovery"))
+        progress.observe("""2026-11-21 Network notice {"noticeType":"AvailableEgressRegions","data":{"regions":["US"]}}""")
+        assertTrue(progress.failureAfter(60_000).contains("candidates"))
+        progress.observe("""{"noticeType":"ConnectingServer","data":{"ipAddress":"example-secret"}}""")
+        assertTrue(progress.failureAfter(60_000).contains("dialing"))
+        assertFalse(progress.failureAfter(60_000).contains("example-secret"))
+    }
+
     @Test fun psiphonKeepsTacticsSeparateForWifiMobileAndRelays() {
         assertEquals("MOBILE-43235-direct", PsiphonSidecar.networkId("cell:43235", relayed = false))
         assertEquals("WIFI-abcdef123456-relay", PsiphonSidecar.networkId("wifi:abcdef123456", relayed = true))

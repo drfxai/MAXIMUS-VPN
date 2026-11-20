@@ -470,10 +470,7 @@ fun HomeScreen(
                     Text(if (directRoute) "Device → Direct DPI bypass → Internet · ISP exit IP"
                         else "Device → Android VPN → ${connectionState.activeRoute ?: "selected route"} → Internet",
                         color = AppTheme.colors.textPrimary, fontSize = 12.sp)
-                    Text(if (connectionState.trafficEvidence?.takeIf { it.appliesTo(connectionState) }?.let {
-                        it.path == com.example.vpn.verify.ProbePath.TUN && it.bidirectional } == true)
-                        "Android VPN upload and download verified"
-                        else "Engine traffic checked · full-device route not verified",
+                    Text(connectionState.verification.title,
                         color = AppTheme.colors.textSecondary, fontSize = 12.sp)
                     if (connectionState.bulkLimited) {
                         Row(verticalAlignment = Alignment.CenterVertically) {

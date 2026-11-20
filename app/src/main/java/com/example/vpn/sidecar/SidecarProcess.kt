@@ -21,6 +21,7 @@ class SidecarProcess(
     @Volatile private var ready = false
     @Volatile private var failureHint: String? = null
     @Volatile private var startupStage: String? = null
+    private val psiphonStartup = PsiphonSidecar.StartupProgress()
     @Volatile override var startupFailure: String? = null
         private set
 
@@ -31,6 +32,7 @@ class SidecarProcess(
                 lines.forEachIndexed { index, line ->
                     EngineSignals.publish(name, line)
                     reportApiTlsEvent(line)
+                    if (name.removePrefix("lab-") == PsiphonSidecar.ID && !ready) psiphonStartup.observe(line)
                     if (name == AetherSidecar.ID) aetherStage(line)?.let { stage ->
                         if (startupStage != stage) {
                             // An account retry warning is no longer the failure once
@@ -127,6 +129,8 @@ class SidecarProcess(
         }
         if (startupFailure == null) startupFailure = if (name == AetherSidecar.ID && !sawReadyLine)
             aetherTimeout(startupStage, failureHint, timeoutMs)
+        else if (name.removePrefix("lab-") == PsiphonSidecar.ID && !sawReadyLine)
+            psiphonStartup.failureAfter(timeoutMs)
         else if (portOpen(socksPort) && !sawReadyLine)
             "Local proxy socket opened, but the required transport readiness marker was not observed within ${timeoutMs / 1000}s; traffic is unverified."
         else if (readyLine != null) "Engine never reported a connected session with its server within ${timeoutMs / 1000}s: " +

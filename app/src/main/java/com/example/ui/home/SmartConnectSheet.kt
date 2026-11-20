@@ -58,7 +58,6 @@ import com.example.vpn.RayVpnService
 import com.example.vpn.smart.NetworkIdentity
 import com.example.vpn.smart.NetworkNames
 import com.example.vpn.smart.SearchProgress
-import com.example.vpn.verify.TrafficCheck
 import com.example.xray.RealDelayProbe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -83,10 +82,6 @@ private val limits = SmartConnectRows.Limits(
     revivalSec = RayVpnService.CONFIG_REVIVE_MS / 1000
 )
 
-/** True when the path in use carried traffic both ways in this attempt, on this network. */
-private fun bothWays(state: ConnectionState): Boolean =
-    state.trafficEvidence?.takeIf { it.appliesTo(state) }?.bidirectional == true
-
 /** The Home entry to the sheet: where the search stands, in one line. */
 @Composable
 internal fun SmartConnectEntry(state: ConnectionState, mode: SmartConnectMode, onOpen: () -> Unit) {
@@ -98,7 +93,7 @@ internal fun SmartConnectEntry(state: ConnectionState, mode: SmartConnectMode, o
         )
         SmartConnectMode.CONNECTED -> Pair(
             SmartConnectRows.foundLine(search)?.removeSuffix(".") ?: "Smart Connect",
-            if (bothWays(state)) "Both directions verified" else "Traffic verified"
+            state.verification.title
         )
     }
     Row(
@@ -195,7 +190,7 @@ private fun Connected(c: LabColors, state: ConnectionState, search: SearchProgre
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LabText(state.activeProfile?.name?.ifBlank { null } ?: "Server in use", c.text, 15.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 2)
                 Spacer(Modifier.width(10.dp))
-                Badge(if (evidence?.bidirectional == true) "Both directions verified" else "Traffic verified", c.good)
+                Badge(state.verification.title, c.good)
             }
             val found = listOfNotNull(
                 SmartConnectRows.foundLine(search),
@@ -204,6 +199,7 @@ private fun Connected(c: LabColors, state: ConnectionState, search: SearchProgre
             if (found.isNotEmpty()) LabText(found, c.text2, 12.5.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 3, lineHeight = 17.sp)
         }
         evidence?.let { e ->
+            KeyValue(c, "Test path", e.path.title)
             KeyValue(c, "Download check", SmartConnectRows.legValue(e.download, upload = false))
             KeyValue(c, "Upload check", SmartConnectRows.legValue(e.upload, upload = true))
         }
@@ -213,8 +209,7 @@ private fun Connected(c: LabColors, state: ConnectionState, search: SearchProgre
     }
     GroupLabel(c, "How it was found")
     Stages(c, SmartConnectRows.stageRows(search, limits, summary = true))
-    Footnote(c, "\"Both directions verified\" means a ${TrafficCheck.DOWNLOAD_BYTES / 1024} KB download and a " +
-        "graded upload of at least ${TrafficCheck.UPLOAD_PASS_BYTES / 1024} KB (up to ${TrafficCheck.UPLOAD_BYTES / 1024} KB) went through the tunnel. A single small request shows as \"Traffic verified\".")
+    Footnote(c, "Android VPN traffic and the local engine proxy are measured separately.")
 }
 
 @Composable

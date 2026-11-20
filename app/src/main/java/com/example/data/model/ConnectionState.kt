@@ -85,6 +85,7 @@ data class ConnectionState(
     val recoveryExhausted: Boolean = false,
     /** The upload and download check for this attempt; ignored once the attempt or network changes. */
     val trafficEvidence: com.example.vpn.verify.TrafficEvidence? = null,
+    val lastVerifiedPath: com.example.vpn.verify.ProbePath? = null,
     /** The Smart Connect search of this attempt, stage by stage: what was tested and what carried traffic. */
     val search: com.example.vpn.smart.SearchProgress? = null,
     /** The session was started with the Smart Connect button (not the power button or a tile). */
@@ -155,7 +156,8 @@ object ConnectionVerification {
         success: Boolean,
         latencyMs: Long?,
         now: Long,
-        stage: FailureStage? = null
+        stage: FailureStage? = null,
+        path: com.example.vpn.verify.ProbePath? = null
     ): ConnectionState {
         if (attemptId == null || attemptId != state.attemptId) return state
         val live = state.status == ConnectionStatus.VERIFYING || state.status == ConnectionStatus.CONNECTED ||
@@ -166,6 +168,7 @@ object ConnectionVerification {
             return state.copy(
                 status = ConnectionStatus.CONNECTED,
                 verifiedAt = now,
+                lastVerifiedPath = path ?: state.lastVerifiedPath,
                 lastConnectedTime = state.lastConnectedTime ?: now,
                 pingMs = latencyMs ?: state.pingMs,
                 pingCheckedAt = now,
@@ -196,7 +199,7 @@ object ConnectionVerification {
     fun onNetworkChanged(state: ConnectionState): ConnectionState {
         val next = state.copy(networkGeneration = state.networkGeneration + 1)
         return if (state.status == ConnectionStatus.CONNECTED || state.status == ConnectionStatus.DEGRADED) next.copy(
-            status = ConnectionStatus.NETWORK_CHANGED, verifiedAt = null, pingMs = null, pingCheckedAt = null,
+            status = ConnectionStatus.NETWORK_CHANGED, verifiedAt = null, lastVerifiedPath = null, pingMs = null, pingCheckedAt = null,
             probeFailures = 0, failureStage = null
         ) else next
     }

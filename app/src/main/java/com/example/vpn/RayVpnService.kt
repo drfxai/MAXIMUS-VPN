@@ -693,8 +693,10 @@ class RayVpnService : VpnService() {
             profile.security.equals("tls", true) && !profile.allowInsecure
         if (!fronted) return null
         showForegroundNotification("Looking for a verified clean path...")
-        val scanNetwork = com.example.vpn.smart.NetworkKey.current(this)
-        val cached = com.example.RayApplication.instance.endpointScores.validated(scanNetwork)
+        val scanNetwork = ledgerNetwork()
+        val scope = com.example.vpn.connectivity.EndpointScoringEngine.destinationScope(scanNetwork, profile)
+        val endpointScores = com.example.RayApplication.instance.endpointScores
+        val cached = endpointScores.validated(scope)
         // Candidates must pass TLS with this server's own name and its WebSocket/HTTP exchange, not just a TCP
         // connect: on a filtered network nearly every Cloudflare address accepts TCP and then drops TLS.
         // Addresses that worked here before are tested first; what passes before the time limit is kept.
@@ -702,10 +704,10 @@ class RayVpnService : VpnService() {
         withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
             try {
                 com.example.panels.CleanIpOptimizer().scan(profile, targetPort = profile.port, enableSpeedTest = false,
-                    candidateCount = 48, preferred = com.example.RayApplication.instance.endpointScores.remembered(scanNetwork),
+                    candidateCount = 48, preferred = endpointScores.remembered(scope, limit = 4),
                     enough = 6, onAccepted = { found += it.ip },
                     assertNetwork = {
-                        check(com.example.vpn.smart.NetworkKey.current(this@RayVpnService) == scanNetwork) { "Network changed during clean-IP scan" }
+                        check(ledgerNetwork() == scanNetwork) { "Network changed during clean-IP scan" }
                     }) { }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -718,10 +720,10 @@ class RayVpnService : VpnService() {
         return com.example.vpn.Abandonable.run {
             com.example.vpn.smart.CleanPathRace.select(profile, (cached + candidates).distinct(),
                 probe = { paths -> probeAll(paths, timeoutSec) },
-                cancelled = { attempt?.isActive == false || com.example.vpn.smart.NetworkKey.current(this) != scanNetwork })
+                cancelled = { attempt?.isActive == false || ledgerNetwork() != scanNetwork })
         }?.also {
             com.example.RayApplication.instance.endpointScores.record(listOf(com.example.vpn.connectivity.EndpointScoringEngine.Measurement(
-                it.profile.address, scanNetwork, System.currentTimeMillis(), true, it.latencyMs)))
+                it.profile.address, scope, System.currentTimeMillis(), true, it.latencyMs)))
             XrayLogManager.i("SMART", "A clean path carried two real requests (${it.latencyMs} ms).")
         }
     }
@@ -1096,10 +1098,39 @@ class RayVpnService : VpnService() {
                 firstTimeoutSec = timeouts.firstSec,
                 alternateTimeoutSec = timeouts.alternateSec
             )
+            // Recheck the exact successful engine recipe before scanning unrelated servers or registering WARP.
+            // In comparison mode only replay a recently verified Lantern route before testing the selected server.
+            if (!raced && raceFirst && !lockExit && !force && !aetherLast && !xrayExhausted) {
+                val replayBudget = if (compare) 30_000L else 90_000L
+                val earlyOutcome = withTimeoutOrNull(replayBudget) {
+                    com.example.RayApplication.instance.lab.fastRecovery(
+                        exclude = exclude, deadlineMs = System.currentTimeMillis() + replayBudget,
+                        engineWindow = { test -> engineWindow(test) }, mode = settings.operationalMode,
+                        rememberedOnly = true, rememberedRadianceOnly = compare
+                    ) { showForegroundNotification("Rechecking the engine route that worked here...") }
+                }
+                val early = earlyOutcome?.result
+                if (early != null) {
+                    tracker.start(com.example.vpn.smart.SearchStage.REMEMBERED_ROUTE)
+                    tracker.add(com.example.vpn.smart.SearchStage.REMEMBERED_ROUTE, tested = early.tested, verified = 1)
+                    tracker.finish(com.example.vpn.smart.SearchStage.REMEMBERED_ROUTE, verified = true,
+                        note = "Remembered engine carried fresh traffic on this network.")
+                    com.example.vless.VlessValidator.validate(early.profile)
+                    com.example.vpn.engine.RuntimeCapabilities.requireSupported(early.profile)
+                    requestedProfile = early.profile
+                    activeProfile = early.profile
+                    profile = early.profile
+                    raced = true
+                    mutateState { it.copy(activeProfile = early.profile, attemptedProfileId = early.profile.id) }
+                    XrayLogManager.i("SMART", "Previously working engine route passed fresh traffic checks on this network.")
+                }
+            }
+
+
             // Stage A: the exact route that carried verified traffic on this network before. The chosen
             // config's own route first; with Smart Connect, then the best other remembered route. Each has
             // to carry a real request here now; a failure counts against it and the normal search goes on.
-            if (!lockExit && !force && !xrayExhausted && !aetherLast) {
+            if (!raced && !lockExit && !force && !xrayExhausted && !aetherLast) {
                 // Smart Connect replays only a route whose upload and download went through here and whose
                 // download did not stall since; anything weaker competes in the comparison instead.
                 val frozenA = frozenWide()
@@ -1152,28 +1183,6 @@ class RayVpnService : VpnService() {
                 if (ordered.isNotEmpty()) tracker.finish(com.example.vpn.smart.SearchStage.REMEMBERED_ROUTE, verified = raced)
             }
 
-            // Recheck the exact successful engine recipe before scanning unrelated servers or registering WARP.
-            // Not when the user pressed Smart Connect: engine routes (Tor, DNS tunnels, Psiphon) are much slower
-            // than a saved server that works, so they wait for the recovery stage after the comparison.
-            if (!raced && raceFirst && !lockExit && !force && !compare && !aetherLast) {
-                val early = withTimeoutOrNull(com.example.vpn.smart.RecoveryAttemptPolicy.TOR_WINDOW_MS + 10_000L) {
-                    com.example.RayApplication.instance.lab.fastRecovery(
-                        exclude = exclude, deadlineMs = System.currentTimeMillis() + 90_000L,
-                        engineWindow = { test -> engineWindow(test) }, mode = settings.operationalMode,
-                        rememberedOnly = true
-                    ) { showForegroundNotification("Rechecking the engine route that worked here...") }
-                }?.result
-                if (early != null) {
-                    com.example.vless.VlessValidator.validate(early.profile)
-                    com.example.vpn.engine.RuntimeCapabilities.requireSupported(early.profile)
-                    requestedProfile = early.profile
-                    activeProfile = early.profile
-                    profile = early.profile
-                    raced = true
-                    mutateState { it.copy(activeProfile = early.profile, attemptedProfileId = early.profile.id) }
-                    XrayLogManager.i("SMART", "Previously working engine route passed fresh traffic checks on this network.")
-                }
-            }
 
             var firstFailed = initialResolutionFailed || engineCarriersFailed || xrayExhausted
             // The engine's carriers were all just tried and none carried traffic: not tested again here.
@@ -1381,11 +1390,14 @@ class RayVpnService : VpnService() {
                 val skipRefs = setOf(com.example.vpn.connectivity.PathRef.of(requestedProfile), com.example.vpn.connectivity.PathRef.of(userProfile))
                 val deadline = System.currentTimeMillis() + FAST_RECOVERY_MS
                 val outcome = runCatching {
-                    withTimeoutOrNull(FAST_RECOVERY_MS + com.example.vpn.smart.RecoveryAttemptPolicy.TOR_WINDOW_MS + 10_000L) {
+                    withTimeoutOrNull(FAST_RECOVERY_MS + 1_000L) {
                         com.example.RayApplication.instance.lab.fastRecovery(skipRefs + exclude + requestedProfile.id + userProfile.id + frozenWide(), deadline,
                             engineWindow = { test -> engineWindow(test) }, mode = settings.operationalMode,
                             resolveForRecovery = { p -> if (isLiteralIp(p.address)) p else resolveEndpoint(p) },
-                            heldBackAether = deferredAether) { step -> showForegroundNotification(step) }
+                            heldBackAether = deferredAether) { step ->
+                            tracker.note(com.example.vpn.smart.SearchStage.RECOVERY, step)
+                            showForegroundNotification(step)
+                        }
                     }
                 }.onFailure {
                     if (it is kotlinx.coroutines.CancellationException) throw it
@@ -1868,7 +1880,8 @@ class RayVpnService : VpnService() {
                 else if (pathEngines.size == 1) ledger.failed(id, routeNetwork, check.second?.name)
             }
             mutateState {
-                com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, check.first != null, check.first, System.currentTimeMillis(), check.second)
+                com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, check.first != null, check.first, System.currentTimeMillis(), check.second, path =
+                    if (engineEndpoint == null) com.example.vpn.verify.ProbePath.TUN else com.example.vpn.verify.ProbePath.ENGINE_PROXY)
             }
             if (_vpnState.value.isConnected) {
                 showConnectedNotification()
@@ -2485,7 +2498,7 @@ class RayVpnService : VpnService() {
         }
     }
     /**
-     * Before a CottenDNS engine starts: one plain DNS question to each of its resolvers (up to four, at once),
+     * Before CottenDNS starts: sample up to four configured resolvers in parallel on the underlying link,
      * from this app, which like the engine is outside the VPN. The log then says which resolvers this phone
      * reaches; the engine itself reports an unreachable one only as "UPLOAD_MTU value=0". When none can even
      * be sent to, the connect stops here instead of after the engine's 45 s start-up limit.
@@ -2498,26 +2511,24 @@ class RayVpnService : VpnService() {
         val pool = java.util.concurrent.Executors.newFixedThreadPool(resolvers.size)
         val outcomes = try {
             pool.invokeAll(resolvers.map { r ->
-                java.util.concurrent.Callable { com.example.vpn.sidecar.ResolverReach.check(r, s.domain, timeoutMs = 2_500) }
+                java.util.concurrent.Callable {
+                    List(3) { com.example.vpn.sidecar.ResolverReach.check(r, s.domain, timeoutMs = 850) }
+                }
             }).map { it.get() }
         } finally {
             pool.shutdownNow()
         }
-        resolvers.zip(outcomes).forEach { (r, o) ->
-            val line = com.example.vpn.sidecar.ResolverReach.describe(r, o)
-            if (o is com.example.vpn.sidecar.ResolverReach.Outcome.Answered) XrayLogManager.i("DNS", line) else XrayLogManager.w("DNS", line)
+        resolvers.zip(outcomes).forEach { (r, samples) ->
+            val replies = samples.count { it is com.example.vpn.sidecar.ResolverReach.Outcome.Answered }
+            XrayLogManager.i("DNS", "Resolver $r replied to $replies/${samples.size} matching DNS queries; tunnel traffic not tested yet.")
         }
         if (s.transport == "udp" && s.resolvers.size == resolvers.size &&
-            outcomes.all { it is com.example.vpn.sidecar.ResolverReach.Outcome.Blocked }) {
+            outcomes.flatten().all { it is com.example.vpn.sidecar.ResolverReach.Outcome.Blocked }) {
             com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "resolvers unreachable")
             error("None of this config's DNS resolvers can be reached from this phone " +
-                "(${(outcomes.first() as com.example.vpn.sidecar.ResolverReach.Outcome.Blocked).reason}), so the ${engine.id} engine cannot start")
+                "(${(outcomes.first().first() as com.example.vpn.sidecar.ResolverReach.Outcome.Blocked).reason}), so the ${engine.id} engine cannot start")
         }
-        val responsive = resolvers.zip(outcomes).mapNotNull { (resolver, outcome) ->
-            (outcome as? com.example.vpn.sidecar.ResolverReach.Outcome.Answered)
-                ?.takeIf { it.rcode == 0 }?.let { resolver to it.ms }
-        }.sortedBy { it.second }.map { it.first }
-        val ordered = (responsive + s.resolvers).distinct()
+        val ordered = com.example.vpn.sidecar.ResolverReach.prioritize(s.resolvers, resolvers.zip(outcomes))
         return if (ordered == s.resolvers) profile
             else com.example.vpn.sidecar.CottenDnsSidecar.withSettings(profile, s.copy(resolvers = ordered))
     }
@@ -2568,7 +2579,9 @@ class RayVpnService : VpnService() {
                 val process = com.example.vpn.sidecar.EngineReaper.track(engine.startPrepared(hopProfile, settings, launch, context)
                     ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
                 try {
-                    check(process.awaitReady(launch.readyTimeoutMs)) { "The ${engine.id} engine did not start" }
+                    check(process.awaitReady(launch.readyTimeoutMs)) {
+                        process.startupFailure ?: "The ${engine.id} engine did not start"
+                    }
                     process to launch
                 } catch (t: Throwable) {
                     process.stop()
@@ -2755,7 +2768,8 @@ class RayVpnService : VpnService() {
                     passive?.recordActiveSuccess()
                     okStreak++
                     mutateState {
-                        com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, true, sample.latencyMs, System.currentTimeMillis())
+                        com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, true, sample.latencyMs, System.currentTimeMillis(), path =
+                            if (engineEndpoint == null) com.example.vpn.verify.ProbePath.TUN else com.example.vpn.verify.ProbePath.ENGINE_PROXY)
                             .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = sample.country, exitIp = sample.ip ?: s.exitIp) else s }
                     }
                     if (!wasConnected && _vpnState.value.isConnected && _vpnState.value.attemptId == attemptId) {
