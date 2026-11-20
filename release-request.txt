@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #245 (335b32cd846a237735c98590231ce1afe73c4608).
-Includes the updated Aether startup settings and Psiphon TCP retry, built-in connection picker, chain compatibility, redesigned Protocols screen, and live connection Analytics.
+V1.0.4 signed Android rebuild after PR #248 (753d83f1d45f48fb37a8fce4e88f3428cc264706).
+Includes the recovery changes from PRs #247 and #248: Lantern route replay, Aether short gateway recheck, Psiphon-over-Lantern, separate Android VPN and engine verification, repeated resolver checks and destination-scoped clean-IP results.
