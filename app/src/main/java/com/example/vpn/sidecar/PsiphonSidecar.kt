@@ -94,6 +94,40 @@ class PsiphonSidecar(
         )
     }
 
+    /** Only structured, known notices can move diagnostics beyond server discovery. */
+    internal class StartupProgress {
+        @Volatile private var stage = 0
+
+        fun observe(line: String) {
+            if (line.length > 32_768) return
+            val start = line.indexOf('{')
+            if (start < 0) return
+            val notice = runCatching { JSONObject(line.substring(start)) }.getOrNull() ?: return
+            // ConsoleClient can emit either raw JSON or a timestamp, notice name, then its JSON data.
+            val kind = notice.optString("noticeType").ifBlank {
+                line.substring(0, start).trimEnd().substringAfterLast(' ')
+            }
+            val data = notice.optJSONObject("data") ?: notice
+            val observed = when (kind) {
+                "AvailableEgressRegions" -> if ((data.optJSONArray("regions")?.length() ?: 0) > 0) 1 else 0
+                "ConnectingServer" -> 2
+                "ConnectedServer" -> 3
+                else -> 0
+            }
+            stage = maxOf(stage, observed)
+        }
+
+        fun failureAfter(timeoutMs: Long): String {
+            val phase = when (stage) {
+                3 -> "server connected but the tunnel did not become ready"
+                2 -> "server dialing did not establish a tunnel"
+                1 -> "server candidates found but no tunnel became ready"
+                else -> "server discovery or bootstrap did not produce a ready tunnel"
+            }
+            return "Psiphon startup timed out after ${timeoutMs / 1000}s: $phase; traffic is unverified."
+        }
+    }
+
     private fun privateSettings(id: String): JSONObject? {
         if (!PrivatePsiphonStore.validId(id)) return null
         return runCatching { privateConfigProvider(id)?.let(::JSONObject) }.getOrNull()

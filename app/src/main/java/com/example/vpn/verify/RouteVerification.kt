@@ -20,6 +20,7 @@ enum class RouteVerification(val title: String) {
     LOCAL_PROXY_READY("Engine ready, traffic not verified"),
     /** The server completed a handshake. Not connectivity: used for candidates, never for a live session. */
     HANDSHAKE_VERIFIED("Handshake only"),
+    ENGINE_PROXY_VERIFIED("Engine proxy verified · Android VPN unconfirmed"),
     /** A real request went through the route and came back. */
     TUNNEL_TRAFFIC_VERIFIED("Traffic verified"),
     /** A download and an upload, each checked byte for byte, went through the route. */
@@ -49,6 +50,8 @@ enum class RouteVerification(val title: String) {
             ConnectionStatus.CONNECTED -> when {
                 state.revived -> REVIVED_AND_VERIFIED
                 state.trafficEvidence?.takeIf { it.appliesTo(state) && it.path == ProbePath.TUN }?.bidirectional == true -> BIDIRECTIONAL_VERIFIED
+                state.lastVerifiedPath == ProbePath.ENGINE_PROXY ||
+                    state.trafficEvidence?.takeIf { it.appliesTo(state) }?.path == ProbePath.ENGINE_PROXY -> ENGINE_PROXY_VERIFIED
                 else -> TUNNEL_TRAFFIC_VERIFIED
             }
             ConnectionStatus.DEGRADED -> DEGRADED

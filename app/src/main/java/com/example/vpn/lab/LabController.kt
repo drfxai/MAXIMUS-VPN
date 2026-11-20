@@ -652,6 +652,7 @@ class LabController(
         mode: com.example.data.model.OperationalMode = com.example.data.model.AppSettings().operationalMode,
         resolveForRecovery: (VlessProfile) -> VlessProfile = { it },
         rememberedOnly: Boolean = false,
+        rememberedRadianceOnly: Boolean = false,
         /**
          * The automatic Aether lead Smart Connect held back because Cloudflare is blocked here (cf=0). On Irancell its
          * single capped WARP attempt (IrancellWarp: MASQUE over HTTP/2, 20 s) runs before the other recovery engines.
@@ -692,7 +693,10 @@ class LabController(
             val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(
                 saved, seedBridges = seeds, tcpOnly = ExperimentPlanner.udpDead(cap)
             ) + fakeSni
-            val poolProfiles = if (rememberedOnly) com.example.vpn.smart.EngineRouteHints.preferred(context, currentIdentity, builtIn) else saved + builtIn
+            val poolProfiles = if (rememberedOnly) {
+                val eligible = if (rememberedRadianceOnly) builtIn.filter { com.example.vpn.sidecar.RadianceSidecar.handles(it) } else builtIn
+                com.example.vpn.smart.EngineRouteHints.preferred(context, currentIdentity, eligible)
+            } else saved + builtIn
             val all = poolProfiles.distinctBy { com.example.vpn.connectivity.PathRef.of(it) }
                 .filter { it.id !in exclude && com.example.vpn.connectivity.PathRef.of(it) !in exclude }
             if (all.isEmpty()) return FastRecoveryOutcome(null, 0, true, "no other saved config or recovery engine is available")
@@ -749,7 +753,8 @@ class LabController(
                 XrayLogManager.i("SMART", "Recovery: Irancell with Cloudflare blocked (cf=0): one capped WARP attempt " +
                     "(MASQUE over HTTP/2, ${com.example.vpn.connections.IrancellWarp.BUDGET_MS / 1000}s) before Tor and the other engines.")
                 val began = System.currentTimeMillis()
-                val windowMs = com.example.vpn.smart.RecoveryEngineCaps.IRANCELL_WARP_WINDOW_MS
+                val windowMs = minOf(com.example.vpn.smart.RecoveryEngineCaps.IRANCELL_WARP_WINDOW_MS,
+                    (deadlineMs - System.currentTimeMillis()).coerceAtLeast(1L))
                 val r = withTimeoutOrNull(windowMs) {
                     engineWindow { EngineProbe.testProfile(context, irancellWarp, ENGINE_TIMEOUT_SEC, requests = 2, mode = mode, keep = true) }
                 } ?: EngineProbe.Result(com.example.vpn.sidecar.AetherSidecar.ID, ConnectionStage.NOT_TESTED, null,
@@ -811,13 +816,16 @@ class LabController(
                     outcome?.winner?.let { "won by ${engineIds[it.first] ?: it.first}" } ?: "nothing carried traffic")
                 outcome?.winner?.let { (id, _) -> XrayLogManager.i("SMART", "Recovery: ${byId[id]?.profile?.name?.let(com.example.core.SecretRedactor::redact)} won the parallel check") }
             }
+            var lastFailure: String? = null
             loop@ while (currentCoroutineContext().isActive && System.currentTimeMillis() < deadlineMs) {
                 when (val d = planner.decide(System.currentTimeMillis())) {
                     is AdaptivePlanner.Decision.Stop -> break@loop
                     is AdaptivePlanner.Decision.Wait -> { delay((d.untilMs - System.currentTimeMillis()).coerceIn(100, 3_000)); continue@loop }
                     is AdaptivePlanner.Decision.Test -> {
                         val pk = byId[d.candidate.id] ?: continue@loop
-                        onProgress("${pk.family.title}: ${if (d.recheck) "rechecking" else "testing"} ${pk.profile.name}")
+                        val checking = "${if (d.recheck) "Rechecking" else "Testing"} ${pk.family.title}"
+                        onProgress(listOfNotNull(checking, lastFailure).joinToString(" · "))
+                        lastFailure = null
                         val engine = Sidecars.forProfile(pk.profile)
                         val dependencies = com.example.vpn.sidecar.ChainRunner.readChain(pk.profile)?.hops?.map { it.engineId }
                             ?: listOfNotNull(engine?.id)
@@ -830,10 +838,8 @@ class LabController(
                             // No engine can start and carry a request in a few seconds; starting one now
                             // only logs a "timed out after 0s" test at the very end of the search.
                             if (remaining < MIN_ENGINE_WINDOW_MS) break@loop
-                            // A Tor attempt admitted before the search deadline may finish its bounded,
-                            // progress-aware bootstrap. The service outer deadline includes this grace.
-                            // Timeout is a measured unsuccessful attempt, not "not run". User cancellation
-                            // still propagates through runInterruptible and stops the child processes.
+                            // Cap startup and traffic validation at the remaining overall budget.
+                            // Cancellation releases the child processes before the next route starts.
                             val normalMs = com.example.vpn.smart.RecoveryAttemptPolicy.window(engine?.id, remaining)
                             // Metered or cf=0: ByeDPI and Tor share hard per-search caps (RecoveryEngineCaps).
                             val windowMs = caps.window(engine?.id, normalMs)
@@ -882,6 +888,10 @@ class LabController(
                                 else -> "failed (${result.failure ?: result.stage.title})"
                             })
                             recordEngine(pk, result)
+                            if (result.outcomes.lastOrNull() != true && result.failure != null) {
+                                lastFailure = com.example.core.SecretRedactor.redact(result.failure).take(140)
+                                onProgress("Trying another route · $lastFailure")
+                            }
                         } else {
                             val began = System.currentTimeMillis()
                             when (val o = com.example.vpn.Abandonable.run { RealDelayProbe.measure(listOf(pk.profile), budget.probeTimeoutSec).first() }) {

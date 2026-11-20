@@ -60,4 +60,16 @@ class ResolverReachTest {
         assertEquals(ResolverReach.Outcome.Blocked("Network is unreachable"), blocked)
         assertTrue(ResolverReach.describe("1.1.1.1:53", blocked).contains("could not be reached from this phone"))
     }
+    @Test fun repeatSuccessMattersMoreThanOneFastReply() {
+        val fast = ResolverReach.Outcome.Answered(12, 0)
+        val slow = ResolverReach.Outcome.Answered(70, 0)
+        val bad = ResolverReach.Outcome.Answered(3, 3)
+        val outcomes = listOf(
+            "single" to listOf(fast, bad, ResolverReach.Outcome.Silent),
+            "steady" to listOf(slow, slow, slow),
+            "twice" to listOf(fast, fast, bad)
+        )
+        assertEquals(listOf("steady", "twice", "single", "unmeasured"),
+            ResolverReach.prioritize(listOf("single", "steady", "twice", "unmeasured"), outcomes))
+    }
 }

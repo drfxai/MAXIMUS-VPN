@@ -53,11 +53,13 @@ object IrancellWarp {
         engineId == AetherSidecar.ID && automatic && irancell && !relayOnly && !reverseRelay
 
     /**
-     * The one method tried: [preferred] when it is a MASQUE HTTP/2 method that is available, otherwise the first of
-     * [ALLOWED] in [methods]. Null when no MASQUE HTTP/2 method is available at all.
+     * Try a remembered gateway first. Otherwise use the previously verified HTTP/2 method if available,
+     * then the default order. Null means no MASQUE HTTP/2 method is available.
      */
     fun pick(methods: List<String>, preferred: String?): String? =
-        preferred?.takeIf { it in ALLOWED && it in methods } ?: ALLOWED.firstOrNull { it in methods }
+        ConnectionEngineRunner.CLEAN_H2.takeIf { it in methods }
+            ?: preferred?.takeIf { it in ALLOWED && it in methods }
+            ?: ALLOWED.firstOrNull { it in methods }
 
     /** An explicit connect can use a second H2 variant within the same overall budget. */
     fun plan(methods: List<String>, preferred: String?, manual: Boolean): List<String> {

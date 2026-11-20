@@ -15,7 +15,7 @@ class RecoveryEngineCapsTest {
         assertFalse(RecoveryEngineCaps.constrained(metered = null, cloudflareBlocked = false))
 
         val open = RecoveryEngineCaps.Budget(constrained = false)
-        assertEquals(420_000L, open.window("tor", RecoveryAttemptPolicy.window("tor", 300_000)))
+        assertEquals(300_000L, open.window("tor", RecoveryAttemptPolicy.window("tor", 300_000)))
         assertEquals(90_000L, open.window("byedpi", 90_000))
 
         val capped = RecoveryEngineCaps.Budget(constrained = true)

@@ -4,8 +4,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RecoveryAttemptPolicyTest {
-    @Test fun progressingTorIsNotCutOffByTheLast78SecondsOfTheSearch() {
-        assertEquals(420_000L, RecoveryAttemptPolicy.window("tor", 78_000))
+    @Test fun everyEngineRespectsTheRemainingSearchBudget() {
+        assertEquals(78_000L, RecoveryAttemptPolicy.window("tor", 78_000))
         assertEquals(78_000L, RecoveryAttemptPolicy.window("masque", 78_000))
         assertEquals(90_000L, RecoveryAttemptPolicy.window("matrix-transport", 300_000))
     }

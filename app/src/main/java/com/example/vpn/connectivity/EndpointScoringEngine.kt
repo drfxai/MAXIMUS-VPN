@@ -86,6 +86,17 @@ class EndpointScoringEngine(
         .map { it.ip }
 
     companion object {
+        /** Origin evidence belongs to one physical link, TLS name, HTTP host, port and route. */
+        fun destinationScope(network: String, profile: com.example.data.model.VlessProfile, port: Int = profile.port): String {
+            val host = profile.host.ifBlank { profile.sni.ifBlank { profile.address } }
+            val tlsName = profile.sni.ifBlank { host }
+            val origin = listOf(tlsName.lowercase(), host.lowercase(), port.toString(), profile.transport.lowercase(), profile.path)
+                .joinToString("|") { "${it.length}:$it" }
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(origin.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+            return "$network:origin:$digest"
+        }
+
         const val TTL_MS = 3L * 24 * 60 * 60 * 1000
         const val VALID_FOR_MS = 24L * 60 * 60 * 1000
         const val MIN_RATE = 0.5

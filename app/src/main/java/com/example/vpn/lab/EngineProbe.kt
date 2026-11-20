@@ -145,7 +145,7 @@ object EngineProbe {
                     val process = EngineReaper.track(engine.startPrepared(hop, settings, launch, ctx)
                         ?: SidecarProcess.start("lab-${engine.id}", launch, ctx.workDir, ctx.socksPort))
                     try {
-                        if (!process.awaitReady(launch.readyTimeoutMs)) error("${engine.id} was not ready")
+                        if (!process.awaitReady(launch.readyTimeoutMs)) error(process.startupFailure ?: "${engine.id} was not ready")
                         process to launch
                     } catch (t: Throwable) { process.stop(); throw t }
                 })
@@ -161,7 +161,7 @@ object EngineProbe {
         } catch (e: Exception) {
             if (e is InterruptedException || e is kotlinx.coroutines.CancellationException) throw e
             val failure = if (e is com.example.vpn.sidecar.ChainRunner.HopStartFailure)
-                e.message ?: "A chain hop did not start."
+                listOfNotNull(e.message, e.cause?.message).joinToString(" ").ifBlank { "A chain hop did not start." }
             else "Chain start or request failed: ${e.javaClass.simpleName}"
             return Result("chain", ConnectionStage.NOT_TESTED, null, failure, false)
         } finally {

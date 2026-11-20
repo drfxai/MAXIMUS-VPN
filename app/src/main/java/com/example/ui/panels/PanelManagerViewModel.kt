@@ -324,6 +324,10 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
 
+        val network = com.example.vpn.smart.NetworkIdentity.current(getApplication<android.app.Application>())
+        val scoreScope = profile?.let {
+            com.example.vpn.connectivity.EndpointScoringEngine.destinationScope(network, it, scannedPort ?: port)
+        }
         val edges = CleanIpOptimizer().scan(
             p = profile,
             // Validate the actual port of the config that will later use this edge.
@@ -332,12 +336,15 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
             customSubnet = customSubnet?.ifBlank { null } ?: _state.value.customSubnet.ifBlank { null },
             enableSpeedTest = speedTest,
             candidateCount = 100,
-            assertNetwork = ::assertScanNetwork,
+            assertNetwork = {
+                check(com.example.vpn.smart.NetworkIdentity.current(getApplication<android.app.Application>()) == network) {
+                    "Physical network changed during the scan"
+                }
+            },
             checkpoint = ::scanCheckpoint,
             // Addresses that passed on this network before are retested first.
             preferred = runCatching {
-                RayApplication.instance.endpointScores.remembered(
-                    com.example.vpn.smart.NetworkKey.current(getApplication<android.app.Application>()))
+                RayApplication.instance.endpointScores.remembered(scoreScope ?: network, limit = 4)
             }.getOrDefault(emptyList())
         ) { progress ->
             _state.update {
@@ -361,10 +368,10 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         appendLog("[CF_SCANNER_DONE] clean candidates found=${edges.size}")
         // Addresses that completed the WebSocket upgrade with this config's own server feed recovery.
         runCatching {
-            val network = com.example.vpn.smart.NetworkKey.current(getApplication<android.app.Application>())
+            assertScanNetwork()
             val now = System.currentTimeMillis()
-            RayApplication.instance.endpointScores.record(edges.filter { it.originVerified }.map {
-                com.example.vpn.connectivity.EndpointScoringEngine.Measurement(it.ip, network, now, true, it.medianMs)
+            RayApplication.instance.endpointScores.record(edges.filter { it.originVerified && scoreScope != null }.map {
+                com.example.vpn.connectivity.EndpointScoringEngine.Measurement(it.ip, scoreScope, now, true, it.medianMs)
             })
         }
         _state.value.copy(

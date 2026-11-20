@@ -13,6 +13,6 @@ class RecoveryAttemptPolicy {
         // Leave room for its last socket check and two application requests after readiness.
         const val TOR_WINDOW_MS = 420_000L
         fun window(engineId: String?, remainingMs: Long): Long =
-            if (engineId == "tor") TOR_WINDOW_MS else minOf(remainingMs, 90_000L)
+            minOf(remainingMs, if (engineId == "tor") TOR_WINDOW_MS else 90_000L)
     }
 }

@@ -108,7 +108,7 @@ object SmartConnectRows {
         val counts = if (r.tested == 1) "1 tested" else "${r.tested} tested"
         return when (r.outcome) {
             StageReport.Outcome.PENDING -> selectedName?.takeIf { r.stage == SearchStage.SELECTED } ?: description(r.stage, limits)
-            StageReport.Outcome.RUNNING -> "${r.tested} tested so far"
+            StageReport.Outcome.RUNNING -> r.note ?: "${r.tested} tested so far"
             StageReport.Outcome.VERIFIED -> "$counts, ${r.verified} verified"
             StageReport.Outcome.SKIPPED -> r.note ?: "Skipped"
             StageReport.Outcome.CHOSEN -> r.note ?: "Chosen; checked once it runs"
