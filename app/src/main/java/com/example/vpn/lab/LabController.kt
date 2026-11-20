@@ -775,7 +775,9 @@ class LabController(
             val parallel = com.example.vpn.smart.ParallelEngineRound.concurrency(device.metered, lowBattery)
             val round = if (rememberedOnly) emptyList() else com.example.vpn.smart.ParallelEngineRound.pick(
                 pool.filter { Sidecars.isEngineProfile(it.profile) }
-                    .sortedByDescending { planner.score(candidates.getValue(it.profile.id)) }
+                    .sortedWith(compareByDescending<FullAnalysis.Pick> {
+                        it.family == PathFamily.RADIANCE && candidates.getValue(it.profile.id).provenHere
+                    }.thenByDescending { planner.score(candidates.getValue(it.profile.id)) })
                     .map { pk ->
                         val chain = com.example.vpn.sidecar.ChainRunner.readChain(pk.profile)
                         val engines = chain?.hops?.map { it.engineId }.orEmpty()
@@ -972,7 +974,8 @@ class LabController(
      * WARP MASQUE, Matrix Transport and Aether wait for the end instead of taking a slot in the first round.
      */
     private fun parallelExcluded(cap: NetworkCapabilityProfile?, pool: List<FullAnalysis.Pick>): Set<String> =
-        pool.filter { ExperimentPlanner.cloudflareDeferred(cap, it.family, Sidecars.forProfile(it.profile)?.id) }
+        pool.filter { it.family == PathFamily.PSIPHON_RADIANCE ||
+            ExperimentPlanner.cloudflareDeferred(cap, it.family, Sidecars.forProfile(it.profile)?.id) }
             .map { it.profile.id }.toSet()
 
     /** The family of a saved config from its fields: Tor by its bridge transport, Mihomo by its proxy type. */

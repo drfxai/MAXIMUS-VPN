@@ -79,6 +79,7 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
     MATRIX_H3("Matrix MASQUE HTTP/3", udp = true, engine = true),
     MATRIX_WG("Matrix WireGuard", udp = true, engine = true),
     MATRIX_GOOL("Matrix WARP-in-WARP", udp = true, engine = true),
+    PSIPHON_RADIANCE("Psiphon over Lantern", engine = true),
     PSIPHON_MATRIX("Psiphon over Matrix HTTP/2", engine = true),
     MASQUE("WARP MASQUE (HTTP/3)", udp = true, engine = true),
     PSIPHON_MASQUE("Psiphon over WARP MASQUE", udp = true, engine = true),
@@ -113,6 +114,7 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
             engineId == "chain" -> when (detail) {
                 "psiphon,masque" -> PSIPHON_MASQUE
                 "psiphon,matrix-transport" -> PSIPHON_MATRIX
+                "psiphon,radiance" -> PSIPHON_RADIANCE
                 else -> ENGINE_CHAIN
             }
             engineId == "psiphon" -> PSIPHON

@@ -13,8 +13,8 @@ import org.junit.Test
 class IrancellWarpTest {
     @Test fun manualPlanReservesAnAlternateHttp2Variant() {
         val methods = listOf("h3", "h2", ConnectionEngineRunner.H2_SPLIT, "wireguard")
-        assertEquals(listOf("h2"), IrancellWarp.plan(methods, null, manual = false))
-        assertEquals(listOf("h2", ConnectionEngineRunner.H2_SPLIT), IrancellWarp.plan(methods, null, manual = true))
+        assertEquals(listOf(ConnectionEngineRunner.H2_SPLIT), IrancellWarp.plan(methods, null, manual = false))
+        assertEquals(listOf(ConnectionEngineRunner.H2_SPLIT, "h2"), IrancellWarp.plan(methods, null, manual = true))
     }
 
     private val irancellMethods = listOf("h3", "wireguard", "h2", ConnectionEngineRunner.H2_SPLIT)
@@ -35,7 +35,7 @@ class IrancellWarpTest {
         // The real Irancell order puts H3 and WireGuard first; the single attempt skips both.
         val order = ConnectionEngineRunner.order(irancellMethods, null, false, emptySet(), irancell = true)
         assertEquals(listOf("h3", "wireguard", "h2", ConnectionEngineRunner.H2_SPLIT), order)
-        assertEquals("h2", IrancellWarp.pick(order, null))
+        assertEquals(ConnectionEngineRunner.H2_SPLIT, IrancellWarp.pick(order, null))
         assertEquals(listOf("h3", "wireguard", ConnectionEngineRunner.H2_SPLIT), IrancellWarp.skipped(order, "h2"))
         // A remembered clean HTTP/2 gateway goes before any scan.
         assertEquals(ConnectionEngineRunner.CLEAN_H2,
@@ -45,9 +45,9 @@ class IrancellWarpTest {
             IrancellWarp.pick(listOf(ConnectionEngineRunner.CLEAN_H2) + order, ConnectionEngineRunner.H2_SPLIT))
         // H3, WireGuard and their follow-ups are never picked, even when remembered as verified.
         for (blocked in listOf("h3", "wireguard", ConnectionEngineRunner.WIREGUARD_MTU, ConnectionEngineRunner.WIREGUARD_NOIZE, "wiw"))
-            assertEquals(blocked, "h2", IrancellWarp.pick(order + blocked, blocked))
+            assertEquals(blocked, ConnectionEngineRunner.H2_SPLIT, IrancellWarp.pick(order + blocked, blocked))
         // Relays are the background relay's job.
-        assertEquals("h2", IrancellWarp.pick(listOf(ConnectionEngineRunner.H2_RELAY) + order, ConnectionEngineRunner.H2_RELAY))
+        assertEquals(ConnectionEngineRunner.H2_SPLIT, IrancellWarp.pick(listOf(ConnectionEngineRunner.H2_RELAY) + order, ConnectionEngineRunner.H2_RELAY))
         assertNull(IrancellWarp.pick(listOf("h3", "wireguard"), null))
         assertNull(IrancellWarp.pick(emptyList(), "h2"))
     }

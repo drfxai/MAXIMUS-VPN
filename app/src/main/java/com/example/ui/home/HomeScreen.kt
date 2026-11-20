@@ -1335,7 +1335,7 @@ private fun ConfigFreeMethodPicker(
                                 val icon = when (method) {
                                     ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Filled.Public
                                     ConfigFreeMethod.SERVERLESS -> Icons.Filled.Bolt
-                                    ConfigFreeMethod.PSIPHON, ConfigFreeMethod.AETHER_PSIPHON -> Icons.Filled.Shield
+                                    ConfigFreeMethod.PSIPHON, ConfigFreeMethod.PSIPHON_RADIANCE, ConfigFreeMethod.AETHER_PSIPHON -> Icons.Filled.Shield
                                     ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
                                     ConfigFreeMethod.AETHER_TOR -> Icons.Filled.Link
                                     else -> Icons.Filled.Cloud

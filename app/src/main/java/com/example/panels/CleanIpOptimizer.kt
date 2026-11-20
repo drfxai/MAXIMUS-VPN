@@ -567,7 +567,10 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
         progress(ScanProgress(0, 0, candidatePool.firstOrNull()?.first.orEmpty(), total, "Starting Scan"))
 
         // Batches of 16 for high throughput without exhausting Android socket handles
-        val chunks = candidatePool.chunked(16)
+        val remembered = if (customSubnet.isNullOrBlank()) preferred.toSet() else emptySet()
+        val rememberedCount = candidatePool.takeWhile { it.first in remembered }.size
+        val chunks = candidatePool.take(rememberedCount).chunked(16) +
+            candidatePool.drop(rememberedCount).chunked(16)
         for (chunk in chunks) {
             ensureActive()
             assertNetwork()

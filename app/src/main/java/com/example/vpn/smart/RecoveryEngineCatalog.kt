@@ -2,6 +2,7 @@ package com.example.vpn.smart
 
 import com.example.data.model.VlessProfile
 import com.example.vpn.engine.RuntimeCapabilities
+import com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod
 import com.example.vpn.sidecar.ChainRunner
 import com.example.vpn.sidecar.EngineChain
 import com.example.vpn.sidecar.MasqueSidecar
@@ -27,6 +28,7 @@ object RecoveryEngineCatalog {
                 name = if (tcpOnly) "Psiphon direct (TCP)" else "Psiphon direct"
             ),
             RadianceSidecar.profile().copy(id = "recovery-radiance"),
+            ConfigFreeMethod.PSIPHON_RADIANCE.profile().copy(id = "recovery-psiphon-radiance"),
             TorSidecar.profile().copy(id = "recovery-tor-snowflake"),
             ChainRunner.profile(EngineChain.Chain(listOf(EngineChain.Hop("psiphon"), EngineChain.Hop("masque")))) {
                 if (it == "masque") "WARP MASQUE" else "Psiphon"
