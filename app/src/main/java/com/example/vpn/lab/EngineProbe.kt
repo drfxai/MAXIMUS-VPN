@@ -161,7 +161,7 @@ object EngineProbe {
         } catch (e: Exception) {
             if (e is InterruptedException || e is kotlinx.coroutines.CancellationException) throw e
             val failure = if (e is com.example.vpn.sidecar.ChainRunner.HopStartFailure)
-                listOfNotNull(e.message, e.cause?.message).joinToString(" ").ifBlank { "A chain hop did not start." }
+                e.message?.ifBlank { null } ?: "A chain hop did not start."
             else "Chain start or request failed: ${e.javaClass.simpleName}"
             return Result("chain", ConnectionStage.NOT_TESTED, null, failure, false)
         } finally {

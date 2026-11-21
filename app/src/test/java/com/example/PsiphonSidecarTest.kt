@@ -28,6 +28,48 @@ class PsiphonSidecarTest {
         assertFalse(progress.failureAfter(60_000).contains("example-secret"))
     }
 
+    @Test fun upstreamProxyAllowsAllServerEntrySourcesOnlyInAChain() {
+        val dir = Files.createTempDirectory("psiphon-up").toFile()
+        try {
+            // The build's settings cannot switch the flag on for a direct Psiphon start.
+            val source = JSONObject(settings).put("UpstreamProxyAllowAllServerEntrySources", true)
+            val direct = PsiphonSidecar.buildConfig(source, "", 40123, dir)
+            assertFalse(direct.has("UpstreamProxyURL"))
+            assertFalse(direct.has("UpstreamProxyAllowAllServerEntrySources"))
+
+            val chained = PsiphonSidecar.buildConfig(JSONObject(settings), "", 40123, dir,
+                upstreamSocks = 40124, tcpOnly = true)
+            assertEquals("socks5://127.0.0.1:40124", chained.getString("UpstreamProxyURL"))
+            assertTrue(chained.getBoolean("UpstreamProxyAllowAllServerEntrySources"))
+
+            // prepare() with an upstream hop (the chain path) writes both, and only upstream-capable
+            // TCP protocols (psiphon-tunnel-core rejects QUIC, in-proxy and refraction through a proxy).
+            val ctx = context(dir).copy(upstreamSocks = 40125)
+            PsiphonSidecar { settings }.prepare(PsiphonSidecar.profile(), AppSettings(), ctx)
+            val written = JSONObject(File(dir, PsiphonSidecar.CONFIG_FILE).readText())
+            assertTrue(written.getBoolean("UpstreamProxyAllowAllServerEntrySources"))
+            val protocols = written.getJSONArray("LimitTunnelProtocols").let { a -> (0 until a.length()).map { a.getString(it) } }
+            assertTrue(protocols.isNotEmpty())
+            assertTrue(protocols.none { it.contains("QUIC") || it.startsWith("INPROXY") || it.startsWith("TAPDANCE") || it.startsWith("CONJURE") })
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test fun timeoutCarriesTheLastSkipReasonButNoAddress() {
+        val progress = PsiphonSidecar.StartupProgress()
+        progress.observe("""Sat 2026-11-21 10:00 AM AvailableEgressRegions {"regions":[]}""")
+        progress.observe("""{"noticeType":"SkipServerEntry","data":{"reason":"restricted provider ID: 1a2b3c"}}""")
+        progress.observe("""{"noticeType":"SkipServerEntry","data":{"reason":"server entry source disallowed with upstream proxy: OBFUSCATED"}}""")
+        var failure = progress.failureAfter(60_000)
+        assertTrue(failure, failure.contains("server entry source disallowed with upstream proxy: OBFUSCATED"))
+        assertTrue(failure, failure.contains("2 skips"))
+        assertTrue(failure, failure.contains("last notice: SkipServerEntry"))
+        progress.observe("""{"noticeType":"SkipServerEntry","data":{"reason":"dial failed: 203.0.113.9:443 refused"}}""")
+        failure = progress.failureAfter(60_000)
+        assertFalse(failure, failure.contains("203.0.113.9"))
+    }
+
     @Test fun psiphonKeepsTacticsSeparateForWifiMobileAndRelays() {
         assertEquals("MOBILE-43235-direct", PsiphonSidecar.networkId("cell:43235", relayed = false))
         assertEquals("WIFI-abcdef123456-relay", PsiphonSidecar.networkId("wifi:abcdef123456", relayed = true))
