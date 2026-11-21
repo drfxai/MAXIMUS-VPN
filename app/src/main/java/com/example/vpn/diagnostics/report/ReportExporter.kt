@@ -51,7 +51,8 @@ object ReportExporter {
                 val app = com.example.RayApplication.instance
                 val net = runCatching { com.example.vpn.smart.NetworkIdentity.current(app) }.getOrElse { com.example.vpn.smart.NetworkKey.current(app) }
                 com.example.vpn.engine.registry.EngineRegistry.statuses(net)
-            }.getOrDefault(emptyList())
+            }.getOrDefault(emptyList()),
+            tunPath = runCatching { com.example.vpn.verify.TunPathStatus.view() }.getOrNull()
         )
     }
 
