@@ -580,6 +580,14 @@ object ConnectionEngineRunner {
             queue.addAll(relays)
         }
         val options = AetherSettings.read(ProfileExtras.read(profile))
+        // Build 167: nothing remembered for Aether here and Cloudflare not measured as filtered: a MASQUE carrier that
+        // stops making startup progress is given up after AetherStartupStall's short window, not the full one.
+        fun stallGuarded(name: String, carrier: String, extras: org.json.JSONObject) = AetherStartupStall.applies(
+            engine.id, automatic, carrier, name, irancellLadder = irancellHttp2, cloudflareFiltered = preferWireGuard,
+            rememberedGateway = cleanPeers.isNotEmpty(), verifiedHere = preferred != null,
+            relay = relayOnly || extras.optBoolean(RELAY_FOLLOW_UP))
+        if (!relayOnly && queue.any { c -> ProfileExtras.read(c).let { stallGuarded(method(c), it.optString("carrier"), it) } })
+            record("ladder", "queue", "START", AetherStartupStall.SUMMARY)
         var deferRelay = false
         var raced = false
         /** HTTPS through the engine's SOCKS port, rechecked after 6 s for Aether on the same transport generation. */
@@ -825,6 +833,7 @@ object ConnectionEngineRunner {
             }
             var running: RunningEngine? = null
             var stage = "configuration preparation failed"
+            var stallCut = false
             val attemptStartedAt = System.currentTimeMillis()
             val attemptStartedNanos = System.nanoTime()
             val reserveForNextRelay = relayOnly && metered && queue.any {
@@ -875,10 +884,16 @@ object ConnectionEngineRunner {
                     val wait = AetherBackgroundRelay.startupWindowMs(capped, elapsedMs, metered, hasNext = true)
                     record(name, "budget", "START", "up to ${wait} ms to reach readiness before the next relay")
                     wait > 0 && process.awaitReady(wait)
+                } else if (stallGuarded(name, carrier, extras)) {
+                    process.awaitReadyUnless(capped) {
+                        AetherStartupStall.shouldGiveUp(System.currentTimeMillis(), attemptStartedAt,
+                            process.startupStage, process.transportStageSinceMs).also { if (it) stallCut = true }
+                    }
                 } else process.awaitReady(capped)
                 checkCancellation()
                 if (!ready) {
-                    val reason = process.startupFailure ?: if (reserveForNextRelay)
+                    val reason = (if (stallCut) AetherStartupStall.reason(process.startupStage) else null)
+                        ?: process.startupFailure ?: if (reserveForNextRelay)
                         "Relay did not reach readiness within its startup budget; traffic is unverified." else stage
                     record(name, "startup", "FAIL", reason)
                     attempts += "$name: $reason"

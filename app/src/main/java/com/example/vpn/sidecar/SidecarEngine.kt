@@ -50,6 +50,10 @@ interface RunningEngine {
      * already reported a failure it will not recover from inside the window. Engines that cannot poll wait normally.
      */
     fun awaitReadyUnless(timeoutMs: Long, giveUp: () -> Boolean): Boolean = awaitReady(timeoutMs)
+    /** Aether: the native startup stage last reported (account, identity, scan, transport); null if none yet. */
+    val startupStage: String? get() = null
+    /** Aether: when (wall clock, ms) the "transport" stage was first reported without readiness; null if not yet. */
+    val transportStageSinceMs: Long? get() = null
     fun stop()
 }
 

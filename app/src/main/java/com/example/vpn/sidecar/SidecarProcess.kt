@@ -20,7 +20,10 @@ class SidecarProcess(
     @Volatile private var stopping = false
     @Volatile private var ready = false
     @Volatile private var failureHint: String? = null
-    @Volatile private var startupStage: String? = null
+    @Volatile override var startupStage: String? = null
+        private set
+    @Volatile override var transportStageSinceMs: Long? = null
+        private set
     private val psiphonStartup = PsiphonSidecar.StartupProgress()
     @Volatile override var startupFailure: String? = null
         private set
@@ -43,6 +46,9 @@ class SidecarProcess(
                         sawReadyLine = false
                         transportGeneration++
                         startupStage = stage
+                        // The first time a gateway was picked: how long the tunnel has had to start serving.
+                        if (stage == "transport" && !ready && transportStageSinceMs == null)
+                            transportStageSinceMs = System.currentTimeMillis()
                         XrayLogManager.i("BUILTIN", "aether · $stage · pending; traffic unverified")
                     }
                     if (name == AetherSidecar.ID && !ready && startupStage == "scan" &&

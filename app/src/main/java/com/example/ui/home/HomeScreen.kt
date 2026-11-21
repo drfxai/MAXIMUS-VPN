@@ -483,6 +483,12 @@ fun HomeScreen(
                                 Text(stringResource(R.string.connection_try_another_server), fontSize = 12.sp)
                             }
                         }
+                        // A pinned session (power button) never moves by itself; say what the button does there.
+                        if (!connectionState.smartSession) {
+                            Text(stringResource(R.string.connection_limited_bulk_pinned_hint),
+                                color = AppTheme.colors.textSecondary, fontSize = 11.sp,
+                                modifier = Modifier.testTag("connection_limited_bulk_pinned_hint"))
+                        }
                     }
                 }
             }

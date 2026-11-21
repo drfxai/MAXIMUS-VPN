@@ -251,8 +251,20 @@ class TrafficCheck(
      * One HTTP/1.1 request over a fresh connection, bounded by [stepTimeoutMs] in total: a socket write has
      * no timeout of its own, so a watchdog closes the socket at the deadline.
      */
+    /**
+     * A GET that reads at most [maxBytes] of the body and then closes the connection: for references whose body is
+     * large or endless (a video CDN), where only "the server answered 2xx and data started to flow" matters. A
+     * `Range` request asks for no more than that. Returns the status and the body bytes read (0..[maxBytes]); a
+     * 2xx answer that ends before [maxBytes] is not an error. Throws on any network failure or the deadline.
+     */
+    internal fun cappedGet(t: Target, maxBytes: Int): Response {
+        require(maxBytes in 1..MAX_BODY)
+        return exchange(t, "GET", null, keepBody = false,
+            extraHeaders = mapOf("Range" to "bytes=0-${maxBytes - 1}"), maxBodyBytes = maxBytes)
+    }
+
     internal fun exchange(t: Target, method: String, payload: ByteArray?, keepBody: Boolean, extraHeaders: Map<String, String> = emptyMap(),
-                          progress: ((Int) -> Unit)? = null, onBody: ((Int) -> Unit)? = null): Response {
+                          progress: ((Int) -> Unit)? = null, onBody: ((Int) -> Unit)? = null, maxBodyBytes: Int? = null): Response {
         require(method in setOf("GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"))
         require(extraHeaders.all { (key, value) -> key.matches(Regex("[A-Za-z0-9-]+")) &&
             value.length <= 8192 && value.none { it == '\r' || it == '\n' } &&
@@ -306,6 +318,9 @@ class TrafficCheck(
             val chunked = headers.second["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true
             val total = when {
                 method == "HEAD" || status == 204 || status == 304 -> 0
+                // Capped read: the first bytes of the body (raw, chunk framing included) and no more.
+                maxBodyBytes != null -> readFixed(input, if (!chunked && length != null) minOf(length, maxBodyBytes) else maxBodyBytes,
+                    body, counter, untilEof = true)
                 chunked -> readChunked(input, body, counter)
                 length != null -> readFixed(input, length, body, counter)
                 else -> readFixed(input, MAX_BODY, body, counter, untilEof = true)
