@@ -93,6 +93,9 @@ class RayVpnService : VpnService() {
         private const val VERIFY_RETRY_MS = 1_500L
         private const val SLOW_PROBE_STEP_MS = 20_000
         private const val SLOW_VERIFY_STEP_MS = 25_000L
+        /** How long tun.forwarded waits for other apps' traffic before it says "waiting" (not a failure). */
+        private const val TUN_FORWARD_WINDOW_MS = 90_000L
+        private const val TUN_FORWARD_POLL_MS = 3_000L
         private const val SLOW_VERIFY_CONFIG_MS = 90_000L
         /** Moves to the next working path after a stalled download, per Smart Connect. */
         private const val MAX_STALL_SWITCHES = com.example.vpn.smart.StallFailover.MAX_SWITCHES
@@ -206,6 +209,8 @@ class RayVpnService : VpnService() {
 
     /** The upload and download check of the current attempt. */
     private var trafficCheckJob: Job? = null
+    /** The session's tun.forwarded watch (self-excluded sessions only); separate so the relay gate never waits on it. */
+    private var tunForwardJob: Job? = null
 
     /** The remembered route (network, recipe id) the current session runs on, once verified. */
     @Volatile private var activeRoute: Pair<String, String>? = null
@@ -1698,6 +1703,9 @@ class RayVpnService : VpnService() {
             sidecarForwardProfile = profile.takeIf { sidecar != null }
             sidecarNetwork = ledgerNetwork().takeIf { sidecar != null }
             sidecarOwnerFingerprint = requestedProfile.effectiveFingerprint.takeIf { sidecar != null }
+            // The app is left out of its own VPN here, so the device (TUN) path cannot be dialed from the app
+            // (TunCheckPlan). A byte meter on the TUN → engine hop measures what the TUN forwards for other apps.
+            val xrayProfile = withTunForwardMeter(profile)
             val runtime = EngineSelectionPolicy.select(profile)
             val engineId = if (amnezia != null) com.example.vpn.engine.AmneziaNativeEngine.ID
                 else com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
@@ -1720,10 +1728,10 @@ class RayVpnService : VpnService() {
             showForegroundNotification("Connecting Proxy via ${activeEngine.engineType.displayName}...")
 
             val startResult = if (activeEngine is NativeTunVpnEngine) {
-                (activeEngine as NativeTunVpnEngine).startWithTun(profile, settings.copy(mtu = safeMtu), pfd.fd) { fd -> safeProtectFd(fd) }
+                (activeEngine as NativeTunVpnEngine).startWithTun(xrayProfile, settings.copy(mtu = safeMtu), pfd.fd) { fd -> safeProtectFd(fd) }
             } else {
                 activeEngine.start(
-                    profile = profile,
+                    profile = xrayProfile,
                     settings = settings,
                     protectSocket = { socket: Socket -> safeProtectSocket(socket) },
                     protectDatagram = { dSocket: DatagramSocket -> safeProtectDatagram(dSocket) }
@@ -1745,7 +1753,7 @@ class RayVpnService : VpnService() {
             // Native Xray owns the TUN fd directly; the Kotlin packet loop must not read it concurrently.
             if (activeEngine !is NativeTunVpnEngine) tunnelManager = TunnelManager(
                 vpnInterface = pfd,
-                profile = profile,
+                profile = xrayProfile,
                 settings = settings.copy(mtu = safeMtu),
                 protectSocket = { socket -> safeProtectSocket(socket) },
                 protectDatagram = { datagramSocket -> safeProtectDatagram(datagramSocket) },
@@ -2933,14 +2941,29 @@ class RayVpnService : VpnService() {
                         shieldInconclusive("check cancelled")
                         throw it
                     }
-                    registry.finish(testId, false, it.javaClass.simpleName,
-                        com.example.vpn.diagnostics.FailureStage.of(it))
-                    XrayLogManager.w("VPN", "Upload/download check could not run: ${it.javaClass.simpleName}")
+                    if (path == com.example.vpn.verify.ProbePath.TUN && com.example.vpn.verify.TunCheckPlan.isBindRefusal(it)) {
+                        // Android refused the app's socket on the VPN network: not testable, never a route failure.
+                        registry.notTestable(testId, com.example.vpn.verify.TunCheckPlan.bindRefusedResult(
+                            com.example.vpn.verify.TunCheckPlan.reasonOf(it)))
+                        shieldInconclusive("TUN check not testable")
+                        XrayLogManager.i("VPN", "Upload/download check not testable: ${com.example.vpn.verify.TunCheckPlan.reasonOf(it)}")
+                    } else {
+                        registry.finish(testId, false, it.javaClass.simpleName,
+                            com.example.vpn.diagnostics.FailureStage.of(it))
+                        XrayLogManager.w("VPN", "Upload/download check could not run: ${it.javaClass.simpleName}")
+                    }
                 }
                 .getOrNull() ?: return@launch
             if (!isActive || !evidence.appliesTo(_vpnState.value)) {
                 registry.cancel(testId, "stale connection attempt or network")
                 shieldInconclusive("session ended before the verdict")
+                return@launch
+            }
+            if (path == com.example.vpn.verify.ProbePath.TUN && evidence.bindRefused) {
+                // Nothing was measured: the app may not use its own VPN network. No evidence, no failover, no strike.
+                registry.notTestable(testId, com.example.vpn.verify.TunCheckPlan.bindRefusedResult(evidence.describe()))
+                shieldInconclusive("TUN check not testable")
+                XrayLogManager.i("VPN", "Upload/download check not testable: Android refused the app's socket on the VPN network.")
                 return@launch
             }
             registry.finish(testId, evidence.bidirectional, "${path.name}: ${evidence.diagLine(serverLabel)}",
@@ -3005,54 +3028,180 @@ class RayVpnService : VpnService() {
                 "detail" to evidence.describe()
             ))
 
-            // The engine's loopback SOCKS port proves only that the engine works. For
-            // sidecars, independently check the Android TUN route that other apps use.
-            // A failed/unavailable TUN check must not be advertised as a bulk PASS.
+            // The engine's loopback SOCKS port proves only that the engine works. For sidecars the device (TUN)
+            // path that other apps use is judged separately (TunCheckPlan).
             if (endpoint != null && isActive && _vpnState.value.attemptId == attemptId) {
-                val tunId = registry.queue("bulk.tun", state.sessionId,
-                    com.example.vpn.diagnostics.events.DiagEvent.profileRef(state.activeProfile?.id))
-                registry.start(tunId)
-                try {
-                    val step = if (slowTunnel()) SLOW_VERIFY_STEP_MS.toInt()
-                        else com.example.vpn.verify.TrafficCheck.stepTimeoutFor(requestMs)
-                    val tunEvidence = com.example.vpn.verify.TrafficCheck(
-                        com.example.vpn.verify.RouteDialers.vpn(this@RayVpnService), stepTimeoutMs = step,
-                        cloudflareWorkerExit = workerExit
-                    ).both(attemptId, generation, com.example.vpn.verify.ProbePath.TUN)
-                    if (!isActive || !tunEvidence.appliesTo(_vpnState.value)) {
-                        registry.cancel(tunId, "stale connection attempt or network")
-                        return@launch
-                    }
-                    registry.finish(tunId, tunEvidence.bidirectional, "TUN: ${tunEvidence.diagLine(serverLabel)}",
-                        if (tunEvidence.bidirectional) null else com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED)
-                    XrayLogManager.i("VPN", "Android TUN upload/download check: ${tunEvidence.diagLine(serverLabel)}")
-                    // Prefer device-level evidence over a PASS only at the engine port.
-                    mutateState { if (tunEvidence.appliesTo(it)) it.copy(trafficEvidence = tunEvidence) else it }
-                    if (tunEvidence.bidirectional) activeRoute?.let { (net, id) ->
-                        networkMemory.routes.markBidirectional(net, id)
-                    }
-                    onTransferChecked(attemptId, freezeNetwork, tunEvidence)
-                    com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
-                        "result" to if (tunEvidence.bidirectional) "verified" else if (tunEvidence.bulkStalled) "stalled" else "partial",
-                        "path" to "TUN", "server" to (serverLabel ?: "unknown"),
-                        "stall.bytes" to (tunEvidence.stallBytes?.toString() ?: "none"), "detail" to tunEvidence.describe()
-                    ))
-                } catch (e: CancellationException) {
-                    registry.cancel(tunId, "connection check cancelled")
-                    throw e
-                } catch (e: Exception) {
-                    // VPN binding can be unavailable for excluded-app sockets. This is
-                    // untested, never evidence that the physical ISP path worked.
-                    XrayLogManager.w("VPN", "Android TUN check unavailable: ${e.javaClass.simpleName}; local proxy success is not device-level proof")
-                    registry.finish(tunId, false, "TUN check unavailable: ${e.javaClass.simpleName}",
-                        com.example.vpn.diagnostics.FailureStage.of(e))
-                    com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
-                        "result" to "not_tested", "path" to "TUN",
-                        "detail" to "TUN probe could not run (${e.javaClass.simpleName})"
-                    ))
+                when (com.example.vpn.verify.TunCheckPlan.mode(appOutsideVpn)) {
+                    com.example.vpn.verify.TunCheckPlan.Mode.SELF_EXCLUDED ->
+                        recordTunNotTestable(state, serverLabel)
+                    com.example.vpn.verify.TunCheckPlan.Mode.BIND_PROBE ->
+                        runBoundTunCheck(state, attemptId, generation, requestMs, workerExit, serverLabel, freezeNetwork)
                 }
             }
         }
+    }
+
+    /**
+     * The app is excluded from its own VPN, so Android refuses its sockets on the VPN network and a bind-based
+     * bulk.tun cannot run (build 165: every sidecar failed in ~200-430 ms with a SocketException and 0 bytes).
+     * Recorded as not testable, never as a failure: no evidence is replaced, nothing switches or is marked. The
+     * device path is then judged by what the TUN forwards for other apps ([watchTunForwarded]).
+     */
+    private fun recordTunNotTestable(state: ConnectionState, serverLabel: String?) {
+        val registry = com.example.vpn.diagnostics.events.Tests.registry
+        val tunId = registry.queue("bulk.tun", state.sessionId,
+            com.example.vpn.diagnostics.events.DiagEvent.profileRef(state.activeProfile?.id))
+        registry.start(tunId)
+        registry.notTestable(tunId, com.example.vpn.verify.TunCheckPlan.selfExcludedResult(serverLabel))
+        XrayLogManager.i("VPN", "${com.example.vpn.verify.TunCheckPlan.SELF_EXCLUDED_LINE}: the engine program runs " +
+            "outside the TUN; the device path is measured from the traffic it forwards for other apps.")
+        com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
+            "result" to com.example.vpn.verify.TunCheckPlan.NOT_TESTABLE_SELF_EXCLUDED, "path" to "TUN",
+            "server" to (serverLabel ?: "unknown"),
+            "detail" to com.example.vpn.verify.TunCheckPlan.SELF_EXCLUDED_LINE
+        ))
+        watchTunForwarded(state)
+    }
+
+    /**
+     * tun.forwarded: watches the meter on the TUN → engine hop for up to [TUN_FORWARD_WINDOW_MS] and records
+     * whether other apps' traffic flowed both ways (≥ 32 KB down, some upstream, no engine errors). Informational:
+     * it never changes the connection state, starts a failover or marks a server.
+     */
+    private fun watchTunForwarded(state: ConnectionState) {
+        val attemptId = state.attemptId ?: return
+        val meter = com.example.vpn.verify.TunPathStatus.meter
+        val registry = com.example.vpn.diagnostics.events.Tests.registry
+        val id = registry.queue(com.example.vpn.verify.TunForwarded.EVENT, state.sessionId,
+            com.example.vpn.diagnostics.events.DiagEvent.profileRef(state.activeProfile?.id))
+        registry.start(id)
+        if (meter == null || meter.isClosed) {
+            registry.notTestable(id, "not measured: no meter on the TUN → engine hop for this session")
+            return
+        }
+        tunForwardJob?.cancel()
+        tunForwardJob = serviceScope.launch(Dispatchers.IO) {
+            val since = meter.snapshot()
+            var window = since
+            var verdict = com.example.vpn.verify.TunForwarded.State.WAITING
+            val deadline = System.currentTimeMillis() + TUN_FORWARD_WINDOW_MS
+            try {
+                while (isActive && _vpnState.value.attemptId == attemptId && !meter.isClosed) {
+                    delay(TUN_FORWARD_POLL_MS)
+                    window = meter.snapshot() - since
+                    verdict = com.example.vpn.verify.TunForwarded.verdict(window)
+                    if (verdict == com.example.vpn.verify.TunForwarded.State.VERIFIED) break
+                    if (System.currentTimeMillis() >= deadline) break
+                }
+            } catch (e: CancellationException) {
+                registry.cancel(id, "connection check cancelled")
+                throw e
+            }
+            if (_vpnState.value.attemptId != attemptId || meter.isClosed) {
+                registry.cancel(id, "stale connection attempt")
+                return@launch
+            }
+            com.example.vpn.verify.TunPathStatus.lastWindow = window
+            val line = "TUN: ${verdict.word} · ${com.example.vpn.verify.TunForwarded.describe(window)}"
+            when (verdict) {
+                com.example.vpn.verify.TunForwarded.State.VERIFIED -> registry.finish(id, true, line)
+                // The engine refused flows the TUN handed it: a real device-path problem, reported (not acted on).
+                com.example.vpn.verify.TunForwarded.State.FAILED -> registry.finish(id, false, line,
+                    com.example.vpn.diagnostics.FailureStage.TCP_CONNECT_FAILED)
+                else -> registry.notTestable(id, line)
+            }
+            XrayLogManager.i("VPN", "Android TUN forwarding (other apps' traffic): $line")
+            com.example.vpn.diagnostics.events.EventLog.event(com.example.vpn.verify.TunForwarded.EVENT,
+                attributes = com.example.vpn.verify.TunForwarded.attributes(window, verdict))
+        }
+    }
+
+    /**
+     * The app is inside its own VPN (no engine program left out): the bind-based bulk check through the VPN
+     * network. A refused bind is recorded as not testable, never as a route failure.
+     */
+    private suspend fun runBoundTunCheck(state: ConnectionState, attemptId: String, generation: Int, requestMs: Long?,
+                                         workerExit: Boolean, serverLabel: String?, freezeNetwork: String) {
+        val registry = com.example.vpn.diagnostics.events.Tests.registry
+        val tunId = registry.queue("bulk.tun", state.sessionId,
+            com.example.vpn.diagnostics.events.DiagEvent.profileRef(state.activeProfile?.id))
+        registry.start(tunId)
+        try {
+            com.example.vpn.verify.RouteDialers.vpnBindPreflight(this@RayVpnService)?.let { reason ->
+                registry.notTestable(tunId, com.example.vpn.verify.TunCheckPlan.bindRefusedResult(reason))
+                XrayLogManager.i("VPN", "Android TUN check not testable: $reason")
+                return
+            }
+            val step = if (slowTunnel()) SLOW_VERIFY_STEP_MS.toInt()
+                else com.example.vpn.verify.TrafficCheck.stepTimeoutFor(requestMs)
+            val tunEvidence = com.example.vpn.verify.TrafficCheck(
+                com.example.vpn.verify.RouteDialers.vpn(this@RayVpnService), stepTimeoutMs = step,
+                cloudflareWorkerExit = workerExit
+            ).both(attemptId, generation, com.example.vpn.verify.ProbePath.TUN)
+            if (!kotlinx.coroutines.currentCoroutineContext().isActive || !tunEvidence.appliesTo(_vpnState.value)) {
+                registry.cancel(tunId, "stale connection attempt or network")
+                return
+            }
+            if (tunEvidence.bindRefused) {
+                registry.notTestable(tunId, com.example.vpn.verify.TunCheckPlan.bindRefusedResult(tunEvidence.describe()))
+                XrayLogManager.i("VPN", "Android TUN check not testable: Android refused the app's socket on the VPN network.")
+                return
+            }
+            registry.finish(tunId, tunEvidence.bidirectional, "TUN: ${tunEvidence.diagLine(serverLabel)}",
+                if (tunEvidence.bidirectional) null else com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED)
+            XrayLogManager.i("VPN", "Android TUN upload/download check: ${tunEvidence.diagLine(serverLabel)}")
+            // Prefer device-level evidence over a PASS only at the engine port.
+            mutateState { if (tunEvidence.appliesTo(it)) it.copy(trafficEvidence = tunEvidence) else it }
+            if (tunEvidence.bidirectional) activeRoute?.let { (net, id) ->
+                networkMemory.routes.markBidirectional(net, id)
+            }
+            onTransferChecked(attemptId, freezeNetwork, tunEvidence)
+            com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
+                "result" to if (tunEvidence.bidirectional) "verified" else if (tunEvidence.bulkStalled) "stalled" else "partial",
+                "path" to "TUN", "server" to (serverLabel ?: "unknown"),
+                "stall.bytes" to (tunEvidence.stallBytes?.toString() ?: "none"), "detail" to tunEvidence.describe()
+            ))
+        } catch (e: CancellationException) {
+            registry.cancel(tunId, "connection check cancelled")
+            throw e
+        } catch (e: Exception) {
+            if (com.example.vpn.verify.TunCheckPlan.isBindRefusal(e)) {
+                registry.notTestable(tunId, com.example.vpn.verify.TunCheckPlan.bindRefusedResult(com.example.vpn.verify.TunCheckPlan.reasonOf(e)))
+                return
+            }
+            // Untested, never evidence that the physical ISP path worked.
+            XrayLogManager.w("VPN", "Android TUN check unavailable: ${e.javaClass.simpleName}; local proxy success is not device-level proof")
+            registry.finish(tunId, false, "TUN check unavailable: ${e.javaClass.simpleName}",
+                com.example.vpn.diagnostics.FailureStage.of(e))
+            com.example.vpn.diagnostics.events.EventLog.event("tunnel.bidirectional", attributes = mapOf(
+                "result" to "not_tested", "path" to "TUN",
+                "detail" to "TUN probe could not run (${e.javaClass.simpleName})"
+            ))
+        }
+    }
+
+    /**
+     * The profile Xray runs with: for an app left out of its own VPN with a loopback engine port, the SOCKS outbound
+     * goes through a [com.example.vpn.verify.TunForwardMeter] first. Any problem starting it leaves the profile as it
+     * was (the session runs without the meter).
+     */
+    private fun withTunForwardMeter(profile: VlessProfile): VlessProfile {
+        com.example.vpn.verify.TunPathStatus.reset()
+        com.example.vpn.verify.TunPathStatus.selfExcluded = appOutsideVpn
+        val endpoint = engineEndpoint ?: return profile
+        if (!appOutsideVpn || com.example.vpn.verify.Socks5.endpointOf(profile)?.port != endpoint.port) return profile
+        val meter = runCatching { com.example.vpn.verify.TunForwardMeter.start(endpoint.port) }.getOrNull() ?: run {
+            XrayLogManager.w("VPN", "TUN forwarding meter unavailable; the device path is not measured this session.")
+            return profile
+        }
+        val rewired = com.example.vpn.verify.TunForwardMeter.rewire(profile, meter.port)
+        if (rewired == null) {
+            meter.close()
+            return profile
+        }
+        com.example.vpn.verify.TunPathStatus.meter = meter
+        XrayLogManager.i("VPN", "TUN → engine traffic is counted on a local meter (tun.forwarded).")
+        return rewired
     }
 
     /**
@@ -3532,6 +3681,8 @@ class RayVpnService : VpnService() {
         pingJob = null
         trafficCheckJob?.cancel()
         trafficCheckJob = null
+        tunForwardJob?.cancel()
+        tunForwardJob = null
         engineEndpoint = null
         tunMtu = null
 
@@ -3546,6 +3697,8 @@ class RayVpnService : VpnService() {
 
         // Stop Xray before closing the TUN descriptor it owns.
         activeEngine.stop()
+        // The meter sits between Xray and the engine program: it goes with Xray.
+        com.example.vpn.verify.TunPathStatus.reset()
         if (!preserveSidecar) {
             sidecar?.stop()
             sidecar = null
