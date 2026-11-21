@@ -1,5 +1,7 @@
 package com.example.ui.vip
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -99,16 +101,16 @@ fun VipContent(state: VipUiState, c: LabColors, actions: VipActions) {
             item { AppBar(c, state, actions) }
             item { Header(c) }
             when {
-                state.total == 0 && (state.syncing || state.loading) -> item { EmptyCard(c, "Opening VIP", "Getting the VIP servers…", busy = true) }
+                state.total == 0 && (state.syncing || state.loading) -> item { EmptyCard(c, stringResource(R.string.ui_opening_vip), stringResource(R.string.ui_getting_the_vip_servers), busy = true) }
                 state.total == 0 -> item {
-                    EmptyCard(c, "No VIP servers yet", state.syncError?.let { "The VIP list could not be downloaded: $it" }
-                        ?: "VIP servers appear here as soon as they are published.", action = "Try again", onAction = actions.onRefresh)
+                    EmptyCard(c, stringResource(R.string.ui_no_vip_servers_yet), state.syncError?.let { "The VIP list could not be downloaded: $it" }
+                        ?: "VIP servers appear here as soon as they are published.", action = stringResource(R.string.ui_try_again), onAction = actions.onRefresh)
                 }
                 else -> {
                     item { Hero(c, state) }
                     item { Features(c) }
                     state.message?.let { m -> item { Message(c, m, actions.onDismissMessage) } }
-                    item { SectionHead(c, "VIP SERVERS · ${state.total}", state.testing, actions.onTestAll) }
+                    item { SectionHead(c, stringResource(R.string.ui_vip_servers, state.total), state.testing, actions.onTestAll) }
                     item {
                         val rows = state.rows
                         Column(Modifier.labCard(c)) {
@@ -162,7 +164,7 @@ private fun Header(c: LabColors) {
             style = TextStyle(brush = gold(c), fontFamily = InterFamily, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp)
         )
         Spacer(Modifier.height(4.dp))
-        LabText("Private servers, tested on your network", c.text2, 14.sp)
+        LabText(stringResource(R.string.ui_private_servers_tested_on_your), c.text2, 14.sp)
     }
 }
 
@@ -180,8 +182,8 @@ private fun Hero(c: LabColors, s: VipUiState) {
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                LabText("Private network", c.text, 16.sp, FontWeight.Bold, maxLines = 1)
-                LabText("${s.total} hand-picked server${if (s.total == 1) "" else "s"}", c.text2, 12.5.sp, maxLines = 1)
+                LabText(stringResource(R.string.ui_private_network), c.text, 16.sp, FontWeight.Bold, maxLines = 1)
+                LabText(androidx.compose.ui.platform.LocalContext.current.resources.getQuantityString(R.plurals.vip_hand_picked_servers, s.total, s.total), c.text2, 12.5.sp, maxLines = 1)
             }
             // Green only while the VPN really runs through a VIP server.
             val tint = if (s.connectedHere) c.good else c.accent
@@ -191,7 +193,7 @@ private fun Hero(c: LabColors, s: VipUiState) {
             ) {
                 Icon(if (s.connectedHere) Icons.Rounded.Check else Icons.Rounded.Shield, null, tint = tint, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(5.dp))
-                LabText(if (s.connectedHere) "Protected" else "Private", tint, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
+                LabText(if (s.connectedHere) stringResource(R.string.ui_protected) else stringResource(R.string.ui_private), tint, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -222,9 +224,9 @@ private fun Stat(c: LabColors, value: String, unit: String, label: String, modif
 @Composable
 private fun Features(c: LabColors) {
     Row(Modifier.padding(top = 12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Feature(c, Icons.Rounded.Lock, "Curated", "By MAXIMUS", Modifier.weight(1f))
-        Feature(c, Icons.Rounded.Bolt, "Live test", "Your network", Modifier.weight(1f))
-        Feature(c, Icons.Rounded.Sync, "Auto sync", "Every 6 h", Modifier.weight(1f))
+        Feature(c, Icons.Rounded.Lock, stringResource(R.string.ui_curated), stringResource(R.string.ui_by_maximus), Modifier.weight(1f))
+        Feature(c, Icons.Rounded.Bolt, stringResource(R.string.ui_live_test), stringResource(R.string.ui_your_network), Modifier.weight(1f))
+        Feature(c, Icons.Rounded.Sync, stringResource(R.string.ui_auto_sync), stringResource(R.string.ui_every_6_h), Modifier.weight(1f))
     }
 }
 
@@ -245,12 +247,12 @@ private fun SectionHead(c: LabColors, title: String, testing: Boolean, onTest: (
     Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         LabText(title, c.text2, 12.sp, FontWeight.SemiBold, letterSpacing = 1.sp, maxLines = 1, modifier = Modifier.weight(1f))
         if (!testing) Row(Modifier.clickable(onClick = onTest), verticalAlignment = Alignment.CenterVertically) {
-            LabText("Test all", c.accent, 13.sp, FontWeight.SemiBold, maxLines = 1)
+            LabText(stringResource(R.string.ui_test_all), c.accent, 13.sp, FontWeight.SemiBold, maxLines = 1)
             Icon(Icons.Rounded.ChevronRight, null, tint = c.accent, modifier = Modifier.size(15.dp))
         } else Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.size(12.dp), color = c.accent, strokeWidth = 1.5.dp)
             Spacer(Modifier.width(6.dp))
-            LabText("Testing", c.accent, 13.sp, FontWeight.SemiBold, maxLines = 1)
+            LabText(stringResource(R.string.ui_testing_4), c.accent, 13.sp, FontWeight.SemiBold, maxLines = 1)
         }
     }
 }
@@ -302,7 +304,7 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                     if (best) {
                         Spacer(Modifier.width(7.dp))
                         Box(Modifier.clip(RoundedCornerShape(6.dp)).background(gold(c)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                            LabText("BEST", c.onAccent, 10.sp, FontWeight.ExtraBold, letterSpacing = 0.8.sp, maxLines = 1)
+                            LabText(stringResource(R.string.ui_best), c.onAccent, 10.sp, FontWeight.ExtraBold, letterSpacing = 0.8.sp, maxLines = 1)
                         }
                     }
                 }
@@ -310,7 +312,7 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     val secure = node.secureLabel()
                     if (secure != null) Tag(secure, c.good, c.good.copy(alpha = 0.13f), Icons.Rounded.Lock)
-                    else Tag("Unencrypted", c.okay, c.okay.copy(alpha = 0.14f), Icons.Rounded.WarningAmber)
+                    else Tag(stringResource(R.string.ui_unencrypted), c.okay, c.okay.copy(alpha = 0.14f), Icons.Rounded.WarningAmber)
                     (listOf(node.protocol) + node.tags).filter { it != secure }.distinct().take(2).forEach { Tag(it, c.text2, c.cardAlt) }
                 }
             }
@@ -324,8 +326,8 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                 Spacer(Modifier.height(3.dp))
                 LabText(
                     when (node.health) {
-                        NodeHealth.FAST -> if ((node.latencyMs ?: Long.MAX_VALUE) <= EXCELLENT_MS) "Excellent" else "Fast"
-                        NodeHealth.SLOW -> "Slow"; NodeHealth.OFFLINE -> "Offline"; NodeHealth.QUEUED -> "Queued"
+                        NodeHealth.FAST -> if ((node.latencyMs ?: Long.MAX_VALUE) <= EXCELLENT_MS) stringResource(R.string.ui_excellent) else stringResource(R.string.ui_fast)
+                        NodeHealth.SLOW -> stringResource(R.string.ui_slow); NodeHealth.OFFLINE -> stringResource(R.string.ui_offline_2); NodeHealth.QUEUED -> stringResource(R.string.ui_queued)
                     }, c.text2, 11.5.sp, maxLines = 1
                 )
             }
@@ -380,7 +382,7 @@ private fun Dock(c: LabColors, best: FreeNode, modifier: Modifier, onConnect: ()
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                LabText("Connect VIP", c.onAccent, 16.sp, FontWeight.ExtraBold, maxLines = 1)
+                LabText(stringResource(R.string.ui_connect_vip), c.onAccent, 16.sp, FontWeight.ExtraBold, maxLines = 1)
                 LabText(
                     listOfNotNull(FreeConfigsUiState.countryName(best.country), "${best.protocol} ${best.secureLabel().orEmpty()}".trim(),
                         best.latencyMs?.let { "$it ms" }).joinToString(" · "),

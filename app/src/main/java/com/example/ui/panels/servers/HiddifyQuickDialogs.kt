@@ -1,5 +1,7 @@
 package com.example.ui.panels.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,13 +30,13 @@ internal fun HiddifyQuickDialog(vm: ServersViewModel, id: String, busy: Boolean,
     val state by vm.state.collectAsState()
     AlertDialog(
         onDismissRequest = { if (!busy) dismiss() },
-        title = { Text("Quick Hiddify config") },
+        title = { Text(stringResource(R.string.ui_quick_hiddify_config)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Create one user on this panel, then import its subscription into Nodes. This changes the server. If a reply is lost, Retry checks the pending user before creating anything else.")
-                OutlinedTextField(name, { name = it }, label = { Text("User name") }, singleLine = true)
-                OutlinedTextField(days, { days = it }, label = { Text("Expiry (days)") }, singleLine = true)
-                OutlinedTextField(quota, { quota = it }, label = { Text("Traffic quota (GB)") }, singleLine = true)
+                Text(stringResource(R.string.ui_create_one_user_on_this))
+                OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.ui_user_name)) }, singleLine = true)
+                OutlinedTextField(days, { days = it }, label = { Text(stringResource(R.string.ui_expiry_days)) }, singleLine = true)
+                OutlinedTextField(quota, { quota = it }, label = { Text(stringResource(R.string.ui_traffic_quota_gb)) }, singleLine = true)
                 if (busy) Text(state.busy)
                 if (state.error.isNotBlank()) Text(state.error)
             }
@@ -43,10 +45,10 @@ internal fun HiddifyQuickDialog(vm: ServersViewModel, id: String, busy: Boolean,
             TextButton(enabled = !busy && name.isNotBlank() && name.length <= 80 &&
                 (days.toIntOrNull() ?: 0) in 1..10000 && (quota.toIntOrNull() ?: 0) in 1..1000000,
                 onClick = { vm.quickHiddifyUser(id, name, days.toInt(), quota.toInt(), dismiss) }) {
-                Text("Create & import")
+                Text(stringResource(R.string.ui_create_import))
             }
         },
-        dismissButton = { TextButton(onClick = dismiss, enabled = !busy) { Text("Cancel") } }
+        dismissButton = { TextButton(onClick = dismiss, enabled = !busy) { Text(stringResource(R.string.ui_cancel)) } }
     )
 }
 
@@ -57,20 +59,20 @@ internal fun HiddifyTelegramDialog(vm: ServersViewModel, id: String, busy: Boole
     val state by vm.state.collectAsState()
     AlertDialog(
         onDismissRequest = { if (!busy) dismiss() },
-        title = { Text("Telegram proxy / Web proxy") },
+        title = { Text(stringResource(R.string.ui_telegram_proxy_web_proxy)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Read links enabled by Hiddify. A Web proxy is listed separately from raw MTProto; neither is assumed to have verified CDN support. Paste a user page link, or leave blank to use the last created user.")
-                OutlinedTextField(userLink, { userLink = it; links = emptyList() }, label = { Text("Hiddify user link (optional)") },
+                Text(stringResource(R.string.ui_read_links_enabled_by_hiddify))
+                OutlinedTextField(userLink, { userLink = it; links = emptyList() }, label = { Text(stringResource(R.string.ui_hiddify_user_link_optional)) },
                     visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
                 if (busy) Text(state.busy)
                 if (state.error.isNotBlank()) Text(state.error)
                 links.forEachIndexed { index, link ->
-                    TextButton(onClick = { copy(link.link) }, enabled = !busy) { Text("Copy ${link.title} ${index + 1}") }
+                    TextButton(onClick = { copy(link.link) }, enabled = !busy) { Text(stringResource(R.string.ui_copy_2, link.title, index + 1)) }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { vm.hiddifyTelegram(id, userLink) { links = it } }, enabled = !busy) { Text("Get links") } },
-        dismissButton = { TextButton(onClick = dismiss, enabled = !busy) { Text("Close") } }
+        confirmButton = { TextButton(onClick = { vm.hiddifyTelegram(id, userLink) { links = it } }, enabled = !busy) { Text(stringResource(R.string.ui_get_links)) } },
+        dismissButton = { TextButton(onClick = dismiss, enabled = !busy) { Text(stringResource(R.string.ui_close)) } }
     )
 }

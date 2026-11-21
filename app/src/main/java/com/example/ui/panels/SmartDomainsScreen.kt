@@ -1,5 +1,7 @@
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.app.Application
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -323,7 +325,7 @@ internal fun SmartDomainsScreen(onBack: () -> Unit, vm: SmartDomainsViewModel = 
 
     val openTokenPage = {
         runCatching { CloudflareTokenHelper.openTokenUrl(context, CloudflareTokenHelper.buildSmartDomainsTokenUrl()) }
-            .onFailure { Toast.makeText(context, "Cannot open Cloudflare in a browser", Toast.LENGTH_SHORT).show() }
+            .onFailure { Toast.makeText(context, context.getString(R.string.ui_cannot_open_cloudflare_in_a), Toast.LENGTH_SHORT).show() }
         Unit
     }
     val useCopied = {
@@ -331,16 +333,16 @@ internal fun SmartDomainsScreen(onBack: () -> Unit, vm: SmartDomainsViewModel = 
         if (token != null) vm.useCopiedToken(token)
         else {
             copiedHint = null
-            Toast.makeText(context, "No token on the clipboard. Copy it in Cloudflare first.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.ui_no_token_on_the_clipboard), Toast.LENGTH_SHORT).show()
         }
     }
 
     ScreenFrame(
-        title = "Smart domains",
+        title = stringResource(R.string.ui_smart_domains),
         subtitle = when {
-            ui.connected && ui.fill != null -> "Ready to create"
-            ui.connected -> "Names on your own Cloudflare domain"
-            else -> "Panels → Cloudflare"
+            ui.connected && ui.fill != null -> stringResource(R.string.ui_ready_to_create)
+            ui.connected -> stringResource(R.string.ui_names_on_your_own_cloudflare_2)
+            else -> stringResource(R.string.ui_panels_cloudflare)
         },
         onBack = onBack
     ) {
@@ -354,18 +356,18 @@ internal fun SmartDomainsScreen(onBack: () -> Unit, vm: SmartDomainsViewModel = 
 
     confirmRemove?.let { n ->
         ConfirmDialog(
-            title = "Remove ${n.name}?",
-            text = "The DNS record is deleted in Cloudflare, only if it still points at ${n.address}. Configs that use this name stop working.",
-            action = "Remove",
+            title = stringResource(R.string.ui_remove_2, n.name),
+            text = stringResource(R.string.ui_the_dns_record_is_deleted, n.address),
+            action = stringResource(R.string.ui_remove),
             onConfirm = { vm.remove(n) },
             onDismiss = { confirmRemove = null }
         )
     }
     if (confirmForget) {
         ConfirmDialog(
-            title = "Forget the token?",
-            text = "The DNS token is deleted from this phone. Names already made stay in Cloudflare.",
-            action = "Forget",
+            title = stringResource(R.string.ui_forget_the_token),
+            text = stringResource(R.string.ui_the_dns_token_is_deleted),
+            action = stringResource(R.string.ui_forget),
             onConfirm = { vm.forgetToken() },
             onDismiss = { confirmForget = false }
         )
@@ -384,14 +386,14 @@ private fun ConnectContent(
 ) {
     var manual by remember { mutableStateOf(false) }
     GroupCard {
-        TokenStep(1, "Create token", active = true) {
+        TokenStep(1, stringResource(R.string.ui_create_token), active = true) {
             CloudflarePageText()
             TokenChips(TokenTemplate.SMART_DOMAINS_NAME, TokenTemplate.SMART_DOMAINS.map { it.label } + "Your zones")
             PrimaryButton("Create token in Cloudflare", openTokenPage, Modifier.fillMaxWidth(), icon = Icons.AutoMirrored.Rounded.OpenInNew)
         }
         RowDivider(0.dp)
-        TokenStep(2, "Paste it back", active = copiedHint != null) {
-            StepText("When you come back, Maximus offers the copied token. Tap once to check it.")
+        TokenStep(2, stringResource(R.string.ui_paste_it_back), active = copiedHint != null) {
+            StepText(stringResource(R.string.ui_when_you_come_back_maximus_2))
             if (copiedHint != null) {
                 PrimaryButton(
                     if (ui.checking) "Checking…" else "Use copied token $copiedHint", useCopied, Modifier.fillMaxWidth(),
@@ -400,11 +402,11 @@ private fun ConnectContent(
             }
             if (manual || ui.tokenInput.isNotBlank() || ui.hasToken) {
                 SvField(
-                    value = ui.tokenInput, onValueChange = vm::setToken, label = "API token", secret = true,
-                    placeholder = if (ui.hasToken) "A token is saved; paste a new one to replace it" else ""
+                    value = ui.tokenInput, onValueChange = vm::setToken, label = stringResource(R.string.ui_api_token), secret = true,
+                    placeholder = if (ui.hasToken) stringResource(R.string.ui_a_token_is_saved_paste) else ""
                 )
                 GhostButton(
-                    if (ui.checking) "Checking…" else "Check token", vm::checkToken, Modifier.fillMaxWidth(),
+                    if (ui.checking) stringResource(R.string.ui_checking) else stringResource(R.string.ui_check_token), vm::checkToken, Modifier.fillMaxWidth(),
                     enabled = !ui.checking && (ui.tokenInput.isNotBlank() || ui.hasToken)
                 )
             } else {
@@ -412,8 +414,8 @@ private fun ConnectContent(
             }
         }
         RowDivider(0.dp)
-        TokenStep(3, "Confirm", active = false) {
-            StepText("Maximus fills in the domain, the subdomain, the server and the Cloudflare setting. You tap Confirm.")
+        TokenStep(3, stringResource(R.string.ui_confirm), active = false) {
+            StepText(stringResource(R.string.ui_maximus_fills_in_the_domain))
         }
     }
     if (ui.error.isNotBlank()) Notice(ui.error, NoticeKind.ERROR)
@@ -433,11 +435,11 @@ private fun FillContent(ui: SmartDomainsUi, fill: SmartFill.Fill, vm: SmartDomai
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Badge("Token works", Tone.GOOD, dot = true)
+        Badge(stringResource(R.string.ui_token_works), Tone.GOOD, dot = true)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             val count = ui.zones.size
-            Text(if (count == 1) "1 domain found" else "$count domains found", color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (count == 1) stringResource(R.string.ui_t_1_domain_found) else stringResource(R.string.ui_domains_found, count), color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 "${zone.name} · ${SmartNames.zoneStatus(zone.status).lowercase()}", color = Sv.Muted, fontSize = 13.sp,
                 fontFamily = Mono, maxLines = 1, overflow = TextOverflow.Ellipsis
@@ -445,17 +447,17 @@ private fun FillContent(ui: SmartDomainsUi, fill: SmartFill.Fill, vm: SmartDomai
         }
     }
     if (ui.zones.size > 1 && active.size != 1) {
-        Text("This token sees ${ui.zones.size} domains. Pick one:", color = Sv.Muted, fontSize = 12.5.sp)
+        Text(stringResource(R.string.ui_this_token_sees_domains_pick, ui.zones.size), color = Sv.Muted, fontSize = 12.5.sp)
         Choices(ui.zones, zone, { it.name }, mono = true, enabled = idle) { vm.pickZone(it) }
     }
 
     SectionLabel("Filled in for you")
     GroupCard {
-        FillRow("Server", fill.title) { Text(fill.server.address, color = Sv.Muted, fontSize = 13.sp, fontFamily = Mono, maxLines = 1) }
+        FillRow(stringResource(R.string.ui_server), fill.title) { Text(fill.server.address, color = Sv.Muted, fontSize = 13.sp, fontFamily = Mono, maxLines = 1) }
         RowDivider()
-        FillRow("Subdomain", "${ui.label}.${zone.name}", mono = true) { TextAction("change", vm::newLabel, color = Sv.Muted, enabled = idle) }
+        FillRow(stringResource(R.string.ui_subdomain), "${ui.label}.${zone.name}", mono = true) { TextAction("change", vm::newLabel, color = Sv.Muted, enabled = idle) }
         RowDivider()
-        FillRow("Cloudflare setting", if (ui.use.proxied) "Proxied (orange cloud)" else "DNS only (grey cloud)") {
+        FillRow(stringResource(R.string.ui_cloudflare_setting), if (ui.use.proxied) "Proxied (orange cloud)" else "DNS only (grey cloud)") {
             Badge(SmartNames.chip(ui.use), if (ui.use.proxied) Tone.ACCENT else Tone.NEUTRAL, dot = true)
         }
         RowDivider()
@@ -495,27 +497,27 @@ private fun ConnectedContent(ui: SmartDomainsUi, vm: SmartDomainsViewModel, onRe
     val idle = ui.busy.isBlank()
 
     GroupCard {
-        InfoRow(zone.name, "Token can read zones and edit DNS here only") {
+        InfoRow(zone.name, stringResource(R.string.ui_token_can_read_zones_and)) {
             Badge(SmartNames.zoneStatus(zone.status), if (zone.status == "active") Tone.GOOD else Tone.WARN, dot = true)
         }
         if (ui.zones.size > 1) {
             Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("This token sees ${ui.zones.size} domains. Pick one:", color = Sv.Muted, fontSize = 12.5.sp)
+                Text(stringResource(R.string.ui_this_token_sees_domains_pick, ui.zones.size), color = Sv.Muted, fontSize = 12.5.sp)
                 Choices(ui.zones, zone, { it.name }, mono = true, enabled = idle) { vm.pickZone(it) }
             }
         }
         RowDivider()
         InfoRow(
-            "SSL/TLS mode",
-            "Set it to Full (strict) in Cloudflare. The token cannot read this setting, so the app does not show it as checked."
-        ) { Badge("Set it yourself", Tone.WARN, dot = true) }
+            stringResource(R.string.ui_ssl_tls_mode),
+            stringResource(R.string.ui_set_it_to_full_strict)
+        ) { Badge(stringResource(R.string.ui_set_it_yourself), Tone.WARN, dot = true) }
     }
 
     SectionLabel("Your names")
     GroupCard {
         if (ui.names.isEmpty()) {
             Text(
-                "No names yet. Names you make here are listed on this phone.",
+                stringResource(R.string.ui_no_names_yet_names_you),
                 color = Sv.Muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
             )
         } else {
@@ -533,18 +535,18 @@ private fun ConnectedContent(ui: SmartDomainsUi, vm: SmartDomainsViewModel, onRe
     SectionLabel("New name")
     SvCard {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("What is it for?", color = Sv.Muted, fontSize = 13.sp)
+            Text(stringResource(R.string.ui_what_is_it_for), color = Sv.Muted, fontSize = 13.sp)
             Choices(Use.values().toList(), ui.use, SmartNames::chip, enabled = idle) { vm.setUse(it) }
             NameField(ui.label, zone.name, vm::setLabel, vm::newLabel)
             SmartDomains.labelProblem(ui.label)?.let { FieldError(it) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SvField(
-                    value = ui.address, onValueChange = vm::setAddress, label = "Server address", modifier = Modifier.weight(1f),
+                    value = ui.address, onValueChange = vm::setAddress, label = stringResource(R.string.ui_server_address), modifier = Modifier.weight(1f),
                     placeholder = "203.0.113.24", keyboard = KeyboardType.Uri, mono = true
                 )
                 if (ui.use != Use.DNS_TUNNEL) {
                     SvField(
-                        value = ui.port, onValueChange = vm::setPort, label = "Port", modifier = Modifier.width(104.dp),
+                        value = ui.port, onValueChange = vm::setPort, label = stringResource(R.string.ui_port), modifier = Modifier.width(104.dp),
                         keyboard = KeyboardType.Number, mono = true
                     )
                 }
@@ -561,7 +563,7 @@ private fun ConnectedContent(ui: SmartDomainsUi, vm: SmartDomainsViewModel, onRe
 
     ui.conflict?.let { (name, text) ->
         SectionLabel("When a name is already used")
-        GroupCard { InfoRow(name, text, mono = true) { Badge("In use", Tone.WARN, dot = true) } }
+        GroupCard { InfoRow(name, text, mono = true) { Badge(stringResource(R.string.ui_in_use), Tone.WARN, dot = true) } }
     }
     if (ui.outcome.isNotBlank()) Notice(ui.outcome, NoticeKind.OK)
     if (ui.error.isNotBlank()) Notice(ui.error, NoticeKind.ERROR)
@@ -613,7 +615,7 @@ private fun <T> Choices(
 private fun NameField(label: String, zone: String, onChange: (String) -> Unit, onRegenerate: () -> Unit) {
     OutlinedTextField(
         value = label, onValueChange = onChange, modifier = Modifier.fillMaxWidth(),
-        label = { Text("Name") }, singleLine = true,
+        label = { Text(stringResource(R.string.ui_name)) }, singleLine = true,
         textStyle = TextStyle(fontSize = 15.sp, fontFamily = Mono),
         suffix = { Text(".$zone", color = Sv.Dim, fontSize = 15.sp, fontFamily = Mono, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         trailingIcon = { IconButton(onClick = onRegenerate) { Icon(Icons.Rounded.Refresh, "New random name", tint = Sv.Blue) } },
@@ -639,6 +641,6 @@ private fun ConfirmDialog(title: String, text: String, action: String, onConfirm
         title = { Text(title, color = Sv.Text) },
         text = { Text(text, color = Sv.Muted) },
         confirmButton = { TextButton(onClick = { onConfirm(); onDismiss() }) { Text(action, color = Sv.Red) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Sv.Muted) } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.ui_cancel), color = Sv.Muted) } }
     )
 }

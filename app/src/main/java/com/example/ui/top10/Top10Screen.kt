@@ -1,5 +1,7 @@
 package com.example.ui.top10
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -166,13 +168,13 @@ fun Top10Screen(
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "No Tested Nodes Available",
+                        text = stringResource(R.string.ui_no_tested_nodes_available),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Run a benchmark from the Benchmark tab to rank your servers.",
+                        text = stringResource(R.string.ui_run_a_benchmark_from_the),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -308,7 +310,7 @@ private fun RankedNodeCard(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Connect",
+                    text = stringResource(R.string.ui_connect_2),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )

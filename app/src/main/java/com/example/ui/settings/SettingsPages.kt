@@ -1,5 +1,7 @@
 package com.example.ui.settings
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Code
@@ -101,9 +104,9 @@ fun ConnectionSettingsPage(
     var showScoring by rememberSaveable { mutableStateOf(false) }
     var showEngines by rememberSaveable { mutableStateOf(false) }
     Column {
-        SettingsTopBar("Connection", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_connection), onBack = onBack)
         SettingsPageColumn {
-            SettingsSectionLabel("Smart Connect optimises for", first = true)
+            SettingsSectionLabel(stringResource(R.string.ui_smart_connect_optimises_for), first = true)
             SettingsGroup {
                 Column(Modifier.padding(16.dp)) {
                     SettingsChips(
@@ -116,7 +119,7 @@ fun ConnectionSettingsPage(
                 }
                 SettingsDivider(inset = false)
                 SettingsNavRow(
-                    title = "How servers are scored",
+                    title = stringResource(R.string.ui_how_servers_are_scored),
                     subtitle = settings.scoringProfile.description,
                     icon = Icons.Default.Info,
                     iconTint = AppTheme.colors.textSecondary,
@@ -124,38 +127,38 @@ fun ConnectionSettingsPage(
                 )
             }
 
-            SettingsSectionLabel("Failover")
+            SettingsSectionLabel(stringResource(R.string.ui_failover))
             SettingsGroup {
                 SettingsSwitchRow(
-                    title = "Automated failover",
-                    subtitle = "Switch to the next best server on >30% loss or >800 ms",
+                    title = stringResource(R.string.ui_automated_failover),
+                    subtitle = stringResource(R.string.ui_switch_to_the_next_best),
                     icon = Icons.Default.SwapHoriz,
                     checked = settings.autoFailoverEnabled,
                     onCheckedChange = actions::setAutoFailover
                 )
                 SettingsDivider()
                 SettingsSwitchRow(
-                    title = "Power button fallback",
+                    title = stringResource(R.string.ui_power_button_fallback),
                     subtitle = if (settings.powerButtonFallback)
-                        "Your server first; recovery engines (MASQUE, Psiphon, Tor) only if it carries no traffic"
-                    else "Starts only the selected config",
+                        stringResource(R.string.ui_your_server_first_recovery_engines)
+                    else stringResource(R.string.ui_starts_only_the_selected_config),
                     icon = Icons.Default.PowerSettingsNew,
                     checked = settings.powerButtonFallback,
                     onCheckedChange = actions::setPowerButtonFallback
                 )
                 SettingsDivider()
                 SettingsNavRow(
-                    title = "Learned network data",
+                    title = stringResource(R.string.ui_learned_network_data),
                     subtitle = learnedSummary,
                     icon = Icons.Default.Psychology,
                     onClick = onOpenLearnedNetworks
                 )
             }
 
-            SettingsSectionLabel("Proxy core")
+            SettingsSectionLabel(stringResource(R.string.ui_proxy_core))
             SettingsGroup {
                 SettingsNavRow(
-                    title = "Engine",
+                    title = stringResource(R.string.ui_engine),
                     subtitle = SettingsLabels.engineTitle(settings.preferredEngine),
                     icon = Icons.Default.Memory,
                     modifier = Modifier.testTag("settings_engine_row"),
@@ -163,19 +166,19 @@ fun ConnectionSettingsPage(
                 )
             }
 
-            SettingsAdvanced(title = "Local proxy mode") {
+            SettingsAdvanced(title = stringResource(R.string.ui_local_proxy_mode)) {
                 SettingsGroup {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Local SOCKS5 proxy", color = AppTheme.colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.ui_local_socks5_proxy), color = AppTheme.colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                         Text(
-                            "Serves the selected server to apps configured with SOCKS5. Device-wide VPN and the packet guard are inactive in this mode.",
+                            stringResource(R.string.ui_serves_the_selected_server_to),
                             color = AppTheme.colors.textMuted, fontSize = 12.5.sp, lineHeight = 17.sp
                         )
                         localProxy.error?.let { Text(it, color = AppTheme.colors.statusWarning, fontSize = 12.5.sp) }
                         if (localProxy.running) {
                             SelectionContainer {
                                 Text(
-                                    "SOCKS5 127.0.0.1:${localProxy.port}\nUsername: ${localProxy.user}\nPassword: ${localProxy.password}",
+                                    stringResource(R.string.ui_socks5_127_0_0_1, localProxy.port, localProxy.user, localProxy.password),
                                     fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = AppTheme.colors.primary
                                 )
                             }
@@ -194,9 +197,9 @@ fun ConnectionSettingsPage(
                         ) {
                             Text(
                                 when {
-                                    localProxy.starting -> "Cancel proxy startup"
-                                    localProxy.running -> "Stop local proxy"
-                                    else -> "Start selected server as local proxy"
+                                    localProxy.starting -> stringResource(R.string.ui_cancel_proxy_startup)
+                                    localProxy.running -> stringResource(R.string.ui_stop_local_proxy)
+                                    else -> stringResource(R.string.ui_start_selected_server_as_local)
                                 }
                             )
                         }
@@ -212,7 +215,7 @@ fun ConnectionSettingsPage(
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = AppTheme.colors.surfaceCard
         ) {
-            SheetTitle("How servers are scored", "Smart Connect ranks servers with these weights")
+            SheetTitle(stringResource(R.string.ui_how_servers_are_scored), stringResource(R.string.ui_smart_connect_ranks_servers_with))
             Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
                 ScoringProfile.values().forEach { profile ->
                     SettingsChoiceRow(
@@ -233,7 +236,7 @@ fun ConnectionSettingsPage(
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = AppTheme.colors.surfaceCard
         ) {
-            SheetTitle("Proxy core", "Used for configs that more than one engine can run")
+            SheetTitle(stringResource(R.string.ui_proxy_core), stringResource(R.string.ui_used_for_configs_that_more))
             Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
                 SettingsLabels.engines.forEach { engine ->
                     SettingsChoiceRow(
@@ -279,9 +282,9 @@ fun RoutingDnsSettingsPage(
 ) {
     var showDns by rememberSaveable { mutableStateOf(false) }
     Column {
-        SettingsTopBar("Routing & DNS", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_routing_dns), onBack = onBack)
         SettingsPageColumn {
-            SettingsSectionLabel("Routing", first = true)
+            SettingsSectionLabel(stringResource(R.string.ui_routing), first = true)
             SettingsGroup {
                 SettingsLabels.routingModes.forEachIndexed { index, mode ->
                     if (index > 0) SettingsDivider(inset = false)
@@ -295,10 +298,10 @@ fun RoutingDnsSettingsPage(
             }
 
             if (onOpenSplitTunnel != null) {
-                SettingsSectionLabel("Apps")
+                SettingsSectionLabel(stringResource(R.string.ui_apps))
                 SettingsGroup {
                     SettingsNavRow(
-                        title = "Per-app routing",
+                        title = stringResource(R.string.ui_per_app_routing),
                         subtitle = splitTunnelSummary ?: "Every app on this phone",
                         icon = Icons.Default.Apps,
                         modifier = Modifier.testTag("settings_split_tunnel_row"),
@@ -310,7 +313,7 @@ fun RoutingDnsSettingsPage(
             SettingsSectionLabel("DNS")
             SettingsGroup {
                 SettingsNavRow(
-                    title = "DNS provider",
+                    title = stringResource(R.string.ui_dns_provider),
                     subtitle = SettingsLabels.dns(settings.dnsServer),
                     icon = Icons.Default.Dns,
                     modifier = Modifier.testTag("settings_dns_row"),
@@ -318,7 +321,7 @@ fun RoutingDnsSettingsPage(
                 )
                 SettingsDivider()
                 SettingsNavRow(
-                    title = "Test current VPN DNS",
+                    title = stringResource(R.string.ui_test_current_vpn_dns),
                     icon = Icons.Default.NetworkCheck,
                     enabled = !dnsTestRunning,
                     trailing = { if (dnsTestRunning) SmallSpinner() },
@@ -326,7 +329,7 @@ fun RoutingDnsSettingsPage(
                 )
                 SettingsDivider()
                 SettingsNavRow(
-                    title = "Test selected resolver",
+                    title = stringResource(R.string.ui_test_selected_resolver),
                     icon = Icons.Default.TravelExplore,
                     enabled = !dnsTestRunning,
                     trailing = {},
@@ -334,23 +337,23 @@ fun RoutingDnsSettingsPage(
                 )
                 SettingsDivider()
                 SettingsNavRow(
-                    title = "Compare encrypted DNS",
-                    subtitle = "Measure Cloudflare, Google and Quad9 on this connection",
+                    title = stringResource(R.string.ui_compare_encrypted_dns),
+                    subtitle = stringResource(R.string.ui_measure_cloudflare_google_and_quad9),
                     icon = Icons.Default.Speed,
                     enabled = !dnsTestRunning,
                     onClick = onCompareResolvers
                 )
             }
             SettingsFootnote(
-                if (dnsTestRunning) "Testing DNS on this connection…"
+                if (dnsTestRunning) stringResource(R.string.ui_testing_dns_on_this_connection)
                 else dnsTestResult ?: "DNS changes apply the next time you connect."
             )
 
-            SettingsSectionLabel("Resolvers")
+            SettingsSectionLabel(stringResource(R.string.ui_resolvers))
             SettingsGroup {
                 SettingsNavRow(
-                    title = "Resolver databases",
-                    subtitle = "Update, roll back and refresh clean IPs",
+                    title = stringResource(R.string.ui_resolver_databases),
+                    subtitle = stringResource(R.string.ui_update_roll_back_and_refresh),
                     icon = Icons.Default.Storage,
                     onClick = onOpenResolverData
                 )
@@ -364,11 +367,11 @@ fun RoutingDnsSettingsPage(
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = AppTheme.colors.surfaceCard
         ) {
-            SheetTitle("DNS provider", "DoH encrypts queries. UDP presets use plain DNS.")
+            SheetTitle(stringResource(R.string.ui_dns_provider), stringResource(R.string.ui_doh_encrypts_queries_udp_presets))
             Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
                 val default = AppSettings().dnsServer
                 SettingsChoiceRow(
-                    title = "Use default DNS",
+                    title = stringResource(R.string.ui_use_default_dns),
                     subtitle = SettingsLabels.dns(default),
                     selected = false,
                     onSelect = { actions.setDnsServer(default); showDns = false }
@@ -382,8 +385,8 @@ fun RoutingDnsSettingsPage(
                 }
                 val isCustom = SettingsLabels.dnsPresets.none { it.first == settings.dnsServer }
                 SettingsChoiceRow(
-                    title = "Custom DNS…",
-                    subtitle = if (isCustom) settings.dnsServer else "IP address or DoH URL",
+                    title = stringResource(R.string.ui_custom_dns),
+                    subtitle = if (isCustom) settings.dnsServer else stringResource(R.string.ui_ip_address_or_doh_url),
                     selected = isCustom,
                     onSelect = { showDns = false; onCustomDns() }
                 )
@@ -407,13 +410,13 @@ fun AntiCensorshipSettingsPage(
 ) {
     val desync = settings.defaultDesyncConfig
     Column {
-        SettingsTopBar("Anti-censorship", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_anti_censorship), onBack = onBack)
         SettingsPageColumn {
-            SettingsSectionLabel("SNI spoofing & bypass engine", first = true)
+            SettingsSectionLabel(stringResource(R.string.ui_sni_spoofing_bypass_engine), first = true)
             SettingsGroup {
                 SettingsSwitchRow(
-                    title = "Desync packet mutation",
-                    subtitle = "Split, reorder and inject a decoy SNI to get past DPI filters",
+                    title = stringResource(R.string.ui_desync_packet_mutation),
+                    subtitle = stringResource(R.string.ui_split_reorder_and_inject_a),
                     icon = Icons.Default.VpnLock,
                     checked = desync.enabled,
                     onCheckedChange = { enabled ->
@@ -423,7 +426,7 @@ fun AntiCensorshipSettingsPage(
                 if (desync.enabled) {
                     SettingsDivider(inset = false)
                     Column(Modifier.padding(16.dp)) {
-                        Text("Preset", color = AppTheme.colors.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.ui_preset), color = AppTheme.colors.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(10.dp))
                         SettingsChips(
                             options = SettingsLabels.desyncPresets,
@@ -449,12 +452,12 @@ fun AntiCensorshipSettingsPage(
                 }
             }
             if (desync.enabled) {
-                SettingsAdvanced(title = "Advanced · fake SNI pool") {
+                SettingsAdvanced(title = stringResource(R.string.ui_advanced_fake_sni_pool)) {
                     SettingsGroup {
                         Column(Modifier.padding(16.dp)) {
-                            Text("Multi-domain fake SNI pool", color = AppTheme.colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.ui_multi_domain_fake_sni_pool_2), color = AppTheme.colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.height(2.dp))
-                            Text("Comma-separated decoy domains", color = AppTheme.colors.textMuted, fontSize = 12.5.sp)
+                            Text(stringResource(R.string.ui_comma_separated_decoy_domains), color = AppTheme.colors.textMuted, fontSize = 12.5.sp)
                             Spacer(Modifier.height(12.dp))
                             OutlinedTextField(
                                 value = desync.fakeSniPool,
@@ -472,13 +475,13 @@ fun AntiCensorshipSettingsPage(
                 }
             }
 
-            SettingsSectionLabel("Free configs")
+            SettingsSectionLabel(stringResource(R.string.ui_free_configs_2))
             SettingsGroup {
                 SettingsSwitchRow(
-                    title = "Free configs",
+                    title = stringResource(R.string.ui_free_configs_2),
                     subtitle = if (settings.freeConfigsEnabled)
-                        "Downloads the free public server list into Servers and Free Configs"
-                    else "Nothing is downloaded, tested or shown",
+                        stringResource(R.string.ui_downloads_the_free_public_server)
+                    else stringResource(R.string.ui_nothing_is_downloaded_tested_or),
                     icon = Icons.Default.Public,
                     checked = settings.freeConfigsEnabled,
                     onCheckedChange = actions::setFreeConfigs
@@ -510,41 +513,41 @@ fun PrivacySettingsPage(
     onRequestBackgroundRunning: (() -> Unit)? = null
 ) {
     Column {
-        SettingsTopBar("Privacy & security", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_privacy_security), onBack = onBack)
         SettingsPageColumn {
-            SettingsSectionLabel("Protection", first = true)
+            SettingsSectionLabel(stringResource(R.string.ui_protection), first = true)
             SettingsGroup {
                 SettingsSwitchRow(
-                    title = "In-tunnel packet guard",
-                    subtitle = "Blocks leaks inside the tunnel while it reconnects",
+                    title = stringResource(R.string.ui_in_tunnel_packet_guard),
+                    subtitle = stringResource(R.string.ui_blocks_leaks_inside_the_tunnel),
                     icon = Icons.Default.Lock,
                     checked = settings.killSwitchEnabled,
                     onCheckedChange = actions::setKillSwitch
                 )
                 SettingsDivider()
                 SettingsNavRow(
-                    title = "Always-on VPN",
-                    subtitle = "Open Android settings: Always-on and Block connections without VPN",
+                    title = stringResource(R.string.ui_always_on_vpn),
+                    subtitle = stringResource(R.string.ui_open_android_settings_always_on),
                     icon = Icons.Default.VpnLock,
                     trailing = { ExternalIcon() },
                     onClick = onOpenAndroidVpnSettings
                 )
             }
-            SettingsFootnote("For system-wide blocking during disconnects, also enable Android's Always-on VPN and Block connections without VPN.")
+            SettingsFootnote(stringResource(R.string.ui_for_system_wide_blocking_during))
 
-            SettingsSectionLabel("Network")
+            SettingsSectionLabel(stringResource(R.string.ui_network_2))
             SettingsGroup {
                 SettingsSwitchRow(
-                    title = "Route IPv6 through VPN",
-                    subtitle = "Native Xray routes IPv6; it is blocked on the IPv4-only compatibility tunnel",
+                    title = stringResource(R.string.ui_route_ipv6_through_vpn),
+                    subtitle = stringResource(R.string.ui_native_xray_routes_ipv6_it),
                     icon = Icons.Default.Route,
                     checked = settings.ipv6Enabled,
                     onCheckedChange = actions::setIpv6
                 )
                 SettingsDivider()
                 SettingsSwitchRow(
-                    title = "Auto-reconnect",
-                    subtitle = "Re-establish the tunnel when switching between Wi-Fi and mobile data",
+                    title = stringResource(R.string.ui_auto_reconnect),
+                    subtitle = stringResource(R.string.ui_re_establish_the_tunnel_when),
                     icon = Icons.Default.SyncAlt,
                     checked = settings.autoReconnect,
                     onCheckedChange = actions::setAutoReconnect
@@ -552,11 +555,11 @@ fun PrivacySettingsPage(
             }
 
             if (onRequestBackgroundRunning != null) {
-                SettingsSectionLabel("Startup & background")
+                SettingsSectionLabel(stringResource(R.string.ui_startup_background))
                 SettingsGroup {
                     SettingsSwitchRow(
-                        title = "Connect when the phone starts",
-                        subtitle = "Starts the config selected in Nodes after a reboot",
+                        title = stringResource(R.string.ui_connect_when_the_phone_starts),
+                        subtitle = stringResource(R.string.ui_starts_the_config_selected_in),
                         icon = Icons.Default.PowerSettingsNew,
                         modifier = Modifier.testTag("settings_connect_on_boot"),
                         checked = settings.autoConnectOnBoot,
@@ -564,11 +567,11 @@ fun PrivacySettingsPage(
                     )
                     SettingsDivider()
                     SettingsNavRow(
-                        title = "Background running",
+                        title = stringResource(R.string.ui_background_running),
                         subtitle = when (batteryUnrestricted) {
-                            true -> "Allowed: Android will not stop the tunnel to save battery"
-                            false -> "Restricted: Android may stop the tunnel when the screen is off. Tap to allow"
-                            null -> "Let Maximus keep running when the screen is off"
+                            true -> stringResource(R.string.ui_allowed_android_will_not_stop)
+                            false -> stringResource(R.string.ui_restricted_android_may_stop_the)
+                            null -> stringResource(R.string.ui_let_maximus_keep_running_when)
                         },
                         icon = Icons.Default.BatteryChargingFull,
                         iconTint = if (batteryUnrestricted == false) AppTheme.colors.statusWarning else AppTheme.colors.primary,
@@ -577,7 +580,7 @@ fun PrivacySettingsPage(
                         onClick = onRequestBackgroundRunning
                     )
                 }
-                SettingsFootnote("Connect on boot needs VPN permission granted once from the app. If Android's Always-on VPN is set to Maximus, Android starts it instead. Add the Maximus widget from your home screen's widget list for one-tap connect.")
+                SettingsFootnote(stringResource(R.string.ui_connect_on_boot_needs_vpn))
             }
         }
     }
@@ -607,40 +610,40 @@ fun SharingSettingsPage(
     onBack: () -> Unit
 ) {
     Column {
-        SettingsTopBar("Sharing", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_sharing), onBack = onBack)
         SettingsPageColumn {
-            SettingsSectionLabel("Hotspot", first = true)
+            SettingsSectionLabel(stringResource(R.string.ui_hotspot), first = true)
             SettingsGroup {
                 SettingsSwitchRow(
-                    title = "Share VPN over hotspot",
-                    subtitle = "Password-protected proxy for devices on your hotspot; works only while connected",
+                    title = stringResource(R.string.ui_share_vpn_over_hotspot),
+                    subtitle = stringResource(R.string.ui_password_protected_proxy_for_devices),
                     icon = Icons.Default.WifiTethering,
                     checked = settings.hotspotShareEnabled,
                     onCheckedChange = actions::setHotspotShare
                 )
             }
             if (settings.hotspotShareEnabled) {
-                SettingsSectionLabel("On the other device")
+                SettingsSectionLabel(stringResource(R.string.ui_on_the_other_device))
                 SettingsGroup {
                     if (share == null) {
                         Text(
-                            "Turn on your phone's hotspot, then connect the VPN. The address to use on other devices will appear here.",
+                            stringResource(R.string.ui_turn_on_your_phone_s),
                             color = AppTheme.colors.textMuted,
                             fontSize = 13.sp,
                             lineHeight = 18.sp,
                             modifier = Modifier.padding(16.dp)
                         )
                     } else {
-                        CopyRow("SOCKS5 proxy", share.socks) { onCopy(share.socks, "SOCKS5 address") }
+                        CopyRow(stringResource(R.string.ui_socks5_proxy), share.socks) { onCopy(share.socks, "SOCKS5 address") }
                         SettingsDivider(inset = false)
-                        CopyRow("HTTP proxy", share.http) { onCopy(share.http, "HTTP address") }
+                        CopyRow(stringResource(R.string.ui_http_proxy), share.http) { onCopy(share.http, "HTTP address") }
                         SettingsDivider(inset = false)
-                        CopyRow("Username", share.user) { onCopy(share.user, "Username") }
+                        CopyRow(stringResource(R.string.ui_username), share.user) { onCopy(share.user, "Username") }
                         SettingsDivider(inset = false)
-                        CopyRow("Password", share.password) { onCopy(share.password, "Password") }
+                        CopyRow(stringResource(R.string.ui_password), share.password) { onCopy(share.password, "Password") }
                     }
                 }
-                SettingsFootnote("Only devices on your hotspot can connect, and only with these credentials. Changes take effect on the next connect.")
+                SettingsFootnote(stringResource(R.string.ui_only_devices_on_your_hotspot))
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(
                     onClick = actions::regenerateHotspotCredentials,
@@ -649,7 +652,7 @@ fun SharingSettingsPage(
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Generate new password")
+                    Text(stringResource(R.string.ui_generate_new_password))
                 }
             }
         }
@@ -673,29 +676,53 @@ private fun CopyRow(label: String, value: String, onCopy: () -> Unit) {
 @Composable
 fun AppearanceSettingsPage(settings: AppSettings, actions: SettingsActions, onBack: () -> Unit) {
     Column {
-        SettingsTopBar("Appearance", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_appearance), onBack = onBack)
         SettingsPageColumn {
-            SettingsSectionLabel("Theme", first = true)
+            SettingsSectionLabel(stringResource(R.string.ui_theme), first = true)
             SettingsGroup {
                 SettingsChoiceRow(
-                    title = "Dark",
-                    subtitle = "Easy on the eyes at night",
+                    title = stringResource(R.string.ui_dark),
+                    subtitle = stringResource(R.string.ui_easy_on_the_eyes_at),
                     icon = Icons.Default.DarkMode,
                     selected = settings.darkTheme,
                     onSelect = { actions.setDarkTheme(true) }
                 )
                 SettingsDivider()
                 SettingsChoiceRow(
-                    title = "Light",
-                    subtitle = "Bright and high-contrast",
+                    title = stringResource(R.string.ui_light),
+                    subtitle = stringResource(R.string.ui_bright_and_high_contrast),
                     icon = Icons.Default.LightMode,
                     selected = !settings.darkTheme,
                     onSelect = { actions.setDarkTheme(false) }
                 )
             }
-            SettingsFootnote("You can also switch with the sun/moon toggle on Home.")
+            SettingsFootnote(stringResource(R.string.ui_you_can_also_switch_with))
+            LanguageSettingsSection()
         }
     }
+}
+
+/** App language: applies at once and is remembered (Android 13+ also lists it in system app settings). */
+@Composable
+private fun LanguageSettingsSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val activity = context as? android.app.Activity
+    val current = remember(context) { com.example.ui.language.LanguageStore.current(context) }
+    SettingsSectionLabel(stringResource(R.string.settings_language))
+    SettingsGroup {
+        com.example.ui.language.AppLanguage.entries.forEachIndexed { index, language ->
+            if (index > 0) SettingsDivider()
+            SettingsChoiceRow(
+                title = language.nativeName,
+                subtitle = com.example.ui.language.LanguageStore.contextFor(context, language)
+                    .getString(R.string.lang_picker_card_caption),
+                icon = Icons.Default.Translate,
+                selected = current == language,
+                onSelect = { activity?.let { com.example.ui.language.LanguageStore.apply(it, language) } }
+            )
+        }
+    }
+    SettingsFootnote(stringResource(R.string.settings_language_footnote))
 }
 
 /* ------------------------------------------------------------------ Updates & data */
@@ -725,43 +752,43 @@ fun UpdatesSettingsPage(
     onBack: () -> Unit
 ) {
     Column {
-        SettingsTopBar("App updates", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_app_updates), onBack = onBack)
         SettingsPageColumn {
             Spacer(Modifier.height(16.dp))
             UpdateOverview(
                 title = "Maximus VPN",
-                subtitle = if (installedBuild > 0) "Installed build $installedBuild · $versionName" else "Installed version $versionName",
+                subtitle = if (installedBuild > 0) stringResource(R.string.ui_installed_build, installedBuild, versionName) else stringResource(R.string.ui_installed_version, versionName),
                 icon = Icons.Default.SystemUpdate,
                 update = update,
                 onCheckForUpdates = onCheckForUpdates
             )
-            SettingsSectionLabel("Release preferences")
+            SettingsSectionLabel(stringResource(R.string.ui_release_preferences))
             SettingsGroup {
                 SettingsSwitchRow(
-                    title = "VPN-only updates",
-                    subtitle = "No direct fallback when the VPN is disconnected",
+                    title = stringResource(R.string.ui_vpn_only_updates),
+                    subtitle = stringResource(R.string.ui_no_direct_fallback_when_the),
                     icon = Icons.Default.Lock,
                     checked = data.vpnOnlyUpdates,
                     onCheckedChange = onVpnOnlyUpdates
                 )
                 SettingsDivider()
                 SettingsNavRow(
-                    title = "Changelog",
-                    subtitle = "What's new in recent versions",
+                    title = stringResource(R.string.ui_changelog),
+                    subtitle = stringResource(R.string.ui_what_s_new_in_recent),
                     icon = Icons.AutoMirrored.Filled.Article,
                     trailing = { ExternalIcon() },
                     onClick = onChangelog
                 )
             }
 
-            SettingsSectionLabel("Network data")
+            SettingsSectionLabel(stringResource(R.string.ui_network_data))
             SettingsGroup {
                 SettingsNavRow(
-                    title = "Update resolver databases",
+                    title = stringResource(R.string.ui_update_resolver_databases),
                     subtitle = when {
-                        data.resolverBusy -> "Downloading verified data… ${data.resolverProgress.coerceAtLeast(0)}%"
-                        data.resolverInstalled -> "Verified update installed · rollback available"
-                        else -> "Six resolver lists · SHA-256 checked"
+                        data.resolverBusy -> stringResource(R.string.ui_downloading_verified_data_pct, data.resolverProgress.coerceAtLeast(0))
+                        data.resolverInstalled -> stringResource(R.string.ui_verified_update_installed_rollback_avail)
+                        else -> stringResource(R.string.ui_six_resolver_lists_sha_256)
                     },
                     icon = Icons.Default.Storage,
                     trailing = { if (data.resolverBusy) SmallSpinner() else SettingsChevron() },
@@ -770,8 +797,8 @@ fun UpdatesSettingsPage(
                 if (data.resolverInstalled) {
                     SettingsDivider()
                     SettingsNavRow(
-                        title = "Roll back resolver databases",
-                        subtitle = "Restore the previously verified list set",
+                        title = stringResource(R.string.ui_roll_back_resolver_databases),
+                        subtitle = stringResource(R.string.ui_restore_the_previously_verified_list),
                         icon = Icons.Default.Restore,
                         iconTint = AppTheme.colors.textSecondary,
                         onClick = onRollbackResolvers
@@ -779,8 +806,8 @@ fun UpdatesSettingsPage(
                 }
                 SettingsDivider()
                 SettingsNavRow(
-                    title = "Refresh verified clean IPs",
-                    subtitle = if (data.cleanIpBusy) "Testing the selected CDN node…" else "Retest endpoints for the selected node on this network",
+                    title = stringResource(R.string.ui_refresh_verified_clean_ips),
+                    subtitle = if (data.cleanIpBusy) stringResource(R.string.ui_testing_the_selected_cdn_node) else stringResource(R.string.ui_retest_endpoints_for_the_selected),
                     icon = Icons.Default.Speed,
                     trailing = { if (data.cleanIpBusy) SmallSpinner() else SettingsChevron() },
                     onClick = onRefreshCleanIps
@@ -813,30 +840,30 @@ internal fun EngineUpdatesSettingsPage(
     onBack: () -> Unit
 ) {
     Column {
-        SettingsTopBar("Engine updates", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_engine_updates), onBack = onBack)
         SettingsPageColumn {
             Spacer(Modifier.height(16.dp))
             UpdateOverview(
-                title = "Connection engines",
-                subtitle = "Engine upgrades are included in signed app releases.",
+                title = stringResource(R.string.ui_connection_engines),
+                subtitle = stringResource(R.string.ui_engine_upgrades_are_included_in),
                 icon = Icons.Default.Memory,
                 update = update,
                 onCheckForUpdates = onCheckForUpdates
             )
-            SettingsSectionLabel("Engine inventory")
+            SettingsSectionLabel(stringResource(R.string.ui_engine_inventory))
             SettingsGroup {
-                EngineInventoryRow(CoreCapabilityRegistry.CORE, "Included in the app")
+                EngineInventoryRow(CoreCapabilityRegistry.CORE, stringResource(R.string.ui_included_in_the_app))
                 Sidecars.ENGINES.forEach { engine ->
                     managedEngineNames[engine.id]?.let { name ->
                         SettingsDivider()
-                        EngineInventoryRow(name, if (Sidecars.isBundled(engine)) "Included in the app" else "Unavailable on this device")
+                        EngineInventoryRow(name, if (Sidecars.isBundled(engine)) stringResource(R.string.ui_included_in_the_app) else stringResource(R.string.ui_unavailable_on_this_device))
                     }
                 }
             }
-            SettingsSectionLabel("Engine setup")
+            SettingsSectionLabel(stringResource(R.string.ui_engine_setup))
             SettingsGroup {
                 SettingsNavRow(
-                    title = "Import Psiphon.config",
+                    title = stringResource(R.string.ui_import_psiphon_config),
                     subtitle = psiphonStatus,
                     icon = Icons.Default.Storage,
                     enabled = !psiphonImporting,
@@ -846,7 +873,7 @@ internal fun EngineUpdatesSettingsPage(
                 if (Sidecars.isBundled(RadianceSidecar)) {
                     SettingsDivider()
                     SettingsNavRow(
-                        title = "Add Lantern / Radiance to Nodes",
+                        title = stringResource(R.string.ui_add_lantern_radiance_to_nodes),
                         icon = Icons.Default.Public,
                         onClick = onAddRadiance
                     )
@@ -920,10 +947,10 @@ private fun UpdateOverview(
             ) {
                 Text(
                     when {
-                        update.checking -> "Checking…"
-                        update.hasUpdate -> "Review app update"
-                        update.checkFailed -> "Retry update check"
-                        else -> "Check for updates"
+                        update.checking -> stringResource(R.string.ui_checking)
+                        update.hasUpdate -> stringResource(R.string.ui_review_app_update)
+                        update.checkFailed -> stringResource(R.string.ui_retry_update_check)
+                        else -> stringResource(R.string.ui_check_for_updates)
                     }
                 )
             }
@@ -941,21 +968,21 @@ fun DiagnosticsSettingsPage(
     onBack: () -> Unit
 ) {
     Column {
-        SettingsTopBar("Diagnostics", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_diagnostics), onBack = onBack)
         SettingsPageColumn {
-            SettingsSectionLabel("Engine", first = true)
+            SettingsSectionLabel(stringResource(R.string.ui_engine), first = true)
             SettingsGroup {
                 SettingsNavRow(
-                    title = "Live logs & telemetry",
-                    subtitle = "Connection events, engine output and tests",
+                    title = stringResource(R.string.ui_live_logs_telemetry),
+                    subtitle = stringResource(R.string.ui_connection_events_engine_output_and),
                     icon = Icons.Default.Terminal,
                     modifier = Modifier.testTag("view_diagnostics_button"),
                     onClick = onViewLogs
                 )
                 SettingsDivider()
                 SettingsNavRow(
-                    title = "Raw engine config",
-                    subtitle = "Generated JSON with secrets redacted",
+                    title = stringResource(R.string.ui_raw_engine_config),
+                    subtitle = stringResource(R.string.ui_generated_json_with_secrets_redacted),
                     icon = Icons.Default.Code,
                     modifier = Modifier.testTag("view_xray_config_button"),
                     onClick = onViewConfig
@@ -965,8 +992,8 @@ fun DiagnosticsSettingsPage(
             Spacer(Modifier.height(32.dp))
             SettingsGroup {
                 SettingsNavRow(
-                    title = "Reset all settings",
-                    subtitle = "Restore routing and engine settings to defaults",
+                    title = stringResource(R.string.ui_reset_all_settings),
+                    subtitle = stringResource(R.string.ui_restore_routing_and_engine_settings),
                     icon = Icons.Default.Restore,
                     iconTint = AppTheme.colors.statusError,
                     titleColor = AppTheme.colors.statusError,
@@ -997,7 +1024,7 @@ fun AboutSettingsPage(
     onBack: () -> Unit
 ) {
     Column {
-        SettingsTopBar("About & community", onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_about_community), onBack = onBack)
         SettingsPageColumn {
             SettingsGroup {
                 Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1005,32 +1032,32 @@ fun AboutSettingsPage(
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Maximus VPN", color = AppTheme.colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Version $versionName", color = AppTheme.colors.textMuted, fontSize = 13.sp)
+                        Text(stringResource(R.string.ui_version, versionName), color = AppTheme.colors.textMuted, fontSize = 13.sp)
                     }
                 }
                 SettingsDivider(inset = false)
-                SettingsInfoLine("Developer", "DrFXAi")
-                SettingsInfoLine("Engines", coreSummary)
-                SettingsInfoLine("Protocols", "VLESS · VMess · Trojan · Shadowsocks · Hysteria2 · TUIC · SOCKS5 · HTTP")
+                SettingsInfoLine(stringResource(R.string.ui_developer), "DrFXAi")
+                SettingsInfoLine(stringResource(R.string.ui_engines), coreSummary)
+                SettingsInfoLine(stringResource(R.string.ui_protocols), "VLESS · VMess · Trojan · Shadowsocks · Hysteria2 · TUIC · SOCKS5 · HTTP")
                 Spacer(Modifier.height(4.dp))
             }
 
-            SettingsSectionLabel("Community")
+            SettingsSectionLabel(stringResource(R.string.ui_community))
             SettingsGroup {
-                SettingsNavRow(title = "Telegram", subtitle = "News, updates and community", leading = { LogoTile(telegramLogo) }, trailing = { ExternalIcon() }, onClick = onTelegram)
+                SettingsNavRow(title = "Telegram", subtitle = stringResource(R.string.ui_news_updates_and_community), leading = { LogoTile(telegramLogo) }, trailing = { ExternalIcon() }, onClick = onTelegram)
                 SettingsDivider()
-                SettingsNavRow(title = "YouTube", subtitle = "Tutorials and guides", leading = { LogoTile(youTubeLogo) }, trailing = { ExternalIcon() }, onClick = onYouTube)
+                SettingsNavRow(title = "YouTube", subtitle = stringResource(R.string.ui_tutorials_and_guides), leading = { LogoTile(youTubeLogo) }, trailing = { ExternalIcon() }, onClick = onYouTube)
                 SettingsDivider()
-                SettingsNavRow(title = "GitHub", subtitle = "Source code, issues and contributions", leading = { LogoTile(gitHubLogo) }, trailing = { ExternalIcon() }, onClick = onGitHub)
+                SettingsNavRow(title = "GitHub", subtitle = stringResource(R.string.ui_source_code_issues_and_contributions), leading = { LogoTile(gitHubLogo) }, trailing = { ExternalIcon() }, onClick = onGitHub)
             }
 
-            SettingsSectionLabel("Support Maximus")
+            SettingsSectionLabel(stringResource(R.string.ui_support_maximus))
             SettingsGroup {
-                SettingsNavRow(title = "Support with crypto", subtitle = cryptoSubtitle, icon = Icons.Default.CurrencyBitcoin, onClick = onCrypto)
+                SettingsNavRow(title = stringResource(R.string.ui_support_with_crypto), subtitle = cryptoSubtitle, icon = Icons.Default.CurrencyBitcoin, onClick = onCrypto)
                 SettingsDivider()
-                SettingsNavRow(title = "Buy a coffee", subtitle = "Support the developer", icon = Icons.Default.LocalCafe, onClick = onCoffee)
+                SettingsNavRow(title = stringResource(R.string.ui_buy_a_coffee), subtitle = stringResource(R.string.ui_support_the_developer), icon = Icons.Default.LocalCafe, onClick = onCoffee)
             }
-            SettingsFootnote("Executable engine upgrades ship only as signed APKs.", Modifier.padding(top = 4.dp))
+            SettingsFootnote(stringResource(R.string.ui_executable_engine_upgrades_ship_only), Modifier.padding(top = 4.dp))
         }
     }
 }

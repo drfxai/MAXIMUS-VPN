@@ -1,5 +1,7 @@
 package com.example.ui.protocols
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -341,7 +343,7 @@ private fun Header(c: LabColors, state: ProtocolsUiState, actions: ProtocolsActi
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "Protocols", color = c.text, modifier = Modifier.semantics { heading() },
+                        stringResource(R.string.ui_protocols), color = c.text, modifier = Modifier.semantics { heading() },
                         style = TextStyle(fontFamily = InterFamily, fontSize = 28.sp, fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.6).sp)
                     )
@@ -405,7 +407,7 @@ private fun StartCard(c: LabColors, state: ProtocolsUiState, actions: ProtocolsA
             Box(Modifier.width(1.dp).height(77.dp).background(c.stroke))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                LabText("Network check", c.text, 20.sp, FontWeight.Bold, letterSpacing = (-0.3).sp)
+                LabText(stringResource(R.string.ui_network_check), c.text, 20.sp, FontWeight.Bold, letterSpacing = (-0.3).sp)
                 Spacer(Modifier.height(4.dp))
                 val body = if (state.panel != null) {
                     "Test each selected protocol on your server and rank the results."
@@ -418,11 +420,11 @@ private fun StartCard(c: LabColors, state: ProtocolsUiState, actions: ProtocolsA
         Spacer(Modifier.height(18.dp))
         Segmented(c, state.priority, actions.onPriority)
         Spacer(Modifier.height(14.dp))
-        GradientButton(c, "Run network test", Icons.Rounded.PlayArrow, onClick = actions.onRun)
+        GradientButton(c, stringResource(R.string.ui_run_network_test), Icons.Rounded.PlayArrow, onClick = actions.onRun)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             LabText("${ProtocolLab.DEFAULT_ROUNDS} rounds", c.text2, 12.sp)
-            LabText(if (state.panel != null) "Auto cleanup" else "No server needed", c.text2, 12.sp)
+            LabText(if (state.panel != null) stringResource(R.string.ui_auto_cleanup) else stringResource(R.string.ui_no_server_needed), c.text2, 12.sp)
         }
     }
 }
@@ -435,15 +437,15 @@ private fun RunningCard(c: LabColors, state: ProtocolsUiState, phase: LabPhase.R
             Gauge(c, percent, 112.dp, "$percent%", "testing")
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f)) {
-                LabText("IN PROGRESS", c.accent, 11.sp, FontWeight.Bold, letterSpacing = 1.sp, maxLines = 1)
+                LabText(stringResource(R.string.ui_in_progress), c.accent, 11.sp, FontWeight.Bold, letterSpacing = 1.sp, maxLines = 1)
                 Spacer(Modifier.height(4.dp))
                 LabText(phase.step, c.text, 17.sp, FontWeight.SemiBold, maxLines = 3, lineHeight = 22.sp)
                 Spacer(Modifier.height(4.dp))
-                LabText("Keep this screen open. Each protocol is tried 3 times with real requests.", c.text2, 13.sp, lineHeight = 18.sp, maxLines = 3)
+                LabText(stringResource(R.string.ui_keep_this_screen_open_each), c.text2, 13.sp, lineHeight = 18.sp, maxLines = 3)
             }
         }
         Spacer(Modifier.height(16.dp))
-        GradientButton(c, "Testing…", Icons.Rounded.Timer, enabled = false) {}
+        GradientButton(c, stringResource(R.string.ui_testing), Icons.Rounded.Timer, enabled = false) {}
     }
 }
 
@@ -460,7 +462,7 @@ private fun BestCard(c: LabColors, state: ProtocolsUiState) {
             Gauge(c, r.score, 112.dp, "${r.score}", scoreWord(r.score))
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f)) {
-                LabText(if (r === state.best) "BEST MATCH" else "YOUR CHOICE", c.accent, 11.sp, FontWeight.Bold, letterSpacing = 1.sp, maxLines = 1)
+                LabText(if (r === state.best) stringResource(R.string.ui_best_match) else stringResource(R.string.ui_your_choice), c.accent, 11.sp, FontWeight.Bold, letterSpacing = 1.sp, maxLines = 1)
                 Spacer(Modifier.height(4.dp))
                 LabText(r.family.shortName, c.text, 24.sp, FontWeight.Bold, letterSpacing = (-0.5).sp, maxLines = 1)
                 Spacer(Modifier.height(4.dp))
@@ -484,7 +486,7 @@ private fun NothingWorkedCard(c: LabColors, state: ProtocolsUiState, actions: Pr
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 val anyMeasured = state.results.any { it.wasMeasured }
-                LabText(if (anyMeasured) "No config answered" else "No tests completed", c.text, 19.sp, FontWeight.Bold, maxLines = 1)
+                LabText(if (anyMeasured) stringResource(R.string.ui_no_config_answered) else stringResource(R.string.ui_no_tests_completed), c.text, 19.sp, FontWeight.Bold, maxLines = 1)
                 Spacer(Modifier.height(2.dp))
                 val hint = when {
                     !anyMeasured -> "See the results below for details, then try again."
@@ -495,7 +497,7 @@ private fun NothingWorkedCard(c: LabColors, state: ProtocolsUiState, actions: Pr
             }
         }
         Spacer(Modifier.height(16.dp))
-        GradientButton(c, "Test again", Icons.Rounded.Refresh, onClick = actions.onRun)
+        GradientButton(c, stringResource(R.string.ui_test_again), Icons.Rounded.Refresh, onClick = actions.onRun)
     }
 }
 
@@ -527,7 +529,7 @@ private fun Catalog(c: LabColors, state: ProtocolsUiState, actions: ProtocolsAct
                         Pill("TLS", c.good)
                     }
                 }
-                if (families.isEmpty()) LabText("Add a config in Nodes to test it here.", c.text2, 13.sp)
+                if (families.isEmpty()) LabText(stringResource(R.string.ui_add_a_config_in_nodes), c.text2, 13.sp)
             }
         }
         if (state.panels.isEmpty()) {
@@ -540,8 +542,8 @@ private fun Catalog(c: LabColors, state: ProtocolsUiState, actions: ProtocolsAct
                 IconTile(Icons.Rounded.Add, c.accent)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    LabText("Add your server", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
-                    LabText("Use a 3X-UI panel to create test configs", c.text2, 12.sp, maxLines = 2)
+                    LabText(stringResource(R.string.ui_add_your_server), c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
+                    LabText(stringResource(R.string.ui_use_a_3x_ui_panel), c.text2, 12.sp, maxLines = 2)
                 }
             }
         }
@@ -559,7 +561,7 @@ private fun ProtoTile(c: LabColors, f: LabFamily, off: Boolean, modifier: Modifi
             LabText(f.shortName, if (off) c.text3 else c.text, 13.sp, FontWeight.Bold, maxLines = 2)
             LabText(saved?.let(::savedConfigLabel) ?: f.blurb, c.text2, 10.sp, maxLines = 2)
         }
-        Pill(if (off) "OFF" else f.network, c.text2)
+        Pill(if (off) stringResource(R.string.ui_off_2) else f.network, c.text2)
     }
 }
 
@@ -643,13 +645,13 @@ private fun ActionDock(c: LabColors, state: ProtocolsUiState, actions: Protocols
             Icon(Icons.AutoMirrored.Rounded.AltRoute, null, tint = c.accent, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                LabText("Smart failover", c.text, 14.sp, FontWeight.SemiBold, maxLines = 1)
+                LabText(stringResource(R.string.ui_smart_failover), c.text, 14.sp, FontWeight.SemiBold, maxLines = 1)
                 LabText(failoverSub, c.text2, 12.sp, maxLines = 1)
             }
             LabSwitch(c, state.autoFailover, actions.onAutoFailover)
         }
         Spacer(Modifier.height(10.dp))
-        GradientButton(c, "Connect with ${chosen.family.shortName}", Icons.Rounded.PowerSettingsNew, onClick = actions.onOpenSetup)
+        GradientButton(c, stringResource(R.string.ui_connect_with, chosen.family.shortName), Icons.Rounded.PowerSettingsNew, onClick = actions.onOpenSetup)
     }
 }
 
@@ -674,8 +676,8 @@ fun SetupSheetContent(
             IconTile(r.family.icon(), r.family.tint(c), 52.dp)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                LabText("Set up ${r.family.shortName}", c.text, 21.sp, FontWeight.Bold, letterSpacing = (-0.4).sp, maxLines = 1)
-                LabText("${if (r === state.best) "Best match for this network" else "Your choice"} · score ${r.score}", c.text2, 13.sp, maxLines = 1)
+                LabText(stringResource(R.string.ui_set_up, r.family.shortName), c.text, 21.sp, FontWeight.Bold, letterSpacing = (-0.4).sp, maxLines = 1)
+                LabText(stringResource(R.string.ui_score, if (r === state.best) "Best match for this network" else "Your choice", r.score), c.text2, 13.sp, maxLines = 1)
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -708,19 +710,19 @@ fun SetupSheetContent(
         if (state.serverRun) {
             Spacer(Modifier.height(14.dp))
             ToggleRow(
-                c, "Keep backups for failover",
+                c, stringResource(R.string.ui_keep_backups_for_failover),
                 if (backups.isEmpty()) "No other protocol works here" else "${backups.joinToString(" and ")} stay ready on your server",
                 keepBackups && backups.isNotEmpty(), onKeepBackups
             )
             ToggleRow(
-                c, "Clean up test configs",
+                c, stringResource(R.string.ui_clean_up_test_configs),
                 if (removable <= 0) "Nothing else to remove" else "Removes the $removable ${if (removable == 1) "config" else "configs"} you don’t need",
                 cleanUp, onCleanUp
             )
         }
         Spacer(Modifier.height(16.dp))
         GradientButton(
-            c, if (state.applying) "Saving…" else if (state.serverRun) "Create & connect" else "Connect",
+            c, if (state.applying) stringResource(R.string.ui_saving) else if (state.serverRun) stringResource(R.string.ui_create_connect) else stringResource(R.string.ui_connect_2),
             Icons.Rounded.PowerSettingsNew, enabled = !state.applying, onClick = onConfirm
         )
     }
@@ -730,14 +732,14 @@ fun SetupSheetContent(
 fun SourceSheetContent(state: ProtocolsUiState, onPick: (ManagedPanel?) -> Unit, onAddServer: () -> Unit) {
     val c = labColors
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 22.dp)) {
-        LabText("Test on", c.text, 21.sp, FontWeight.Bold, letterSpacing = (-0.4).sp, maxLines = 1)
+        LabText(stringResource(R.string.ui_test_on), c.text, 21.sp, FontWeight.Bold, letterSpacing = (-0.4).sp, maxLines = 1)
         Spacer(Modifier.height(14.dp))
         Column(Modifier.clip(RoundedCornerShape(16.dp)).background(c.cardAlt)) {
             state.panels.forEach { p ->
                 SourceRow(c, Icons.Rounded.Dns, p.name.ifBlank { p.host }, "Creates a test config per protocol", state.panel?.id == p.id) { onPick(p) }
                 Divider(c, 58.dp)
             }
-            SourceRow(c, Icons.Rounded.Folder, "Saved configs", "Tests what is already in the app", state.panel == null) { onPick(null) }
+            SourceRow(c, Icons.Rounded.Folder, stringResource(R.string.ui_saved_configs), "Tests what is already in the app", state.panel == null) { onPick(null) }
         }
         Spacer(Modifier.height(12.dp))
         Row(
@@ -746,7 +748,7 @@ fun SourceSheetContent(state: ProtocolsUiState, onPick: (ManagedPanel?) -> Unit,
         ) {
             Icon(Icons.Rounded.Add, null, tint = c.accent, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            LabText("Add a server", c.accent, 13.sp, FontWeight.SemiBold, maxLines = 1)
+            LabText(stringResource(R.string.ui_add_a_server), c.accent, 13.sp, FontWeight.SemiBold, maxLines = 1)
         }
     }
 }
@@ -768,8 +770,8 @@ private fun SourceRow(c: LabColors, icon: ImageVector, title: String, sub: Strin
 fun CustomizeSheetContent(state: ProtocolsUiState, onToggle: (LabFamily) -> Unit) {
     val c = labColors
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 22.dp)) {
-        LabText("Protocols to test", c.text, 21.sp, FontWeight.Bold, letterSpacing = (-0.4).sp, maxLines = 1)
-        LabText("Fewer protocols make the test quicker.", c.text2, 13.sp, maxLines = 2)
+        LabText(stringResource(R.string.ui_protocols_to_test), c.text, 21.sp, FontWeight.Bold, letterSpacing = (-0.4).sp, maxLines = 1)
+        LabText(stringResource(R.string.ui_fewer_protocols_make_the_test), c.text2, 13.sp, maxLines = 2)
         Spacer(Modifier.height(10.dp))
         LabFamily.serverFamilies.forEach { f ->
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {

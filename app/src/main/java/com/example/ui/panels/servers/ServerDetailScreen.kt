@@ -1,5 +1,7 @@
 package com.example.ui.panels.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -173,22 +175,22 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
         SectionLabel("Sign-in security")
         GroupCard {
             ListRow(
-                "Key login",
-                subtitle = if (ui.keyLogin) "This phone's key" else "Sign in with a key instead of a password",
+                stringResource(R.string.ui_key_login),
+                subtitle = if (ui.keyLogin) stringResource(R.string.ui_this_phone_s_key) else stringResource(R.string.ui_sign_in_with_a_key),
                 leading = { IconTile(Icons.Rounded.Key, 32.dp) },
                 trailing = {
-                    if (ui.keyLogin) Badge("On", Tone.GOOD, dot = true)
+                    if (ui.keyLogin) Badge(stringResource(R.string.ui_on), Tone.GOOD, dot = true)
                     else if (!ui.needsSignIn) TextAction("Set up", actions.onKeyLogin, enabled = idle)
-                    else Badge("Off")
+                    else Badge(stringResource(R.string.ui_off))
                 }
             )
             RowDivider(58.dp)
             ListRow(
-                "Password login",
+                stringResource(R.string.ui_password_login),
                 subtitle = when {
-                    ui.passwordLoginOff -> "Only keys can sign in"
-                    ui.keyLogin -> "Turn off to stop password guessing"
-                    else -> "Needs key login first"
+                    ui.passwordLoginOff -> stringResource(R.string.ui_only_keys_can_sign_in)
+                    ui.keyLogin -> stringResource(R.string.ui_turn_off_to_stop_password)
+                    else -> stringResource(R.string.ui_needs_key_login_first)
                 },
                 leading = { IconTile(Icons.Rounded.Lock, 32.dp) },
                 trailing = {
@@ -196,7 +198,7 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
                         ui.needsSignIn -> Unit
                         ui.passwordLoginOff -> TextAction("Turn on", { actions.onPasswordLogin(false) }, Sv.Muted, enabled = idle)
                         ui.keyLogin -> TextAction("Turn off", { actions.onPasswordLogin(true) }, Sv.Amber, enabled = idle)
-                        else -> Badge("On", Tone.WARN, dot = true)
+                        else -> Badge(stringResource(R.string.ui_on), Tone.WARN, dot = true)
                     }
                 }
             )
@@ -207,7 +209,7 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
         }
         GroupCard {
             if (ui.tools.isEmpty()) {
-                ListRow("Nothing installed yet", subtitle = "Add a panel, a tunnel or protection from the Install tab.")
+                ListRow(stringResource(R.string.ui_nothing_installed_yet), subtitle = stringResource(R.string.ui_add_a_panel_a_tunnel))
             } else {
                 Rows(ui.tools) { ToolBlock(it, actions, idle) }
             }
@@ -219,8 +221,8 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
             SectionLabel("DNS tunnel")
             GroupCard {
                 ListRow(
-                    "Install MasterDNS",
-                    subtitle = "MasterDnsVPN server on this VPS · needs a domain you can delegate",
+                    stringResource(R.string.ui_install_masterdns),
+                    subtitle = stringResource(R.string.ui_masterdnsvpn_server_on_this_vps),
                     leading = { ToolBadge(ServerToolCatalog.MASTERDNS, 32.dp) },
                     trailing = { TextAction("Install", { actions.onInstall(ServerToolCatalog.MASTERDNS) }, enabled = idle) }
                 )
@@ -229,7 +231,7 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
 
         if (ui.tools.any { it.id == ServerToolCatalog.XUI }) {
             SectionLabel("Optional after 3X-UI")
-            GroupCard { ListRow("RegionHop · Psiphon locations", subtitle = "Manage country exits over private SSH",
+            GroupCard { ListRow(stringResource(R.string.ui_regionhop_psiphon_locations), subtitle = stringResource(R.string.ui_manage_country_exits_over_private),
                 trailing = { TextAction("Manage", actions.onRegionHop, enabled = idle) }) }
         }
 
@@ -239,7 +241,7 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
                 listOf(ServerToolCatalog.SOAR to "Soar", ServerToolCatalog.COTTEN to "CottenDNS",
                     ServerToolCatalog.MASTERDNS to "MasterDNS", ServerToolCatalog.DNSTT to "DNSTT").filter { candidate -> ui.tools.none { it.id == candidate.first } }
                     .forEach { (id, title) ->
-                        ListRow(title, subtitle = "Delete leftover server files and services",
+                        ListRow(title, subtitle = stringResource(R.string.ui_delete_leftover_server_files_and),
                             trailing = { TextAction("Clean up", { actions.onUninstall(id) }, Sv.Red, enabled = idle) })
                     }
             }
@@ -250,34 +252,34 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
         if (ui.tools.any { it.id == ServerToolCatalog.HIDDIFY }) {
             SectionLabel("Hiddify management")
             GroupCard {
-                ListRow("Remove Hiddify", subtitle = "Delete panel files, database and services from this server",
+                ListRow(stringResource(R.string.ui_remove_hiddify), subtitle = stringResource(R.string.ui_delete_panel_files_database_and),
                     trailing = { TextAction("Remove", { actions.onUninstall(ServerToolCatalog.HIDDIFY) }, enabled = idle) })
                 RowDivider(0.dp)
                 ListRow(
-                    "Open admin panel",
-                    subtitle = "Recover your secure admin link over SSH if needed",
+                    stringResource(R.string.ui_open_admin_panel),
+                    subtitle = stringResource(R.string.ui_recover_your_secure_admin_link),
                     leading = { ToolBadge(ServerToolCatalog.HIDDIFY, 32.dp) },
                     trailing = { TextAction("Open", { actions.onOpenPanel(ServerToolCatalog.HIDDIFY) }, enabled = idle) }
                 )
                 RowDivider(0.dp)
                 ListRow(
-                    "Quick create config",
-                    subtitle = "Create a user with a quota and expiry, then import its subscription into Nodes",
+                    stringResource(R.string.ui_quick_create_config),
+                    subtitle = stringResource(R.string.ui_create_a_user_with_a),
                     trailing = { TextAction("Create", actions.onQuickHiddify, enabled = idle) }
                 )
                 RowDivider(0.dp)
-                ListRow("Import saved configs", subtitle = "Refresh the last user subscription without creating another user",
+                ListRow(stringResource(R.string.ui_import_saved_configs), subtitle = stringResource(R.string.ui_refresh_the_last_user_subscription),
                     trailing = { TextAction("Import", actions.onImportHiddifyConfigs, enabled = idle) })
                 RowDivider(0.dp)
                 ListRow(
-                    "CDN & domains",
-                    subtitle = "Open Admin V2, then Settings > Domains to configure a CDN domain",
+                    stringResource(R.string.ui_cdn_domains),
+                    subtitle = stringResource(R.string.ui_open_admin_v2_then_settings),
                     trailing = { TextAction("Manage", { actions.onOpenPanel(ServerToolCatalog.HIDDIFY) }, enabled = idle) }
                 )
                 RowDivider(0.dp)
                 ListRow(
-                    "Telegram proxy",
-                    subtitle = "Read MTProto or Web proxy links from your user account; CDN compatibility depends on the proxy",
+                    stringResource(R.string.ui_telegram_proxy),
+                    subtitle = stringResource(R.string.ui_read_mtproto_or_web_proxy),
                     trailing = { TextAction("Get links", actions.onHiddifyTelegram, enabled = idle) }
                 )
             }
@@ -293,8 +295,8 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
         SectionLabel("This phone")
         GroupCard {
             ListRow(
-                "Forget this server",
-                subtitle = "Removes its sign-in from this phone. Nothing on the server changes.",
+                stringResource(R.string.ui_forget_this_server),
+                subtitle = stringResource(R.string.ui_removes_its_sign_in_from),
                 titleColor = Sv.Red,
                 onClick = actions.onRemove
             )
@@ -313,9 +315,9 @@ private fun OverviewCard(ui: ServerDetailUi) {
                 Text(
                     when (ui.row.health) {
                         Health.ONLINE -> "Online" + (ui.row.latencyMs?.let { " · $it ms" } ?: "")
-                        Health.OFFLINE -> "Not reachable"
-                        Health.CHECKING -> "Checking"
-                        Health.SIGN_IN -> "Needs sign-in"
+                        Health.OFFLINE -> stringResource(R.string.ui_not_reachable)
+                        Health.CHECKING -> stringResource(R.string.ui_checking_2)
+                        Health.SIGN_IN -> stringResource(R.string.ui_needs_sign_in)
                     },
                     color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium
                 )
@@ -445,15 +447,15 @@ private fun FoundHiddifyCard(summary: String, actions: ServerDetailActions, idle
                 ToolBadge(ServerToolCatalog.HIDDIFY, 34.dp)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Hiddify files detected", color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.ui_hiddify_files_detected), color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Text(summary, color = Sv.Muted, fontSize = 13.sp)
                 }
             }
             Notice("A folder alone does not prove a complete installation. Add it for diagnostics, inspect logs, or remove an incomplete installation. Adding changes nothing on the server.", NoticeKind.WARN)
             PrimaryButton("Add Hiddify", actions.onImportHiddify, Modifier.fillMaxWidth(), enabled = idle)
-            GhostButton("Diagnostics", { actions.onLogs(ServerToolCatalog.HIDDIFY) }, Modifier.fillMaxWidth(), enabled = idle)
-            GhostButton("Remove Hiddify", { actions.onUninstall(ServerToolCatalog.HIDDIFY) }, Modifier.fillMaxWidth(), enabled = idle)
-            GhostButton("Not now", actions.onDismissFound, Modifier.fillMaxWidth())
+            GhostButton(stringResource(R.string.ui_diagnostics), { actions.onLogs(ServerToolCatalog.HIDDIFY) }, Modifier.fillMaxWidth(), enabled = idle)
+            GhostButton(stringResource(R.string.ui_remove_hiddify), { actions.onUninstall(ServerToolCatalog.HIDDIFY) }, Modifier.fillMaxWidth(), enabled = idle)
+            GhostButton(stringResource(R.string.ui_not_now), actions.onDismissFound, Modifier.fillMaxWidth())
         }
     }
 }

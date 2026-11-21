@@ -1,5 +1,7 @@
 package com.example.ui.lab
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -68,19 +70,19 @@ internal fun ShadowLinkPage(c: LabColors, s: ShadowLinkUi, vpnOn: Boolean, onRun
         item {
             Panel(c) {
                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                    LabText("One pass reads the network and picks a path", c.text, 15.sp, FontWeight.SemiBold, maxLines = 2)
-                    LabText("ShadowLink fuses the network measurement, the state read, the service checks, the firewall and DNS honesty into a single verdict, then orders the transports to try.",
+                    LabText(stringResource(R.string.ui_one_pass_reads_the_network), c.text, 15.sp, FontWeight.SemiBold, maxLines = 2)
+                    LabText(stringResource(R.string.ui_shadowlink_fuses_the_network_measurement),
                         c.text2, 12.5.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 5, lineHeight = 17.sp)
                 }
             }
         }
         item {
             Column(Modifier.padding(horizontal = Gutter)) {
-                if (s.running) SecondaryButton(c, "Stop", Icons.Rounded.Stop, Modifier.fillMaxWidth(), onClick = onStop)
+                if (s.running) SecondaryButton(c, stringResource(R.string.ui_stop), Icons.Rounded.Stop, Modifier.fillMaxWidth(), onClick = onStop)
                 else PrimaryButton(c, if (s.report == null) "Run discovery" else "Run discovery again", Icons.Rounded.Shield, Modifier.fillMaxWidth(), onClick = onRun)
                 LabText(
-                    if (vpnOn) "The VPN is on, so this reads the path through it; the captive-portal check is skipped."
-                    else "Reads what this network allows directly, with the VPN off.",
+                    if (vpnOn) stringResource(R.string.ui_the_vpn_is_on_so)
+                    else stringResource(R.string.ui_reads_what_this_network_allows),
                     c.text3, 12.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp), maxLines = 3, lineHeight = 16.sp
                 )
             }
@@ -131,7 +133,7 @@ internal fun ShadowLinkPage(c: LabColors, s: ShadowLinkUi, vpnOn: Boolean, onRun
                             }
                             r.exitCountry?.let {
                                 Spacer(Modifier.size(10.dp))
-                                LabText("Exit · ${ServiceCheck.flag(it)} $it", c.text3, 12.sp, maxLines = 1)
+                                LabText(stringResource(R.string.ui_exit, ServiceCheck.flag(it), it), c.text3, 12.sp, maxLines = 1)
                             }
                         }
                     }
@@ -157,7 +159,7 @@ internal fun ShadowLinkPage(c: LabColors, s: ShadowLinkUi, vpnOn: Boolean, onRun
                             }
                         }
                     }
-                    LabText("Tap one to select it on the Servers screen. Nothing connects until you tap Connect there.",
+                    LabText(stringResource(R.string.ui_tap_one_to_select_it),
                         c.text3, 11.5.sp, modifier = Modifier.padding(start = Gutter + 4.dp, top = 8.dp), maxLines = 2, lineHeight = 16.sp)
                 }
             }
@@ -200,14 +202,14 @@ internal fun ShadowLinkPage(c: LabColors, s: ShadowLinkUi, vpnOn: Boolean, onRun
         } else if (!s.running) item {
             Panel(c) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 22.dp, horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    LabText("No discovery yet", c.text, 14.5.sp, FontWeight.SemiBold, maxLines = 1)
-                    LabText("Tap Run discovery to read this network and get the path order to try.", c.text3, 12.5.sp,
+                    LabText(stringResource(R.string.ui_no_discovery_yet), c.text, 14.5.sp, FontWeight.SemiBold, maxLines = 1)
+                    LabText(stringResource(R.string.ui_tap_run_discovery_to_read), c.text3, 12.5.sp,
                         modifier = Modifier.padding(top = 4.dp), maxLines = 3, lineHeight = 17.sp)
                 }
             }
         }
         item {
-            Footnote(c, "Everything is measured on this phone and kept to an anonymous network key — never the operator's name. Nothing about you or your configs is sent.")
+            Footnote(c, stringResource(R.string.ui_everything_is_measured_on_this))
         }
     }
 }

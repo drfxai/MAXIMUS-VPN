@@ -1,5 +1,7 @@
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -32,64 +34,64 @@ internal fun RegionHopPanel(vm: ServersViewModel, state: ServersState, serverId:
     var token by remember(serverId) { mutableStateOf("") }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("RegionHop · Psiphon locations", style = MaterialTheme.typography.titleMedium)
-            Text("Optional after 3X-UI · ${server.displayName}")
-            Text("Device → your VPS → Psiphon country → Internet. Local proxy ports stay private.", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.ui_regionhop_psiphon_locations), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.ui_optional_after_3x_ui, server.displayName))
+            Text(stringResource(R.string.ui_device_your_vps_psiphon_country), style = MaterialTheme.typography.bodySmall)
             if (state.error.isNotBlank()) Text(state.error, color = MaterialTheme.colorScheme.error)
             if (!idle) Text(state.busy)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PsiphonSettingsImportButton(vm, idle)
-                TextButton(onClick = { vm.regionHopAction(serverId, "status") }, enabled = idle) { Text("Inspect") }
+                TextButton(onClick = { vm.regionHopAction(serverId, "status") }, enabled = idle) { Text(stringResource(R.string.ui_inspect)) }
             }
             if (snapshot?.installed != true) {
                 Text(snapshot?.detail ?: "Inspect installation first. Root SSH and 3X-UI are required.")
-                Button(onClick = { confirmInstall = true }, enabled = idle && server.canSignIn && server.username == "root" && server.facts?.xuiInstalled == true) { Text("Review RegionHop install") }
+                Button(onClick = { confirmInstall = true }, enabled = idle && server.canSignIn && server.username == "root" && server.facts?.xuiInstalled == true) { Text(stringResource(R.string.ui_review_regionhop_install)) }
             } else {
-                Text("Installed ${snapshot.version} · ${snapshot.locations.size} locations")
+                Text(stringResource(R.string.ui_installed_locations, snapshot.version, snapshot.locations.size))
                 Box {
-                    OutlinedButton(onClick = { menu = true }, enabled = idle) { Text("Country: $region") }
+                    OutlinedButton(onClick = { menu = true }, enabled = idle) { Text(stringResource(R.string.ui_country, region)) }
                     DropdownMenu(menu, { menu = false }) {
                         RegionHopManager.REGIONS.forEach { code -> DropdownMenuItem(text = { Text("$code · ${java.util.Locale("", code).getDisplayCountry(java.util.Locale.ENGLISH)}") }, onClick = { region = code; menu = false }) }
                     }
                 }
-                Button(onClick = { vm.regionHopAction(serverId, "add", JSONObject().put("region", region)) }, enabled = idle) { Text("Add + start location") }
+                Button(onClick = { vm.regionHopAction(serverId, "add", JSONObject().put("region", region)) }, enabled = idle) { Text(stringResource(R.string.ui_add_start_location)) }
                 snapshot.locations.forEach { location ->
                     HorizontalDivider()
-                    Text("Requested ${location.region} · ${location.name} · ${location.outbound}", style = MaterialTheme.typography.titleSmall)
-                    Text("Local SOCKS ${location.port} · ${location.state} · phone traffic untested", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.ui_requested, location.region, location.name, location.outbound), style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.ui_local_socks_phone_traffic_untested, location.port, location.state), style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf("start", "stop", "restart", "test").forEach { action ->
                             TextButton(onClick = { vm.regionHopAction(serverId, action, JSONObject().put("name", location.name)) }, enabled = idle) { Text(action.replaceFirstChar { it.uppercase() }) }
                         }
                     }
-                    TextButton(onClick = { remove = location.name }, enabled = idle) { Text("Remove location") }
+                    TextButton(onClick = { remove = location.name }, enabled = idle) { Text(stringResource(R.string.ui_remove_location)) }
                 }
                 if (snapshot.detail.isNotBlank()) Text(snapshot.detail, style = MaterialTheme.typography.bodySmall)
                 HorizontalDivider()
-                Text("3X-UI outbound synchronization", style = MaterialTheme.typography.titleSmall)
-                OutlinedTextField(address, { address = it }, label = { Text("Loopback panel URL + web path") }, modifier = Modifier.fillMaxWidth(), enabled = idle)
-                OutlinedTextField(token, { token = it }, label = { Text("3X-UI API token") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), enabled = idle)
-                Text("Sync creates regionhop-* outbounds. Assign them to your inbounds in 3X-UI Routing; existing user rules are preserved.", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.ui_t_3x_ui_outbound_synchronization), style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(address, { address = it }, label = { Text(stringResource(R.string.ui_loopback_panel_url_web_path)) }, modifier = Modifier.fillMaxWidth(), enabled = idle)
+                OutlinedTextField(token, { token = it }, label = { Text(stringResource(R.string.ui_t_3x_ui_api_token)) }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), enabled = idle)
+                Text(stringResource(R.string.ui_sync_creates_regionhop_outbounds_assign), style = MaterialTheme.typography.bodySmall)
                 Button(onClick = {
                     vm.regionHopAction(serverId, "sync", JSONObject().put("url", address.trim()).put("token", token.trim()))
                     token = ""
-                }, enabled = idle && token.isNotBlank()) { Text("Save token + sync outbounds") }
-                TextButton(onClick = { confirmRemoveAll = true }, enabled = idle) { Text("Uninstall managed RegionHop") }
+                }, enabled = idle && token.isNotBlank()) { Text(stringResource(R.string.ui_save_token_sync_outbounds)) }
+                TextButton(onClick = { confirmRemoveAll = true }, enabled = idle) { Text(stringResource(R.string.ui_uninstall_managed_regionhop)) }
             }
         }
     }
-    if (confirmInstall) AlertDialog(onDismissRequest = { confirmInstall = false }, title = { Text("Install RegionHop?") },
-        text = { Text("Install pinned RegionHop 1.27.0 on ${server.displayName}, create isolated services and a loopback panel, and send your privately imported Psiphon settings to this VPS. 3X-UI routing changes require the separate Sync action.") },
-        confirmButton = { TextButton(onClick = { confirmInstall = false; vm.regionHopAction(serverId, "install") }) { Text("Install on this VPS") } },
-        dismissButton = { TextButton(onClick = { confirmInstall = false }) { Text("Cancel") } })
-    if (confirmRemoveAll) AlertDialog(onDismissRequest = { confirmRemoveAll = false }, title = { Text("Uninstall RegionHop?") },
-        text = { Text("Stops all locations and removes their linked RegionHop outbounds and managed panel files. Review 3X-UI routing rules that used these outbounds. 3X-UI itself is preserved.") },
-        confirmButton = { TextButton(onClick = { confirmRemoveAll = false; vm.regionHopAction(serverId, "uninstall") }) { Text("Uninstall") } },
-        dismissButton = { TextButton(onClick = { confirmRemoveAll = false }) { Text("Cancel") } })
-    remove?.let { name -> AlertDialog(onDismissRequest = { remove = null }, title = { Text("Remove $name?") },
-        text = { Text("Stops this location and removes its RegionHop outbound from the linked 3X-UI panel.") },
-        confirmButton = { TextButton(onClick = { remove = null; vm.regionHopAction(serverId, "remove", JSONObject().put("name", name)) }) { Text("Remove") } },
-        dismissButton = { TextButton(onClick = { remove = null }) { Text("Cancel") } }) }
+    if (confirmInstall) AlertDialog(onDismissRequest = { confirmInstall = false }, title = { Text(stringResource(R.string.ui_install_regionhop)) },
+        text = { Text(stringResource(R.string.ui_install_pinned_regionhop_1_27, server.displayName)) },
+        confirmButton = { TextButton(onClick = { confirmInstall = false; vm.regionHopAction(serverId, "install") }) { Text(stringResource(R.string.ui_install_on_this_vps)) } },
+        dismissButton = { TextButton(onClick = { confirmInstall = false }) { Text(stringResource(R.string.ui_cancel)) } })
+    if (confirmRemoveAll) AlertDialog(onDismissRequest = { confirmRemoveAll = false }, title = { Text(stringResource(R.string.ui_uninstall_regionhop)) },
+        text = { Text(stringResource(R.string.ui_stops_all_locations_and_removes)) },
+        confirmButton = { TextButton(onClick = { confirmRemoveAll = false; vm.regionHopAction(serverId, "uninstall") }) { Text(stringResource(R.string.ui_uninstall)) } },
+        dismissButton = { TextButton(onClick = { confirmRemoveAll = false }) { Text(stringResource(R.string.ui_cancel)) } })
+    remove?.let { name -> AlertDialog(onDismissRequest = { remove = null }, title = { Text(stringResource(R.string.ui_remove_2, name)) },
+        text = { Text(stringResource(R.string.ui_stops_this_location_and_removes)) },
+        confirmButton = { TextButton(onClick = { remove = null; vm.regionHopAction(serverId, "remove", JSONObject().put("name", name)) }) { Text(stringResource(R.string.ui_remove)) } },
+        dismissButton = { TextButton(onClick = { remove = null }) { Text(stringResource(R.string.ui_cancel)) } }) }
 }
 
 @Composable
@@ -106,7 +108,7 @@ internal fun PsiphonSettingsImportButton(vm: ServersViewModel, enabled: Boolean 
             vm.importPsiphonConfig(bytes.toString(Charsets.UTF_8))
         }.onFailure { vm.importPsiphonConfig("") }
     }
-    TextButton(onClick = { importer.launch(arrayOf("*/*")) }, enabled = enabled) { Text("Import Psiphon.config") }
+    TextButton(onClick = { importer.launch(arrayOf("*/*")) }, enabled = enabled) { Text(stringResource(R.string.ui_import_psiphon_config)) }
 }
 
 @Composable
@@ -116,7 +118,7 @@ internal fun RegionHopDialog(vm: ServersViewModel, state: ServersState, serverId
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxWidth().padding(12.dp).heightIn(max = 720.dp)
             .verticalScroll(rememberScrollState())) {
-            TextButton(onClick = onDismiss) { Text("Back") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.ui_back)) }
             RegionHopPanel(vm, state, serverId)
         }
     }

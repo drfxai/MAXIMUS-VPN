@@ -1,5 +1,7 @@
 package com.example.ui.lab
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.app.Application
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -84,7 +86,7 @@ internal fun BuiltinConnectionScreen(
     val scroll = rememberScrollState()
     LaunchedEffect(tab) { scroll.scrollTo(0) }
     Column(Modifier.fillMaxSize().background(c.bg).imePadding()) {
-        TitleBar(c, title, "MAXIMUS VPN · CONNECTIONS", Icons.AutoMirrored.Rounded.ArrowBack, onBack)
+        TitleBar(c, title, stringResource(R.string.ui_maximus_vpn_connections), Icons.AutoMirrored.Rounded.ArrowBack, onBack)
         Surface(Modifier.padding(horizontal = Gutter, vertical = 8.dp).fillMaxWidth(),
             shape = RoundedCornerShape(24.dp), color = c.card,
             border = BorderStroke(1.dp, c.accent.copy(alpha = .28f))) {
@@ -97,25 +99,25 @@ internal fun BuiltinConnectionScreen(
                     }
                     Column(Modifier.weight(1f)) {
                         LabText(when {
-                            !bundled -> "Engine unavailable"
-                            ui.working -> "Working…"
-                            failed -> "Connection failed"
-                            fallback && !idle -> "WARP fallback"
+                            !bundled -> stringResource(R.string.ui_engine_unavailable)
+                            ui.working -> stringResource(R.string.ui_working)
+                            failed -> stringResource(R.string.ui_connection_failed)
+                            fallback && !idle -> stringResource(R.string.ui_warp_fallback)
                             own && !idle -> session.statusLabel
-                            !idle -> "Another session is active"
-                            ui.result?.traffic == true -> "Local access verified"
-                            else -> "Ready to connect"
+                            !idle -> stringResource(R.string.ui_another_session_is_active)
+                            ui.result?.traffic == true -> stringResource(R.string.ui_local_access_verified)
+                            else -> stringResource(R.string.ui_ready_to_connect)
                         }, c.text, 18.sp, FontWeight.Bold)
-                        LabText(if (direct) "DPI bypass · ISP exit IP" else "Cloudflare tunnel · Private device keys",
+                        LabText(if (direct) stringResource(R.string.ui_dpi_bypass_isp_exit_ip) else stringResource(R.string.ui_cloudflare_tunnel_private_device_keys),
                             c.text2, 12.sp)
                     }
                 }
                 if (ui.working || own && session.isBusy) LinearProgressIndicator(
                     Modifier.fillMaxWidth(), color = c.accent, trackColor = c.stroke)
-                if (fallback && !idle) LabText("Direct access failed. Your enabled WARP fallback is in use.", c.text2, 12.sp)
+                if (fallback && !idle) LabText(stringResource(R.string.ui_direct_access_failed_your_enabled), c.text2, 12.sp)
                 val message = if (failed || own && !idle) session.errorMessage ?: ui.message else ui.message
                 message?.let { LabText(it, c.text2, 12.sp) }
-                if (ui.working) TextButton(onClick = model::cancel) { Text("Cancel operation") }
+                if (ui.working) TextButton(onClick = model::cancel) { Text(stringResource(R.string.ui_cancel_operation)) }
             }
         }
         TabRow(selectedTabIndex = tab, containerColor = c.bg, contentColor = c.accent,
@@ -129,27 +131,27 @@ internal fun BuiltinConnectionScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (tab == 0) {
             Panel(c) {
-                SettingField("Alias (remarks)", options.advanced.alias, configurable) { value ->
+                SettingField(stringResource(R.string.ui_alias_remarks), options.advanced.alias, configurable) { value ->
                     model.options { it.copy(advanced = it.advanced.copy(alias = value)) }
                 }
             }
             GroupLabel(c, if (direct) "DPI profile" else "Tunnel settings")
             Panel(c) {
                 val choices = if (direct) ServerlessSidecar.variants else AetherSidecar.transports
-                OptionRow(if (direct) "Profile" else "Transport", if (direct) options.variant else options.transport,
+                OptionRow(if (direct) stringResource(R.string.ui_profile) else stringResource(R.string.ui_transport), if (direct) options.variant else options.transport,
                     choices, configurable) { value ->
                     model.options { if (direct) it.copy(variant = value) else it.copy(transport = value) }
                 }
                 Hairline(c)
-                OptionRow("IP family", options.family, AetherSidecar.families, configurable) { value ->
+                OptionRow(stringResource(R.string.ui_ip_family), options.family, AetherSidecar.families, configurable) { value ->
                     model.options { it.copy(family = value) }
                 }
                 Hairline(c)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        LabText(if (direct) "WARP fallback" else "TLS fragmentation", c.text, 14.sp)
-                        LabText(if (direct) "Switch to WARP if Direct fails" else "Split supported TLS handshakes", c.text2, 12.sp)
+                        LabText(if (direct) stringResource(R.string.ui_warp_fallback) else stringResource(R.string.ui_tls_fragmentation), c.text, 14.sp)
+                        LabText(if (direct) stringResource(R.string.ui_switch_to_warp_if_direct) else stringResource(R.string.ui_split_supported_tls_handshakes), c.text2, 12.sp)
                     }
                     Switch(checked = if (direct) options.vpnFallback else options.fragment,
                         enabled = configurable, onCheckedChange = { value ->
@@ -161,11 +163,11 @@ internal fun BuiltinConnectionScreen(
                     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            LabText("WARP identity", c.text, 14.sp)
-                            LabText(if (ui.identity) "Stored on this device" else "Created automatically when connecting", c.text2, 12.sp)
+                            LabText(stringResource(R.string.ui_warp_identity), c.text, 14.sp)
+                            LabText(if (ui.identity) stringResource(R.string.ui_stored_on_this_device) else stringResource(R.string.ui_created_automatically_when_connecting), c.text2, 12.sp)
                         }
                         TextButton(onClick = { model.renewIdentity() }, enabled = configurable && bundled && valid) {
-                            Text(if (ui.identity) "Renew" else "Create")
+                            Text(if (ui.identity) stringResource(R.string.ui_renew) else stringResource(R.string.ui_create))
                         }
                     }
                 }
@@ -173,15 +175,15 @@ internal fun BuiltinConnectionScreen(
             if (direct) {
                 GroupLabel(c, "Encrypted DNS")
                 Panel(c) {
-                    OptionRow("Preferred resolver", options.resolver, ServerlessSidecar.resolvers, configurable) {
+                    OptionRow(stringResource(R.string.ui_preferred_resolver), options.resolver, ServerlessSidecar.resolvers, configurable) {
                         model.options { o -> o.copy(resolver = it) }
                     }
                 }
-                Footnote(c, "Both resolvers use authenticated HTTPS through the DPI profile. The other resolver remains available as fallback.")
+                Footnote(c, stringResource(R.string.ui_both_resolvers_use_authenticated_https))
             }
-            Footnote(c, if (direct) "Auto tries DPI methods and remembers the last verified method for this network. Advanced routing is optional."
-                else "Auto selects a transport. Endpoint, registration, relay and exit-node controls are available in Advanced.")
-            SecondaryButton(c, "Run access checks", null,
+            Footnote(c, if (direct) stringResource(R.string.ui_auto_tries_dpi_methods_and)
+                else stringResource(R.string.ui_auto_selects_a_transport_endpoint))
+            SecondaryButton(c, stringResource(R.string.ui_run_access_checks), null,
                 Modifier.padding(horizontal = Gutter).fillMaxWidth(), enabled = configurable && bundled && valid) {
                 tab = 2
                 model.testAccess()
@@ -200,40 +202,40 @@ internal fun BuiltinConnectionScreen(
                 }
                 GroupLabel(c, "Endpoint discovery")
                 Panel(c) {
-                    OptionRow("Scan mode", options.advanced.scan, AetherSettings.scans, configurable) { value ->
+                    OptionRow(stringResource(R.string.ui_scan_mode), options.advanced.scan, AetherSettings.scans, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(scan = value)) }
                     }
-                    OptionRow("Obfuscation", options.advanced.noize, AetherSettings.noises,
+                    OptionRow(stringResource(R.string.ui_obfuscation), options.advanced.noize, AetherSettings.noises,
                         configurable && options.transport in listOf("auto", "h3", "wireguard", "wiw")) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(noize = value)) }
                     }
-                    SettingField("Address · blank to scan", options.advanced.endpointAddress, configurable) { value ->
+                    SettingField(stringResource(R.string.ui_address_blank_to_scan), options.advanced.endpointAddress, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.withEndpoint(address = value)) }
                     }
-                    SettingField("Port", options.advanced.endpointPort, configurable) { value ->
+                    SettingField(stringResource(R.string.ui_port), options.advanced.endpointPort, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.withEndpoint(port = value)) }
                     }
-                    SettingField("WireGuard MTU · blank for automatic (1180–1420)", options.advanced.mtu,
+                    SettingField(stringResource(R.string.ui_wireguard_mtu_blank_for_automatic), options.advanced.mtu,
                         configurable && options.transport in listOf("auto", "wireguard", "wiw")) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(mtu = value.filter { ch -> ch in '0'..'9' }.take(4))) }
                     }
                 }
                 GroupLabel(c, "WARP registration and TLS")
                 Panel(c) {
-                    OptionRow("API host", options.advanced.apiHost, AetherSettings.apiHosts, configurable) { value ->
+                    OptionRow(stringResource(R.string.ui_api_host), options.advanced.apiHost, AetherSettings.apiHosts, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(apiHost = value)) }
                     }
-                    OptionRow("API server name (SNI)", options.advanced.apiSni, AetherSettings.apiHosts, configurable) { value ->
+                    OptionRow(stringResource(R.string.ui_api_server_name_sni), options.advanced.apiSni, AetherSettings.apiHosts, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(apiSni = value)) }
                     }
-                    OptionRow("Account API route", options.advanced.apiRoute, AetherSettings.apiRoutes, configurable) { value ->
+                    OptionRow(stringResource(R.string.ui_account_api_route), options.advanced.apiRoute, AetherSettings.apiRoutes, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(apiRoute = value)) }
                     }
-                    Footnote(c, "Auto/OOB uses Android TLS for account HTTPS. Native applies the API fingerprint directly. Explicit ECH and tunnel TLS stay native; certificate checks remain enabled.")
-                    OptionRow("Fingerprint", options.advanced.fingerprint, com.example.vpn.sidecar.AetherTlsProfiles.names, configurable) { value ->
+                    Footnote(c, stringResource(R.string.ui_auto_oob_uses_android_tls))
+                    OptionRow(stringResource(R.string.ui_fingerprint), options.advanced.fingerprint, com.example.vpn.sidecar.AetherTlsProfiles.names, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(fingerprint = value)) }
                     }
-                    SettingField("API address · blank for automatic", options.advanced.apiAddress, configurable) { value ->
+                    SettingField(stringResource(R.string.ui_api_address_blank_for_automatic), options.advanced.apiAddress, configurable) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(apiAddress = value)) }
                     }
                     SettingField("WARP API relay · your Worker https:// address, blank for none", options.advanced.apiRelay, configurable) { value ->
@@ -242,16 +244,16 @@ internal fun BuiltinConnectionScreen(
                     TextButton(onClick = {
                         runCatching { context.assets.open("warp-relay/worker.js").bufferedReader().use { it.readText() } }
                             .onSuccess { clipboard.setText(AnnotatedString(it)) }
-                    }) { Text("Copy WARP API relay Worker script") }
+                    }) { Text(stringResource(R.string.ui_copy_warp_api_relay_worker)) }
                     Footnote(c, "Irancell/MCI: each WARP account call races Aether's TLS against an OOB ClientHello lane. A relay on your own Worker (set RELAY_KEY, enter https://<worker>.workers.dev/<RELAY_KEY>) joins the race.")
-                    SettingField("Fragment bytes · default 8-16", options.advanced.fragmentSize, configurable && options.fragment) { value ->
+                    SettingField(stringResource(R.string.ui_fragment_bytes_default_8_16), options.advanced.fragmentSize, configurable && options.fragment) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(fragmentSize = value)) }
                     }
-                    SettingField("Fragment delay ms · default 2-10", options.advanced.fragmentDelay, configurable && options.fragment) { value ->
+                    SettingField(stringResource(R.string.ui_fragment_delay_ms_default_2), options.advanced.fragmentDelay, configurable && options.fragment) { value ->
                         model.options { it.copy(advanced = it.advanced.copy(fragmentDelay = value)) }
                     }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LabText("Encrypted Client Hello", c.text, 14.sp, modifier = Modifier.weight(1f))
+                        LabText(stringResource(R.string.ui_encrypted_client_hello), c.text, 14.sp, modifier = Modifier.weight(1f))
                         Switch(checked = options.advanced.ech, enabled = configurable, onCheckedChange = { value ->
                             model.options { it.copy(advanced = it.advanced.copy(ech = value)) }
                         })
@@ -260,48 +262,48 @@ internal fun BuiltinConnectionScreen(
                         KeyValue(c, optionLabel(kind), if (ui.keyStatus[kind] == true) "Stored" else "Not created")
                     }
                     var keyKind by rememberSaveable { mutableStateOf("all") }
-                    OptionRow("New keys for", keyKind, AetherSettings.keyKinds, configurable) { keyKind = it }
+                    OptionRow(stringResource(R.string.ui_new_keys_for), keyKind, AetherSettings.keyKinds, configurable) { keyKind = it }
                     TextButton(onClick = { model.renewIdentity(keyKind) }, enabled = configurable && bundled && valid) {
-                        Text("Get new WARP keys")
+                        Text(stringResource(R.string.ui_get_new_warp_keys))
                     }
                 }
-                Footnote(c, "ECH requires a usable ECH key. TLS uses Chrome by default. API host and SNI stay matched; certificate verification remains enabled.")
+                Footnote(c, stringResource(R.string.ui_ech_requires_a_usable_ech))
             }
             GroupLabel(c, "Exit-node")
             Panel(c) {
-                OptionRow("Outbound", options.advanced.exitNode, listOf("") + ui.exitNodes.map { it.id }, configurable,
+                OptionRow(stringResource(R.string.ui_outbound), options.advanced.exitNode, listOf("") + ui.exitNodes.map { it.id }, configurable,
                     label = { id -> if (id.isBlank()) "freedom (default)" else ui.exitNodes.firstOrNull { it.id == id }?.name ?: "Unavailable node" }) { value ->
                     model.options { it.copy(advanced = it.advanced.copy(exitNode = value)) }
                 }
-                SettingField("exit-node finalMask · raw JSON", options.advanced.exitFinalMask,
+                SettingField(stringResource(R.string.ui_exit_node_finalmask_raw_json), options.advanced.exitFinalMask,
                     configurable && options.advanced.exitNode.isBlank(), multiline = true) { value ->
                     model.options { it.copy(advanced = it.advanced.copy(exitFinalMask = value)) }
                 }
-                SettingField("exit-node dialMode", options.advanced.exitDialMode,
+                SettingField(stringResource(R.string.ui_exit_node_dialmode), options.advanced.exitDialMode,
                     configurable && options.advanced.exitNode.isBlank()) { value ->
                     model.options { it.copy(advanced = it.advanced.copy(exitDialMode = value)) }
                 }
             }
             if (!direct) {
-                SecondaryButton(c, "Scan for an endpoint", null,
+                SecondaryButton(c, stringResource(R.string.ui_scan_for_an_endpoint), null,
                     Modifier.padding(horizontal = Gutter).fillMaxWidth(), enabled = configurable && bundled && valid) {
                     model.testAccess()
                 }
             }
             }
             if (tab == 2) {
-            Footnote(c, "These checks measure the local engine. They do not prove that every Android app is using the VPN or that DNS cannot leak.")
+            Footnote(c, stringResource(R.string.ui_these_checks_measure_the_local))
             GroupLabel(c, if (direct) "Direct command" else "Aether command")
             Panel(c) {
                 val preview = model.commandPreview()
                 Text(preview, Modifier.padding(14.dp), color = c.text2, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                TextButton(onClick = { clipboard.setText(AnnotatedString(preview)) }) { Text("Copy") }
+                TextButton(onClick = { clipboard.setText(AnnotatedString(preview)) }) { Text(stringResource(R.string.ui_copy)) }
             }
             GroupLabel(c, "Log")
             Panel(c) {
                 Text(ui.log.joinToString("\n").ifBlank { ui.message ?: "No operation recorded" },
                     Modifier.padding(14.dp), color = c.text2, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                TextButton(onClick = { clipboard.setText(AnnotatedString(ui.log.joinToString("\n").ifBlank { ui.message.orEmpty() })) }) { Text("Copy") }
+                TextButton(onClick = { clipboard.setText(AnnotatedString(ui.log.joinToString("\n").ifBlank { ui.message.orEmpty() })) }) { Text(stringResource(R.string.ui_copy)) }
             }
             GroupLabel(c, "Access checks")
             Panel(c) {
@@ -313,8 +315,8 @@ internal fun BuiltinConnectionScreen(
                 KeyValue(c, "HTTPS traffic", outcome(result?.traffic))
                 result?.latencyMs?.let { KeyValue(c, "HTTPS check time", "$it ms") }
             }
-            Footnote(c, "Connect starts the engine and checks access automatically. The optional access test checks the local engine.")
-            SecondaryButton(c, if (ui.working) "Cancel" else "Run access checks", null,
+            Footnote(c, stringResource(R.string.ui_connect_starts_the_engine_and))
+            SecondaryButton(c, if (ui.working) stringResource(R.string.ui_cancel) else stringResource(R.string.ui_run_access_checks), null,
                 Modifier.padding(horizontal = Gutter).fillMaxWidth(), enabled = ui.working || configurable && bundled && valid) {
                 if (ui.working) model.cancel() else model.testAccess()
             }

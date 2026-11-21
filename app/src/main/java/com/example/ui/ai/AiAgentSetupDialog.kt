@@ -1,5 +1,7 @@
 package com.example.ui.ai
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -85,8 +87,8 @@ fun AiAgentSetupDialog(
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("AI Agent", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = c.textPrimary)
-                        Text("Gemini co-pilot settings", fontSize = 12.sp, color = c.textSecondary)
+                        Text(stringResource(R.string.ui_ai_agent), fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = c.textPrimary)
+                        Text(stringResource(R.string.ui_gemini_co_pilot_settings), fontSize = 12.sp, color = c.textSecondary)
                     }
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = c.textSecondary, modifier = Modifier.size(20.dp))
@@ -102,7 +104,7 @@ fun AiAgentSetupDialog(
                         .padding(horizontal = 20.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    SectionHeader("API key")
+                    SectionHeader(stringResource(R.string.ui_api_key))
                     OutlinedTextField(
                         value = apiKeyInput,
                         onValueChange = { apiKeyInput = it },
@@ -144,7 +146,7 @@ fun AiAgentSetupDialog(
                     )
 
                     Spacer(Modifier.height(6.dp))
-                    SectionHeader("Model")
+                    SectionHeader(stringResource(R.string.ui_model))
                     val (flash, pro) = GeminiModelCatalog.AVAILABLE_MODELS.partition { !it.isPro }
                     GroupLabel("Flash · fastest replies")
                     flash.forEach { ModelOption(it, config.model == it.id) { onSelectModel(it.id) } }
@@ -152,7 +154,7 @@ fun AiAgentSetupDialog(
                     pro.forEach { ModelOption(it, config.model == it.id) { onSelectModel(it.id) } }
 
                     Spacer(Modifier.height(6.dp))
-                    SectionHeader("Voice")
+                    SectionHeader(stringResource(R.string.ui_voice))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -169,8 +171,8 @@ fun AiAgentSetupDialog(
                         Icon(Icons.Default.VolumeUp, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Read replies aloud", fontSize = 13.5.sp, fontWeight = FontWeight.Medium, color = c.textPrimary)
-                            Text("Speaks each answer when it arrives", fontSize = 11.5.sp, color = c.textMuted)
+                            Text(stringResource(R.string.ui_read_replies_aloud), fontSize = 13.5.sp, fontWeight = FontWeight.Medium, color = c.textPrimary)
+                            Text(stringResource(R.string.ui_speaks_each_answer_when_it), fontSize = 11.5.sp, color = c.textMuted)
                         }
                         // The row handles the click.
                         Switch(
@@ -202,7 +204,7 @@ fun AiAgentSetupDialog(
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, c.borderSubtle)
                     ) {
-                        Text("Cancel", color = c.textPrimary, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.ui_cancel), color = c.textPrimary, fontWeight = FontWeight.Medium)
                     }
                     Button(
                         onClick = {
@@ -213,7 +215,7 @@ fun AiAgentSetupDialog(
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = c.primary, contentColor = c.onPrimary)
                     ) {
-                        Text("Save and activate", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ui_save_and_activate), fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -262,7 +264,7 @@ private fun KeyStatusRow(
         Spacer(Modifier.width(8.dp))
         Text(text, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = color, modifier = Modifier.weight(1f))
         TextButton(onClick = onTest, enabled = canTest) {
-            Text("Test key", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.ui_test_key), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -302,8 +304,8 @@ private fun ModelOption(model: ModelInfo, selected: Boolean, onSelect: () -> Uni
         }
         Text(model.description, fontSize = 12.5.sp, lineHeight = 17.sp, color = c.textSecondary)
         Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            ScoreMeter("Speed", model.speed)
-            ScoreMeter("Reasoning", model.reasoning)
+            ScoreMeter(stringResource(R.string.ui_speed), model.speed)
+            ScoreMeter(stringResource(R.string.ui_reasoning), model.reasoning)
         }
     }
 }

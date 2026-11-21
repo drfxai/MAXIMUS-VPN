@@ -1,6 +1,8 @@
 
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
@@ -109,12 +111,12 @@ internal fun PremiumSmartManagerScreen(
         Text(server?.displayName ?: "Connect your first VPS", color = StudioText,
             fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
         Text(when {
-            fresh && server?.canSignIn == true -> "SSH authenticated · Inspection fresh"
-            facts != null -> "Inspection expired · Refresh over SSH"
-            else -> "Authenticated SSH inspection required"
+            fresh && server?.canSignIn == true -> stringResource(R.string.ui_ssh_authenticated_inspection_fresh)
+            facts != null -> stringResource(R.string.ui_inspection_expired_refresh_over_ssh)
+            else -> stringResource(R.string.ui_authenticated_ssh_inspection_required)
         }, color = StudioMuted, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
         if (server == null) {
-            MxAction("Add VPS", onClick = { vm.openAdd() }, strong = true)
+            MxAction(stringResource(R.string.ui_add_vps), onClick = { vm.openAdd() }, strong = true)
             return@Column
         }
         StudioResources(facts.takeIf { fresh })
@@ -128,7 +130,7 @@ internal fun PremiumSmartManagerScreen(
         }
         when (page) {
             0 -> {
-                MxAction("RegionHop · Psiphon country exits", { showRegionHop = true })
+                MxAction(stringResource(R.string.ui_regionhop_psiphon_country_exits), { showRegionHop = true })
                 StudioTableHeader()
                 engineIds.forEachIndexed { index, id ->
                     val candidate = inspection?.candidate(id)
@@ -163,7 +165,7 @@ internal fun PremiumSmartManagerScreen(
             1 -> {
                 MxChecks(server, inspection, vm)
                 MxCloudflareSetup(onOpenCloudflare, onOpenSmartDomains)
-                MxAction("VPS settings", { vm.openDetail(server.id) })
+                MxAction(stringResource(R.string.ui_vps_settings), { vm.openDetail(server.id) })
             }
             3 -> {
                 // The approved artwork puts selection and Cloudflare side by side on wide screens.
@@ -184,10 +186,10 @@ internal fun PremiumSmartManagerScreen(
                     }
                 }
                 state.bundle?.takeIf { it.serverId == server?.id }?.let { batch ->
-                    MxCard("Batch installation", "Sequential VPS changes · never an atomic rollback", Mx.Cyan) {
-                        Text("Selected: ${batch.order.joinToString { id ->
+                    MxCard(stringResource(R.string.ui_batch_installation), stringResource(R.string.ui_sequential_vps_changes_never_an), Mx.Cyan) {
+                        Text(stringResource(R.string.ui_selected, batch.order.joinToString { id ->
                             ServerToolCatalog.byId(id)?.title ?: id
-                        }}", color = Mx.White, fontSize = 12.sp)
+                        }), color = Mx.White, fontSize = 12.sp)
                         Text("Completed: ${batch.completed.size}/${batch.order.size}" +
                             (if (batch.running) " · running ${ServerToolCatalog.byId(batch.active)?.title ?: batch.active}"
                                 else if (batch.finished) " · server-side setup complete" else " · stopped"),
@@ -198,7 +200,7 @@ internal fun PremiumSmartManagerScreen(
                                 "Earlier tools were preserved; inspect the server and operation journal before retrying.",
                             color = Mx.Orange, fontSize = 11.sp)
                         if (batch.finished) Text(
-                            "DNS delegation and end-to-end phone tunnel verification are still required.",
+                            stringResource(R.string.ui_dns_delegation_and_end_to),
                             color = Mx.Muted, fontSize = 11.sp)
                     }
                 }
@@ -206,7 +208,7 @@ internal fun PremiumSmartManagerScreen(
                     if (maxWidth >= 600.dp) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             MxChecks(server, inspection, vm, Modifier.weight(1f))
-                            MxCard("Automation Flow", "Inspect → select → DNS → review → install → verify",
+                            MxCard(stringResource(R.string.ui_automation_flow), stringResource(R.string.ui_inspect_select_dns_review_install),
                                 Mx.Cyan, Modifier.weight(1f)) {
                                 MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
                                     "Review", "Install", "Verify"))
@@ -215,7 +217,7 @@ internal fun PremiumSmartManagerScreen(
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             MxChecks(server, inspection, vm)
-                            MxCard("Automation Flow", "Six-step guided deployment", Mx.Cyan) {
+                            MxCard(stringResource(R.string.ui_automation_flow), stringResource(R.string.ui_six_step_guided_deployment), Mx.Cyan) {
                                 MxFlowSteps(listOf("Inspect", "Select", "Cloudflare",
                                     "Review", "Install", "Verify"))
                             }
@@ -224,13 +226,13 @@ internal fun PremiumSmartManagerScreen(
                 }
             }
             5 -> {
-                MxCard("Service logs", "Selected VPS · Read-only SSH", StudioBlue) {
+                MxCard(stringResource(R.string.ui_service_logs), stringResource(R.string.ui_selected_vps_read_only_ssh), StudioBlue) {
                     val loggable = server.tools.filter { SmartManagerState.hasLogs(it.id) }
                     loggable.forEach { tool ->
                         MxAction(ServerToolCatalog.byId(tool.id)?.title ?: tool.id, { vm.logs(server.id, tool.id) },
                             enabled = state.busy.isBlank())
                     }
-                    if (loggable.isEmpty()) Text("No managed services yet.", color = StudioMuted)
+                    if (loggable.isEmpty()) Text(stringResource(R.string.ui_no_managed_services_yet), color = StudioMuted)
                     val operations by produceState(emptyList<com.example.panels.servers.SmartOperation>(),
                         server.id, state.busy, state.bundle, state.psiphonInstall, state.wizard?.stage) {
                         value = withContext(Dispatchers.IO) { vm.operationsFor(server.id) }
@@ -239,9 +241,9 @@ internal fun PremiumSmartManagerScreen(
                         Text("${operation.toolId} · ${operation.status.name.lowercase()}", color = StudioMuted, fontSize = 11.sp)
                         // An interrupted install blocks every later install on this VPS until reconciled.
                         if (operation.status == com.example.panels.servers.SmartOperation.Status.UNCERTAIN) {
-                            Text("Interrupted: remote effects unknown. Reinspect before another installation.",
+                            Text(stringResource(R.string.ui_interrupted_remote_effects_unknown_reins),
                                 color = Mx.Red, fontSize = 11.sp)
-                            MxAction("Reinspect & acknowledge", {
+                            MxAction(stringResource(R.string.ui_reinspect_acknowledge), {
                                 vm.reconcileUncertainOperation(server.id, operation.id)
                             }, enabled = state.busy.isBlank() && state.bundle?.running != true &&
                                 state.psiphonInstall?.running != true)
@@ -260,10 +262,10 @@ internal fun PremiumSmartManagerScreen(
         }
         val seconds = ((inspectionNow - server.checkedAt) / 1000).coerceAtLeast(0)
         StudioActivity(when {
-            server.id in state.checking -> "Refreshing SSH inspection…"
+            server.id in state.checking -> stringResource(R.string.ui_refreshing_ssh_inspection)
             state.busy.isNotBlank() -> state.busy
-            server.checkedAt > 0L -> "SSH inspection completed · ${if (seconds < 60) "${seconds}s" else "${seconds / 60}m"} ago"
-            else -> "Awaiting first SSH inspection"
+            server.checkedAt > 0L -> stringResource(R.string.ui_ssh_inspection_completed_ago, if (seconds < 60) "${seconds}s" else "${seconds / 60}m")
+            else -> stringResource(R.string.ui_awaiting_first_ssh_inspection)
         })
         if (state.error.isNotBlank()) Text(state.error, color = Mx.Red, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
@@ -286,27 +288,27 @@ internal fun PremiumSmartManagerScreen(
             server != null && state.busy.isBlank() && state.bundle?.running != true
         AlertDialog(
             onDismissRequest = { showPlan = false },
-            title = { Text("Smart Installation Review") },
+            title = { Text(stringResource(R.string.ui_smart_installation_review)) },
             text = {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Selected: ${chosenCandidates.joinToString { it.title }.ifBlank { "None" }}")
+                    Text(stringResource(R.string.ui_selected, chosenCandidates.joinToString { it.title }.ifBlank { "None" }))
                     if (chosenCandidates.size > 1) {
-                        Text("Supported batch: 3X-UI + exactly one DNS tunnel. One approval starts a sequential, stop-on-error installation; it is NOT atomic. Existing successful installs are preserved on later failure.")
+                        Text(stringResource(R.string.ui_supported_batch_3x_ui_exactly))
                         OutlinedTextField(value = batchDomain, onValueChange = { batchDomain = it },
-                            singleLine = true, label = { Text("Your DNS domain") },
+                            singleLine = true, label = { Text(stringResource(R.string.ui_your_dns_domain)) },
                             placeholder = { Text("example.com") })
                         OutlinedTextField(value = batchLabel, onValueChange = { batchLabel = it },
-                            singleLine = true, label = { Text("Tunnel label") },
+                            singleLine = true, label = { Text(stringResource(R.string.ui_tunnel_label)) },
                             placeholder = { Text("t") })
-                        Text("No DNS records will be changed automatically. You must configure delegation and verify traffic after installation.")
+                        Text(stringResource(R.string.ui_no_dns_records_will_be))
                     }
                     blockers.forEach { Text("• $it", color = MaterialTheme.colorScheme.error) }
                     batchPlan?.blockers?.filterNot { it in blockers }?.forEach {
                         Text("• $it", color = MaterialTheme.colorScheme.error)
                     }
-                    if (canSingle) Text("Open the individual approval wizard before installation.")
-                    if (canBatch) Text("One approval will execute both selected services in sequence; each step is recorded and checked over pinned SSH.")
+                    if (canSingle) Text(stringResource(R.string.ui_open_the_individual_approval_wizard))
+                    if (canBatch) Text(stringResource(R.string.ui_one_approval_will_execute_both))
                 }
             },
             confirmButton = {
@@ -315,9 +317,9 @@ internal fun PremiumSmartManagerScreen(
                         selectedIds, batchDomain, batchLabel)
                     else if (canSingle) vm.openWizard(chosenCandidates.single().id, server?.id)
                     showPlan = false
-                }) { Text(if (canBatch) "Approve & install both" else "Open verified installer") }
+                }) { Text(if (canBatch) stringResource(R.string.ui_approve_install_both) else stringResource(R.string.ui_open_verified_installer)) }
             },
-            dismissButton = { TextButton(onClick = { showPlan = false }) { Text("Close") } }
+            dismissButton = { TextButton(onClick = { showPlan = false }) { Text(stringResource(R.string.ui_close)) } }
         )
     }
 }
@@ -327,7 +329,7 @@ private fun MxInstallSelector(
     candidates: List<SmartManagerPlanner.Candidate>, chosen: Set<String>,
     onChange: (Set<String>) -> Unit, onInstall: () -> Unit, modifier: Modifier = Modifier
 ) {
-    MxCard("One-click Multi-Install", "Select panels and engines on the chosen VPS",
+    MxCard(stringResource(R.string.ui_one_click_multi_install), stringResource(R.string.ui_select_panels_and_engines_on),
         Mx.Cyan, modifier) {
         candidates.forEach { c ->
             val statusColor = when (c.status) {
@@ -364,11 +366,11 @@ private fun MxInstallSelector(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            MxAction("Install Selected (${chosen.size})", onInstall,
+            MxAction(stringResource(R.string.ui_install_selected, chosen.size), onInstall,
                 Modifier.weight(1.4f), strong = true, enabled = chosen.isNotEmpty())
-            MxAction("Preview Plan", onInstall, Modifier.weight(1f))
+            MxAction(stringResource(R.string.ui_preview_plan), onInstall, Modifier.weight(1f))
         }
-        Text("Safety gate: unsupported bundles cannot install automatically.",
+        Text(stringResource(R.string.ui_safety_gate_unsupported_bundles_cannot),
             color = Mx.Muted, fontSize = 10.sp)
     }
 }
@@ -386,26 +388,26 @@ private fun MxCloudflareSetup(
     var status by remember { mutableStateOf(if (tokenStored) "Token stored securely" else "Token required") }
     var zones by remember { mutableStateOf<List<SmartDomains.Zone>>(emptyList()) }
     var zone by remember { mutableStateOf(store.zoneId()) }
-    MxCard("Cloudflare Integration", "Create a scoped token, verify zones, then manage DNS",
+    MxCard(stringResource(R.string.ui_cloudflare_integration), stringResource(R.string.ui_create_a_scoped_token_verify),
         Mx.Gold, modifier) {
-        MxAction("Create Cloudflare API Token", strong = true, onClick = {
+        MxAction(stringResource(R.string.ui_create_cloudflare_api_token), strong = true, onClick = {
             val uri = TokenTemplate.url(TokenTemplate.SMART_DOMAINS, "Maximus Smart Manager")
             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri))) }
                 .onFailure { status = "Browser unavailable" }
         }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value = token, onValueChange = { if (it.length <= 100) token = it.trim() },
-            label = { Text("Cloudflare API Token", fontSize = 11.sp) },
-            placeholder = { Text("Paste your scoped token", fontSize = 11.sp) },
+            label = { Text(stringResource(R.string.ui_cloudflare_api_token_2), fontSize = 11.sp) },
+            placeholder = { Text(stringResource(R.string.ui_paste_your_scoped_token), fontSize = 11.sp) },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(), singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = Mx.White, unfocusedTextColor = Mx.White,
                 focusedBorderColor = Mx.Gold, unfocusedBorderColor = Mx.Line,
                 focusedLabelColor = Mx.Gold, unfocusedLabelColor = Mx.Muted))
-        Text("Zone Read + DNS Edit only; secret saved using Android Keystore.",
+        Text(stringResource(R.string.ui_zone_read_dns_edit_only),
             color = Mx.Muted, fontSize = 10.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            MxAction(if (working) "Verifying..." else "Verify & Save", onClick = {
+            MxAction(if (working) stringResource(R.string.ui_verifying_2) else stringResource(R.string.ui_verify_save), onClick = {
                 val value = token.trim()
                 if (!TokenTemplate.looksLikeToken(value)) {
                     status = "Invalid API token format"
@@ -430,7 +432,7 @@ private fun MxCloudflareSetup(
                     }
                 }
             }, Modifier.weight(1f), enabled = !working && token.isNotBlank())
-            MxAction("Discover zones", onClick = {
+            MxAction(stringResource(R.string.ui_discover_zones), onClick = {
                 val value = store.token()
                 if (value.isBlank()) status = "Verify a token first"
                 else {
@@ -448,7 +450,7 @@ private fun MxCloudflareSetup(
         }
         MxStatus(status, if (tokenStored) Mx.Green else Mx.Orange)
         if (zones.isNotEmpty()) {
-            Text("Select Domain (Zone)", color = Mx.Gold, fontSize = 11.sp)
+            Text(stringResource(R.string.ui_select_domain_zone), color = Mx.Gold, fontSize = 11.sp)
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 zones.filter { it.status == "active" }.take(12).forEach { z ->
                     Surface(color = if (zone == z.id) Mx.Blue.copy(alpha = .23f) else Mx.Card,
@@ -465,10 +467,10 @@ private fun MxCloudflareSetup(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            MxAction("Smart Domains", onSmartDomains, Modifier.weight(1f))
-            MxAction("Cloudflare DNS", onCloudflare, Modifier.weight(1f))
+            MxAction(stringResource(R.string.ui_smart_domains_2), onSmartDomains, Modifier.weight(1f))
+            MxAction(stringResource(R.string.ui_cloudflare_dns), onCloudflare, Modifier.weight(1f))
         }
-        Text("Create a token on Cloudflare's site. No zone or DNS record is modified by this card.",
+        Text(stringResource(R.string.ui_create_a_token_on_cloudflare),
             color = Mx.Muted, fontSize = 10.sp)
     }
 }
@@ -481,25 +483,25 @@ private fun MxChecks(
 ) {
     val fresh = server != null && System.currentTimeMillis() - server.checkedAt in 0..INSPECTION_TTL_MS
     val facts = server?.facts.takeIf { fresh }
-    MxCard("Pre-flight Checks", "Validated against the selected VPS", Mx.Cyan, modifier) {
-        MxInfoRow("SSH fingerprint",
+    MxCard(stringResource(R.string.ui_pre_flight_checks), stringResource(R.string.ui_validated_against_the_selected_vps), Mx.Cyan, modifier) {
+        MxInfoRow(stringResource(R.string.ui_ssh_fingerprint),
             if (server?.hostKeySha256.isNullOrBlank()) "Pending" else "Pinned",
             if (server?.hostKeySha256.isNullOrBlank()) Mx.Orange else Mx.Green)
-        MxInfoRow("Port conflicts", if (facts?.socketInspectionAvailable == true && fresh) "Scanned" else "Needs scan",
+        MxInfoRow(stringResource(R.string.ui_port_conflicts), if (facts?.socketInspectionAvailable == true && fresh) "Scanned" else "Needs scan",
             if (facts?.socketInspectionAvailable == true && fresh) Mx.Green else Mx.Orange)
         // Public listeners only: the local systemd-resolved stub (127.0.0.53) is not a conflict.
         val port53 = SmartManagerState.publicPort53Occupied(facts)
-        MxInfoRow("DNS safety", when (port53) {
+        MxInfoRow(stringResource(R.string.ui_dns_safety), when (port53) {
             null -> "Pending"
             true -> "Port 53: occupied"
             false -> "Port 53: available"
         }, if (port53 == false) Mx.Green else Mx.Orange)
-        MxInfoRow("Firewall", facts?.firewall ?: "Not inspected", Mx.Cyan)
-        MxInfoRow("Resource fit", if (facts == null) "Pending" else
+        MxInfoRow(stringResource(R.string.ui_firewall), facts?.firewall ?: "Not inspected", Mx.Cyan)
+        MxInfoRow(stringResource(R.string.ui_resource_fit), if (facts == null) "Pending" else
             if (facts.blocker() == null) "Preliminary" else "Blocked",
             if (facts?.blocker() == null && facts != null) Mx.Green else Mx.Orange)
-        MxInfoRow("Rollback plan", "Per-engine wizard", Mx.Cyan)
-        if (server != null) MxAction("Run smart inspection", { vm.refresh(server.id) },
+        MxInfoRow(stringResource(R.string.ui_rollback_plan), "Per-engine wizard", Mx.Cyan)
+        if (server != null) MxAction(stringResource(R.string.ui_run_smart_inspection), { vm.refresh(server.id) },
             Modifier.fillMaxWidth(), strong = true)
         inspection?.limitations?.take(2)?.forEach {
             Text("• $it", color = Mx.Muted, fontSize = 10.sp, lineHeight = 13.sp)

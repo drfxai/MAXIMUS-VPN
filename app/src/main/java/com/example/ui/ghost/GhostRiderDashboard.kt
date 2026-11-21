@@ -1,5 +1,7 @@
 package com.example.ui.ghost
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -85,9 +87,9 @@ fun GhostRiderDashboard(
                     Box(
                         modifier = Modifier.clip(RoundedCornerShape(5.dp))
                             .border(1.dp, GR.strokeHi, RoundedCornerShape(5.dp)).padding(horizontal = 5.dp, vertical = 1.dp)
-                    ) { Text("ABOVE GOD", color = GR.accent2, fontSize = 8.5.sp, fontWeight = FontWeight.Bold, fontFamily = GR.mono) }
+                    ) { Text(stringResource(R.string.ui_above_god), color = GR.accent2, fontSize = 8.5.sp, fontWeight = FontWeight.Bold, fontFamily = GR.mono) }
                 }
-                Text("Maximum privacy · Always fails closed", color = GR.text3, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.ui_maximum_privacy_always_fails_closed), color = GR.text3, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
 
@@ -117,11 +119,11 @@ fun GhostRiderDashboard(
                 .border(1.dp, GR.stroke, RoundedCornerShape(15.dp)).padding(14.dp)
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("TRAFFIC PATH", color = GR.text3, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+                Text(stringResource(R.string.ui_traffic_path), color = GR.text3, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
                 if (model.connected) Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(GR.good))
                     Spacer(Modifier.width(5.dp))
-                    Text("LIVE", color = GR.good, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_live), color = GR.good, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
             Spacer(Modifier.height(10.dp))
@@ -136,11 +138,11 @@ fun GhostRiderDashboard(
         // Protections
         Spacer(Modifier.height(11.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            ProtectionTile(Modifier.weight(1f), "Kill switch", "No traffic escapes if the tunnel drops.", model.killSwitch)
-            ProtectionTile(Modifier.weight(1f), "Fails closed", "Only Disconnect ends protection.", model.failsClosed)
+            ProtectionTile(Modifier.weight(1f), stringResource(R.string.ui_kill_switch), stringResource(R.string.ui_no_traffic_escapes_if_the), model.killSwitch)
+            ProtectionTile(Modifier.weight(1f), stringResource(R.string.ui_fails_closed), stringResource(R.string.ui_only_disconnect_ends_protection), model.failsClosed)
         }
         Spacer(Modifier.height(9.dp))
-        ProtectionTile(Modifier.fillMaxWidth(), "Leak protection", "IPv6 blackholed, DNS over HTTPS only, WebRTC held inside the tunnel.", model.leakBlocked, badge = "IPv6 · DNS · WebRTC")
+        ProtectionTile(Modifier.fillMaxWidth(), stringResource(R.string.ui_leak_protection), stringResource(R.string.ui_ipv6_blackholed_dns_over_https), model.leakBlocked, badge = "IPv6 · DNS · WebRTC")
 
         // Primary action
         Spacer(Modifier.height(13.dp))
@@ -152,7 +154,7 @@ fun GhostRiderDashboard(
             ) {
                 Icon(Icons.Filled.Public, contentDescription = null, tint = GR.accent2, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Routed through Tor", color = GR.text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ui_routed_through_tor), color = GR.text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         } else {
             Row(
@@ -162,7 +164,7 @@ fun GhostRiderDashboard(
             ) {
                 Icon(Icons.Filled.Public, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Route through Tor", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ui_route_through_tor), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -176,8 +178,8 @@ fun GhostRiderDashboard(
             Icon(Icons.Filled.Lock, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(9.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Panic lock", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
-                Text("Disconnect · wipe secret chats · new identity", color = Color.White.copy(alpha = 0.85f), fontSize = 9.5.sp)
+                Text(stringResource(R.string.ui_panic_lock), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                Text(stringResource(R.string.ui_disconnect_wipe_secret_chats_new), color = Color.White.copy(alpha = 0.85f), fontSize = 9.5.sp)
             }
         }
     }

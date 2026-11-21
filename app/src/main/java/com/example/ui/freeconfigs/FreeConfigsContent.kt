@@ -1,5 +1,7 @@
 package com.example.ui.freeconfigs
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -100,14 +102,14 @@ fun FreeConfigsContent(
             item { AppBar(c, state, actions) }
             item { Header(c) }
             when {
-                !state.available -> item { EmptyCard(c, "Not in this build", "This build cannot check the list's signature, so the free list stays off.") }
+                !state.available -> item { EmptyCard(c, stringResource(R.string.ui_not_in_this_build), stringResource(R.string.ui_this_build_cannot_check_the)) }
                 !state.enabled -> item {
-                    EmptyCard(c, "Free configs are off", "The free list is not downloaded, tested or shown. Turn on Free configs in Settings to use it.")
+                    EmptyCard(c, stringResource(R.string.ui_free_configs_are_off), stringResource(R.string.ui_the_free_list_is_not))
                 }
-                state.total == 0 && (state.syncing || state.loading) -> item { EmptyCard(c, "Getting the list", "Downloading and checking the signed list…", busy = true) }
+                state.total == 0 && (state.syncing || state.loading) -> item { EmptyCard(c, stringResource(R.string.ui_getting_the_list), stringResource(R.string.ui_downloading_and_checking_the_signed), busy = true) }
                 state.total == 0 -> item {
-                    EmptyCard(c, "No list yet", state.syncError?.let { "The list could not be downloaded: $it" } ?: "Pull the list to see free servers.",
-                        action = "Get the list", onAction = actions.onRefresh)
+                    EmptyCard(c, stringResource(R.string.ui_no_list_yet), state.syncError?.let { "The list could not be downloaded: $it" } ?: "Pull the list to see free servers.",
+                        action = stringResource(R.string.ui_get_the_list), onAction = actions.onRefresh)
                 }
                 else -> {
                     if (state.refreshFailedAt > 0L && !state.syncing) item { RefreshFailed(c, state.refreshFailure) }
@@ -118,13 +120,13 @@ fun FreeConfigsContent(
                     state.message?.let { m -> item { Message(c, m, actions.onDismissMessage) } }
                     val rows = state.visible
                     item {
-                        SectionHead(c, "SERVERS · ${rows.size}",
+                        SectionHead(c, stringResource(R.string.ui_servers, rows.size),
                             if (state.testing) "Stop · ${state.testDone}/${state.testTotal}" else "Test all",
                             busy = state.testing,
                             onAction = if (state.testing) actions.onStopTest else actions.onTestAll)
                     }
                     if (rows.isEmpty()) item {
-                        EmptyCard(c, "Nothing to show", "No server matches, or none answered on your network. Try another filter or test again later.")
+                        EmptyCard(c, stringResource(R.string.ui_nothing_to_show), stringResource(R.string.ui_no_server_matches_or_none))
                     } else {
                         // One lazy item per server: only the rows on screen are built, and a finished test
                         // batch redraws just the rows that changed instead of the whole card.
@@ -177,9 +179,9 @@ private fun AppBar(c: LabColors, state: FreeConfigsUiState, actions: FreeConfigs
 @Composable
 private fun Header(c: LabColors) {
     Column(Modifier.padding(start = 4.dp, top = 8.dp, bottom = 18.dp)) {
-        LabText("Free Configs", c.text, 28.sp, FontWeight.Bold, letterSpacing = (-0.6).sp, maxLines = 1)
+        LabText(stringResource(R.string.ui_free_configs), c.text, 28.sp, FontWeight.Bold, letterSpacing = (-0.6).sp, maxLines = 1)
         Spacer(Modifier.height(4.dp))
-        LabText("Public servers, filtered and tested for your network", c.text2, 14.sp)
+        LabText(stringResource(R.string.ui_public_servers_filtered_and_tested), c.text2, 14.sp)
     }
 }
 
@@ -194,7 +196,7 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 LabText("MAXIMUS Free", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
-                LabText("Signed list · public GitHub sources", c.text3, 12.sp, maxLines = 1)
+                LabText(stringResource(R.string.ui_signed_list_public_github_sources), c.text3, 12.sp, maxLines = 1)
             }
             if (s.syncing) Row(
                 Modifier.clip(RoundedCornerShape(8.dp)).background(c.accentSoft).padding(start = 7.dp, end = 9.dp, top = 5.dp, bottom = 5.dp),
@@ -202,14 +204,14 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
             ) {
                 CircularProgressIndicator(Modifier.size(11.dp), color = c.accent, strokeWidth = 1.5.dp)
                 Spacer(Modifier.width(5.dp))
-                LabText("Refreshing", c.accent, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
+                LabText(stringResource(R.string.ui_refreshing_2), c.accent, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
             } else if (s.verified) Row(
                 Modifier.clip(RoundedCornerShape(8.dp)).background(c.good.copy(alpha = 0.12f)).padding(start = 7.dp, end = 9.dp, top = 5.dp, bottom = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Rounded.Check, null, tint = c.good, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(5.dp))
-                LabText("Verified", c.good, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
+                LabText(stringResource(R.string.ui_verified), c.good, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -217,7 +219,7 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
             LabText("${s.online.size}", c.text, 44.sp, FontWeight.Bold, letterSpacing = (-1.5).sp, maxLines = 1)
             Spacer(Modifier.width(8.dp))
             LabText(
-                if (s.tested == 0) "of ${s.total} not tested yet" else "online of ${s.tested} tested",
+                if (s.tested == 0) stringResource(R.string.ui_of_not_tested_yet, s.total) else stringResource(R.string.ui_online_of_tested, s.tested),
                 c.text2, 14.sp, maxLines = 1, modifier = Modifier.padding(bottom = 7.dp)
             )
         }
@@ -225,15 +227,15 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
         HealthBar(c, s)
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Legend(c, c.good, "Fast", s.fast)
-            Legend(c, c.okay, "Slow", s.slow)
-            Legend(c, c.bad, "Offline", s.offline.size)
-            Legend(c, idle(c), "Not tested", s.queued)
+            Legend(c, c.good, stringResource(R.string.ui_fast), s.fast)
+            Legend(c, c.okay, stringResource(R.string.ui_slow), s.slow)
+            Legend(c, c.bad, stringResource(R.string.ui_offline_2), s.offline.size)
+            Legend(c, idle(c), stringResource(R.string.ui_not_tested), s.queued)
         }
         if (s.syncing) RefreshPanel(c, s) else LifecycleStats(c, s)
         s.lastRefresh?.takeIf { !s.syncing }?.let { r ->
             Spacer(Modifier.height(10.dp))
-            LabText("Last refresh: +${r.added} added · ${r.kept} kept · ${r.retained} retained · ${r.removed} removed",
+            LabText(stringResource(R.string.ui_last_refresh_added_kept_retained, r.added, r.kept, r.retained, r.removed),
                 c.text3, 11.5.sp, maxLines = 2)
         }
         Spacer(Modifier.height(16.dp))
@@ -242,9 +244,9 @@ private fun Summary(c: LabColors, s: FreeConfigsUiState, ago: (Long) -> String, 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Schedule, null, tint = c.text2, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(6.dp))
-            LabText(if (s.lastUpdated == 0L) "Not updated yet" else "Updated ${ago(s.lastUpdated)}", c.text2, 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
-            if (s.refreshFailedAt > 0L && !s.syncing) LabText("Last try failed ${ago(s.refreshFailedAt)}", c.bad, 12.5.sp, maxLines = 1)
-            else if (s.nextUpdate > 0L) LabText("Next update ${until(s.nextUpdate)}", c.text2, 12.5.sp, maxLines = 1)
+            LabText(if (s.lastUpdated == 0L) stringResource(R.string.ui_not_updated_yet) else stringResource(R.string.ui_updated, ago(s.lastUpdated)), c.text2, 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+            if (s.refreshFailedAt > 0L && !s.syncing) LabText(stringResource(R.string.ui_last_try_failed, ago(s.refreshFailedAt)), c.bad, 12.5.sp, maxLines = 1)
+            else if (s.nextUpdate > 0L) LabText(stringResource(R.string.ui_next_update, until(s.nextUpdate)), c.text2, 12.5.sp, maxLines = 1)
         }
     }
 }
@@ -261,7 +263,7 @@ private fun RefreshFailed(c: LabColors, reason: String?) {
         Icon(Icons.Rounded.WarningAmber, null, tint = c.bad, modifier = Modifier.padding(top = 1.dp).size(16.dp))
         Spacer(Modifier.width(8.dp))
         Column {
-            LabText("Refresh failed — existing verified configurations retained.", c.text, 13.sp, FontWeight.SemiBold, maxLines = 2)
+            LabText(stringResource(R.string.ui_refresh_failed_existing_verified_configu), c.text, 13.sp, FontWeight.SemiBold, maxLines = 2)
             reason?.let {
                 Spacer(Modifier.height(3.dp))
                 LabText(it + " Tap refresh to try again.", c.text2, 12.sp, maxLines = 3)
@@ -277,9 +279,9 @@ private fun RefreshPanel(c: LabColors, s: FreeConfigsUiState) {
     val swapping = p?.stage == com.example.vpn.subscription.FreeRefreshProgress.Stage.SWAPPING
     Spacer(Modifier.height(16.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
-        LabText(if (swapping) "Checked ${p?.candidates ?: 0} candidates · ${p?.valid ?: 0} passed" else "Downloading the signed list",
+        LabText(if (swapping) stringResource(R.string.ui_checked_candidates_passed, p?.candidates ?: 0, p?.valid ?: 0) else stringResource(R.string.ui_downloading_the_signed_list),
             c.text, 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
-        LabText("${s.total} still in use", c.text2, 12.sp, maxLines = 1)
+        LabText(stringResource(R.string.ui_still_in_use, s.total), c.text2, 12.sp, maxLines = 1)
     }
     Spacer(Modifier.height(6.dp))
     LinearProgressIndicator(
@@ -289,12 +291,12 @@ private fun RefreshPanel(c: LabColors, s: FreeConfigsUiState) {
     )
     Spacer(Modifier.height(6.dp))
     LabText(
-        if (swapping) "✓ Downloaded   ✓ Signature valid   ✓ Security filter   ◌ Swap"
-        else "◌ Download   ○ Signature   ○ Security filter   ○ Swap",
+        if (swapping) stringResource(R.string.ui_downloaded_signature_valid_security_filt)
+        else stringResource(R.string.ui_download_signature_security_filter_swap),
         c.text3, 11.5.sp, maxLines = 1
     )
     Spacer(Modifier.height(4.dp))
-    LabText("Configs in use or last known to work are retained; a refresh never empties the list.", c.text3, 11.5.sp, maxLines = 2)
+    LabText(stringResource(R.string.ui_configs_in_use_or_last), c.text3, 11.5.sp, maxLines = 2)
 }
 
 /** What this phone's own measurements say, next to what the list builder checked outside Iran. */
@@ -421,7 +423,7 @@ private fun SiteChips(c: LabColors, s: FreeConfigsUiState, onSite: (String?) -> 
             ) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(color))
                 Spacer(Modifier.width(6.dp))
-                LabText("Opens ${names[tag] ?: tag} (global)", if (on) c.text else c.text2, 12.5.sp, if (on) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
+                LabText(stringResource(R.string.ui_opens_global, names[tag] ?: tag), if (on) c.text else c.text2, 12.5.sp, if (on) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
                 Spacer(Modifier.width(4.dp))
                 LabText("$count", c.text3, 12.5.sp, maxLines = 1)
             }
@@ -481,7 +483,7 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                     if (best) {
                         Spacer(Modifier.width(7.dp))
                         Box(Modifier.clip(RoundedCornerShape(5.dp)).background(c.accentSoft).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                            LabText("BEST", c.accent, 10.sp, FontWeight.Bold, letterSpacing = 0.3.sp, maxLines = 1)
+                            LabText(stringResource(R.string.ui_best), c.accent, 10.sp, FontWeight.Bold, letterSpacing = 0.3.sp, maxLines = 1)
                         }
                     }
                 }
@@ -521,7 +523,7 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                 Spacer(Modifier.height(3.dp))
                 LabText(
                     when (node.health) {
-                        NodeHealth.FAST -> "Fast"; NodeHealth.SLOW -> "Slow"; NodeHealth.OFFLINE -> "Offline"; NodeHealth.QUEUED -> "Not tested"
+                        NodeHealth.FAST -> stringResource(R.string.ui_fast); NodeHealth.SLOW -> stringResource(R.string.ui_slow); NodeHealth.OFFLINE -> stringResource(R.string.ui_offline_2); NodeHealth.QUEUED -> stringResource(R.string.ui_not_tested)
                     }, c.text3, 11.5.sp, maxLines = 1
                 )
             }
@@ -529,9 +531,9 @@ private fun NodeRow(c: LabColors, node: FreeNode, best: Boolean, last: Boolean, 
                 Icon(Icons.Rounded.MoreVert, "More", tint = c.text3,
                     modifier = Modifier.clip(CircleShape).clickable { menu = true }.padding(4.dp).size(18.dp))
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Test") }, onClick = { menu = false; onTest() })
-                    DropdownMenuItem(text = { Text("Connect") }, onClick = { menu = false; onClick() })
-                    DropdownMenuItem(text = { Text("Delete", color = c.bad) }, onClick = { menu = false; onDelete() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.ui_test)) }, onClick = { menu = false; onTest() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.ui_connect_2)) }, onClick = { menu = false; onClick() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.ui_delete), color = c.bad) }, onClick = { menu = false; onDelete() })
                 }
             }
         }
@@ -554,7 +556,7 @@ private fun Hidden(c: LabColors, s: FreeConfigsUiState, onToggle: () -> Unit) {
         Column(Modifier.weight(1f)) {
             LabText("$count hidden", c.text, 14.5.sp, FontWeight.SemiBold, maxLines = 1)
             Spacer(Modifier.height(3.dp))
-            LabText("Did not answer on your network", c.text2, 12.5.sp, maxLines = 1)
+            LabText(stringResource(R.string.ui_did_not_answer_on_your), c.text2, 12.5.sp, maxLines = 1)
         }
         Icon(if (s.showHidden) Icons.Rounded.ExpandMore else Icons.Rounded.ChevronRight, null, tint = c.text3, modifier = Modifier.size(20.dp))
     }
@@ -566,7 +568,7 @@ private fun Note(c: LabColors) {
         Icon(Icons.Rounded.Info, null, tint = c.text3, modifier = Modifier.padding(top = 2.dp).size(14.dp))
         Spacer(Modifier.width(8.dp))
         LabText(
-            "Free servers are run by third parties. Use them for browsing and messaging, not for banking or account logins.",
+            stringResource(R.string.ui_free_servers_are_run_by),
             c.text3, 12.sp, maxLines = 4, lineHeight = 18.sp
         )
     }
@@ -618,7 +620,7 @@ private fun Dock(c: LabColors, best: FreeNode, modifier: Modifier, onConnect: ()
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                LabText("Connect to fastest", Color.White, 15.5.sp, FontWeight.SemiBold, maxLines = 1)
+                LabText(stringResource(R.string.ui_connect_to_fastest), Color.White, 15.5.sp, FontWeight.SemiBold, maxLines = 1)
                 LabText(
                     listOfNotNull(FreeConfigsUiState.countryName(best.country), "${best.protocol} ${best.tags.firstOrNull().orEmpty()}".trim(),
                         best.latencyMs?.let { "$it ms" }).joinToString(" · "),

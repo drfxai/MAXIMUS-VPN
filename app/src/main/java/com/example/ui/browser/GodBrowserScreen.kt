@@ -1,5 +1,7 @@
 package com.example.ui.browser
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
@@ -80,7 +82,7 @@ fun GodBrowserScreen(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "Hardened Browser",
+                                text = stringResource(R.string.ui_hardened_browser),
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -90,7 +92,7 @@ fun GodBrowserScreen(
                                 color = Color(0xFF4CAF50).copy(alpha = 0.2f)
                             ) {
                                 Text(
-                                    text = "SANDBOX",
+                                    text = stringResource(R.string.ui_sandbox),
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF81C784),
@@ -99,7 +101,7 @@ fun GodBrowserScreen(
                             }
                         }
                         Text(
-                            text = "Trackers Blocked: $blockedTrackerCount • App traffic follows VPN routing",
+                            text = stringResource(R.string.ui_trackers_blocked_app_traffic_follows, blockedTrackerCount),
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -120,7 +122,7 @@ fun GodBrowserScreen(
                             WebStorage.getInstance().deleteAllData()
                             webView.loadUrl("about:blank")
                             blockedTrackerCount = 0
-                            Toast.makeText(context, "Session wiped & cache shredded cleanly.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.ui_session_wiped_cache_shredded_cleanly), Toast.LENGTH_SHORT).show()
                         }
                     }) {
                         Icon(Icons.Default.CleaningServices, contentDescription = "Nuke Session", tint = MaterialTheme.colorScheme.error)
@@ -173,7 +175,7 @@ fun GodBrowserScreen(
                     OutlinedTextField(
                         value = urlInput,
                         onValueChange = { urlInput = it },
-                        placeholder = { Text("Search or type URL...", fontSize = 13.sp) },
+                        placeholder = { Text(stringResource(R.string.ui_search_or_type_url), fontSize = 13.sp) },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         shape = RoundedCornerShape(20.dp),

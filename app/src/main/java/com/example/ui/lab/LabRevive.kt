@@ -1,5 +1,7 @@
 package com.example.ui.lab
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -69,7 +71,7 @@ internal fun RevivePage(
         item {
             Panel(c) {
                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                    LabText("Cloudflare configs that stopped working", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
+                    LabText(stringResource(R.string.ui_cloudflare_configs_that_stopped_working), c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
                     LabText("BPB and other Workers, Pages and CDN configs often die because the network blocks how they connect, " +
                         "not because the server is gone. LAB tries each dead one with these recipes and keeps the fastest that works.",
                         c.text2, 12.5.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 4, lineHeight = 17.sp)
@@ -95,7 +97,7 @@ internal fun RevivePage(
                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         LabText(r.firewall.title, c.text, 14.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
-                        LabText(if (r.chosen == null) (if (r.detected == Firewall.OTHER) "not a known carrier" else "detected") else "chosen by you",
+                        LabText(if (r.chosen == null) (if (r.detected == Firewall.OTHER) "not a known carrier" else "detected") else stringResource(R.string.ui_chosen_by_you),
                             c.text3, 12.sp, maxLines = 1)
                     }
                     LabText(r.firewall.note, c.text2, 12.5.sp, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp), maxLines = 2, lineHeight = 17.sp)
@@ -130,7 +132,7 @@ internal fun RevivePage(
         item {
             Column(Modifier.padding(horizontal = Gutter)) {
                 if (r.running) {
-                    SecondaryButton(c, "Stop", Icons.Rounded.Stop, Modifier.fillMaxWidth(), onClick = onStop)
+                    SecondaryButton(c, stringResource(R.string.ui_stop), Icons.Rounded.Stop, Modifier.fillMaxWidth(), onClick = onStop)
                 } else {
                     PrimaryButton(c, if (r.eligible == 1) "Revive 1 config" else "Revive ${minOf(r.eligible, ConfigRevival.MAX_CONFIGS)} configs",
                         Icons.Rounded.Healing, Modifier.fillMaxWidth(), r.eligible > 0 && !vpnOn && !busy, onClick = onRevive)
@@ -185,8 +187,8 @@ internal fun RevivePage(
         } else if (!r.running) item {
             Panel(c) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 22.dp, horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    LabText("No revival run yet", c.text, 14.5.sp, FontWeight.SemiBold, maxLines = 1)
-                    LabText("Turn the VPN off and tap Revive. Configs that already work are left alone.", c.text3, 12.5.sp,
+                    LabText(stringResource(R.string.ui_no_revival_run_yet), c.text, 14.5.sp, FontWeight.SemiBold, maxLines = 1)
+                    LabText(stringResource(R.string.ui_turn_the_vpn_off_and), c.text3, 12.5.sp,
                         modifier = Modifier.padding(top = 4.dp), maxLines = 3, lineHeight = 17.sp)
                 }
             }

@@ -1,5 +1,7 @@
 package com.example.ui.benchmark
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -128,13 +130,13 @@ fun BenchmarkScreen(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "BENCHMARK ENGINE",
+                        text = stringResource(R.string.ui_benchmark_engine),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Multi-Stage Real Proxy Verification",
+                        text = stringResource(R.string.ui_multi_stage_real_proxy_verification),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -146,7 +148,7 @@ fun BenchmarkScreen(
 
         // Mode Selection
         Text(
-            text = "Benchmark Precision Mode",
+            text = stringResource(R.string.ui_benchmark_precision_mode),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold
         )
@@ -187,14 +189,14 @@ fun BenchmarkScreen(
                     enabled = !progress.isRunning
                 )
                 Text(
-                    text = "Test Untested Only",
+                    text = stringResource(R.string.ui_test_untested_only),
                     style = MaterialTheme.typography.bodySmall
                 )
             }
 
             val estData = TrafficStats.formatBytes(uiState.totalNodesAvailable * uiState.selectedMode.targetBytes)
             Text(
-                text = "Est. Data: ~$estData",
+                text = stringResource(R.string.ui_est_data, estData),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -254,7 +256,7 @@ fun BenchmarkScreen(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "Retry Failed",
+                        text = stringResource(R.string.ui_retry_failed),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -275,7 +277,7 @@ fun BenchmarkScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Testing: ${progress.currentServerName}",
+                            text = stringResource(R.string.ui_testing_2, progress.currentServerName),
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -314,7 +316,7 @@ fun BenchmarkScreen(
                             ) {
                                 Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Resume", fontSize = 12.sp)
+                                Text(stringResource(R.string.ui_resume), fontSize = 12.sp)
                             }
                         } else {
                             OutlinedButton(
@@ -324,7 +326,7 @@ fun BenchmarkScreen(
                             ) {
                                 Icon(imageVector = Icons.Default.Pause, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Pause", fontSize = 12.sp)
+                                Text(stringResource(R.string.ui_pause), fontSize = 12.sp)
                             }
                         }
 
@@ -336,7 +338,7 @@ fun BenchmarkScreen(
                         ) {
                             Icon(imageVector = Icons.Default.Close, contentDescription = null)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Cancel", fontSize = 12.sp)
+                            Text(stringResource(R.string.ui_cancel), fontSize = 12.sp)
                         }
                     }
                 }
@@ -347,7 +349,7 @@ fun BenchmarkScreen(
 
         // Recent Benchmark Results Live Feed
         Text(
-            text = "Live Verification Results",
+            text = stringResource(R.string.ui_live_verification_results),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold
         )
@@ -362,7 +364,7 @@ fun BenchmarkScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Press 'Run Benchmark' to start real network measurements.",
+                    text = stringResource(R.string.ui_press_run_benchmark_to_start),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -408,7 +410,7 @@ private fun BenchmarkResultItem(result: BenchmarkStageResult) {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (result.isSuccess) "${result.pingMs} ms transport • throughput not measured" else "Offline / Timeout",
+                        text = if (result.isSuccess) stringResource(R.string.ui_ms_transport_throughput_not_measured, result.pingMs) else stringResource(R.string.ui_offline_timeout),
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                         color = if (result.isSuccess) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error

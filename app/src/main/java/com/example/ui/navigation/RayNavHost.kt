@@ -31,6 +31,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -116,6 +118,19 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector,
     data object AiSettings : Screen("ai_settings", "AI", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome)
 }
 
+/** Bottom bar label in the app language; routes without a translation keep their English title. */
+@Composable
+private fun navLabel(screen: Screen): String = when (screen) {
+    Screen.Home -> stringResource(R.string.nav_tunnel)
+    Screen.Servers -> stringResource(R.string.nav_nodes)
+    Screen.Top10 -> stringResource(R.string.nav_top10)
+    Screen.AiAgent -> stringResource(R.string.nav_ai_agent)
+    Screen.Lab -> stringResource(R.string.nav_lab)
+    Screen.Panels -> stringResource(R.string.nav_panels)
+    Screen.Settings -> stringResource(R.string.nav_settings)
+    else -> screen.title
+}
+
 val bottomNavItems = listOf(
     Screen.Home,
     Screen.Servers,
@@ -175,16 +190,17 @@ fun MainApp(
                 ) {
                     bottomNavItems.forEach { screen ->
                         val selected = currentRoute == screen.route
+                        val label = navLabel(screen)
                         NavigationBarItem(
                             icon = {
                                 Icon(
                                     imageVector = if (selected) screen.icon else screen.unselectedIcon,
-                                    contentDescription = screen.title
+                                    contentDescription = label
                                 )
                             },
                             label = {
                                 Text(
-                                    text = screen.title,
+                                    text = label,
                                     // Seven tabs: labels a little smaller so each fits on one line.
                                     fontSize = if (bottomNavItems.size > 6) 8.5.sp else 9.5.sp,
                                     maxLines = 1,

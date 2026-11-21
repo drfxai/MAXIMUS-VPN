@@ -1,5 +1,6 @@
 package com.example.vpn.share
 
+import com.example.R
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -40,13 +41,13 @@ class LocalProxyService : Service() {
         if (intent?.action == "stop") { stopSelf(); return START_NOT_STICKY }
         if (job != null) return START_NOT_STICKY
         if (Build.VERSION.SDK_INT >= 26) getSystemService(NotificationManager::class.java)
-            ?.createNotificationChannel(NotificationChannel(CHANNEL, "Local SOCKS proxy", NotificationManager.IMPORTANCE_LOW))
+            ?.createNotificationChannel(NotificationChannel(CHANNEL, com.example.ui.language.LanguageStore.localized(this).getString(R.string.notification_proxy_channel), NotificationManager.IMPORTANCE_LOW))
         val stop = PendingIntent.getService(this, 0, Intent(this, LocalProxyService::class.java).setAction("stop"),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         startForeground(NOTIFICATION, NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done).setContentTitle("MAXIMUS local proxy")
-            .setContentText("Proxy mode only · no device-wide VPN").setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stop).build())
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done).setContentTitle(com.example.ui.language.LanguageStore.localized(this).getString(R.string.notification_proxy_title))
+            .setContentText(com.example.ui.language.LanguageStore.localized(this).getString(R.string.notification_proxy_text)).setOngoing(true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, com.example.ui.language.LanguageStore.localized(this).getString(R.string.notification_stop), stop).build())
         mutable.value = State(starting = true)
         job = scope.launch {
             try {

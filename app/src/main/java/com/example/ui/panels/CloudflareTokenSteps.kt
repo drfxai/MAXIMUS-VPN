@@ -1,5 +1,7 @@
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.background
@@ -116,7 +118,7 @@ internal fun TokenChips(name: String, labels: List<String>, colors: StepColors =
 @Composable
 internal fun TokenFootnote(extra: String, colors: StepColors = SvStepColors) {
     Text(
-        "Cloudflare does not let any app create a token for you; the last tap on Cloudflare's own page is yours. $extra",
+        stringResource(R.string.ui_cloudflare_does_not_let_any, extra),
         color = colors.dim, fontSize = 12.5.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 2.dp)
     )
 }

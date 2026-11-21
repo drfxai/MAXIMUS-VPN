@@ -1,5 +1,6 @@
 package com.example.ui.home
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -186,7 +187,7 @@ fun LandingHeroBanner(
                         )
                     }
                     Text(
-                        text = "Sovereign Privacy • Anti-DPI • Multi-Engine",
+                        text = stringResource(R.string.ui_sovereign_privacy_anti_dpi_multi),
                         fontSize = 11.sp,
                         color = AppTheme.colors.primary,
                         fontWeight = FontWeight.SemiBold,
@@ -201,7 +202,7 @@ fun LandingHeroBanner(
                     border = BorderStroke(1.dp, AppTheme.colors.primary.copy(alpha = 0.3f))
                 ) {
                     Text(
-                        text = "v${BuildConfig.VERSION_NAME} PRO",
+                        text = stringResource(R.string.ui_v_pro, BuildConfig.VERSION_NAME),
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = AppTheme.colors.primary,
@@ -219,9 +220,9 @@ fun LandingHeroBanner(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                LandingStatPill(label = "Zero Logs", icon = Icons.Default.VisibilityOff, modifier = Modifier.weight(1f))
+                LandingStatPill(label = stringResource(R.string.ui_zero_logs), icon = Icons.Default.VisibilityOff, modifier = Modifier.weight(1f))
                 LandingStatPill(label = "REALITY", icon = Icons.Default.Lock, modifier = Modifier.weight(1f))
-                LandingStatPill(label = "Encrypted DNS", icon = Icons.Default.Shield, modifier = Modifier.weight(1.25f))
+                LandingStatPill(label = stringResource(R.string.ui_encrypted_dns), icon = Icons.Default.Shield, modifier = Modifier.weight(1.25f))
                 Surface(
                     onClick = onExploreArchitecture,
                     shape = CircleShape,
@@ -351,14 +352,14 @@ fun PromotionalFeatureShowcase(
         ) {
             Column {
                 Text(
-                    text = "FEATURE SPOTLIGHT",
+                    text = stringResource(R.string.ui_feature_spotlight),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = AppTheme.colors.primary,
                     letterSpacing = 1.sp
                 )
                 Text(
-                    text = "Next-Gen Architecture & Capabilities",
+                    text = stringResource(R.string.ui_next_gen_architecture_capabilities),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = AppTheme.colors.textPrimary
@@ -499,7 +500,7 @@ private fun PromotionalCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "ACTIVE",
+                            text = stringResource(R.string.ui_active),
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White

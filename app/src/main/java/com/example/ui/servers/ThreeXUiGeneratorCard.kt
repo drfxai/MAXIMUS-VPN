@@ -1,5 +1,7 @@
 package com.example.ui.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.widget.Toast
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -169,7 +171,7 @@ fun ThreeXUiGeneratorCard(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "3X-UI panel not installed",
+                        text = stringResource(R.string.ui_t_3x_ui_panel_not_installed),
                         fontWeight = FontWeight.SemiBold,
                         color = AppTheme.colors.textPrimary,
                         fontSize = 13.sp,
@@ -177,7 +179,7 @@ fun ThreeXUiGeneratorCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "Install it to create configs automatically",
+                        text = stringResource(R.string.ui_install_it_to_create_configs),
                         color = AppTheme.colors.textMuted,
                         fontSize = 11.sp,
                         maxLines = 1,
@@ -206,7 +208,7 @@ fun ThreeXUiGeneratorCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Install",
+                        text = stringResource(R.string.ui_install),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -274,7 +276,7 @@ fun ThreeXUiGeneratorCard(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "3X-UI INBOUND ENGINE",
+                                text = stringResource(R.string.ui_t_3x_ui_inbound_engine),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = AppTheme.colors.primary,
@@ -323,7 +325,7 @@ fun ThreeXUiGeneratorCard(
                             modifier = Modifier.testTag("switch_panel_button")
                         ) {
                             Text(
-                                text = "Switch",
+                                text = stringResource(R.string.ui_switch),
                                 fontSize = 11.sp,
                                 color = AppTheme.colors.primary,
                                 fontWeight = FontWeight.Bold
@@ -424,7 +426,7 @@ fun ThreeXUiGeneratorCard(
                             onComplete = {
                                 Toast.makeText(
                                     context,
-                                    "⚡ Reality config created, verified and added to Maximus VPN!",
+                                    context.getString(R.string.ui_reality_config_created_verified_and),
                                     Toast.LENGTH_SHORT
                                 ).show()
                             }
@@ -457,7 +459,7 @@ fun ThreeXUiGeneratorCard(
                     }
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Quick Config",
+                        text = stringResource(R.string.ui_quick_config),
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
@@ -488,7 +490,7 @@ fun ThreeXUiGeneratorCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Custom Inbound",
+                        text = stringResource(R.string.ui_custom_inbound),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = if (isMenuExpanded) AppTheme.colors.primary else AppTheme.colors.textPrimary
@@ -522,14 +524,14 @@ fun ThreeXUiGeneratorCard(
                         .navigationBarsPadding()
                 ) {
                     Text(
-                        text = "Create custom inbound",
+                        text = stringResource(R.string.ui_create_custom_inbound),
                         color = AppTheme.colors.textPrimary,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Pick a transport and security, then create it and add it to Maximus VPN.",
+                        text = stringResource(R.string.ui_pick_a_transport_and_security),
                         color = AppTheme.colors.textSecondary,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -542,7 +544,7 @@ fun ThreeXUiGeneratorCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "TRANSMISSION PROTOCOL",
+                            text = stringResource(R.string.ui_transmission_protocol),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = AppTheme.colors.textSecondary,
@@ -608,7 +610,7 @@ fun ThreeXUiGeneratorCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "SECURITY TYPE",
+                            text = stringResource(R.string.ui_security_type),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = AppTheme.colors.textSecondary,
@@ -670,8 +672,8 @@ fun ThreeXUiGeneratorCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("custom_inbound_port_input"),
-                        label = { Text("Listening Port (Optional, auto if blank)", fontSize = 11.sp) },
-                        placeholder = { Text("e.g. 24890", fontSize = 11.sp, color = AppTheme.colors.textMuted) },
+                        label = { Text(stringResource(R.string.ui_listening_port_optional_auto_if), fontSize = 11.sp) },
+                        placeholder = { Text(stringResource(R.string.ui_e_g_24890), fontSize = 11.sp, color = AppTheme.colors.textMuted) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         shape = RoundedCornerShape(10.dp),
@@ -700,7 +702,7 @@ fun ThreeXUiGeneratorCard(
                                     isMenuExpanded = false
                                     Toast.makeText(
                                         context,
-                                        "Configuration created and added to Maximus VPN!",
+                                        context.getString(R.string.ui_configuration_created_and_added_to),
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }
@@ -726,13 +728,13 @@ fun ThreeXUiGeneratorCard(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Generating Inbound & Client Settings...",
+                                text = stringResource(R.string.ui_generating_inbound_client_settings),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         } else {
                             Text(
-                                text = "Create and add to VPN",
+                                text = stringResource(R.string.ui_create_and_add_to_vpn),
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -881,14 +883,14 @@ private fun InboundResultDialog(
         title = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "Configuration Added!",
+                    text = stringResource(R.string.ui_configuration_added),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = AppTheme.colors.textPrimary
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Added to Maximus VPN Proxy Nodes",
+                    text = stringResource(R.string.ui_added_to_maximus_vpn_proxy),
                     style = MaterialTheme.typography.bodySmall,
                     color = AppTheme.colors.textSecondary,
                     fontSize = 12.sp
@@ -938,7 +940,7 @@ private fun InboundResultDialog(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = "Endpoint: ${result.panelHost}:${result.port}",
+                            text = stringResource(R.string.ui_endpoint_2, result.panelHost, result.port),
                             fontSize = 11.5.sp,
                             color = AppTheme.colors.textSecondary,
                             fontFamily = FontFamily.Monospace
@@ -970,7 +972,7 @@ private fun InboundResultDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "CLIENT VLESS URI",
+                        text = stringResource(R.string.ui_client_vless_uri),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = AppTheme.colors.textSecondary,
@@ -980,7 +982,7 @@ private fun InboundResultDialog(
                     TextButton(
                         onClick = {
                             clipboard.setText(AnnotatedString(result.clientUri))
-                            Toast.makeText(context, "VLESS URI copied!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.ui_vless_uri_copied), Toast.LENGTH_SHORT).show()
                         },
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
                         modifier = Modifier.testTag("copy_client_uri_button")
@@ -992,7 +994,7 @@ private fun InboundResultDialog(
                             tint = AppTheme.colors.primary
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy URI", fontSize = 11.sp, color = AppTheme.colors.primary)
+                        Text(stringResource(R.string.ui_copy_uri), fontSize = 11.sp, color = AppTheme.colors.primary)
                     }
                 }
 
@@ -1025,7 +1027,7 @@ private fun InboundResultDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (showInboundJson) "Hide 3X-UI Inbound JSON" else "View 3X-UI Inbound Settings JSON",
+                        text = if (showInboundJson) stringResource(R.string.ui_hide_3x_ui_inbound_json) else stringResource(R.string.ui_view_3x_ui_inbound_settings),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = AppTheme.colors.primary
@@ -1068,7 +1070,7 @@ private fun InboundResultDialog(
             ) {
                 Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Connect Now", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ui_connect_now), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1076,7 +1078,7 @@ private fun InboundResultDialog(
                 onClick = onDismiss,
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Text("Close", fontSize = 12.5.sp, color = AppTheme.colors.textSecondary)
+                Text(stringResource(R.string.ui_close), fontSize = 12.5.sp, color = AppTheme.colors.textSecondary)
             }
         }
     )

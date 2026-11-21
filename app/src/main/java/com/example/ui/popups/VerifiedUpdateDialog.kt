@@ -1,5 +1,6 @@
 package com.example.ui.popups
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -128,10 +129,10 @@ fun VerifiedUpdateDialog(
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically) {
                             TextButton(onClick = onDismiss, modifier = Modifier.testTag("update_dismiss")) {
-                                Text(if (state.busy) "Cancel download" else "Later", color = colors.textSecondary, fontSize = 13.sp)
+                                Text(if (state.busy) stringResource(R.string.ui_cancel_download) else stringResource(R.string.ui_later), color = colors.textSecondary, fontSize = 13.sp)
                             }
                             TextButton(onClick = onOfficialLink, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                                Text("GitHub release", color = colors.textMuted, fontSize = 11.sp)
+                                Text(stringResource(R.string.ui_github_release), color = colors.textMuted, fontSize = 11.sp)
                                 Spacer(Modifier.width(4.dp))
                                 Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = colors.textMuted,
                                     modifier = Modifier.size(13.dp))
@@ -176,12 +177,12 @@ private fun Hero(state: UpdateProgressModel.State, accent: Color, accentDeep: Co
             }
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text("MAXIMUS VPN", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = accent, letterSpacing = 1.6.sp)
-                Text(if (state.phase == Phase.READY) "Ready to install" else "Secure update",
+                Text(if (state.phase == Phase.READY) stringResource(R.string.ui_ready_to_install) else stringResource(R.string.ui_secure_update),
                     fontSize = 24.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     Icon(Icons.Default.VerifiedUser, contentDescription = null,
                         tint = if (state.phase == Phase.READY) colors.statusConnected else colors.textSecondary, modifier = Modifier.size(14.dp))
-                    Text(if (state.phase == Phase.READY) "Signature and SHA-256 verified" else "Signed by the Maximus publisher",
+                    Text(if (state.phase == Phase.READY) stringResource(R.string.ui_signature_and_sha_256_verified) else stringResource(R.string.ui_signed_by_the_maximus_publisher),
                         fontSize = 12.sp, color = colors.textSecondary)
                 }
             }
@@ -201,7 +202,7 @@ private fun VersionChips(release: AppUpdateChecker.ReleaseInfo, installedBuild: 
                 container = accent.copy(alpha = 0.16f), content = accent, border = accent.copy(alpha = 0.45f), modifier = Modifier.weight(1.3f))
         }
         release.apk?.let {
-            Text("Download size ${UpdateProgressModel.megabytes(it.size)} · from the official GitHub release",
+            Text(stringResource(R.string.ui_download_size_from_the_official, UpdateProgressModel.megabytes(it.size)),
                 fontSize = 11.sp, color = colors.textMuted)
         }
     }
@@ -225,7 +226,7 @@ private fun WhatsNew(notes: List<String>, accent: Color) {
     val shown = if (expanded) notes else notes.take(3)
     Surface(shape = RoundedCornerShape(18.dp), color = colors.surfaceElevated, border = BorderStroke(1.dp, colors.borderSubtle)) {
         Column(Modifier.fillMaxWidth().padding(14.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("What's new", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+            Text(stringResource(R.string.ui_what_s_new), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
             shown.forEach { line ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.padding(top = 6.dp).size(6.dp).clip(CircleShape).background(accent))
@@ -233,7 +234,7 @@ private fun WhatsNew(notes: List<String>, accent: Color) {
                 }
             }
             if (notes.size > 3) {
-                Text(if (expanded) "Show less" else "Show all ${notes.size}", fontSize = 12.sp, color = accent,
+                Text(if (expanded) stringResource(R.string.ui_show_less) else stringResource(R.string.ui_show_all, notes.size), fontSize = 12.sp, color = accent,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { expanded = !expanded }.padding(vertical = 2.dp))
             }
         }
@@ -304,9 +305,9 @@ private fun ProgressCard(state: UpdateProgressModel.State, rate: Double?, accent
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(when (state.phase) {
-                    Phase.CONNECTING -> "Connecting…"
-                    Phase.CHECKING_DIGEST -> "Checking SHA-256…"
-                    Phase.CHECKING_SIGNATURE -> "Verifying signature…"
+                    Phase.CONNECTING -> stringResource(R.string.ui_connecting_2)
+                    Phase.CHECKING_DIGEST -> stringResource(R.string.ui_checking_sha_256)
+                    Phase.CHECKING_SIGNATURE -> stringResource(R.string.ui_verifying_signature)
                     else -> "${state.percent}%"
                 }, fontSize = if (verifying || state.phase == Phase.CONNECTING) 16.sp else 26.sp,
                     fontWeight = FontWeight.Bold, color = colors.textPrimary)
@@ -355,11 +356,11 @@ private fun StatusLine(state: UpdateProgressModel.State, release: AppUpdateCheck
             }
         }
         error != null -> Text(error, fontSize = 12.sp, color = colors.statusError)
-        release.apk == null -> Text("Verified APK metadata is unavailable. Use the official GitHub release.",
+        release.apk == null -> Text(stringResource(R.string.ui_verified_apk_metadata_is_unavailable),
             fontSize = 12.sp, color = colors.statusWarning)
-        state.phase == Phase.READY -> Text("SHA-256 and the installed publisher's signing certificate match. Android will ask you to approve the installation.",
+        state.phase == Phase.READY -> Text(stringResource(R.string.ui_sha_256_and_the_installed),
             fontSize = 12.sp, color = colors.textSecondary)
-        state.phase == Phase.IDLE -> Text("The APK is checked against the official SHA-256 digest and your installed app's signing certificate before installation.",
+        state.phase == Phase.IDLE -> Text(stringResource(R.string.ui_the_apk_is_checked_against),
             fontSize = 12.sp, color = colors.textSecondary)
         else -> Unit
     }

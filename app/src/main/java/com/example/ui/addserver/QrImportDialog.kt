@@ -1,5 +1,7 @@
 package com.example.ui.addserver
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,13 +55,13 @@ fun QrImportDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.QrCode, contentDescription = null, tint = AppTheme.colors.primary, modifier = Modifier.size(24.dp))
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("QR / Batch Import", color = AppTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ui_qr_batch_import), color = AppTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "Paste a QR code payload, subscription text, or multiple line-separated VLESS URIs:",
+                    text = stringResource(R.string.ui_paste_a_qr_code_payload),
                     color = AppTheme.colors.textSecondary,
                     fontSize = 13.sp
                 )
@@ -107,7 +109,7 @@ fun QrImportDialog(
                         Icon(Icons.Default.ContentPaste, contentDescription = null, tint = AppTheme.colors.primary, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Paste Clipboard",
+                            text = stringResource(R.string.ui_paste_clipboard),
                             color = AppTheme.colors.primary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -120,7 +122,7 @@ fun QrImportDialog(
 
                     if (detectedCount > 0) {
                         Text(
-                            text = "$detectedCount VLESS found",
+                            text = stringResource(R.string.ui_vless_found, detectedCount),
                             color = AppTheme.colors.statusConnected,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -144,12 +146,12 @@ fun QrImportDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary),
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Text("Import", color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ui_import), color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = AppTheme.colors.textSecondary)
+                Text(stringResource(R.string.ui_cancel), color = AppTheme.colors.textSecondary)
             }
         },
         containerColor = AppTheme.colors.surfaceCard,

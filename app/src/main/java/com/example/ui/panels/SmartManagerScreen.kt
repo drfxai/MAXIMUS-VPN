@@ -1,5 +1,7 @@
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -108,16 +110,16 @@ internal fun SmartManagerScreen(
                     horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     SmIcon(Icons.Default.Security, Sm.Gold)
                     Column(Modifier.weight(1f)) {
-                        Text("MAXIMUS  /  INFRASTRUCTURE", color = Sm.Gold, fontSize = 10.sp,
+                        Text(stringResource(R.string.ui_maximus_infrastructure), color = Sm.Gold, fontSize = 10.sp,
                             fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
                         Text("Smart Manager", color = Sm.White, fontSize = 23.sp,
                             fontWeight = FontWeight.ExtraBold)
-                        Text("Control your servers from one cockpit", color = Sm.Muted, fontSize = 12.sp)
+                        Text(stringResource(R.string.ui_control_your_servers_from_one), color = Sm.Muted, fontSize = 12.sp)
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    SmPill(if (fresh) "SSH INSPECTED" else "INSPECTION REQUIRED",
+                    SmPill(if (fresh) stringResource(R.string.ui_ssh_inspected) else stringResource(R.string.ui_inspection_required),
                         if (fresh) Sm.Green else Sm.Orange)
                     SmPill("${state.servers.size} VPS", Sm.Cyan)
                 }
@@ -125,7 +127,7 @@ internal fun SmartManagerScreen(
                     Button(onClick = { page = 3 }, modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Sm.Gold,
                             contentColor = Sm.Night), shape = RoundedCornerShape(11.dp)) {
-                        Text("Review install plan", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.ui_review_install_plan), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                     OutlinedButton(onClick = {
                         if (server == null) vm.openAdd() else vm.refresh(server.id)
@@ -133,7 +135,7 @@ internal fun SmartManagerScreen(
                         border = BorderStroke(1.dp, Sm.Border)) {
                         Icon(Icons.Default.Refresh, null, tint = Sm.Cyan, modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Scan", color = Sm.White, fontSize = 12.sp)
+                        Text(stringResource(R.string.ui_scan), color = Sm.White, fontSize = 12.sp)
                     }
                 }
             }
@@ -162,10 +164,10 @@ internal fun SmartManagerScreen(
         }
 
         if (state.servers.isEmpty()) {
-            SmPanel("CONNECT YOUR FIRST VPS", Icons.Default.Storage) {
-                Text("Add an Ubuntu server with a verified SSH host key. No installation runs during inspection.",
+            SmPanel(stringResource(R.string.ui_connect_your_first_vps), Icons.Default.Storage) {
+                Text(stringResource(R.string.ui_add_an_ubuntu_server_with),
                     color = Sm.Muted, fontSize = 13.sp)
-                SmAction("Add VPS", onClick = { vm.openAdd() })
+                SmAction(stringResource(R.string.ui_add_vps), onClick = { vm.openAdd() })
             }
             return@Column
         }
@@ -192,27 +194,27 @@ internal fun SmartManagerScreen(
             when (page) {
                 0 -> {
                     val facts = server.facts
-                    SmPanel("SERVER HEALTH", Icons.Default.Storage, "Last authenticated SSH survey") {
+                    SmPanel(stringResource(R.string.ui_server_health), Icons.Default.Storage, stringResource(R.string.ui_last_authenticated_ssh_survey)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(server.displayName, color = Sm.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                                 Text(server.host, color = Sm.Cyan, fontSize = 12.sp)
                             }
-                            SmPill(if (fresh) "INSPECTED" else "STALE / UNKNOWN",
+                            SmPill(if (fresh) stringResource(R.string.ui_inspected) else stringResource(R.string.ui_stale_unknown),
                                 if (fresh) Sm.Green else Sm.Orange)
                         }
-                        Text(if (facts == null) "Run Scan to read VPS health"
-                             else "${facts.osName.ifBlank { "Unknown Linux" }} · ${facts.cpus} CPU",
+                        Text(if (facts == null) stringResource(R.string.ui_run_scan_to_read_vps)
+                             else stringResource(R.string.ui_cpu, facts.osName.ifBlank { "Unknown Linux" }, facts.cpus),
                             color = Sm.Muted, fontSize = 12.sp, maxLines = 2)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SmMetric("RAM FREE", if (facts != null && facts.ramMb > 0)
+                            SmMetric(stringResource(R.string.ui_ram_free), if (facts != null && facts.ramMb > 0)
                                 "${facts.ramAvailableMb} MB" else "—", Sm.Cyan, Modifier.weight(1f))
-                            SmMetric("DISK FREE", if (facts != null && facts.diskMb > 0)
+                            SmMetric(stringResource(R.string.ui_disk_free), if (facts != null && facts.diskMb > 0)
                                 "${facts.diskFreeMb} MB" else "—", Sm.Gold, Modifier.weight(1f))
-                            SmMetric("SERVICES", server.tools.size.toString(), Sm.Green, Modifier.weight(1f))
+                            SmMetric(stringResource(R.string.ui_services), server.tools.size.toString(), Sm.Green, Modifier.weight(1f))
                         }
                         if (facts != null && facts.ramMb > 0) {
-                            SmMeter("Memory usage", (1f - facts.ramAvailableMb.toFloat() / facts.ramMb)
+                            SmMeter(stringResource(R.string.ui_memory_usage), (1f - facts.ramAvailableMb.toFloat() / facts.ramMb)
                                 .coerceIn(0f, 1f), Sm.Cyan)
                         }
                         Text("Port inventory  ·  " +
@@ -221,65 +223,65 @@ internal fun SmartManagerScreen(
                             else "Unavailable — install admission blocked",
                             color = Sm.Muted, fontSize = 12.sp)
                     }
-                    SmPanel("ENGINE READINESS", Icons.Default.Bolt, "Eligibility is not a connection test") {
+                    SmPanel(stringResource(R.string.ui_engine_readiness), Icons.Default.Bolt, stringResource(R.string.ui_eligibility_is_not_a_connection)) {
                         inspection.candidates.forEach { candidate ->
                             SmEngineLine(candidate.title, candidate.status)
                         }
-                        SmAction("View installation options", onClick = { page = 3 }, quiet = true)
+                        SmAction(stringResource(R.string.ui_view_installation_options), onClick = { page = 3 }, quiet = true)
                     }
                 }
-                1 -> SmPanel("SERVER CONTROL", Icons.Default.Storage, "Pinned SSH credentials") {
-                    SmDatum("Server", "${server.host}:${server.sshPort}")
-                    SmDatum("Username", server.username)
-                    SmDatum("Host key", if (server.hostKeySha256.isNotBlank()) "Pinned" else "Not confirmed")
-                    SmDatum("Interface IPv4",
+                1 -> SmPanel(stringResource(R.string.ui_server_control), Icons.Default.Storage, stringResource(R.string.ui_pinned_ssh_credentials)) {
+                    SmDatum(stringResource(R.string.ui_server), "${server.host}:${server.sshPort}")
+                    SmDatum(stringResource(R.string.ui_username), server.username)
+                    SmDatum(stringResource(R.string.ui_host_key), if (server.hostKeySha256.isNotBlank()) "Pinned" else "Not confirmed")
+                    SmDatum(stringResource(R.string.ui_interface_ipv4),
                         server.facts?.interfaceIpv4?.joinToString()?.ifBlank { "Unavailable" } ?: "Not inspected")
-                    SmAction("Manage VPS", onClick = { vm.openDetail(server.id) })
-                    SmAction("Add another VPS", onClick = { vm.openAdd() }, quiet = true)
+                    SmAction(stringResource(R.string.ui_manage_vps), onClick = { vm.openDetail(server.id) })
+                    SmAction(stringResource(R.string.ui_add_another_vps), onClick = { vm.openAdd() }, quiet = true)
                 }
-                2 -> SmPanel("CLOUDFLARE CONTROL", Icons.Default.Cloud, "Scoped DNS permissions") {
-                    Text("Zone Read + DNS Edit only on the zones you approve. Every change remains reviewable.",
+                2 -> SmPanel(stringResource(R.string.ui_cloudflare_control), Icons.Default.Cloud, stringResource(R.string.ui_scoped_dns_permissions)) {
+                    Text(stringResource(R.string.ui_zone_read_dns_edit_only_2),
                         color = Sm.Muted, fontSize = 13.sp)
-                    SmAction("Create scoped API token", onClick = {
+                    SmAction(stringResource(R.string.ui_create_scoped_api_token), onClick = {
                         val url = TokenTemplate.url(TokenTemplate.SMART_DOMAINS, "Maximus Smart Manager")
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                            .onFailure { Toast.makeText(context, "No browser available", Toast.LENGTH_SHORT).show() }
+                            .onFailure { Toast.makeText(context, context.getString(R.string.ui_no_browser_available), Toast.LENGTH_SHORT).show() }
                     })
-                    SmAction("Cloudflare DNS", onClick = onOpenCloudflare, quiet = true)
-                    SmAction("Smart Domains", onClick = onOpenSmartDomains, quiet = true)
-                    Text("Non-HTTP tunnels use DNS-only. No DNS write occurs on this screen.",
+                    SmAction(stringResource(R.string.ui_cloudflare_dns), onClick = onOpenCloudflare, quiet = true)
+                    SmAction(stringResource(R.string.ui_smart_domains_2), onClick = onOpenSmartDomains, quiet = true)
+                    Text(stringResource(R.string.ui_non_http_tunnels_use_dns),
                         color = Sm.Muted, fontSize = 11.sp)
                 }
-                3 -> SmPanel("INSTALLATION PLANNER", Icons.Default.Dns, "Read-only checks · explicit approval") {
+                3 -> SmPanel(stringResource(R.string.ui_installation_planner), Icons.Default.Dns, stringResource(R.string.ui_read_only_checks_explicit_approval)) {
                     inspection.candidates.forEach { candidate ->
                         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             SmEngineLine(candidate.title, candidate.status)
                             Text(candidate.reason, color = Sm.Muted, fontSize = 12.sp, lineHeight = 16.sp)
                             if (candidate.status == SmartManagerPlanner.Status.READY_FOR_WIZARD) {
-                                SmAction("Review ${candidate.title}", onClick = {
+                                SmAction(stringResource(R.string.ui_review, candidate.title), onClick = {
                                     vm.openWizard(candidate.id, server.id)
                                 }, quiet = true)
                             }
                         }
                     }
-                    Text("One-click multi-engine deployment is disabled until rollback and protocol compatibility are verified.",
+                    Text(stringResource(R.string.ui_one_click_multi_engine_deployment),
                         color = Sm.Orange, fontSize = 11.sp)
                 }
-                4 -> SmPanel("MANAGED NODES", Icons.Default.CheckCircle, "Phone traffic verification required") {
+                4 -> SmPanel(stringResource(R.string.ui_managed_nodes), Icons.Default.CheckCircle, stringResource(R.string.ui_phone_traffic_verification_required)) {
                     val managed = vm.managedNodesFor(server.id)
-                    Text("${managed.size} managed provenance records", color = Sm.Cyan,
+                    Text(stringResource(R.string.ui_managed_provenance_records, managed.size), color = Sm.Cyan,
                         fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    if (managed.isEmpty()) Text("No managed node was generated on this VPS yet.",
+                    if (managed.isEmpty()) Text(stringResource(R.string.ui_no_managed_node_was_generated),
                         color = Sm.Muted, fontSize = 12.sp)
                     managed.forEach { node ->
                         SmDatum(node.serviceId, node.state.name)
                     }
-                    Text("A stored profile is not a verified tunnel. Manual imported nodes remain unchanged.",
+                    Text(stringResource(R.string.ui_a_stored_profile_is_not),
                         color = Sm.Muted, fontSize = 12.sp)
-                    SmAction("Inspect and test profiles", onClick = { vm.openDetail(server.id) })
+                    SmAction(stringResource(R.string.ui_inspect_and_test_profiles), onClick = { vm.openDetail(server.id) })
                 }
-                else -> SmPanel("LIVE SERVICE INSPECTION", Icons.Default.Security,
-                    "Read-only; no automatic repair") {
+                else -> SmPanel(stringResource(R.string.ui_live_service_inspection), Icons.Default.Security,
+                    stringResource(R.string.ui_read_only_no_automatic_repair)) {
                     val health = SmartServerHealth.evaluate(server)
                     SmPill(health.level.name.replace('_', ' '),
                         if (health.level == SmartServerHealth.Level.SERVICES_ACTIVE_UNVERIFIED) Sm.Cyan
@@ -298,22 +300,22 @@ internal fun SmartManagerScreen(
                     vm.operationsFor(server.id).forEach { op ->
                         SmDatum(op.toolId, op.status.name)
                         if (op.status == SmartOperation.Status.UNCERTAIN) {
-                            Text("Remote effects unknown: inspect before another installation.",
+                            Text(stringResource(R.string.ui_remote_effects_unknown_inspect_before),
                                 color = Sm.Red, fontSize = 12.sp)
-                            SmAction("Reinspect interrupted operation", quiet = true, onClick = {
+                            SmAction(stringResource(R.string.ui_reinspect_interrupted_operation), quiet = true, onClick = {
                                 vm.reconcileUncertainOperation(server.id, op.id)
                             })
                         }
                     }
-                    SmAction("Refresh service inspection", onClick = { vm.refresh(server.id) })
-                    SmAction("Full VPS diagnostics", onClick = { vm.openDetail(server.id) }, quiet = true)
+                    SmAction(stringResource(R.string.ui_refresh_service_inspection), onClick = { vm.refresh(server.id) })
+                    SmAction(stringResource(R.string.ui_full_vps_diagnostics), onClick = { vm.openDetail(server.id) }, quiet = true)
                 }
             }
         }
         if (state.error.isNotBlank()) {
             Text(state.error, color = Sm.Red, fontSize = 12.sp)
         }
-        Text("MAXIMUS VPN  ·  Managed infrastructure  ·  Verified facts only",
+        Text(stringResource(R.string.ui_maximus_vpn_managed_infrastructure_verif),
             color = Sm.Muted.copy(alpha = 0.65f), fontSize = 10.sp,
             modifier = Modifier.padding(horizontal = 3.dp, vertical = 4.dp))
     }
@@ -396,11 +398,11 @@ private fun SmEngineLine(name: String, status: SmartManagerPlanner.Status) {
         Text(name, color = Sm.White, fontSize = 12.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(when (status) {
-            SmartManagerPlanner.Status.INSTALLED -> "Detected"
-            SmartManagerPlanner.Status.READY_FOR_WIZARD -> "Review"
-            SmartManagerPlanner.Status.UNVERIFIED -> "Unverified"
-            SmartManagerPlanner.Status.NEEDS_INSPECTION -> "Scan required"
-            SmartManagerPlanner.Status.BLOCKED -> "Blocked"
+            SmartManagerPlanner.Status.INSTALLED -> stringResource(R.string.ui_detected)
+            SmartManagerPlanner.Status.READY_FOR_WIZARD -> stringResource(R.string.ui_review_2)
+            SmartManagerPlanner.Status.UNVERIFIED -> stringResource(R.string.ui_unverified)
+            SmartManagerPlanner.Status.NEEDS_INSPECTION -> stringResource(R.string.ui_scan_required)
+            SmartManagerPlanner.Status.BLOCKED -> stringResource(R.string.ui_blocked)
         }, color = tint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }

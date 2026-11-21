@@ -1,5 +1,7 @@
 package com.example.ui.share
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.text.format.DateUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -105,8 +107,8 @@ fun ShareOfflineSheet(
 @Composable
 private fun SingleContent(c: LabColors, profile: VlessProfile, onCopy: () -> Unit, onShareWorking: () -> Unit) {
     val code = remember(profile) { ShareCode.encode(profile) }
-    Title(c, "Share offline")
-    Subtitle(c, "Scan this with MAXIMUS on the other phone. No internet needed on either phone.")
+    Title(c, stringResource(R.string.ui_share_offline))
+    Subtitle(c, stringResource(R.string.ui_scan_this_with_maximus_on))
     QrCard(code, 300)
     FlowRow(
         modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
@@ -127,7 +129,7 @@ private fun SingleContent(c: LabColors, profile: VlessProfile, onCopy: () -> Uni
         Icon(Icons.Outlined.GppGood, contentDescription = null, tint = c.okay, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Text(
-            "Only show it to people you trust. Anyone who scans this code can use this server.",
+            stringResource(R.string.ui_only_show_it_to_people),
             color = c.text2, fontSize = 13.sp, lineHeight = 19.sp, fontFamily = InterFamily
         )
     }
@@ -158,8 +160,8 @@ private fun BundleContent(c: LabColors, all: List<VlessProfile>, onDone: () -> U
         }
     }
 
-    Title(c, "Share working servers")
-    Subtitle(c, "The codes change by themselves. Keep the other phone pointed at the screen until it says all ${codes.size} are received.")
+    Title(c, stringResource(R.string.ui_share_working_servers))
+    Subtitle(c, stringResource(R.string.ui_the_codes_change_by_themselves, codes.size))
     Row(Modifier.fillMaxWidth().padding(top = 16.dp).clip(RoundedCornerShape(14.dp)).background(c.cardAlt).padding(4.dp)) {
         listOf(
             Group.WORKING to "Working (${groups.getValue(Group.WORKING).size})",
@@ -179,7 +181,7 @@ private fun BundleContent(c: LabColors, all: List<VlessProfile>, onDone: () -> U
     }
     if (codes.isEmpty()) {
         Text(
-            "No servers here yet.", color = c.text2, fontSize = 14.sp, fontFamily = InterFamily,
+            stringResource(R.string.ui_no_servers_here_yet), color = c.text2, fontSize = 14.sp, fontFamily = InterFamily,
             modifier = Modifier.fillMaxWidth().padding(vertical = 60.dp), textAlign = TextAlign.Center
         )
         Buttons(c, null, {}, "Done", onDone)
@@ -201,7 +203,7 @@ private fun BundleContent(c: LabColors, all: List<VlessProfile>, onDone: () -> U
     ) {
         Column(Modifier.weight(1f)) {
             Text(current.name, color = c.text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontFamily = InterFamily)
-            Text("Code ${index + 1} of ${codes.size} · ${kindLabel(current)}", color = c.text2, fontSize = 12.5.sp, fontFamily = InterFamily)
+            Text(stringResource(R.string.ui_code_of, index + 1, codes.size, kindLabel(current)), color = c.text2, fontSize = 12.5.sp, fontFamily = InterFamily)
         }
         current.lastLatencyMs?.let {
             Text(

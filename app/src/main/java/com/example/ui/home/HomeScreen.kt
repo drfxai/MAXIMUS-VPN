@@ -336,14 +336,14 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "CASCADE FAILOVER LADDER",
+                                    text = stringResource(R.string.ui_cascade_failover_ladder),
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFFF8A80),
                                     letterSpacing = 0.5.sp
                                 )
                                 Text(
-                                    text = "Bridges: $verifiedBridgesCount/${bridges.size} | Mesh: ${meshPeers.size} Peers",
+                                    text = stringResource(R.string.ui_bridges_mesh_peers, verifiedBridgesCount, bridges.size, meshPeers.size),
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFFFCC80)
@@ -351,7 +351,7 @@ fun HomeScreen(
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "1. REALITY ➔ 2. CDN / TLS ➔ 3. Hysteria2 ➔ 4. WireGuard",
+                                text = stringResource(R.string.ui_t_1_reality_2_cdn_tls),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = Color(0xFFE0E0E0)
@@ -373,7 +373,7 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Secret Chat", fontSize = 11.sp)
+                            Text(stringResource(R.string.ui_secret_chat), fontSize = 11.sp)
                         }
 
                         Button(
@@ -385,7 +385,7 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Hardened Browser", fontSize = 11.sp)
+                            Text(stringResource(R.string.ui_hardened_browser), fontSize = 11.sp)
                         }
                     }
                 }
@@ -424,9 +424,9 @@ fun HomeScreen(
         }
         Text(
             text = when (earthMode) {
-                EarthMode.ON -> "Connected"
-                EarthMode.CONNECTING -> "Finding a path…"
-                EarthMode.OFF -> "Not connected"
+                EarthMode.ON -> stringResource(R.string.ui_connected_2)
+                EarthMode.CONNECTING -> stringResource(R.string.ui_finding_a_path)
+                EarthMode.OFF -> stringResource(R.string.ui_not_connected)
             },
             color = if (earthMode == EarthMode.OFF) AppTheme.colors.textPrimary else earthAccent,
             fontSize = 22.sp,
@@ -447,7 +447,7 @@ fun HomeScreen(
             }
         } else {
             Text(
-                text = if (earthMode == EarthMode.CONNECTING) "${connectionState.statusLabel} · tap the button to stop" else "Tap the button to connect",
+                text = if (earthMode == EarthMode.CONNECTING) stringResource(R.string.ui_tap_the_button_to_stop, connectionState.statusLabel) else stringResource(R.string.ui_tap_the_button_to_connect),
                 color = AppTheme.colors.textSecondary,
                 fontSize = 13.sp
             )
@@ -463,12 +463,12 @@ fun HomeScreen(
                 colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surfaceCard)
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("ACTIVE CONNECTION PATH", color = AppTheme.colors.textSecondary, fontSize = 11.sp)
+                    Text(stringResource(R.string.ui_active_connection_path), color = AppTheme.colors.textSecondary, fontSize = 11.sp)
                     Text(com.example.data.model.ConnectionRoute.withExitCountry(
                         connectionState.activeRoute ?: "Route not reported", exitCode), color = AppTheme.colors.primary,
                         fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Text(if (directRoute) "Device → Direct DPI bypass → Internet · ISP exit IP"
-                        else "Device → Android VPN → ${connectionState.activeRoute ?: "selected route"} → Internet",
+                    Text(if (directRoute) stringResource(R.string.ui_device_direct_dpi_bypass_internet)
+                        else stringResource(R.string.ui_device_android_vpn_internet, connectionState.activeRoute ?: "selected route"),
                         color = AppTheme.colors.textPrimary, fontSize = 12.sp)
                     Text(connectionState.verification.title,
                         color = AppTheme.colors.textSecondary, fontSize = 12.sp)
@@ -496,7 +496,7 @@ fun HomeScreen(
         TextButton(onClick = onOpenAnalytics, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) {
             Icon(Icons.Filled.BarChart, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Connection analytics")
+            Text(stringResource(R.string.ui_connection_analytics))
             Spacer(Modifier.width(5.dp))
             Icon(Icons.Filled.ChevronRight, null, modifier = Modifier.size(16.dp))
         }
@@ -523,7 +523,7 @@ fun HomeScreen(
                     Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (directRoute) "Direct bypass keeps your ISP exit IP and does not add an encrypted VPN tunnel. App encryption still applies. Some apps, including Telegram, may need a separate proxy or a working tunnel." else "This profile has no TLS/REALITY encryption between this device and the VPN server. Use a TLS or REALITY profile for a confidential connection.",
+                        text = if (directRoute) stringResource(R.string.ui_direct_bypass_keeps_your_isp) else stringResource(R.string.ui_this_profile_has_no_tls),
                         color = AppTheme.colors.textPrimary,
                         fontSize = 12.sp
                     )
@@ -649,7 +649,7 @@ fun HomeScreen(
                             TextButton(
                                 onClick = { vpnViewModel.connectAnyway(context) { onRequestVpnPermission() } }
                             ) {
-                                Text("Connect anyway", color = AppTheme.colors.statusError, fontSize = 12.sp)
+                                Text(stringResource(R.string.ui_connect_anyway), color = AppTheme.colors.statusError, fontSize = 12.sp)
                             }
                         }
                     }
@@ -728,7 +728,7 @@ private fun TradeModeCard(
                 Icon(Icons.Default.Lock, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(13.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Trade · fixed exit",
+                    text = stringResource(R.string.ui_trade_fixed_exit),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 0.3.sp,
@@ -738,7 +738,7 @@ private fun TradeModeCard(
                 if (isConnected) {
                     StatusDot(c.statusConnected, 6.dp)
                     Spacer(modifier = Modifier.width(5.dp))
-                    Text("Locked", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = c.statusConnected)
+                    Text(stringResource(R.string.ui_locked), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = c.statusConnected)
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -761,7 +761,7 @@ private fun TradeModeCard(
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "Your exit IP, location and configuration stay the same every time. No switching, failover or recovery runs while Trade is on.",
+                text = stringResource(R.string.ui_your_exit_ip_location_and),
                 fontSize = 12.sp,
                 color = c.textSecondary,
                 lineHeight = 17.sp
@@ -771,7 +771,7 @@ private fun TradeModeCard(
                 HairlineDivider()
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "Steadiest exits to pin",
+                    text = stringResource(R.string.ui_steadiest_exits_to_pin),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 0.3.sp,
@@ -819,7 +819,7 @@ private fun TradeModeCard(
                 Icon(imageVector = Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(15.dp))
                 Spacer(modifier = Modifier.width(7.dp))
                 Text(
-                    text = if (isConnected) "Exit locked" else "Connect — fixed exit",
+                    text = if (isConnected) stringResource(R.string.ui_exit_locked) else stringResource(R.string.ui_connect_fixed_exit),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -1064,9 +1064,9 @@ private fun SmartConnectButton(state: SmartButtonState, onClick: () -> Unit) {
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = when (state) {
-                    SmartButtonState.OFF -> "Auto Connect"
-                    SmartButtonState.CONNECTING -> "Connecting…"
-                    SmartButtonState.ON -> "Auto Connect on"
+                    SmartButtonState.OFF -> stringResource(R.string.ui_auto_connect)
+                    SmartButtonState.CONNECTING -> stringResource(R.string.ui_connecting_2)
+                    SmartButtonState.ON -> stringResource(R.string.ui_auto_connect_on)
                 },
                 color = content,
                 fontSize = 13.sp,
@@ -1074,7 +1074,7 @@ private fun SmartConnectButton(state: SmartButtonState, onClick: () -> Unit) {
             )
             if (state.tapStops) {
                 Text(
-                    text = if (state == SmartButtonState.CONNECTING) "  · tap to stop" else "  · tap to disconnect",
+                    text = if (state == SmartButtonState.CONNECTING) stringResource(R.string.ui_tap_to_stop) else stringResource(R.string.ui_tap_to_disconnect),
                     color = content.copy(alpha = 0.78f),
                     fontSize = 11.sp
                 )
@@ -1257,11 +1257,11 @@ private fun ConfigFreeConnectButton(
         }
         Spacer(Modifier.width(8.dp))
         Text(when {
-            status == ConfigFreeStatus.STOPPING -> "Disconnecting…"
-            active && state.status == ConnectionStatus.CONNECTED -> "Disconnect"
-            active -> "Cancel"
-            status == ConfigFreeStatus.INTERRUPTED -> "Retry without a config"
-            else -> "Connect without a config"
+            status == ConfigFreeStatus.STOPPING -> stringResource(R.string.ui_disconnecting)
+            active && state.status == ConnectionStatus.CONNECTED -> stringResource(R.string.ui_disconnect_2)
+            active -> stringResource(R.string.ui_cancel)
+            status == ConfigFreeStatus.INTERRUPTED -> stringResource(R.string.ui_retry_without_a_config)
+            else -> stringResource(R.string.ui_connect_without_a_config)
         }, fontWeight = FontWeight.SemiBold)
     }
     if (status != ConfigFreeStatus.READY) {
@@ -1270,7 +1270,7 @@ private fun ConfigFreeConnectButton(
             modifier = Modifier.padding(top = 4.dp))
     }
     TextButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-        Text("Advanced options")
+        Text(stringResource(R.string.ui_advanced_options))
     }
 
     if (open) {
@@ -1316,23 +1316,23 @@ private fun ConfigFreeMethodPicker(
                 Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(
                     accent.copy(alpha = if (dark) .16f else .10f), Color.Transparent)))
                     .padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Connect without a config", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text(if (transports) "Select a WARP transport or build a chain." else "Choose a built-in connection method.",
+                    Text(stringResource(R.string.ui_connect_without_a_config), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(if (transports) stringResource(R.string.ui_select_a_warp_transport_or) else stringResource(R.string.ui_choose_a_built_in_connection),
                         style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                 }
                 Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    FilterChip(selected = !transports, onClick = { transports = false }, label = { Text("Methods") })
-                    FilterChip(selected = transports, onClick = { transports = true }, label = { Text("Aether & chains") })
+                    FilterChip(selected = !transports, onClick = { transports = false }, label = { Text(stringResource(R.string.ui_methods)) })
+                    FilterChip(selected = transports, onClick = { transports = true }, label = { Text(stringResource(R.string.ui_aether_chains)) })
                 }
                 androidx.compose.runtime.key(transports) {
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (transports) {
-                            ConfigMethodRow("Build a connection chain", "Combine saved nodes and built-in engines", Icons.Filled.Link, accent, onChain)
-                            ConfigMethodRow("Aether settings", "Configure transport and registration", Icons.Filled.Cloud, accent, onAetherSettings)
+                            ConfigMethodRow(stringResource(R.string.ui_build_a_connection_chain), stringResource(R.string.ui_combine_saved_nodes_and_built), Icons.Filled.Link, accent, onChain)
+                            ConfigMethodRow(stringResource(R.string.ui_aether_settings), stringResource(R.string.ui_configure_transport_and_registration), Icons.Filled.Cloud, accent, onAetherSettings)
                         }
                         val methods = availability
-                        if (methods == null) Text("Checking installed engines…", color = colors.onSurfaceVariant)
+                        if (methods == null) Text(stringResource(R.string.ui_checking_installed_engines), color = colors.onSurfaceVariant)
                         else {
                             methods.filterKeys { (it.aetherTransport != null) == transports }.forEach { (method, problem) ->
                                 val icon = when (method) {
@@ -1351,9 +1351,9 @@ private fun ConfigFreeMethodPicker(
                 }
                 Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.End) {
                     if (availability?.get(ConfigFreeMethod.PSIPHON) != null) {
-                        TextButton(onClick = onSetup) { Text("Psiphon setup") }
+                        TextButton(onClick = onSetup) { Text(stringResource(R.string.ui_psiphon_setup)) }
                     }
-                    TextButton(onClick = onDismiss) { Text("Close") }
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.ui_close)) }
                 }
             }
         }

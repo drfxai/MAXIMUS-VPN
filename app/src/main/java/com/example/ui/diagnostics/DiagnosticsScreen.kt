@@ -1,5 +1,7 @@
 package com.example.ui.diagnostics
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -119,7 +121,7 @@ fun DiagnosticsScreen(
                     description = desc,
                     userNotes = notes
                 )
-                Toast.makeText(context, "Error report submitted & logged to telemetry", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.ui_error_report_submitted_logged_to), Toast.LENGTH_SHORT).show()
                 showReportDialog = false
             }
         )
@@ -156,8 +158,8 @@ fun DiagnosticsScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                 }
                 Column {
-                    Text("Diagnostics & Telemetry", color = AppTheme.colors.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Real-time engine logs & error reporting", color = AppTheme.colors.textSecondary, fontSize = 12.sp)
+                    Text(stringResource(R.string.ui_diagnostics_telemetry), color = AppTheme.colors.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_real_time_engine_logs_error), color = AppTheme.colors.textSecondary, fontSize = 12.sp)
                 }
             }
 
@@ -178,7 +180,7 @@ fun DiagnosticsScreen(
             modifier = Modifier.fillMaxWidth().height(40.dp).testTag("test_tunnel_connectivity_button")
         ) {
             Text(
-                text = if (tunnelTestRunning) "Testing tunneled internet…" else "Test end-to-end VPN connectivity",
+                text = if (tunnelTestRunning) stringResource(R.string.ui_testing_tunneled_internet) else stringResource(R.string.ui_test_end_to_end_vpn),
                 color = AppTheme.colors.primary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
@@ -206,10 +208,10 @@ fun DiagnosticsScreen(
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth().height(40.dp).testTag("test_dns_path_button")
         ) {
-            Text(if (dnsTestRunning) "Testing VPN DNS…" else "Test DNS path / leak status",
+            Text(if (dnsTestRunning) stringResource(R.string.ui_testing_vpn_dns) else stringResource(R.string.ui_test_dns_path_leak_status),
                 color = AppTheme.colors.primary, fontSize = 12.sp)
         }
-        Text("Checks DNS on the VPN network. Internet-side DNS leaks remain untested.",
+        Text(stringResource(R.string.ui_checks_dns_on_the_vpn),
             color = AppTheme.colors.textSecondary, fontSize = 11.sp)
         dnsPath?.let { result ->
             Text(result.summary + (result.latencyMs?.let { " • ${it} ms" } ?: ""),
@@ -220,7 +222,7 @@ fun DiagnosticsScreen(
 
         // Section Title: Engine Telemetry
         Text(
-            text = "ENGINE TELEMETRY",
+            text = stringResource(R.string.ui_engine_telemetry),
             color = AppTheme.colors.textMuted,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -255,7 +257,7 @@ fun DiagnosticsScreen(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Report Error",
+                    text = stringResource(R.string.ui_report_error),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -269,7 +271,7 @@ fun DiagnosticsScreen(
                     val report = viewModel.generateDiagnosticReport()
                     val text = viewModel.formatReportText(report)
                     clipboardManager.setText(AnnotatedString(text))
-                    Toast.makeText(context, "Sanitized report copied to clipboard", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.ui_sanitized_report_copied_to_clipboard), Toast.LENGTH_SHORT).show()
                     // The short summary and the detailed JSON report, saved off the main thread and shared.
                     viewModel.exportReports { intent -> runCatching { context.startActivity(intent) } }
                 },
@@ -289,7 +291,7 @@ fun DiagnosticsScreen(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Export Report",
+                    text = stringResource(R.string.ui_export_report),
                     color = AppTheme.colors.primary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
@@ -320,13 +322,13 @@ fun DiagnosticsScreen(
                         modifier = Modifier.weight(1f)
                     )
                     DiagnosticGridCell(
-                        title = "Core Engine",
+                        title = stringResource(R.string.ui_core_engine),
                         value = if (connState.isConnected) (connState.activeProfile?.engineType?.displayName ?: "XRAY") else "STANDBY",
                         color = if (connState.isConnected) AppTheme.colors.primary else AppTheme.colors.textMuted,
                         modifier = Modifier.weight(1f)
                     )
                     DiagnosticGridCell(
-                        title = "Tunnel IP",
+                        title = stringResource(R.string.ui_tunnel_ip),
                         value = connState.vpnIp ?: "None",
                         color = AppTheme.colors.textPrimary,
                         modifier = Modifier.weight(1f)
@@ -338,19 +340,19 @@ fun DiagnosticsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     DiagnosticGridCell(
-                        title = "Active Node",
+                        title = stringResource(R.string.ui_active_node),
                         value = connState.activeProfile?.name ?: "Disconnected",
                         color = AppTheme.colors.textPrimary,
                         modifier = Modifier.weight(1f)
                     )
                     DiagnosticGridCell(
-                        title = "Latency",
+                        title = stringResource(R.string.ui_latency),
                         value = connState.pingMs?.let { "${it}ms" } ?: "N/A",
                         color = if ((connState.pingMs ?: 999) < 200) AppTheme.colors.statusConnected else AppTheme.colors.statusWarning,
                         modifier = Modifier.weight(1f)
                     )
                     DiagnosticGridCell(
-                        title = "Privacy Mode",
+                        title = stringResource(R.string.ui_privacy_mode),
                         value = "REDACTED",
                         color = AppTheme.colors.statusConnected,
                         modifier = Modifier.weight(1f)
@@ -383,8 +385,8 @@ fun DiagnosticsScreen(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Column {
-                        Text("Subsystem Health", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
-                        Text("UI: ${healthState.uiState} • Engine: ${healthState.vpnEngineState}", fontSize = 10.sp, color = AppTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.ui_subsystem_health), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
+                        Text(stringResource(R.string.ui_ui_engine, healthState.uiState, healthState.vpnEngineState), fontSize = 10.sp, color = AppTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
 
@@ -394,7 +396,7 @@ fun DiagnosticsScreen(
                 ) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp), tint = AppTheme.colors.primary)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Run Audit", fontSize = 11.sp, color = AppTheme.colors.primary, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_run_audit), fontSize = 11.sp, color = AppTheme.colors.primary, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -479,7 +481,7 @@ fun DiagnosticsScreen(
                     ) {
                         if (logSearchQuery.isEmpty()) {
                             Text(
-                                text = "Search logs & traces...",
+                                text = stringResource(R.string.ui_search_logs_traces),
                                 color = AppTheme.colors.textMuted,
                                 fontSize = 12.sp,
                                 maxLines = 1,
@@ -522,7 +524,7 @@ fun DiagnosticsScreen(
                     .clickable {
                         val allLogsText = logs.joinToString("\n")
                         clipboardManager.setText(AnnotatedString(allLogsText))
-                        Toast.makeText(context, "Logs copied to clipboard", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_logs_copied_to_clipboard), Toast.LENGTH_SHORT).show()
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -582,7 +584,7 @@ fun DiagnosticsScreen(
             if (displayLogs.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = if (logSearchQuery.isNotBlank() || selectedFilterCategory != "All") "No logs matching current filter" else "No log entries captured yet.\nPerform an action or click 'Report Error' to log telemetry.",
+                        text = if (logSearchQuery.isNotBlank() || selectedFilterCategory != "All") stringResource(R.string.ui_no_logs_matching_current_filter) else stringResource(R.string.ui_no_log_entries_captured_yet),
                         color = AppTheme.colors.textMuted,
                         fontSize = 12.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -674,7 +676,7 @@ private fun ReportIssueDialog(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Report An Error",
+                    text = stringResource(R.string.ui_report_an_error),
                     color = AppTheme.colors.textPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
@@ -687,13 +689,13 @@ private fun ReportIssueDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Submit error details for UI or Backend subsystem diagnostics.",
+                    text = stringResource(R.string.ui_submit_error_details_for_ui),
                     fontSize = 12.sp,
                     color = AppTheme.colors.textSecondary
                 )
 
                 // Error Source Selection
-                Text("ERROR SOURCE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textMuted)
+                Text(stringResource(R.string.ui_error_source), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textMuted)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -721,7 +723,7 @@ private fun ReportIssueDialog(
                 }
 
                 // Severity Selection
-                Text("SEVERITY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textMuted)
+                Text(stringResource(R.string.ui_severity), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textMuted)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -752,8 +754,8 @@ private fun ReportIssueDialog(
                 OutlinedTextField(
                     value = issueTitle,
                     onValueChange = { issueTitle = it },
-                    label = { Text("Issue Title", fontSize = 11.sp) },
-                    placeholder = { Text("e.g. Handshake failed / Screen freeze", fontSize = 11.sp) },
+                    label = { Text(stringResource(R.string.ui_issue_title), fontSize = 11.sp) },
+                    placeholder = { Text(stringResource(R.string.ui_e_g_handshake_failed_screen), fontSize = 11.sp) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -768,8 +770,8 @@ private fun ReportIssueDialog(
                 OutlinedTextField(
                     value = issueDesc,
                     onValueChange = { issueDesc = it },
-                    label = { Text("Description & Error Log", fontSize = 11.sp) },
-                    placeholder = { Text("Describe what happened or paste stack trace...", fontSize = 11.sp) },
+                    label = { Text(stringResource(R.string.ui_description_error_log), fontSize = 11.sp) },
+                    placeholder = { Text(stringResource(R.string.ui_describe_what_happened_or_paste), fontSize = 11.sp) },
                     minLines = 2,
                     maxLines = 3,
                     modifier = Modifier.fillMaxWidth(),
@@ -792,12 +794,12 @@ private fun ReportIssueDialog(
                 enabled = issueTitle.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary)
             ) {
-                Text("Submit Report", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ui_submit_report), fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = AppTheme.colors.textMuted)
+                Text(stringResource(R.string.ui_cancel), color = AppTheme.colors.textMuted)
             }
         }
     )

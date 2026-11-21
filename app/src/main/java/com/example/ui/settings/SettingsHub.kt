@@ -1,5 +1,6 @@
 package com.example.ui.settings
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -58,23 +59,23 @@ import com.example.R
 import com.example.data.model.AppSettings
 import com.example.ui.theme.AppTheme
 
-private data class HubEntry(val page: SettingsPage, val title: String, val icon: ImageVector)
+private data class HubEntry(val page: SettingsPage, @androidx.annotation.StringRes val title: Int, val icon: ImageVector)
 
-private val connectionEntry = HubEntry(SettingsPage.CONNECTION, "Connection", Icons.Default.Hub)
-private val routingEntry = HubEntry(SettingsPage.ROUTING_DNS, "Routing & DNS", Icons.Default.Route)
+private val connectionEntry = HubEntry(SettingsPage.CONNECTION, R.string.ui_connection, Icons.Default.Hub)
+private val routingEntry = HubEntry(SettingsPage.ROUTING_DNS, R.string.ui_routing_dns, Icons.Default.Route)
 
 private val protectionEntries = listOf(
-    HubEntry(SettingsPage.PRIVACY, "Privacy & security", Icons.Default.Security),
-    HubEntry(SettingsPage.ANTI_CENSORSHIP, "Anti-censorship", Icons.Default.VpnLock)
+    HubEntry(SettingsPage.PRIVACY, R.string.ui_privacy_security, Icons.Default.Security),
+    HubEntry(SettingsPage.ANTI_CENSORSHIP, R.string.ui_anti_censorship, Icons.Default.VpnLock)
 )
 private val appEntries = listOf(
-    HubEntry(SettingsPage.APPEARANCE, "Appearance", Icons.Default.Palette),
-    HubEntry(SettingsPage.UPDATES, "App updates", Icons.Default.SystemUpdate),
-    HubEntry(SettingsPage.ENGINES, "Engine updates", Icons.Default.Memory),
-    HubEntry(SettingsPage.DIAGNOSTICS, "Diagnostics", Icons.Default.Terminal)
+    HubEntry(SettingsPage.APPEARANCE, R.string.ui_appearance, Icons.Default.Palette),
+    HubEntry(SettingsPage.UPDATES, R.string.ui_app_updates, Icons.Default.SystemUpdate),
+    HubEntry(SettingsPage.ENGINES, R.string.ui_engine_updates, Icons.Default.Memory),
+    HubEntry(SettingsPage.DIAGNOSTICS, R.string.ui_diagnostics, Icons.Default.Terminal)
 )
-private val aboutEntry = HubEntry(SettingsPage.ABOUT, "About & community", Icons.Default.Info)
-private val sharingEntry = HubEntry(SettingsPage.SHARING, "Sharing", Icons.Default.WifiTethering)
+private val aboutEntry = HubEntry(SettingsPage.ABOUT, R.string.ui_about_community, Icons.Default.Info)
+private val sharingEntry = HubEntry(SettingsPage.SHARING, R.string.ui_sharing, Icons.Default.WifiTethering)
 
 @Composable
 fun SettingsHub(
@@ -93,8 +94,8 @@ fun SettingsHub(
         Spacer(Modifier.height(12.dp))
         SettingsGroup {
             SettingsSwitchRow(
-                title = "Free configs",
-                subtitle = "Show free Maximus servers in Nodes",
+                title = stringResource(R.string.ui_free_configs_2),
+                subtitle = stringResource(R.string.ui_show_free_maximus_servers_in),
                 icon = Icons.Default.Public,
                 checked = settings.freeConfigsEnabled,
                 onCheckedChange = onFreeConfigsChanged,
@@ -102,7 +103,7 @@ fun SettingsHub(
             )
         }
 
-        SettingsSectionLabel("Network")
+        SettingsSectionLabel(stringResource(R.string.ui_network_2))
         val connectionSummary = SettingsLabels.hub(settings, connectionEntry.page, update, versionName)
         val routingSummary = SettingsLabels.hub(settings, routingEntry.page, update, versionName)
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -126,7 +127,7 @@ fun SettingsHub(
             HubRow(sharingEntry, SettingsLabels.hub(settings, sharingEntry.page, update, versionName), onOpen)
         }
 
-        SettingsSectionLabel("Protection")
+        SettingsSectionLabel(stringResource(R.string.ui_protection))
         SettingsGroup {
             protectionEntries.forEachIndexed { index, entry ->
                 if (index > 0) SettingsDivider()
@@ -134,7 +135,7 @@ fun SettingsHub(
             }
         }
 
-        SettingsSectionLabel("App & tools")
+        SettingsSectionLabel(stringResource(R.string.ui_app_tools))
         SettingsGroup {
             appEntries.forEachIndexed { index, entry ->
                 if (index > 0) SettingsDivider()
@@ -142,8 +143,8 @@ fun SettingsHub(
             }
             SettingsDivider()
             SettingsNavRow(
-                title = "AI agent",
-                subtitle = "Gemini for log diagnosis and tuning",
+                title = stringResource(R.string.ui_ai_agent_2),
+                subtitle = stringResource(R.string.ui_gemini_for_log_diagnosis_and),
                 icon = Icons.Default.AutoAwesome,
                 modifier = Modifier.testTag("settings_ai_agent"),
                 onClick = onOpenAiAgent
@@ -157,7 +158,7 @@ fun SettingsHub(
 @Composable
 private fun HubRow(entry: HubEntry, summary: String, onOpen: (SettingsPage) -> Unit) {
     SettingsNavRow(
-        title = entry.title,
+        title = stringResource(entry.title),
         subtitle = summary,
         icon = entry.icon,
         modifier = Modifier.testTag("settings_" + entry.page.name.lowercase()),
@@ -194,7 +195,7 @@ private fun FeaturedSetting(
                     tint = colors.textSecondary, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.height(10.dp))
-            Text(entry.title, color = colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(entry.title), color = colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
             Text(summary, color = colors.textSecondary, fontSize = 12.sp, lineHeight = 16.sp)
         }
@@ -224,9 +225,9 @@ private fun HubHeader(versionName: String, update: UpdateUi, onUpdateChip: () ->
                 AppLogo(size = 46)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Settings", color = colors.textPrimary, fontSize = 26.sp,
+                    Text(stringResource(R.string.ui_settings), color = colors.textPrimary, fontSize = 26.sp,
                         fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
-                    Text("Maximus VPN · v$versionName", color = colors.textSecondary, fontSize = 13.sp)
+                    Text(stringResource(R.string.ui_maximus_vpn_v, versionName), color = colors.textSecondary, fontSize = 13.sp)
                 }
             }
             Spacer(Modifier.height(6.dp))
