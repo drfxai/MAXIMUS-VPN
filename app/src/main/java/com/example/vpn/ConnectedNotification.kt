@@ -16,6 +16,12 @@ object ConnectedNotification {
         else -> "Xray"
     }
 
+    /** Shown instead of the speeds while this attempt's bulk check found large downloads stalling. */
+    const val LIMITED_LINE = "Connected, but large downloads are stalling"
+
+    /** The collapsed line: [LIMITED_LINE] while [bulkLimited] (any session, pinned or Smart), else [speeds]. */
+    fun contentLine(bulkLimited: Boolean, speeds: String): String = if (bulkLimited) "$LIMITED_LINE · $speeds" else speeds
+
     fun speedLine(downBps: Long, upBps: Long): String = "↓ ${size(downBps)}/s ↑ ${size(upBps)}/s"
 
     fun sessionLine(downBytes: Long, upBytes: Long): String = "Session: ${size(downBytes)} down · ${size(upBytes)} up"

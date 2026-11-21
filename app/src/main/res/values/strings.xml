@@ -6,5 +6,6 @@
     <string name="notification_channel_desc">Shows ongoing Maximus VPN connection status and controls</string>
     <string name="connection_limited_bulk">Connected, but large downloads are stalling</string>
     <string name="connection_try_another_server">Try another server</string>
+    <string name="connection_limited_bulk_pinned_hint">You picked this server yourself, so Maximus will not switch on its own. Try another server leaves it and continues with Smart Connect (Trade mode keeps its exit).</string>
     <string name="widget_description">Connect or disconnect Maximus from the home screen</string>
 </resources>

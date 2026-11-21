@@ -207,9 +207,28 @@ object NetworkCapabilityDetector {
      */
     internal enum class TlsOutcome { COMPLETED, SERVER_ANSWERED, INTERFERED, NOT_RUN }
 
-    private fun literalTls(network: Network, address: InetAddress, sni: String, port: Int = 443): TlsOutcome {
+    /** Time limit of [quickCloudflareTls]'s single handshake. */
+    const val QUICK_CF_TIMEOUT_MS = 3_000
+
+    /**
+     * Before an automatic Aether start on a network with no fresh measurement (build 167): one TLS handshake to
+     * Cloudflare by IP literal (1.1.1.1, one.one.one.one) on the phone's own network, at most ~2 × [timeoutMs].
+     * True: Cloudflare TLS completes here. False: reset, silent drop or a wrong certificate (filtered). Null: not
+     * measured (no physical network, IPv6 only, or the socket was not allowed). Blocking; call off the main thread.
+     */
+    fun quickCloudflareTls(context: Context, timeoutMs: Int = QUICK_CF_TIMEOUT_MS): Boolean? {
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
+        val network = physical(cm) ?: return null
+        val hasV4 = cm.getLinkProperties(network)?.linkAddresses.orEmpty().any { it.address is Inet4Address }
+        if (!hasV4) return null
+        val (ip, name) = INTERNATIONAL.first()
+        return verifiedCloudflareTls(literalTls(network, InetAddress.getByAddress(ip), name, timeoutMs = timeoutMs))
+    }
+
+    private fun literalTls(network: Network, address: InetAddress, sni: String, port: Int = 443,
+                           timeoutMs: Int = TIMEOUT_MS): TlsOutcome {
         val raw = try {
-            network.socketFactory.createSocket().also { it.connect(InetSocketAddress(address, port), TIMEOUT_MS) }
+            network.socketFactory.createSocket().also { it.connect(InetSocketAddress(address, port), timeoutMs) }
         } catch (_: SecurityException) {
             return TlsOutcome.NOT_RUN
         } catch (_: Exception) {
@@ -218,7 +237,7 @@ object NetworkCapabilityDetector {
         return try {
             val ssl = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, sni, port, true) as SSLSocket
             ssl.use {
-                it.soTimeout = TIMEOUT_MS
+                it.soTimeout = timeoutMs
                 val params = it.sslParameters
                 params.serverNames = listOf(SNIHostName(sni))
                 params.endpointIdentificationAlgorithm = "HTTPS"

@@ -106,18 +106,18 @@ object XrayConfigBuilder {
     fun buildJson(profile: VlessProfile, settings: AppSettings): String {
         if (profile.profileType == ProfileType.XRAY_JSON && profile.rawConfig.isNotBlank()) {
             val sanitized = XrayConfigParser.sanitizeForExecution(profile.rawConfig, settings)
-            val tcpOnlyEngine = com.example.vpn.sidecar.EngineUdp.blocksQuic(profile)
+            val endQuic = com.example.vpn.sidecar.EngineUdp.quicEndedLocally(profile)
+            val resolverOverTcp = com.example.vpn.sidecar.EngineUdp.resolverOverTcp(profile)
             val fakeDns = com.example.vpn.sidecar.AetherSidecar.handles(profile) ||
                 com.example.vpn.sidecar.ServerlessSidecar.handles(profile) ||
                 com.example.vpn.sidecar.EngineUdp.remoteDns(profile)
-            if (fakeDns || tcpOnlyEngine) {
+            if (fakeDns || endQuic || resolverOverTcp) {
                 val root = JSONObject(sanitized)
-                // An engine that answers SOCKS CONNECT only (Psiphon, Tor) can carry neither QUIC nor DNS over UDP:
-                // QUIC is ended locally so apps fall back to TCP at once, and Xray's own resolver is asked over TCP.
-                if (tcpOnlyEngine) {
-                    com.example.vpn.sidecar.EngineUdp.applyQuicBlock(root)
-                    com.example.vpn.sidecar.EngineUdp.dnsOverTcp(root)
-                }
+                // An engine that answers SOCKS CONNECT only (Psiphon, Tor) can carry neither QUIC nor DNS over UDP, and
+                // QUIC through Aether stalls (its UDP relay resolves each datagram's name): QUIC is ended locally so
+                // apps fall back to TCP at once, and Xray's own resolver is asked over TCP where UDP gains nothing.
+                if (endQuic) com.example.vpn.sidecar.EngineUdp.applyQuicBlock(root)
+                if (resolverOverTcp) com.example.vpn.sidecar.EngineUdp.dnsOverTcp(root)
                 // Hand the restored domain to the sidecar, as the successful local probe does.
                 // App DNS must not depend on a second resolver reachable through this path.
                 if (fakeDns) applyFakeDns(root, settings)

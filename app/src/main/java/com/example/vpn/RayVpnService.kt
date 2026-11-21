@@ -2395,7 +2395,16 @@ class RayVpnService : VpnService() {
             // Same reading for Connect, the Connections page test and the LAB probe (ConnectionEngineRunner.linkHints).
             val hints = com.example.vpn.connections.ConnectionEngineRunner.linkHints(measured)
             val ipv4Only = hints.ipv4Only
-            val preferWireGuard = hints.cloudflareFiltered
+            // Build 167: automatic Aether on a network with no fresh reading. One cheap Cloudflare TLS handshake on the
+            // physical link first (≤ ~6 s); a filtered result gets the fixed filtered-link budgets and WireGuard first.
+            val quickCloudflare = if (engine.id == com.example.vpn.sidecar.AetherSidecar.ID && measured == null &&
+                com.example.vpn.engine.ProfileExtras.read(profile).optString("carrier", "auto") == "auto") runCatching {
+                com.example.vpn.smart.NetworkCapabilityDetector.quickCloudflareTls(this@RayVpnService)
+            }.getOrNull().also { cf ->
+                com.example.vpn.diagnostics.events.EventLog.event("aether.cf_quick", attributes = mapOf(
+                    "result" to when (cf) { true -> "reachable"; false -> "filtered"; null -> "not_measured" }))
+            } else null
+            val preferWireGuard = hints.cloudflareFiltered || quickCloudflare == false
             // A saved server that carried verified traffic on this same network: Aether can carry WARP through it
             // when the carrier drops WARP's own data (ConnectionEngineRunner.relayed).
             // The exit hop dials it the way it verified: the recipe's pinned address (e.g. a clean CDN address) and
@@ -2900,21 +2909,22 @@ class RayVpnService : VpnService() {
     private fun probeStepMs(): Int = if (slowTunnel()) SLOW_PROBE_STEP_MS else 4_000
 
     /**
-     * Psiphon sessions only: once traffic is verified, check through the engine's local port that YouTube's front
-     * end and its video CDN answer (www.youtube.com/generate_204, redirector.googlevideo.com/report_mapping), and
-     * record what UDP and DNS do on this path (QUIC ended locally, names resolved by Psiphon). Background, once,
-     * never changes the connection; its result only counts for the attempt it ran in.
+     * Psiphon and Aether sessions: once traffic is verified, check through the engine's local port that YouTube's
+     * front end and its video CDN answer (www.youtube.com/generate_204, redirector.googlevideo.com/report_mapping,
+     * capped reads), and record what UDP and DNS do on this path (QUIC ended locally, who resolves names).
+     * Background, once, never changes the connection; its result only counts for the attempt it ran in.
      */
     private fun launchVideoPathProbe(requested: VlessProfile) {
         val engineId = com.example.vpn.sidecar.EngineUdp.engineId(requested)
-        if (engineId != com.example.vpn.sidecar.PsiphonSidecar.ID) return
+        if (!com.example.vpn.sidecar.EngineUdp.videoProbed(engineId)) return
         val endpoint = engineEndpoint ?: return
         val state = _vpnState.value
         val attemptId = state.attemptId ?: return
         val registry = com.example.vpn.diagnostics.events.Tests.registry
-        val udp = com.example.vpn.sidecar.EngineUdp.describe(engineId)
-        val dns = if (com.example.vpn.sidecar.EngineUdp.remoteDns(requested))
-            "FakeDNS in the TUN; names resolved by $engineId on its server" else "Xray resolver through the engine"
+        // The carrier Aether actually runs (the session runner's pick), not the saved "auto".
+        val running = state.activeProfile?.takeIf { com.example.vpn.sidecar.EngineUdp.engineId(it) == engineId } ?: requested
+        val udp = com.example.vpn.sidecar.EngineUdp.describe(running)
+        val dns = com.example.vpn.sidecar.EngineUdp.dnsPath(running)
         videoProbeJob?.cancel()
         videoProbeJob = serviceScope.launch(Dispatchers.IO) {
             val testId = registry.queue("video.engine_proxy", state.sessionId,
@@ -2922,8 +2932,7 @@ class RayVpnService : VpnService() {
             registry.start(testId)
             val result = try {
                 kotlinx.coroutines.runInterruptible {
-                    com.example.vpn.verify.VideoPathProbe(com.example.vpn.verify.RouteDialers.engine(endpoint),
-                        stepTimeoutMs = com.example.vpn.verify.TrafficCheck.STEP_TIMEOUT_MS).run(udp, dns)
+                    com.example.vpn.verify.VideoPathProbe(com.example.vpn.verify.RouteDialers.engine(endpoint)).run(udp, dns)
                 }
             } catch (e: CancellationException) {
                 registry.cancel(testId, "connection check cancelled")
@@ -3271,7 +3280,7 @@ class RayVpnService : VpnService() {
             val stalledKeys = serverNetworkKeys(stalled) + (saved.firstOrNull { it.id == stalled.id }?.let { serverNetworkKeys(it) }.orEmpty())
             val networks = (usable + smartRunnersUp.map { it.owner }).associate { it.id to serverNetworkKeys(it) }
             val decision = com.example.vpn.smart.StallFailover.decide(com.example.vpn.smart.StallFailover.Input(
-                stalledId = stalled.id, pinned = exitPinned(),
+                stalledId = stalled.id, pinned = exitPinned(), userAsked = userAsked, lockedExit = exitLockedByMode(),
                 switchesSoFar = stallSwitches,
                 runnersUp = smartRunnersUp.map { it.owner.id },
                 frozen = networkMemory.freezes.frozen(network),
@@ -3291,6 +3300,13 @@ class RayVpnService : VpnService() {
             XrayLogManager.w("FAILOVER", com.example.vpn.smart.StallFailover.describe(decision, name))
             stallEvent(decision, stalled.id, userAsked)
             if (_vpnState.value.attemptId != attemptId) return@launch
+            // Build 167: "Try another server" on a power-button session is the user's choice to leave the pinned
+            // config. The session continues as Smart Connect from here, leaving the stalled server out.
+            if (com.example.vpn.smart.StallFailover.unpinsSession(decision, userAsked, exactSession)) {
+                exactSession = false
+                smartStarted = true
+                XrayLogManager.i("FAILOVER", "Try another server on a pinned session: the user chose to leave it; continuing as Smart Connect.")
+            }
             when (decision) {
                 is com.example.vpn.smart.StallFailover.Decision.RunnerUp -> {
                     val next = smartRunnersUp.firstOrNull { it.owner.id == decision.toId } ?: return@launch
@@ -3372,7 +3388,10 @@ class RayVpnService : VpnService() {
     }
 
     /** The power button or Trade mode pinned this session's config: failover never changes it. */
-    private suspend fun exitPinned(): Boolean = exactSession || runCatching {
+    private suspend fun exitPinned(): Boolean = exactSession || exitLockedByMode()
+
+    /** Trade mode: the exit address must never change, not even when the user asks for another server. */
+    private suspend fun exitLockedByMode(): Boolean = runCatching {
         com.example.vpn.safety.OperatingModePolicy.of(settingsRepository.getSettings().operationalMode).lockExit
     }.getOrDefault(false)
 
@@ -3923,7 +3942,8 @@ class RayVpnService : VpnService() {
         val since = notificationSince.takeIf { it > 0 } ?: System.currentTimeMillis()
         return baseNotification()
             .setContentTitle(server)
-            .setContentText(ConnectedNotification.speedLine(state.downloadSpeedBps, state.uploadSpeedBps))
+            .setContentText(ConnectedNotification.contentLine(state.bulkLimited,
+                ConnectedNotification.speedLine(state.downloadSpeedBps, state.uploadSpeedBps)))
             .setSubText(route)
             .setWhen(since)
             .setShowWhen(true)

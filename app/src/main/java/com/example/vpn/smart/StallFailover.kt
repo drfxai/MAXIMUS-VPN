@@ -11,7 +11,11 @@ package com.example.vpn.smart
  *    that froze or stalled on this network.
  * 3. When the switch cap is reached or no saved server is left, [Decision.Escalate]: the Smart Connect search
  *    goes on into its later stages (emergency transports, recovery engines, config revival), once per Connect.
- * 4. A pinned session (power button, Trade mode) is never moved ([Decision.Stay]).
+ * 4. A pinned session (power button, Trade mode) is never moved automatically ([Decision.Stay]). Build 167: a pinned
+ *    session whose bulk check stalls still shows "Connected, but large downloads are stalling"; when the user then
+ *    presses "Try another server" on a power-button session, that press is their choice to leave the pinned config:
+ *    the same runner-up / race / Smart Connect stages run with the stalled server left out. Trade mode locks the exit
+ *    address, so even a user press stays ([Decision.Stay]) there.
  *
  * How many bytes came before the stall decides its class ([classify]): at most [MTU_STALL_MAX_BYTES] is a path
  * MTU black hole (the first full-size segment never arrives; the MTU 1280 trial is for that), more is a
@@ -68,7 +72,7 @@ object StallFailover {
     data class Input(
         /** The saved server whose download stalled. */
         val stalledId: String,
-        /** Power button or Trade mode: the config is pinned and never changed. */
+        /** Power button or Trade mode: the config is pinned and never changed automatically. */
         val pinned: Boolean,
         val switchesSoFar: Int,
         /** Servers that carried traffic in this Smart Connect, best first. */
@@ -85,11 +89,16 @@ object StallFailover {
         /** [HostPrefix.keys] of the stalled server. */
         val stalledKeys: Set<String> = emptySet(),
         /** [HostPrefix.keys] of the runners-up and candidates, by id. */
-        val networks: Map<String, Set<String>> = emptyMap()
+        val networks: Map<String, Set<String>> = emptyMap(),
+        /** The user pressed "Try another server": on a power-button session that is their choice to move. */
+        val userAsked: Boolean = false,
+        /** Trade mode (OperatingModePolicy.lockExit): the exit must not change, not even on a press. */
+        val lockedExit: Boolean = false
     )
 
     fun decide(i: Input): Decision {
-        if (i.pinned) return Decision.Stay("the config is pinned (power button or Trade mode)")
+        if (i.lockedExit) return Decision.Stay("Trade mode locks the exit; the config is not changed")
+        if (i.pinned && !i.userAsked) return Decision.Stay("the config is pinned (power button or Trade mode)")
         if (i.switchesSoFar >= i.maxSwitches) return exhausted(i, "${i.maxSwitches} stall switches already made in this session")
         val sameNet = if (classify(i.stallBytes) == StallClass.CAP) sameNetwork(i.stalledId, i.stalledKeys, i.networks) else emptySet()
         val excluded = i.frozen + i.stalledId + sameNet
@@ -108,6 +117,10 @@ object StallFailover {
      * continues with the later stages: never for a pinned session, and once per Connect.
      */
     fun escalatesAfterFreeze(pinned: Boolean, escalated: Boolean): Boolean = !pinned && !escalated
+
+    /** Whether carrying out [d] leaves a power-button session's pin: only a user's press that actually moves it. */
+    fun unpinsSession(d: Decision, userAsked: Boolean, exactSession: Boolean): Boolean =
+        userAsked && exactSession && d !is Decision.Stay
 
     /** The `action` attribute of the `failover.stall` event. */
     fun action(d: Decision): String = when (d) {

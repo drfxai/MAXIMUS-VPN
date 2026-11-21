@@ -87,10 +87,12 @@ class PsiphonYoutubePathTest {
     }
 
     @Test fun enginesWithoutAKnownUdpLimitAreUnchanged() {
-        val config = xray(AetherSidecar.profile())
+        // Build 167 moved Aether out of this group (QUIC ended locally; see Build167DiagTest).
+        val config = xray(com.example.vpn.sidecar.RadianceSidecar.profile())
         assertTrue(rules(config).none { it.optString("outboundTag") == EngineUdp.QUIC_BLOCK_TAG })
         assertEquals(null, outbound(config, EngineUdp.QUIC_BLOCK_TAG))
-        assertEquals(EngineUdp.Capability.UNKNOWN, EngineUdp.of(AetherSidecar.profile()))
+        assertEquals(EngineUdp.Capability.UNKNOWN, EngineUdp.of(com.example.vpn.sidecar.RadianceSidecar.profile()))
+        assertEquals(EngineUdp.Capability.CARRIES_UDP, EngineUdp.of(AetherSidecar.profile()))
         assertEquals(EngineUdp.Capability.TCP_ONLY, EngineUdp.of(PsiphonSidecar.profile()))
         assertEquals(EngineUdp.Capability.TCP_ONLY, EngineUdp.of(TorSidecar.profile()))
         assertTrue(EngineUdp.remoteDns(PsiphonSidecar.profile(region = "DE", tcpOnly = true)))
