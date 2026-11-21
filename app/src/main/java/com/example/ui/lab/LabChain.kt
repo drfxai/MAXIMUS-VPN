@@ -1,5 +1,7 @@
 package com.example.ui.lab
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -149,7 +151,7 @@ internal fun ChainPage(
         ChainPanel(c) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LabText("Traffic route", c.text, 20.sp, FontWeight.Bold, Modifier.weight(1f))
+                LabText(stringResource(R.string.ui_traffic_route), c.text, 20.sp, FontWeight.Bold, Modifier.weight(1f))
                 val (label, color) = when {
                     s.testing -> "Testing…" to c.accent
                     s.testPassed == true -> "Verified" to c.good
@@ -160,7 +162,7 @@ internal fun ChainPage(
                 LabText(label, color, 11.sp, modifier = Modifier.border(1.dp, color.copy(alpha = .55f), pill)
                     .padding(horizontal = 9.dp, vertical = 4.dp), maxLines = 1)
             }
-            Endpoint(c, Icons.Rounded.Smartphone, "This device")
+            Endpoint(c, Icons.Rounded.Smartphone, stringResource(R.string.ui_this_device))
             s.hopIds.forEachIndexed { index, id ->
                 val node = configs.firstOrNull { "saved:${it.id}" == id }
                 val isSaved = id.startsWith("saved:")
@@ -180,36 +182,36 @@ internal fun ChainPage(
                         onOptions = if (id == "psiphon") ({ source = HopSource.PSIPHON }) else null)
                 }
             }
-            if (s.hopIds.isEmpty()) LabText("Add at least two hops to build a route.", c.text2, 13.sp)
+            if (s.hopIds.isEmpty()) LabText(stringResource(R.string.ui_add_at_least_two_hops), c.text2, 13.sp)
             ChainConnector(c)
-            Endpoint(c, Icons.Rounded.Public, "Internet")
+            Endpoint(c, Icons.Rounded.Public, stringResource(R.string.ui_internet))
         }
 
         ChainPanel(c) {
             Row(Modifier.fillMaxWidth().clip(rowShape)
                 .clickable(enabled = optionsAvailable, role = Role.Button) { source = HopSource.SAVED },
                 verticalAlignment = Alignment.CenterVertically) {
-                LabText("Add a hop", c.text, 20.sp, FontWeight.Bold, Modifier.weight(1f))
+                LabText(stringResource(R.string.ui_add_a_hop), c.text, 20.sp, FontWeight.Bold, Modifier.weight(1f))
                 Icon(Icons.Rounded.Add, null, tint = c.accent, modifier = Modifier.size(24.dp))
             }
             HopSource.entries.forEach { item ->
                 ChainRow(c, item.title, item.icon, enabled = optionsAvailable) { source = item }
             }
             if (s.hopIds.size == EngineChain.MAX_HOPS) {
-                LabText("This route has the maximum of ${EngineChain.MAX_HOPS} hops.", c.text2, 12.sp)
+                LabText(stringResource(R.string.ui_this_route_has_the_maximum, EngineChain.MAX_HOPS), c.text2, 12.sp)
             }
         }
 
         ChainRow(c, "Compatibility", Icons.Rounded.Security, subtitle = when {
-            !s.availabilityLoaded -> "Checking installed engines…"
-            problem != null -> "Review route"
-            else -> "Ready to test"
+            !s.availabilityLoaded -> stringResource(R.string.ui_checking_installed_engines)
+            problem != null -> stringResource(R.string.ui_review_route)
+            else -> stringResource(R.string.ui_ready_to_test)
         }) { checkingCompatibility = true }
         s.testMessage?.let {
             LabText(it, if (s.testPassed == true) c.good else c.text2, 13.sp, modifier = Modifier.padding(horizontal = 2.dp),
                 lineHeight = 18.sp, maxLines = 5)
         }
-        if (vpnOn) LabText("Disconnect the active VPN to run an isolated chain test.", c.text2, 12.sp)
+        if (vpnOn) LabText(stringResource(R.string.ui_disconnect_the_active_vpn_to), c.text2, 12.sp)
         Box(
             Modifier.fillMaxWidth().heightIn(min = 51.dp).clip(rowShape)
                 .background(Brush.horizontalGradient(if (!vpnOn && problem == null && !s.busy)
@@ -219,17 +221,17 @@ internal fun ChainPage(
             contentAlignment = Alignment.Center
         ) {
             if (s.testing) CircularProgressIndicator(Modifier.size(20.dp), color = c.accent, strokeWidth = 2.dp)
-            else LabText("Test chain", if (!vpnOn && problem == null) c.onAccent else c.text2, 15.sp, FontWeight.Bold)
+            else LabText(stringResource(R.string.ui_test_chain), if (!vpnOn && problem == null) c.onAccent else c.text2, 15.sp, FontWeight.Bold)
         }
         if (s.testing) TextButton(onClick = onCancelTest, modifier = Modifier.fillMaxWidth()) {
-            Text("Cancel chain test")
+            Text(stringResource(R.string.ui_cancel_chain_test))
         }
         OutlinedButton(onClick = onSave, enabled = problem == null && !s.busy,
             modifier = Modifier.fillMaxWidth().heightIn(min = 51.dp).testTag("save_connection_chain"), shape = rowShape,
             border = androidx.compose.foundation.BorderStroke(1.dp, if (problem == null) c.accent else c.stroke)) {
-            LabText(if (s.saving) "Saving…" else "Save chain", c.text, 15.sp, FontWeight.Bold)
+            LabText(if (s.saving) stringResource(R.string.ui_saving) else stringResource(R.string.ui_save_chain), c.text, 15.sp, FontWeight.Bold)
         }
-        s.savedName?.let { LabText("Saved to Nodes as “$it”.", c.good, 13.sp, maxLines = 3) }
+        s.savedName?.let { LabText(stringResource(R.string.ui_saved_to_nodes_as, it), c.good, 13.sp, maxLines = 3) }
     }
 
     source?.let { item ->
@@ -242,22 +244,22 @@ internal fun ChainPage(
     }
     if (checkingCompatibility) AlertDialog(
         onDismissRequest = { checkingCompatibility = false },
-        title = { Text("Compatibility") },
+        title = { Text(stringResource(R.string.ui_compatibility)) },
         text = { Text(problem ?: "The selected hops can be run in this order. Test the chain to verify traffic on this network.") },
-        confirmButton = { TextButton(onClick = { checkingCompatibility = false }) { Text("Done") } }
+        confirmButton = { TextButton(onClick = { checkingCompatibility = false }) { Text(stringResource(R.string.ui_done)) } }
     )
     if (psiphonSettings) {
         var json by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { psiphonSettings = false },
-            title = { Text("Psiphon network settings") },
-            text = { OutlinedTextField(json, { json = it }, label = { Text("Authorized settings JSON") }, minLines = 2, maxLines = 5) },
+            title = { Text(stringResource(R.string.ui_psiphon_network_settings)) },
+            text = { OutlinedTextField(json, { json = it }, label = { Text(stringResource(R.string.ui_authorized_settings_json)) }, minLines = 2, maxLines = 5) },
             confirmButton = {
                 TextButton(enabled = json.isNotBlank(), onClick = { onPsiphonSettings(json); psiphonSettings = false }) {
-                    Text("Save securely")
+                    Text(stringResource(R.string.ui_save_securely))
                 }
             },
-            dismissButton = { TextButton(onClick = { psiphonSettings = false }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { psiphonSettings = false }) { Text(stringResource(R.string.ui_cancel)) } }
         )
     }
 }
@@ -350,12 +352,12 @@ private fun HopRow(
                 contentAlignment = Alignment.Center
             ) { Icon(Icons.Rounded.DragIndicator, "Reorder $name", tint = c.text2) }
             DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Move up") }, enabled = index > 0, onClick = { menu = false; onMove(index - 1) })
-                DropdownMenuItem(text = { Text("Move down") }, enabled = index < last, onClick = { menu = false; onMove(index + 1) })
+                DropdownMenuItem(text = { Text(stringResource(R.string.ui_move_up)) }, enabled = index > 0, onClick = { menu = false; onMove(index - 1) })
+                DropdownMenuItem(text = { Text(stringResource(R.string.ui_move_down)) }, enabled = index < last, onClick = { menu = false; onMove(index + 1) })
                 onOptions?.let {
-                    DropdownMenuItem(text = { Text("Psiphon options") }, onClick = { menu = false; it() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.ui_psiphon_options)) }, onClick = { menu = false; it() })
                 }
-                DropdownMenuItem(text = { Text("Remove hop") }, onClick = { menu = false; onRemove() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.ui_remove_hop)) }, onClick = { menu = false; onRemove() })
             }
         }
     }
@@ -382,11 +384,11 @@ private fun HopPicker(
         Column(Modifier.widthIn(min = 220.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(7.dp)) {
             if (source == HopSource.SAVED) {
-                OutlinedTextField(search, { search = it }, label = { Text("Search configs") },
+                OutlinedTextField(search, { search = it }, label = { Text(stringResource(R.string.ui_search_configs)) },
                     singleLine = true, modifier = Modifier.fillMaxWidth())
                 val visible = configs.filter { it.name.contains(search.trim(), true) || it.detail.contains(search.trim(), true) }
                     .sortedByDescending { it.supportsSavedNodeChain }
-                if (visible.isEmpty()) Text("No saved configs found.")
+                if (visible.isEmpty()) Text(stringResource(R.string.ui_no_saved_configs_found))
                 visible.forEach { config ->
                     val id = "saved:${config.id}"
                     val (title, detail, enabled) = offer(id, config.name, config.detail, SingBoxSidecar.id, config.supportsSavedNodeChain)
@@ -401,7 +403,7 @@ private fun HopPicker(
             if (source == HopSource.PSIPHON) {
                 var regions by remember { mutableStateOf(false) }
                 Box {
-                    TextButton(onClick = { regions = true }) { Text("Exit country · ${state.region.ifBlank { "Any" }}") }
+                    TextButton(onClick = { regions = true }) { Text(stringResource(R.string.ui_exit_country, state.region.ifBlank { "Any" })) }
                     DropdownMenu(regions, onDismissRequest = { regions = false }) {
                         chainRegions.forEach { code ->
                             DropdownMenuItem(text = { Text(code.ifBlank { "Any" }) }, onClick = {
@@ -411,8 +413,8 @@ private fun HopPicker(
                         }
                     }
                 }
-                TextButton(onClick = onPsiphonSettings) { Text("Psiphon network settings") }
+                TextButton(onClick = onPsiphonSettings) { Text(stringResource(R.string.ui_psiphon_network_settings)) }
             }
         }
-    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } })
+    }, confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.ui_done)) } })
 }

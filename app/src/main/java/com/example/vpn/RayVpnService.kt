@@ -3908,13 +3908,14 @@ class RayVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val profileName = activeProfile?.name ?: "VLESS Tunnel"
+        val text = com.example.ui.language.LanguageStore.localized(this)
+        val profileName = activeProfile?.name ?: text.getString(R.string.notification_default_tunnel)
 
         val notification: Notification = baseNotification()
             .setContentTitle("Maximus — $profileName")
             .setContentText(statusText)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent())
-            .addAction(android.R.drawable.ic_menu_rotate, "Reconnect", reconnectPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, text.getString(R.string.notification_disconnect), disconnectPendingIntent())
+            .addAction(android.R.drawable.ic_menu_rotate, text.getString(R.string.notification_reconnect), reconnectPendingIntent)
             .build()
         return startForegroundWith(notification)
     }
@@ -3952,7 +3953,7 @@ class RayVpnService : VpnService() {
                 .setBigContentTitle(server)
                 .bigText(route + "\n" + ConnectedNotification.expandedText(state.downloadSpeedBps, state.uploadSpeedBps,
                     state.downloadBytes, state.uploadBytes)))
-            .addAction(0, "Disconnect", disconnectPendingIntent())
+            .addAction(0, com.example.ui.language.LanguageStore.localized(this).getString(R.string.notification_disconnect), disconnectPendingIntent())
             .build()
     }
 

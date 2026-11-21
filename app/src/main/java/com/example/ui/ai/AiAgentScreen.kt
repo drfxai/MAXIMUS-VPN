@@ -1,5 +1,7 @@
 package com.example.ui.ai
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -169,7 +171,7 @@ fun AiAgentScreen(
                                     shape = RoundedCornerShape(4.dp)
                                 ) {
                                     Text(
-                                        text = if (config.aiReady) "ACTIVE" else "NO KEY",
+                                        text = if (config.aiReady) stringResource(R.string.ui_active) else stringResource(R.string.ui_no_key),
                                         fontSize = 8.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
@@ -178,7 +180,7 @@ fun AiAgentScreen(
                                 }
                             }
                             Text(
-                                text = "Autonomous Co-Pilot",
+                                text = stringResource(R.string.ui_autonomous_co_pilot),
                                 fontSize = 10.5.sp,
                                 color = AppTheme.colors.textSecondary,
                                 maxLines = 1
@@ -211,7 +213,7 @@ fun AiAgentScreen(
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
                                 Text(
-                                    text = "${formatCompactTokens(config.lifetimeTokens)} Tkn",
+                                    text = stringResource(R.string.ui_tkn, formatCompactTokens(config.lifetimeTokens)),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AppTheme.colors.primary
@@ -385,13 +387,13 @@ fun AiChatTabContent(
                         Spacer(modifier = Modifier.width(6.dp))
                         Column {
                             Text(
-                                text = "AI provider key required",
+                                text = stringResource(R.string.ui_ai_provider_key_required),
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                             Text(
-                                text = "Tap to add a key for Gemini, 9Router, OpenRouter, NVIDIA NIM or OpenAI",
+                                text = stringResource(R.string.ui_tap_to_add_a_key),
                                 fontSize = 10.sp,
                                 color = Color(0xFFFFCDD2)
                             )
@@ -403,7 +405,7 @@ fun AiChatTabContent(
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
-                            text = "SET KEY",
+                            text = stringResource(R.string.ui_set_key),
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
@@ -464,7 +466,7 @@ fun AiChatTabContent(
                     onCopyText = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("Maximus AI", message.text))
-                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_copied_to_clipboard), Toast.LENGTH_SHORT).show()
                     }
                 )
             }
@@ -609,7 +611,7 @@ fun AiChatTabContent(
                         modifier = Modifier
                             .weight(1f)
                             .padding(horizontal = 4.dp),
-                        placeholder = { Text("Ask Maximus AI...", fontSize = 12.5.sp) },
+                        placeholder = { Text(stringResource(R.string.ui_ask_maximus_ai), fontSize = 12.5.sp) },
                         maxLines = 3,
                         textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
                         shape = RoundedCornerShape(18.dp),
@@ -674,13 +676,13 @@ fun AiModesTabContent(
         // Section Header
         Column(modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)) {
             Text(
-                text = "Autonomous Workload Tuning",
+                text = stringResource(R.string.ui_autonomous_workload_tuning),
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = AppTheme.colors.textPrimary
             )
             Text(
-                text = "One-tap network optimization for gaming, streaming, AI, and downloads.",
+                text = stringResource(R.string.ui_one_tap_network_optimization_for),
                 fontSize = 11.5.sp,
                 color = AppTheme.colors.textSecondary
             )
@@ -721,7 +723,7 @@ fun AiModesTabContent(
                                 )
                                 if (isActive) {
                                     Text(
-                                        text = "● ACTIVE NOW",
+                                        text = stringResource(R.string.ui_active_now),
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = AppTheme.colors.primary
@@ -740,7 +742,7 @@ fun AiModesTabContent(
                             modifier = Modifier.height(32.dp)
                         ) {
                             Text(
-                                text = if (isActive) "Re-Tune" else "Activate",
+                                text = if (isActive) stringResource(R.string.ui_re_tune) else stringResource(R.string.ui_activate),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isActive) AppTheme.colors.textPrimary else Color.White
@@ -770,29 +772,29 @@ fun AiModesTabContent(
                             UsageMode.GAMING -> {
                                 ModeParamChip("MTU: 1400")
                                 ModeParamChip("DNS: 1.1.1.1")
-                                ModeParamChip("UDP: Direct")
-                                ModeParamChip("Ping: <60ms")
+                                ModeParamChip(stringResource(R.string.ui_udp_direct))
+                                ModeParamChip(stringResource(R.string.ui_ping_60ms))
                             }
                             UsageMode.STREAMING -> {
-                                ModeParamChip("Buffer: 16KB")
+                                ModeParamChip(stringResource(R.string.ui_buffer_16kb))
                                 ModeParamChip("DNS: Google 8.8.8.8")
-                                ModeParamChip("Desync: Balanced")
-                                ModeParamChip("4K Unblocked")
+                                ModeParamChip(stringResource(R.string.ui_desync_balanced))
+                                ModeParamChip(stringResource(R.string.ui_t_4k_unblocked))
                             }
                             UsageMode.AI_TASKS -> {
-                                ModeParamChip("AI services")
-                                ModeParamChip("Zero Packet Loss")
-                                ModeParamChip("Direct TLS")
+                                ModeParamChip(stringResource(R.string.ui_ai_services))
+                                ModeParamChip(stringResource(R.string.ui_zero_packet_loss))
+                                ModeParamChip(stringResource(R.string.ui_direct_tls))
                                 ModeParamChip("MTU: 1480")
                             }
                             UsageMode.YOUTUBE -> {
-                                ModeParamChip("QUIC / UDP Stream")
-                                ModeParamChip("Google CDN Edge")
-                                ModeParamChip("Fast Buffering")
+                                ModeParamChip(stringResource(R.string.ui_quic_udp_stream))
+                                ModeParamChip(stringResource(R.string.ui_google_cdn_edge))
+                                ModeParamChip(stringResource(R.string.ui_fast_buffering))
                             }
                             UsageMode.DOWNLOADING -> {
-                                ModeParamChip("Multi-TCP Window")
-                                ModeParamChip("Max Throughput")
+                                ModeParamChip(stringResource(R.string.ui_multi_tcp_window))
+                                ModeParamChip(stringResource(R.string.ui_max_throughput))
                                 ModeParamChip("MTU: 1500")
                             }
                         }
@@ -849,14 +851,14 @@ fun AiDiagnosticsTabContent(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "AI Autonomous Diagnostic",
+                            text = stringResource(R.string.ui_ai_autonomous_diagnostic),
                             fontSize = 14.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = AppTheme.colors.textPrimary
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Real-time log analysis, DNS latency, and censorship bypass evaluation.",
+                            text = stringResource(R.string.ui_real_time_log_analysis_dns),
                             fontSize = 11.sp,
                             color = AppTheme.colors.textSecondary,
                             lineHeight = 14.sp
@@ -894,7 +896,7 @@ fun AiDiagnosticsTabContent(
                     Icon(Icons.Default.Bolt, contentDescription = "Run", modifier = Modifier.size(15.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "⚡ Execute Diagnostic Scan",
+                        text = stringResource(R.string.ui_execute_diagnostic_scan),
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
@@ -919,7 +921,7 @@ fun AiDiagnosticsTabContent(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Anti-Censorship Clean IP Revival",
+                        text = stringResource(R.string.ui_anti_censorship_clean_ip_revival),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = AppTheme.colors.textPrimary
@@ -927,7 +929,7 @@ fun AiDiagnosticsTabContent(
                 }
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = "If your node is filtered on mobile operators, tap to revive with a clean edge IP:",
+                    text = stringResource(R.string.ui_if_your_node_is_filtered),
                     fontSize = 11.sp,
                     color = AppTheme.colors.textSecondary,
                     lineHeight = 14.sp
@@ -966,7 +968,7 @@ fun AiDiagnosticsTabContent(
                                     color = AppTheme.colors.textPrimary
                                 )
                                 Text(
-                                    text = "Revive Node ➔",
+                                    text = stringResource(R.string.ui_revive_node),
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AppTheme.colors.primary
@@ -1123,7 +1125,7 @@ fun ChatMessageBubble(
 
                     if (message.promptTokens > 0 || message.candidateTokens > 0) {
                         Text(
-                            text = "⚡ ${message.promptTokens + message.candidateTokens} tokens",
+                            text = stringResource(R.string.ui_tokens, message.promptTokens + message.candidateTokens),
                             fontSize = 9.sp,
                             color = AppTheme.colors.textMuted,
                             fontFamily = FontFamily.Monospace,
@@ -1255,7 +1257,7 @@ fun AgentTypingIndicator() {
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Analyzing network & executing actions...",
+                    text = stringResource(R.string.ui_analyzing_network_executing_actions),
                     fontSize = 11.5.sp,
                     color = AppTheme.colors.textSecondary
                 )

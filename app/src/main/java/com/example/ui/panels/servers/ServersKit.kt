@@ -1,5 +1,7 @@
 package com.example.ui.panels.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -368,9 +370,9 @@ internal fun HealthLabel(health: Health, latencyMs: Long?) {
         Text(
             when (health) {
                 Health.ONLINE -> latencyMs?.let { "$it ms" } ?: "Online"
-                Health.OFFLINE -> "Offline"
-                Health.CHECKING -> "Checking"
-                Health.SIGN_IN -> "Sign in"
+                Health.OFFLINE -> stringResource(R.string.ui_offline_2)
+                Health.CHECKING -> stringResource(R.string.ui_checking_2)
+                Health.SIGN_IN -> stringResource(R.string.ui_sign_in)
             },
             color = if (health == Health.ONLINE) Sv.TextSoft else healthColor(health),
             fontSize = 12.sp, fontWeight = FontWeight.Medium,

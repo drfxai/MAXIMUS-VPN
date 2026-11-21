@@ -1,5 +1,7 @@
 package com.example.ui.settings
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -83,13 +85,13 @@ fun SplitTunnelPage(onBack: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        SettingsTopBar("Per-app routing", subtitle = rules.summary(), onBack = onBack)
+        SettingsTopBar(stringResource(R.string.ui_per_app_routing), subtitle = rules.summary(), onBack = onBack)
         LazyColumn(
             modifier = Modifier.fillMaxSize().imePadding().testTag("split_app_list"),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp)
         ) {
             item(key = "modes") {
-                SettingsSectionLabel("Which apps use the tunnel", first = true)
+                SettingsSectionLabel(stringResource(R.string.ui_which_apps_use_the_tunnel), first = true)
                 SettingsGroup {
                     SplitTunnelMode.entries.forEachIndexed { index, mode ->
                         if (index > 0) SettingsDivider(inset = false)
@@ -101,7 +103,7 @@ fun SplitTunnelPage(onBack: () -> Unit) {
                         )
                     }
                 }
-                SettingsFootnote("Changes apply the next time you connect or reconnect.")
+                SettingsFootnote(stringResource(R.string.ui_changes_apply_the_next_time))
             }
 
             if (!listing) return@LazyColumn
@@ -112,8 +114,8 @@ fun SplitTunnelPage(onBack: () -> Unit) {
                     Spacer(Modifier.height(12.dp))
                     SettingsGroup {
                         SettingsNavRow(
-                            title = "Leave Iranian apps outside",
-                            subtitle = "Selects installed banking, payment, operator and local apps. Review before connecting.",
+                            title = stringResource(R.string.ui_leave_iranian_apps_outside),
+                            subtitle = stringResource(R.string.ui_selects_installed_banking_payment_operat),
                             icon = Icons.Default.AutoAwesome,
                             modifier = Modifier.testTag("split_suggest_iranian"),
                             enabled = apps != null,
@@ -125,21 +127,21 @@ fun SplitTunnelPage(onBack: () -> Unit) {
                         )
                     }
                 }
-                SettingsSectionLabel(if (rules.mode == SplitTunnelMode.ONLY) "Apps to send through the tunnel" else "Apps to leave outside")
+                SettingsSectionLabel(if (rules.mode == SplitTunnelMode.ONLY) stringResource(R.string.ui_apps_to_send_through_the) else stringResource(R.string.ui_apps_to_leave_outside))
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth().testTag("split_search"),
-                    placeholder = { Text("Search apps", color = AppTheme.colors.textMuted) },
+                    placeholder = { Text(stringResource(R.string.ui_search_apps), color = AppTheme.colors.textMuted) },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
                     colors = settingsFieldColors()
                 )
                 Spacer(Modifier.height(8.dp))
                 when {
-                    apps == null -> SettingsFootnote("Reading the apps on this phone…")
+                    apps == null -> SettingsFootnote(stringResource(R.string.ui_reading_the_apps_on_this))
                     visible.isEmpty() -> SettingsFootnote(
-                        if (apps.orEmpty().isEmpty()) "This device reports no apps to list." else "Nothing matches \"$query\"."
+                        if (apps.orEmpty().isEmpty()) stringResource(R.string.ui_this_device_reports_no_apps) else stringResource(R.string.ui_nothing_matches, query)
                     )
                 }
             }
@@ -197,7 +199,7 @@ private fun AppRow(app: InstalledApp, checked: Boolean, onToggle: (Boolean) -> U
         Column(Modifier.weight(1f)) {
             Text(app.label, color = AppTheme.colors.textPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                if (app.system) "System app" else app.packageName,
+                if (app.system) stringResource(R.string.ui_system_app) else app.packageName,
                 color = AppTheme.colors.textMuted,
                 fontSize = 12.sp,
                 maxLines = 1,

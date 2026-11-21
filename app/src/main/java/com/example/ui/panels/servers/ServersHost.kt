@@ -1,5 +1,7 @@
 package com.example.ui.panels.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -112,7 +114,7 @@ internal fun ServersOverlay(
     var telegramHiddify by remember { mutableStateOf<String?>(null) }
     val copy: (String) -> Unit = {
         clipboard.setText(AnnotatedString(it))
-        Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.ui_copied), Toast.LENGTH_SHORT).show()
     }
 
     val tunnelState by vm.tunnel.state.collectAsState()
@@ -173,7 +175,7 @@ internal fun ServersOverlay(
                             vm.openHiddifyAdmin(id) { url ->
                                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
                                     .onFailure {
-                                        android.widget.Toast.makeText(context, "Could not open Hiddify in a browser", android.widget.Toast.LENGTH_LONG).show()
+                                        android.widget.Toast.makeText(context, context.getString(R.string.ui_could_not_open_hiddify_in), android.widget.Toast.LENGTH_LONG).show()
                                     }
                             }
                         } else vm.panelIdFor(id)?.let { pid -> vm.close(); onOpenPanel(pid) }
@@ -238,37 +240,37 @@ private fun ConfirmHost(vm: ServersViewModel, confirm: Confirm?, dismiss: () -> 
     when (val c = confirm) {
         null -> Unit
         is Confirm.Uninstall -> ConfirmDialog(
-            "Remove ${toolTitle(c.toolId)}?",
-            if (c.toolId == ServerToolCatalog.HIDDIFY) "Permanently deletes Hiddify services, its installation directory, databases, users and keys. Export a backup first if needed. Other panels, system DNS and SSH are not removed."
+            stringResource(R.string.ui_remove_2, toolTitle(c.toolId)),
+            if (c.toolId == ServerToolCatalog.HIDDIFY) stringResource(R.string.ui_permanently_deletes_hiddify_services_its)
             else if (c.toolId in ServerToolCatalog.DNS_TUNNELS)
-                "Permanently stops and removes this DNS tunnel, including its private keys and server configuration. Existing clients will stop working. Export a backup first. Its profile is removed from this phone; system DNS and unrelated firewall rules are preserved."
-            else "It is stopped and deleted from the server, and its config is removed from this phone.",
+                stringResource(R.string.ui_permanently_stops_and_removes_this)
+            else stringResource(R.string.ui_it_is_stopped_and_deleted),
             "Remove", { vm.uninstall(c.serverId, c.toolId) }, dismiss
         )
         is Confirm.UpdateHiddify -> ConfirmDialog(
-            "Update Hiddify to ${HiddifyScripts.VERSION}?",
+            stringResource(R.string.ui_update_hiddify_to, HiddifyScripts.VERSION),
             "The app makes a backup on the server first, then runs Hiddify's official installer. The panel and its " +
                 "configs are down while it runs, which can take 30 minutes.",
             "Update", { vm.updateHiddify(c.serverId) }, dismiss, Sv.Blue
         )
         is Confirm.Remove -> ConfirmDialog(
-            "Forget this server?",
-            "The app forgets its sign-in details. Nothing on the server changes; installed tools keep running.",
+            stringResource(R.string.ui_forget_this_server_2),
+            stringResource(R.string.ui_the_app_forgets_its_sign),
             "Forget", { vm.remove(c.serverId) }, dismiss
         )
         is Confirm.PasswordOff -> ConfirmDialog(
-            "Turn password login off?",
-            "Only this phone's key will be able to sign in. Keep your provider's web console as a backup way in.",
+            stringResource(R.string.ui_turn_password_login_off),
+            stringResource(R.string.ui_only_this_phone_s_key),
             "Turn off", { vm.setPasswordLogin(c.serverId, true) }, dismiss
         )
         is Confirm.RemoveTunnel -> ConfirmDialog(
-            "Remove this tunnel?",
-            "It is stopped and deleted on both servers, and its config is removed from this phone. The servers stay.",
+            stringResource(R.string.ui_remove_this_tunnel),
+            stringResource(R.string.ui_it_is_stopped_and_deleted_2),
             "Remove", { vm.tunnel.remove(c.iranId) }, dismiss
         )
         is Confirm.Reseed -> ConfirmDialog(
-            "Move the ports now?",
-            "Both servers switch to new ports at once. Connections through the tunnel drop for a few seconds.",
+            stringResource(R.string.ui_move_the_ports_now),
+            stringResource(R.string.ui_both_servers_switch_to_new),
             "Move", { vm.tunnel.reseed(c.iranId) }, dismiss
         )
     }
@@ -282,6 +284,6 @@ private fun ConfirmDialog(title: String, text: String, action: String, onConfirm
         title = { Text(title, color = Sv.Text) },
         text = { Text(text, color = Sv.Muted) },
         confirmButton = { TextButton(onClick = { onConfirm(); onDismiss() }) { Text(action, color = actionColor) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Sv.Muted) } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.ui_cancel), color = Sv.Muted) } }
     )
 }

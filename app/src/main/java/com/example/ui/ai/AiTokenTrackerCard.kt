@@ -1,5 +1,7 @@
 package com.example.ui.ai
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -81,13 +83,13 @@ fun AiTokenTrackerModal(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Token Analytics",
+                                text = stringResource(R.string.ui_token_analytics),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                                 color = AppTheme.colors.textPrimary
                             )
                             Text(
-                                text = "Real-time consumption monitor",
+                                text = stringResource(R.string.ui_real_time_consumption_monitor),
                                 fontSize = 11.sp,
                                 color = AppTheme.colors.textSecondary
                             )
@@ -130,13 +132,13 @@ fun AiTokenTrackerModal(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Consumed Session Quota",
+                                text = stringResource(R.string.ui_consumed_session_quota),
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = AppTheme.colors.textSecondary
                             )
                             Text(
-                                text = "${(usedRatio * 100).toInt()}% of 1M quota",
+                                text = stringResource(R.string.ui_pct_of_1m_quota, (usedRatio * 100).toInt()),
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = AppTheme.colors.primary
@@ -162,13 +164,13 @@ fun AiTokenTrackerModal(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Used: ${formatter.format(totalTokens)}",
+                                text = stringResource(R.string.ui_used, formatter.format(totalTokens)),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = AppTheme.colors.textPrimary
                             )
                             Text(
-                                text = "Remaining: ~${formatter.format(remainingTokens)}",
+                                text = stringResource(R.string.ui_remaining, formatter.format(remainingTokens)),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF4CAF50)
@@ -190,7 +192,7 @@ fun AiTokenTrackerModal(
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
                                 Text(
-                                    "PROMPT TOKENS",
+                                    stringResource(R.string.ui_prompt_tokens),
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AppTheme.colors.textSecondary
@@ -202,7 +204,7 @@ fun AiTokenTrackerModal(
                                     fontWeight = FontWeight.Bold,
                                     color = AppTheme.colors.textPrimary
                                 )
-                                Text("Inputs & Logs", fontSize = 9.sp, color = AppTheme.colors.textMuted)
+                                Text(stringResource(R.string.ui_inputs_logs), fontSize = 9.sp, color = AppTheme.colors.textMuted)
                             }
                         }
 
@@ -215,7 +217,7 @@ fun AiTokenTrackerModal(
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
                                 Text(
-                                    "REPLY TOKENS",
+                                    stringResource(R.string.ui_reply_tokens),
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AppTheme.colors.textSecondary
@@ -227,7 +229,7 @@ fun AiTokenTrackerModal(
                                     fontWeight = FontWeight.Bold,
                                     color = AppTheme.colors.textPrimary
                                 )
-                                Text("Agent Replies", fontSize = 9.sp, color = AppTheme.colors.textMuted)
+                                Text(stringResource(R.string.ui_agent_replies), fontSize = 9.sp, color = AppTheme.colors.textMuted)
                             }
                         }
                     }
@@ -255,7 +257,7 @@ fun AiTokenTrackerModal(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Last Turn Consumed",
+                                    text = stringResource(R.string.ui_last_turn_consumed),
                                     fontSize = 11.5.sp,
                                     color = AppTheme.colors.textSecondary
                                 )
@@ -285,7 +287,7 @@ fun AiTokenTrackerModal(
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Reset", modifier = Modifier.size(13.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Reset Counter", fontSize = 11.5.sp)
+                        Text(stringResource(R.string.ui_reset_counter), fontSize = 11.5.sp)
                     }
 
                     Button(
@@ -295,7 +297,7 @@ fun AiTokenTrackerModal(
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                         modifier = Modifier.height(38.dp)
                     ) {
-                        Text("Done", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.ui_done), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

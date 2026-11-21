@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -551,21 +553,21 @@ fun ConnectionButton(
 
                 Text(
                     text = when (status) {
-                        ConnectionStatus.CONNECTED -> "CONNECTED"
-                        ConnectionStatus.CONNECTING -> "CONNECTING"
-                        ConnectionStatus.VPN_INTERFACE_ESTABLISHED -> "TUNNEL ON"
-                        ConnectionStatus.PROXY_CONNECTING -> "HANDSHAKE"
-                        ConnectionStatus.ENGINE_STARTED -> "ENGINE ON"
-                        ConnectionStatus.VERIFYING -> "VERIFYING"
-                        ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED -> "NO TRAFFIC"
-                        ConnectionStatus.DEGRADED -> "DEGRADED"
-                        ConnectionStatus.PREPARING -> "STARTING"
-                        ConnectionStatus.RECONNECTING -> "RECONNECT"
-                        ConnectionStatus.SWITCHING -> "SWITCHING"
-                        ConnectionStatus.NETWORK_CHANGED -> "RE-CHECK"
-                        ConnectionStatus.DISCONNECTING -> "DISCONNECT"
-                        ConnectionStatus.FAILED -> "RESET"
-                        ConnectionStatus.DISCONNECTED -> "CONNECT"
+                        ConnectionStatus.CONNECTED -> stringResource(R.string.ui_connected)
+                        ConnectionStatus.CONNECTING -> stringResource(R.string.ui_connecting)
+                        ConnectionStatus.VPN_INTERFACE_ESTABLISHED -> stringResource(R.string.ui_tunnel_on)
+                        ConnectionStatus.PROXY_CONNECTING -> stringResource(R.string.ui_handshake)
+                        ConnectionStatus.ENGINE_STARTED -> stringResource(R.string.ui_engine_on)
+                        ConnectionStatus.VERIFYING -> stringResource(R.string.ui_verifying)
+                        ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED -> stringResource(R.string.ui_no_traffic)
+                        ConnectionStatus.DEGRADED -> stringResource(R.string.ui_degraded)
+                        ConnectionStatus.PREPARING -> stringResource(R.string.ui_starting)
+                        ConnectionStatus.RECONNECTING -> stringResource(R.string.ui_reconnect)
+                        ConnectionStatus.SWITCHING -> stringResource(R.string.ui_switching)
+                        ConnectionStatus.NETWORK_CHANGED -> stringResource(R.string.ui_re_check)
+                        ConnectionStatus.DISCONNECTING -> stringResource(R.string.ui_disconnect)
+                        ConnectionStatus.FAILED -> stringResource(R.string.ui_reset)
+                        ConnectionStatus.DISCONNECTED -> stringResource(R.string.ui_connect)
                     },
                     color = animatedPrimaryColor.copy(
                         alpha = if (isBusy) textPulseAlpha else 1f
@@ -642,7 +644,7 @@ fun LatencyPill(
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("--- ms", color = AppTheme.colors.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.ui_ms), color = AppTheme.colors.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         }
         return
     }

@@ -1,5 +1,7 @@
 package com.example.ui.panels.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -253,7 +255,7 @@ private fun RouteCard(card: TunnelCardUi, status: @Composable () -> Unit) {
             Row(verticalAlignment = Alignment.Top) {
                 // Lines sit level with the middle of the 36 dp tiles.
                 val line = Modifier.padding(top = 13.dp)
-                RouteStop("Phone", null, 52.dp) { Icon(Icons.Rounded.Smartphone, null, tint = Sv.TextSoft, modifier = Modifier.size(18.dp)) }
+                RouteStop(stringResource(R.string.ui_phone), null, 52.dp) { Icon(Icons.Rounded.Smartphone, null, tint = Sv.TextSoft, modifier = Modifier.size(18.dp)) }
                 RouteLine(line.weight(0.6f), Sv.Dim, moving = false)
                 RouteStop(card.iranName, card.iranHost, 100.dp) { FlagIcon(ServerLocation.IRAN, height = 16.dp) }
                 RouteLine(line.weight(1f), color, moving = card.health == Health.ONLINE || card.health == Health.CHECKING)
@@ -270,7 +272,7 @@ private fun TunnelHealthLine(card: TunnelCardUi) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         HealthLabel(card.health, card.latencyMs)
         if (card.working != null && card.total != null) {
-            Text("  ·  ${card.working} of ${card.total} paths verified", color = Sv.Muted, fontSize = 12.sp)
+            Text(stringResource(R.string.ui_of_paths_verified, card.working, card.total), color = Sv.Muted, fontSize = 12.sp)
         }
         Spacer(Modifier.weight(1f))
         Text(card.rotationText, color = Sv.Muted, fontSize = 12.sp)
@@ -282,7 +284,7 @@ private fun TunnelHealthLine(card: TunnelCardUi) {
 @Composable
 internal fun TunnelTab(ui: TunnelTabUi, actions: TunnelActions) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PageHeader("Tunnel", if (ui.tunnels.isEmpty()) "Your Iran server, linked to one abroad" else "${ui.tunnels.size} linked") {
+        PageHeader(stringResource(R.string.ui_tunnel), if (ui.tunnels.isEmpty()) stringResource(R.string.ui_your_iran_server_linked_to) else "${ui.tunnels.size} linked") {
             if (ui.tunnels.isNotEmpty() && ui.canAddMore) PrimaryButton("New", actions.onSetup, icon = Icons.Rounded.Add, compact = true)
         }
         if (ui.tunnels.isEmpty()) {
@@ -293,7 +295,7 @@ internal fun TunnelTab(ui: TunnelTabUi, actions: TunnelActions) {
                     RouteCard(card) { TunnelHealthLine(card) }
                 }
             }
-            Text("Tap a tunnel for its paths, ports and config.", color = Sv.Dim, fontSize = 12.sp, modifier = Modifier.padding(start = 2.dp))
+            Text(stringResource(R.string.ui_tap_a_tunnel_for_its), color = Sv.Dim, fontSize = 12.sp, modifier = Modifier.padding(start = 2.dp))
         }
     }
 }
@@ -317,23 +319,23 @@ private fun TunnelIntro(ui: TunnelTabUi, actions: TunnelActions) {
             }
         }
         RowDivider(0.dp)
-        FeatureRow(Icons.Rounded.Route, "Four ways across", "REALITY, XHTTP, Hysteria2 and Reverse run side by side")
+        FeatureRow(Icons.Rounded.Route, stringResource(R.string.ui_four_ways_across), stringResource(R.string.ui_reality_xhttp_hysteria2_and_reverse))
         RowDivider(50.dp)
-        FeatureRow(Icons.Rounded.Autorenew, "Switches by itself", "The fastest open path is used; a blocked one is skipped")
+        FeatureRow(Icons.Rounded.Autorenew, stringResource(R.string.ui_switches_by_itself), stringResource(R.string.ui_the_fastest_open_path_is))
         RowDivider(50.dp)
-        FeatureRow(Icons.Rounded.Shuffle, "Ports that move", "Both servers change ports on a schedule, no phone needed")
+        FeatureRow(Icons.Rounded.Shuffle, stringResource(R.string.ui_ports_that_move), stringResource(R.string.ui_both_servers_change_ports_on))
         RowDivider(50.dp)
-        FeatureRow(Icons.Rounded.VerifiedUser, "Keys stay on your servers", "Built on Xray and Hysteria2, nothing homemade")
+        FeatureRow(Icons.Rounded.VerifiedUser, stringResource(R.string.ui_keys_stay_on_your_servers), stringResource(R.string.ui_built_on_xray_and_hysteria2))
     }
     SectionLabel("You need")
     GroupCard {
-        NeedRow(ServerLocation.IRAN, "A server in Iran", "The entrance, close to you", ui.hasIran, actions.onAddServer)
+        NeedRow(ServerLocation.IRAN, stringResource(R.string.ui_a_server_in_iran), stringResource(R.string.ui_the_entrance_close_to_you), ui.hasIran, actions.onAddServer)
         RowDivider(50.dp)
-        NeedRow(ServerLocation.ABROAD, "A server abroad", "Where your traffic leaves", ui.hasAbroad, actions.onAddServer)
+        NeedRow(ServerLocation.ABROAD, stringResource(R.string.ui_a_server_abroad), stringResource(R.string.ui_where_your_traffic_leaves), ui.hasAbroad, actions.onAddServer)
     }
     PrimaryButton("Set up tunnel", actions.onSetup, Modifier.fillMaxWidth(), Icons.Rounded.SyncAlt, enabled = ui.hasIran && ui.hasAbroad)
     if (!ui.hasIran || !ui.hasAbroad) {
-        Text("Add both servers in the Servers tab first.", color = Sv.Dim, fontSize = 12.sp, modifier = Modifier.padding(start = 2.dp))
+        Text(stringResource(R.string.ui_add_both_servers_in_the), color = Sv.Dim, fontSize = 12.sp, modifier = Modifier.padding(start = 2.dp))
     }
 }
 
@@ -359,7 +361,7 @@ private fun NeedRow(location: ServerLocation, title: String, text: String, ok: B
 @Composable
 internal fun TunnelSetupScreen(ui: TunnelSetupUi, actions: TunnelActions) {
     ScreenFrame(
-        title = if (ui.update) "Update tunnel" else "New tunnel",
+        title = if (ui.update) stringResource(R.string.ui_update_tunnel) else stringResource(R.string.ui_new_tunnel),
         subtitle = if (ui.iran != null && ui.abroad != null) "${ui.iran!!.name} → ${ui.abroad!!.name}" else "Maximus Tunnel",
         onBack = actions.onBack,
         leading = { IconTile(Icons.Rounded.SyncAlt, 34.dp, accent = true) },
@@ -410,10 +412,10 @@ private fun TunnelStepper(index: Int, failed: Boolean) {
 
 @Composable
 private fun PickStage(ui: TunnelSetupUi, actions: TunnelActions) {
-    Text("Pick the two ends. The app sets up both servers over SSH and adds the config to this phone.",
+    Text(stringResource(R.string.ui_pick_the_two_ends_the),
         color = Sv.Muted, fontSize = 14.sp, lineHeight = 20.sp)
-    PickGroup("Entrance in Iran", ServerLocation.IRAN, ui.iranRows, ui.iranId, actions.onPickIran)
-    PickGroup("Exit abroad", ServerLocation.ABROAD, ui.abroadRows, ui.abroadId, actions.onPickAbroad)
+    PickGroup(stringResource(R.string.ui_entrance_in_iran), ServerLocation.IRAN, ui.iranRows, ui.iranId, actions.onPickIran)
+    PickGroup(stringResource(R.string.ui_exit_abroad), ServerLocation.ABROAD, ui.abroadRows, ui.abroadId, actions.onPickAbroad)
 }
 
 @Composable
@@ -421,14 +423,14 @@ private fun PickGroup(title: String, location: ServerLocation, rows: List<Server
     SectionLabel(title)
     GroupCard {
         if (rows.isEmpty()) {
-            ListRow(if (location == ServerLocation.IRAN) "No server in Iran" else "No server abroad",
-                subtitle = "Add one in the Servers tab", leading = { FlagIcon(location, height = 14.dp) })
+            ListRow(if (location == ServerLocation.IRAN) stringResource(R.string.ui_no_server_in_iran) else stringResource(R.string.ui_no_server_abroad),
+                subtitle = stringResource(R.string.ui_add_one_in_the_servers), leading = { FlagIcon(location, height = 14.dp) })
         }
         Rows(rows, dividerStart = 50.dp) { row ->
             val usable = row.health != Health.SIGN_IN
             ListRow(
                 row.name,
-                subtitle = if (usable) row.host else "Sign in to this server first",
+                subtitle = if (usable) row.host else stringResource(R.string.ui_sign_in_to_this_server),
                 subtitleMono = usable,
                 leading = { Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) { FlagIcon(location, height = 14.dp) } },
                 trailing = { Radio(row.id == selected) },
@@ -487,7 +489,7 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
             val unusable = ui.recommended != null && t !in ui.recommended
             ListRow(
                 transportShort(t),
-                subtitle = if (unusable) "Not reachable in the check" else t.detail,
+                subtitle = if (unusable) stringResource(R.string.ui_not_reachable_in_the_check) else t.detail,
                 trailing = {
                     Switch(on, { v ->
                         if (ui.spoofEnabled) return@Switch
@@ -501,7 +503,7 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
     Text(
         if (ui.recommended != null && !ui.update) "Turned on from the check: every way that can connect these two servers. " +
             "The tunnel uses the fastest open one and moves on when one stops working."
-        else "Keep them all on: the tunnel uses the fastest one that is open and moves on when one stops working.",
+        else stringResource(R.string.ui_keep_them_all_on_the),
         color = Sv.Dim, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 2.dp)
     )
 
@@ -512,7 +514,7 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Segmented(TunnelSpec.ROTATION_CHOICES, ui.rotationHours, { if (it == 0) "Off" else "$it h" }) { actions.onChange(ui.copy(rotationHours = it)) }
                 Text(
-                    if (ui.rotationHours == 0) "Ports stay the same until you move them by hand."
+                    if (ui.rotationHours == 0) stringResource(R.string.ui_ports_stay_the_same_until)
                     else "Every ${ui.rotationHours} h both servers switch REALITY and XHTTP to new ports on their own. " +
                         "The old ports keep working for one more period, so nothing drops.",
                     color = Sv.Muted, fontSize = 12.sp, lineHeight = 17.sp
@@ -524,34 +526,34 @@ private fun OptionsStage(ui: TunnelSetupUi, actions: TunnelActions) {
     SectionLabel("Spoof carrier · server pair")
     GroupCard {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            ListRow("Use source-IP carrier", subtitle = "Requires two Linux servers whose providers permit raw source packets. Hysteria2 authenticates and encrypts the inner tunnel.", trailing = {
+            ListRow(stringResource(R.string.ui_use_source_ip_carrier), subtitle = stringResource(R.string.ui_requires_two_linux_servers_whose), trailing = {
                 Switch(ui.spoofEnabled, { enabled -> actions.onChange(ui.copy(spoofEnabled = enabled,
                     transports = if (enabled) setOf(TunnelTransport.HYSTERIA2) else ui.transports)) })
             })
             if (ui.spoofEnabled) {
-                androidx.compose.material3.OutlinedTextField(ui.spoofIran, { actions.onChange(ui.copy(spoofIran = it)) }, label = { Text("Iran source IPv4 list · 1–16") }, modifier = Modifier.fillMaxWidth())
-                androidx.compose.material3.OutlinedTextField(ui.spoofAbroad, { actions.onChange(ui.copy(spoofAbroad = it)) }, label = { Text("Abroad source IPv4 list · 1–16") }, modifier = Modifier.fillMaxWidth())
-                Text("Iran → abroad", color = Sv.TextSoft)
+                androidx.compose.material3.OutlinedTextField(ui.spoofIran, { actions.onChange(ui.copy(spoofIran = it)) }, label = { Text(stringResource(R.string.ui_iran_source_ipv4_list_1)) }, modifier = Modifier.fillMaxWidth())
+                androidx.compose.material3.OutlinedTextField(ui.spoofAbroad, { actions.onChange(ui.copy(spoofAbroad = it)) }, label = { Text(stringResource(R.string.ui_abroad_source_ipv4_list_1)) }, modifier = Modifier.fillMaxWidth())
+                Text(stringResource(R.string.ui_iran_abroad), color = Sv.TextSoft)
                 Segmented(com.example.panels.servers.tunnel.SpoofCarrierSpec.TRANSPORTS, ui.spoofUpload, { it.uppercase() }) { actions.onChange(ui.copy(spoofUpload = it)) }
-                Text("Abroad → Iran", color = Sv.TextSoft)
+                Text(stringResource(R.string.ui_abroad_iran), color = Sv.TextSoft)
                 Segmented(com.example.panels.servers.tunnel.SpoofCarrierSpec.TRANSPORTS, ui.spoofDownload, { it.uppercase() }) { actions.onChange(ui.copy(spoofDownload = it)) }
-                Text("TCP/ICMP candidates are measured in both directions (4 packets/IP). Every carrier must then pass the authenticated tunnel traffic test. Failed setup restores the previous carrier. Raw transport runs on the servers; the phone needs no root.", color = Sv.Muted, fontSize = 12.sp)
+                Text(stringResource(R.string.ui_tcp_icmp_candidates_are_measured), color = Sv.Muted, fontSize = 12.sp)
             }
         }
     }
 
     SectionLabel("Camouflage sites")
     GroupCard {
-        SniPicker("Phone → Iran server", ui.entrySni, ui.iranSites) { actions.onChange(ui.copy(entrySni = it)) }
+        SniPicker(stringResource(R.string.ui_phone_iran_server), ui.entrySni, ui.iranSites) { actions.onChange(ui.copy(entrySni = it)) }
         if (forwardTcp) {
             RowDivider(0.dp)
-            SniPicker("Iran server → abroad", ui.exitSni, ui.abroadSites) { actions.onChange(ui.copy(exitSni = it)) }
+            SniPicker(stringResource(R.string.ui_iran_server_abroad), ui.exitSni, ui.abroadSites) { actions.onChange(ui.copy(exitSni = it)) }
         }
     }
 
     if (ui.update) {
         GroupCard {
-            ListRow("Create new keys", subtitle = "Your tunnel config stays the same; only the link between the servers changes.",
+            ListRow(stringResource(R.string.ui_create_new_keys), subtitle = stringResource(R.string.ui_your_tunnel_config_stays_the),
                 trailing = {
                     Switch(ui.renewKeys, { actions.onChange(ui.copy(renewKeys = it)) },
                         colors = SwitchDefaults.colors(checkedTrackColor = Sv.Accent, uncheckedTrackColor = Sv.Raised, uncheckedBorderColor = Sv.CardBorder))
@@ -705,11 +707,11 @@ private fun TunnelDoneStage(ui: TunnelSetupUi, actions: TunnelActions) {
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(when (ui.health) {
-                    TunnelHealth.ROUTE_VERIFIED -> "Tunnel is up"
-                    TunnelHealth.DEGRADED -> "Tunnel is up, some paths failed"
-                    TunnelHealth.NO_EXTERNAL_ROUTE_OBSERVED -> "Set up, but no path reached the internet"
-                    TunnelHealth.FAILED -> "Set up, but the tunnel is not running"
-                    else -> "Set up, not verified yet"
+                    TunnelHealth.ROUTE_VERIFIED -> stringResource(R.string.ui_tunnel_is_up)
+                    TunnelHealth.DEGRADED -> stringResource(R.string.ui_tunnel_is_up_some_paths)
+                    TunnelHealth.NO_EXTERNAL_ROUTE_OBSERVED -> stringResource(R.string.ui_set_up_but_no_path)
+                    TunnelHealth.FAILED -> stringResource(R.string.ui_set_up_but_the_tunnel)
+                    else -> stringResource(R.string.ui_set_up_not_verified_yet)
                 }, color = Sv.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
                     FlagIcon(ServerLocation.IRAN, height = 10.dp)
@@ -736,20 +738,20 @@ private fun PathsCard(paths: List<TunnelPathUi>) {
                 transportShort(p.transport) + if (p.previous) " · previous port" else "",
                 subtitle = when (p.transport) {
                     TunnelTransport.HYSTERIA2 -> "UDP ${p.port ?: "—"}"
-                    TunnelTransport.REVERSE -> "TCP ${p.port ?: "—"} · from abroad"
+                    TunnelTransport.REVERSE -> stringResource(R.string.ui_tcp_from_abroad, p.port ?: "—")
                     else -> "TCP ${p.port ?: "—"}"
                 },
                 subtitleMono = true,
                 titleColor = if (p.previous) Sv.TextSoft else Sv.Text,
                 trailing = {
-                    if (p.best) { Badge("In use", Tone.ACCENT); Spacer(Modifier.width(8.dp)) }
+                    if (p.best) { Badge(stringResource(R.string.ui_in_use), Tone.ACCENT); Spacer(Modifier.width(8.dp)) }
                     when {
                         !p.tested -> Text("—", color = Sv.Dim, fontSize = 12.sp)
                         p.latencyMs != null -> HealthLabel(Health.ONLINE, p.latencyMs)
-                        p.state == PathState.NO_EXIT_PROOF -> Badge("Exit not confirmed", Tone.WARN, dot = true)
-                        p.state == PathState.LINK_ONLY -> Badge("Linked, no traffic", Tone.WARN, dot = true)
-                        p.transport == TunnelTransport.REVERSE -> Badge("Not linked", Tone.BAD, dot = true)
-                        else -> Badge("Blocked", Tone.BAD, dot = true)
+                        p.state == PathState.NO_EXIT_PROOF -> Badge(stringResource(R.string.ui_exit_not_confirmed), Tone.WARN, dot = true)
+                        p.state == PathState.LINK_ONLY -> Badge(stringResource(R.string.ui_linked_no_traffic), Tone.WARN, dot = true)
+                        p.transport == TunnelTransport.REVERSE -> Badge(stringResource(R.string.ui_not_linked), Tone.BAD, dot = true)
+                        else -> Badge(stringResource(R.string.ui_blocked), Tone.BAD, dot = true)
                     }
                 }
             )
@@ -761,7 +763,7 @@ private fun PathsCard(paths: List<TunnelPathUi>) {
 private fun ConfigCard(name: String, link: String?, testing: Boolean, result: String?, ok: Boolean?, actions: TunnelActions) {
     SectionLabel("Your config")
     GroupCard {
-        ListRow(name, subtitle = "In your server list · VLESS REALITY to the Iran server",
+        ListRow(name, subtitle = stringResource(R.string.ui_in_your_server_list_vless),
             leading = { IconTile(Icons.Rounded.SyncAlt, 32.dp) },
             trailing = { if (link != null) TextAction("Copy link", { actions.onCopy(link) }, icon = Icons.Rounded.ContentCopy) })
         RowDivider(0.dp)
@@ -770,11 +772,11 @@ private fun ConfigCard(name: String, link: String?, testing: Boolean, result: St
                 testing -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(14.dp), color = Sv.Blue, strokeWidth = 2.dp)
                     Spacer(Modifier.width(10.dp))
-                    Text("Sending a real request through the tunnel…", color = Sv.Muted, fontSize = 13.sp)
+                    Text(stringResource(R.string.ui_sending_a_real_request_through_2), color = Sv.Muted, fontSize = 13.sp)
                 }
                 result != null -> Notice(result, if (ok == true) NoticeKind.OK else NoticeKind.WARN)
             }
-            GhostButton("Test from this phone", actions.onTest, Modifier.fillMaxWidth(), Icons.Rounded.NetworkCheck, enabled = !testing, compact = true)
+            GhostButton(stringResource(R.string.ui_test_from_this_phone), actions.onTest, Modifier.fillMaxWidth(), Icons.Rounded.NetworkCheck, enabled = !testing, compact = true)
         }
     }
 }
@@ -792,11 +794,11 @@ private fun SetupBottomBar(ui: TunnelSetupUi, actions: TunnelActions) {
             Text(ui.steps.getOrNull(ui.currentStep - 1)?.let { "$it…" } ?: "Connecting…", color = Sv.Muted, fontSize = 13.sp)
         }
         TunnelStage.FAILED -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GhostButton("Close", actions.onDone, Modifier.weight(1f))
+            GhostButton(stringResource(R.string.ui_close), actions.onDone, Modifier.weight(1f))
             PrimaryButton("Try again", actions.onRetry, Modifier.weight(1f), Icons.Rounded.Refresh)
         }
         TunnelStage.DONE -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GhostButton("Open tunnel", actions.onOpenTunnel, Modifier.weight(1f))
+            GhostButton(stringResource(R.string.ui_open_tunnel), actions.onOpenTunnel, Modifier.weight(1f))
             PrimaryButton("Done", actions.onDone, Modifier.weight(1f))
         }
     }
@@ -839,10 +841,10 @@ internal fun TunnelDetailScreen(ui: TunnelDetailUi, actions: TunnelActions) {
                 // Moving needs rotation: with fixed ports a new seed would change nothing.
                 trailing = if (ui.rotationHours > 0) { { TextAction("Move now", actions.onReseed, enabled = ui.busy.isBlank()) } } else null)
             RowDivider(58.dp)
-            ListRow("Phone port on the Iran server", subtitle = "TCP ${ui.entryPort}", subtitleMono = true,
+            ListRow(stringResource(R.string.ui_phone_port_on_the_iran), subtitle = "TCP ${ui.entryPort}", subtitleMono = true,
                 leading = { IconTile(Icons.Rounded.Smartphone, 32.dp) })
             RowDivider(58.dp)
-            ListRow("Camouflage", subtitle = "${ui.entrySni}  ·  ${ui.exitSni}", subtitleMono = true,
+            ListRow(stringResource(R.string.ui_camouflage), subtitle = "${ui.entrySni}  ·  ${ui.exitSni}", subtitleMono = true,
                 leading = { IconTile(Icons.Rounded.VerifiedUser, 32.dp) })
         }
 
@@ -850,16 +852,16 @@ internal fun TunnelDetailScreen(ui: TunnelDetailUi, actions: TunnelActions) {
 
         SectionLabel("Manage")
         GroupCard {
-            ManageRow(Icons.Rounded.Tune, "Change settings", "Ways across, rotation, camouflage, new keys", actions.onEdit)
+            ManageRow(Icons.Rounded.Tune, stringResource(R.string.ui_change_settings), stringResource(R.string.ui_ways_across_rotation_camouflage_new), actions.onEdit)
             RowDivider(58.dp)
-            ManageRow(Icons.Rounded.RestartAlt, "Restart", "Both servers", actions.onRestart)
+            ManageRow(Icons.Rounded.RestartAlt, stringResource(R.string.ui_restart), stringResource(R.string.ui_both_servers), actions.onRestart)
             RowDivider(58.dp)
-            ManageRow(Icons.AutoMirrored.Rounded.Subject, "Logs", "Iran server, last 40 lines", actions.onLogs)
+            ManageRow(Icons.AutoMirrored.Rounded.Subject, stringResource(R.string.ui_logs), stringResource(R.string.ui_iran_server_last_40_lines), actions.onLogs)
             RowDivider(58.dp)
-            ListRow("Remove tunnel", subtitle = "Stops it on both servers and deletes its config", titleColor = Sv.Red,
+            ListRow(stringResource(R.string.ui_remove_tunnel), subtitle = stringResource(R.string.ui_stops_it_on_both_servers), titleColor = Sv.Red,
                 leading = { IconTile(Icons.Rounded.Delete, 32.dp) }, onClick = actions.onRemove, enabled = ui.busy.isBlank())
         }
-        ui.logs?.let { LogCard(it, initiallyOpen = true, title = "Logs") }
+        ui.logs?.let { LogCard(it, initiallyOpen = true, title = stringResource(R.string.ui_logs)) }
     }
 }
 

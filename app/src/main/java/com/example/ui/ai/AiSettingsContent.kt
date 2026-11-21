@@ -1,5 +1,7 @@
 package com.example.ui.ai
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -167,7 +169,7 @@ private fun healthColor(c: LabColors, h: ProviderHealth?, hasKey: Boolean): Colo
 private fun SimplePage(c: LabColors, state: AiSettingsUiState, actions: AiSettingsActions) {
     val p = state.primary
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 28.dp)) {
-        item { TitleBar(c, "AI", "Your providers, your keys", Icons.AutoMirrored.Rounded.ArrowBack, actions.onBack) }
+        item { TitleBar(c, stringResource(R.string.ui_ai), stringResource(R.string.ui_your_providers_your_keys), Icons.AutoMirrored.Rounded.ArrowBack, actions.onBack) }
         state.message?.let { m -> item { Banner(c, m, actions.onDismissMessage) } }
         item { GroupLabel(c, "Active route") }
         item {
@@ -186,8 +188,8 @@ private fun SimplePage(c: LabColors, state: AiSettingsUiState, actions: AiSettin
         }
         if (p != null && p.keyMasked != null) item {
             Row(Modifier.padding(start = Gutter, end = Gutter, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SecondaryButton(c, if (state.busy?.startsWith("Testing") == true) "Testing…" else "Test connection", Icons.Rounded.NetworkCheck, Modifier.weight(1f), state.busy == null) { actions.onTest(p.id) }
-                SecondaryButton(c, if (state.busy?.startsWith("Refreshing") == true) "Refreshing…" else "Refresh models", Icons.Rounded.Refresh, Modifier.weight(1f), state.busy == null) { actions.onRefreshModels(p.id) }
+                SecondaryButton(c, if (state.busy?.startsWith("Testing") == true) stringResource(R.string.ui_testing) else stringResource(R.string.ui_test_connection), Icons.Rounded.NetworkCheck, Modifier.weight(1f), state.busy == null) { actions.onTest(p.id) }
+                SecondaryButton(c, if (state.busy?.startsWith("Refreshing") == true) stringResource(R.string.ui_refreshing) else stringResource(R.string.ui_refresh_models), Icons.Rounded.Refresh, Modifier.weight(1f), state.busy == null) { actions.onRefreshModels(p.id) }
             }
         }
         item {
@@ -205,7 +207,7 @@ private fun SimplePage(c: LabColors, state: AiSettingsUiState, actions: AiSettin
 @Composable
 private fun ManagePage(c: LabColors, state: AiSettingsUiState, actions: AiSettingsActions, relativeTime: (Long) -> String) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 28.dp)) {
-        item { TitleBar(c, "Manage AI", "Providers, models and fallbacks", Icons.AutoMirrored.Rounded.ArrowBack, { actions.onManage(false) }) }
+        item { TitleBar(c, stringResource(R.string.ui_manage_ai), stringResource(R.string.ui_providers_models_and_fallbacks), Icons.AutoMirrored.Rounded.ArrowBack, { actions.onManage(false) }) }
         state.message?.let { m -> item { Banner(c, m, actions.onDismissMessage) } }
         item { GroupLabel(c, "Routing mode") }
         item {
@@ -240,7 +242,7 @@ private fun ProviderCard(c: LabColors, state: AiSettingsUiState, p: AiProviderUi
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LabText(p.name, c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
-                    if (isPrimary) LabText("  ·  Primary", c.accent, 12.sp, FontWeight.SemiBold, maxLines = 1)
+                    if (isPrimary) LabText(stringResource(R.string.ui_primary), c.accent, 12.sp, FontWeight.SemiBold, maxLines = 1)
                 }
                 LabText(listOfNotNull(if (p.models.isNotEmpty()) "${p.models.size} models" else null,
                     p.health?.recentLatencyMs?.let { "$it ms" }, if (hasKey) "key saved" else "no key").joinToString(" · "), c.text3, 12.sp, maxLines = 1)
@@ -259,21 +261,21 @@ private fun ProviderEditor(c: LabColors, state: AiSettingsUiState, p: AiProvider
     var modelsOpen by remember(p.id) { mutableStateOf(false) }
     val chosen = state.settings.primary?.takeIf { it.providerId == p.id }?.modelId
     Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 6.dp)) {
-        LabText("API key", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
+        LabText(stringResource(R.string.ui_api_key), c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Field(c, key, { key = it }, p.keyMasked ?: p.config.kind.keyHint, Modifier.weight(1f), secret = true)
             Spacer(Modifier.width(8.dp))
-            SmallButton(c, "Save", enabled = key.isNotBlank()) { actions.onSaveKey(p.id, key); key = "" }
+            SmallButton(c, stringResource(R.string.ui_save), enabled = key.isNotBlank()) { actions.onSaveKey(p.id, key); key = "" }
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SecondaryButton(c, "Test", Icons.Rounded.NetworkCheck, Modifier.weight(1f), state.busy == null && p.keyMasked != null) { actions.onTest(p.id) }
-            SecondaryButton(c, "Refresh models", Icons.Rounded.Refresh, Modifier.weight(1f), state.busy == null && p.keyMasked != null) { actions.onRefreshModels(p.id) }
+            SecondaryButton(c, stringResource(R.string.ui_test), Icons.Rounded.NetworkCheck, Modifier.weight(1f), state.busy == null && p.keyMasked != null) { actions.onTest(p.id) }
+            SecondaryButton(c, stringResource(R.string.ui_refresh_models), Icons.Rounded.Refresh, Modifier.weight(1f), state.busy == null && p.keyMasked != null) { actions.onRefreshModels(p.id) }
         }
-        p.modelsRefreshedAt?.let { LabText("Models updated ${relativeTime(it)}", c.text3, 11.5.sp, modifier = Modifier.padding(top = 6.dp), maxLines = 1) }
+        p.modelsRefreshedAt?.let { LabText(stringResource(R.string.ui_models_updated, relativeTime(it)), c.text3, 11.5.sp, modifier = Modifier.padding(top = 6.dp), maxLines = 1) }
         Spacer(Modifier.height(12.dp))
-        LabText("Model", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
+        LabText(stringResource(R.string.ui_model), c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
         Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).border(1.dp, c.stroke, RoundedCornerShape(10.dp)).clickable { modelsOpen = !modelsOpen }.padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -282,18 +284,18 @@ private fun ProviderEditor(c: LabColors, state: AiSettingsUiState, p: AiProvider
         }
         if (modelsOpen) {
             Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).padding(top = 4.dp)) {
-                ModelRow(c, "Auto", "Maximus picks per task" + if (p.models.any { it.source == ModelSource.PROVIDER_ROUTER }) "; provider routing available" else "", chosen == null) {
+                ModelRow(c, stringResource(R.string.ui_auto), "Maximus picks per task" + if (p.models.any { it.source == ModelSource.PROVIDER_ROUTER }) "; provider routing available" else "", chosen == null) {
                     actions.onPrimary(RouteChoice(p.id, null)); modelsOpen = false
                 }
                 p.models.take(30).forEach { m ->
                     ModelRow(c, m.displayName, modelFacts(m), chosen == m.modelId) { actions.onPrimary(RouteChoice(p.id, m.modelId)); modelsOpen = false }
                 }
-                if (p.models.size > 30) LabText("${p.models.size - 30} more · type an ID under Advanced", c.text3, 11.5.sp, modifier = Modifier.padding(8.dp), maxLines = 1)
+                if (p.models.size > 30) LabText(stringResource(R.string.ui_more_type_an_id_under, p.models.size - 30), c.text3, 11.5.sp, modifier = Modifier.padding(8.dp), maxLines = 1)
             }
         }
         Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { advanced = !advanced }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            LabText("Advanced", c.text2, 13.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
+            LabText(stringResource(R.string.ui_advanced), c.text2, 13.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
             Icon(if (advanced) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = c.text3, modifier = Modifier.size(20.dp))
         }
         if (advanced) AdvancedSection(c, p, actions)
@@ -338,25 +340,25 @@ private fun AdvancedSection(c: LabColors, p: AiProviderUi, actions: AiSettingsAc
     var custom by remember(p.id) { mutableStateOf(p.config.customModelId.orEmpty()) }
     var timeout by remember(p.id) { mutableStateOf((p.config.timeoutMs / 1000).toString()) }
     Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
-        LabText("Endpoint", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
+        LabText(stringResource(R.string.ui_endpoint), c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Field(c, endpoint, { endpoint = it }, p.config.kind.defaultEndpoint ?: "https://… or http://localhost:20128/v1", Modifier.weight(1f))
             Spacer(Modifier.width(8.dp))
-            SmallButton(c, "Set", enabled = endpoint != p.config.endpoint) { actions.onEndpoint(p.id, endpoint.trim()) }
+            SmallButton(c, stringResource(R.string.ui_set), enabled = endpoint != p.config.endpoint) { actions.onEndpoint(p.id, endpoint.trim()) }
         }
-        LabText("HTTPS only; plain HTTP is allowed for this phone (localhost) only.", c.text3, 11.sp, modifier = Modifier.padding(top = 3.dp, bottom = 8.dp), maxLines = 2)
-        LabText("Custom model ID", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
+        LabText(stringResource(R.string.ui_https_only_plain_http_is), c.text3, 11.sp, modifier = Modifier.padding(top = 3.dp, bottom = 8.dp), maxLines = 2)
+        LabText(stringResource(R.string.ui_custom_model_id), c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Field(c, custom, { custom = it }, "e.g. provider/model-name", Modifier.weight(1f))
+            Field(c, custom, { custom = it }, stringResource(R.string.ui_e_g_provider_model_name), Modifier.weight(1f))
             Spacer(Modifier.width(8.dp))
-            SmallButton(c, "Use", enabled = custom.isNotBlank()) { actions.onCustomModel(p.id, custom.trim()) }
+            SmallButton(c, stringResource(R.string.ui_use), enabled = custom.isNotBlank()) { actions.onCustomModel(p.id, custom.trim()) }
         }
         Spacer(Modifier.height(8.dp))
-        LabText("Timeout (seconds)", c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
+        LabText(stringResource(R.string.ui_timeout_seconds), c.text3, 12.sp, FontWeight.Medium, maxLines = 1)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Field(c, timeout, { timeout = it.filter(Char::isDigit).take(3) }, "60", Modifier.weight(1f), number = true)
             Spacer(Modifier.width(8.dp))
-            SmallButton(c, "Set", enabled = timeout.toLongOrNull()?.let { it in 5..180 } == true) { actions.onTimeout(p.id, timeout.toLong() * 1000) }
+            SmallButton(c, stringResource(R.string.ui_set), enabled = timeout.toLongOrNull()?.let { it in 5..180 } == true) { actions.onTimeout(p.id, timeout.toLong() * 1000) }
         }
         p.health?.let { h ->
             Spacer(Modifier.height(10.dp))
@@ -376,7 +378,7 @@ private fun AddProviderRow(c: LabColors, state: AiSettingsUiState, actions: AiSe
             Row(Modifier.fillMaxWidth().clickable { actions.onAddProvider(k) }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Add, null, tint = c.accent, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(14.dp))
-                LabText("Add ${k.displayName}", c.text, 14.sp, FontWeight.Medium, Modifier.weight(1f), maxLines = 1)
+                LabText(stringResource(R.string.ui_add, k.displayName), c.text, 14.sp, FontWeight.Medium, Modifier.weight(1f), maxLines = 1)
             }
         }
     }
@@ -395,7 +397,7 @@ private fun FallbackList(c: LabColors, state: AiSettingsUiState, actions: AiSett
                 if (i > 0) ({ actions.onMoveFallbackUp(i) }) else null, { actions.onRemoveFallback(i) })
         }
         if (state.settings.fallbacks.isEmpty()) {
-            LabText("No fallbacks. Open a provider and tap \"Add as fallback\"; if the primary fails, Maximus tries them in order.",
+            LabText(stringResource(R.string.ui_no_fallbacks_open_a_provider),
                 c.text3, 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), maxLines = 3)
         }
     }

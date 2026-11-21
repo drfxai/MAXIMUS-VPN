@@ -1,5 +1,7 @@
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -202,12 +204,12 @@ fun PanelManagerScreen(
 
     val copyWithToast: (String, String) -> Unit = { text, label ->
         clipboard.setText(AnnotatedString(text))
-        Toast.makeText(context, "$label copied to clipboard", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.ui_copied_to_clipboard_2, label), Toast.LENGTH_SHORT).show()
     }
     val openUrl: (String) -> Unit = { url ->
         runCatching {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure { Toast.makeText(context, "Cannot open $url", Toast.LENGTH_SHORT).show() }
+        }.onFailure { Toast.makeText(context, context.getString(R.string.ui_cannot_open, url), Toast.LENGTH_SHORT).show() }
     }
 
     DisposableEffect(Unit) {
@@ -251,7 +253,7 @@ fun PanelManagerScreen(
                     )
                 } else {
                     TextButton(onClick = { studioPsiphonServer = null }) {
-                        Text("Back to Smart Manager", color = StudioGold)
+                        Text(stringResource(R.string.ui_back_to_smart_manager), color = StudioGold)
                     }
                     PremiumPsiphonScreen(serversVm, serversState, psiphonServer)
                 }
@@ -292,7 +294,7 @@ fun PanelManagerScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Panels",
+                    text = stringResource(R.string.ui_panels),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
@@ -300,7 +302,7 @@ fun PanelManagerScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Server + Cloudflare + Tunnel control center",
+                    text = stringResource(R.string.ui_server_cloudflare_tunnel_control_center),
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -382,12 +384,12 @@ fun PanelManagerScreen(
                         runCatching {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         }.onFailure {
-                            Toast.makeText(context, "Cannot open browser: $url", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.ui_cannot_open_browser, url), Toast.LENGTH_SHORT).show()
                         }
                     },
                     onUpdatePort = { newPort ->
                         viewModel.updatePanelPort(activePanel, newPort)
-                        Toast.makeText(context, "Panel port updated to $newPort", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_panel_port_updated_to, newPort), Toast.LENGTH_SHORT).show()
                     },
                     onImportToVpn = {
                         if (activePanel.type == PanelType.BPB_WORKER) viewModel.importBpbToProfiles(activePanel)
@@ -409,9 +411,9 @@ fun PanelManagerScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val scanningCount = if (state.busy) state.tested else 0
-                    StatCard(Icons.Default.Language, PanelColors.CyanAccent, scanningCount.toString(), "Tested", Modifier.weight(1f))
-                    StatCard(Icons.Default.Security, PanelColors.CyanAccent, state.reachable.toString(), "Reachable", Modifier.weight(1f))
-                    StatCard(Icons.Default.CheckCircle, PanelColors.SuccessGreen, state.edges.size.toString(), "Clean IPs", Modifier.weight(1f))
+                    StatCard(Icons.Default.Language, PanelColors.CyanAccent, scanningCount.toString(), stringResource(R.string.ui_tested), Modifier.weight(1f))
+                    StatCard(Icons.Default.Security, PanelColors.CyanAccent, state.reachable.toString(), stringResource(R.string.ui_reachable), Modifier.weight(1f))
+                    StatCard(Icons.Default.CheckCircle, PanelColors.SuccessGreen, state.edges.size.toString(), stringResource(R.string.ui_clean_ips), Modifier.weight(1f))
                 }
 
                 // TAB 0: MY SERVERS (Iran and abroad, with flags)
@@ -424,7 +426,7 @@ fun PanelManagerScreen(
                     if (showPsiphonInInstall) {
                         BackHandler { showPsiphonInInstall = false }
                         OutlinedButton(onClick = { showPsiphonInInstall = false }) {
-                            Text("‹  Back to Panels / Install")
+                            Text(stringResource(R.string.ui_back_to_panels_install))
                         }
                         PremiumPsiphonScreen(serversVm, serversState)
                     } else {
@@ -532,7 +534,7 @@ fun PanelManagerScreen(
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "Optimize Compatible Configurations",
+                                            text = stringResource(R.string.ui_optimize_compatible_configurations),
                                             color = MaterialTheme.colorScheme.onSurface,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 13.5.sp
@@ -540,7 +542,7 @@ fun PanelManagerScreen(
                                     }
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = "Distribute ${state.edges.size} verified clean Cloudflare IPs across your active CDN configurations to bypass ISP throttling. (Incompatible & offline configs protected).",
+                                        text = stringResource(R.string.ui_distribute_verified_clean_cloudflare_ips, state.edges.size),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 11.sp,
                                         lineHeight = 14.sp
@@ -553,7 +555,7 @@ fun PanelManagerScreen(
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                 ) {
-                                    Text("Optimize All ⚡", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.ui_optimize_all), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -569,14 +571,14 @@ fun PanelManagerScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Clean IP Results (${state.edges.size})",
+                                text = stringResource(R.string.ui_clean_ip_results, state.edges.size),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             if (state.edges.isNotEmpty()) {
                                 Text(
-                                    text = "Sort by",
+                                    text = stringResource(R.string.ui_sort_by),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp
                                 )
@@ -681,17 +683,17 @@ fun PanelManagerScreen(
         AlertDialog(
             onDismissRequest = { confirmRemovePanel = null },
             containerColor = MaterialTheme.colorScheme.surface,
-            title = { Text("Remove panel?", color = MaterialTheme.colorScheme.onSurface) },
-            text = { Text("Remove saved configuration for ${panel.name}?", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            title = { Text(stringResource(R.string.ui_remove_panel), color = MaterialTheme.colorScheme.onSurface) },
+            text = { Text(stringResource(R.string.ui_remove_saved_configuration_for, panel.name), color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.delete(panel)
                     if (selectedPanelId == panel.id) selectedPanelId = null
                     confirmRemovePanel = null
-                }) { Text("Remove", color = Color(0xFFFF5252)) }
+                }) { Text(stringResource(R.string.ui_remove), color = Color(0xFFFF5252)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmRemovePanel = null }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                TextButton(onClick = { confirmRemovePanel = null }) { Text(stringResource(R.string.ui_cancel), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         )
     }
@@ -709,13 +711,13 @@ fun PanelManagerScreen(
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("Quick Config Created", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_quick_config_created), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
                 }
             },
             text = {
                 Column {
                     Text(
-                        text = "VLESS Reality inbound created, verified on your server and imported to VPN Profiles:",
+                        text = stringResource(R.string.ui_vless_reality_inbound_created_verified),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
@@ -738,7 +740,7 @@ fun PanelManagerScreen(
                             .clickable {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 clipboard.setPrimaryClip(ClipData.newPlainText("VLESS URI", gen.configUri))
-                                Toast.makeText(context, "Copied VLESS URI to clipboard", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.ui_copied_vless_uri_to_clipboard), Toast.LENGTH_SHORT).show()
                             }
                     ) {
                         Text(
@@ -757,17 +759,17 @@ fun PanelManagerScreen(
                     onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("VLESS URI", gen.configUri))
-                        Toast.makeText(context, "Copied VLESS URI to clipboard", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_copied_vless_uri_to_clipboard), Toast.LENGTH_SHORT).show()
                         viewModel.dismissGeneratedConfig()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = PanelColors.PrimaryBlue)
                 ) {
-                    Text("Copy URI")
+                    Text(stringResource(R.string.ui_copy_uri))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { viewModel.dismissGeneratedConfig() }) {
-                    Text("Dismiss", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.ui_dismiss), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         )
@@ -806,13 +808,13 @@ fun PanelManagerScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "Optimize Configuration",
+                            text = stringResource(R.string.ui_optimize_configuration),
                             color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
                         Text(
-                            text = "Bind verified Cloudflare edge to bypass ISP blocks",
+                            text = stringResource(R.string.ui_bind_verified_cloudflare_edge_to),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp
                         )
@@ -837,14 +839,14 @@ fun PanelManagerScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "Clean IP: ${edge.ip}",
+                                    text = stringResource(R.string.ui_clean_ip, edge.ip),
                                     color = MaterialTheme.colorScheme.onSurface,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp
                                 )
                                 Text(
-                                    text = "${edge.operatorTag} • Speed: ${edge.formattedSpeed}",
+                                    text = stringResource(R.string.ui_speed_2, edge.operatorTag, edge.formattedSpeed),
                                     color = PanelColors.CyanAccent,
                                     fontSize = 11.sp
                                 )
@@ -864,7 +866,7 @@ fun PanelManagerScreen(
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
                                     Text(
-                                        text = "Grade ${edge.qualityGrade}",
+                                        text = stringResource(R.string.ui_grade, edge.qualityGrade),
                                         color = if (edge.qualityGrade == "A+" || edge.qualityGrade == "A") PanelColors.SuccessGreen else Color(0xFFFBBF24),
                                         fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Bold
@@ -889,7 +891,7 @@ fun PanelManagerScreen(
                             border = BorderStroke(1.dp, Color(0xFF5A222B))
                         ) {
                             Text(
-                                text = "No VPN profiles found yet. Saving will create a new direct Clean IP profile for you.",
+                                text = stringResource(R.string.ui_no_vpn_profiles_found_yet),
                                 color = Color(0xFFFCA5A5),
                                 fontSize = 11.5.sp,
                                 modifier = Modifier.padding(10.dp)
@@ -897,7 +899,7 @@ fun PanelManagerScreen(
                         }
                     } else {
                         Text(
-                            text = "Select VPN Profile to Optimize:",
+                            text = stringResource(R.string.ui_select_vpn_profile_to_optimize),
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
@@ -972,7 +974,7 @@ fun PanelManagerScreen(
                                 border = BorderStroke(1.dp, Color(0xFF7F1D1D))
                             ) {
                                 Text(
-                                    text = "⚠️ Origin Server Offline (HTTP ${down.httpCode ?: "Down"})\nThe backend for this configuration is not reachable. A clean IP cannot fix a shut down origin server or expired subscription.",
+                                    text = stringResource(R.string.ui_origin_server_offline_http_the, down.httpCode ?: "Down"),
                                     color = Color(0xFFFCA5A5),
                                     fontSize = 10.5.sp,
                                     lineHeight = 14.sp,
@@ -1002,7 +1004,7 @@ fun PanelManagerScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Save as new clone: ⚡ [CF-Optimized] ${targetProfile?.name?.take(16) ?: ""}",
+                                text = stringResource(R.string.ui_save_as_new_clone_cf, targetProfile?.name?.take(16) ?: ""),
                                 color = Color(0xFFE2E8F0),
                                 fontSize = 11.sp
                             )
@@ -1029,7 +1031,7 @@ fun PanelManagerScreen(
                             ) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = null, tint = PanelColors.CyanAccent, modifier = Modifier.size(13.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Copy optimized config link", color = PanelColors.CyanAccent, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.ui_copy_optimized_config_link), color = PanelColors.CyanAccent, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -1052,7 +1054,7 @@ fun PanelManagerScreen(
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Optimize & Connect", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.ui_optimize_connect), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             },
@@ -1068,10 +1070,10 @@ fun PanelManagerScreen(
                             showReviveDialogForEdge = null
                         }
                     ) {
-                        Text("Save Only", color = PanelColors.CyanAccent, fontSize = 11.5.sp)
+                        Text(stringResource(R.string.ui_save_only), color = PanelColors.CyanAccent, fontSize = 11.5.sp)
                     }
                     TextButton(onClick = { showReviveDialogForEdge = null }) {
-                        Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.5.sp)
+                        Text(stringResource(R.string.ui_cancel), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.5.sp)
                     }
                 }
             }
@@ -1238,7 +1240,7 @@ private fun CleanIpScannerCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Clean IP scanner",
+                        text = stringResource(R.string.ui_clean_ip_scanner),
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 17.5.sp
@@ -1266,7 +1268,7 @@ private fun CleanIpScannerCard(
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Cloudflare edge scanner",
+                            text = stringResource(R.string.ui_cloudflare_edge_scanner),
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.5.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1
@@ -1274,7 +1276,7 @@ private fun CleanIpScannerCard(
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Scans real Cloudflare edge ranges and ranks the IPs by measured ping and download throughput, so a working address can replace one your ISP blocks.",
+                        text = stringResource(R.string.ui_scans_real_cloudflare_edge_ranges),
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1307,7 +1309,7 @@ private fun CleanIpScannerCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "A clean IP replaces the entry address so traffic reaches an active Cloudflare CDN or Worker backend your ISP has blocked. It cannot revive a dead origin server (HTTP 521), a deleted Worker, or an expired account.",
+                        text = stringResource(R.string.ui_a_clean_ip_replaces_the),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         lineHeight = 15.sp
@@ -1318,7 +1320,7 @@ private fun CleanIpScannerCard(
             // Target Profile Selector Row
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "Target Configuration to Optimize:",
+                    text = stringResource(R.string.ui_target_configuration_to_optimize),
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
@@ -1374,7 +1376,7 @@ private fun CleanIpScannerCard(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    "🌐 General Cloudflare CDN Scan (No profile)",
+                                    stringResource(R.string.ui_general_cloudflare_cdn_scan_no),
                                     color = PanelColors.CyanAccent,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp
@@ -1438,7 +1440,7 @@ private fun CleanIpScannerCard(
                                         color = PanelColors.CyanAccent
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Checking origin backend...", color = PanelColors.CyanAccent, fontSize = 11.5.sp)
+                                    Text(stringResource(R.string.ui_checking_origin_backend), color = PanelColors.CyanAccent, fontSize = 11.5.sp)
                                 } else {
                                     val (badgeText, badgeColor) = when (originHealth) {
                                         is CleanIpOptimizer.OriginHealth.Online -> "Origin Online" to PanelColors.SuccessGreen
@@ -1572,7 +1574,7 @@ private fun CleanIpScannerCard(
                             verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Port", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        Text(stringResource(R.string.ui_port), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                         Spacer(modifier = Modifier.width(6.dp))
                         Box(
                             modifier = Modifier.weight(1f),
@@ -1603,7 +1605,7 @@ private fun CleanIpScannerCard(
             // Custom Subnet Input field (if Custom selected)
             if (selectedRegion.contains("Custom")) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Custom subnet / CIDR:", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
+                    Text(stringResource(R.string.ui_custom_subnet_cidr), color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
                     Surface(
                         modifier = Modifier.fillMaxWidth().height(42.dp),
                         shape = RoundedCornerShape(10.dp),
@@ -1615,7 +1617,7 @@ private fun CleanIpScannerCard(
                             contentAlignment = Alignment.CenterStart
                         ) {
                             if (customSubnet.isBlank()) {
-                                Text("e.g. 104.16.12.0/24, 162.159.130.0/24, 172.67.140", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f), fontSize = 12.sp)
+                                Text(stringResource(R.string.ui_e_g_104_16_12), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f), fontSize = 12.sp)
                             }
                             androidx.compose.foundation.text.BasicTextField(
                                 value = customSubnet,
@@ -1644,7 +1646,7 @@ private fun CleanIpScannerCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Ports:", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f), fontSize = 10.5.sp)
+                    Text(stringResource(R.string.ui_ports), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f), fontSize = 10.5.sp)
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -1699,7 +1701,7 @@ private fun CleanIpScannerCard(
                     }
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Speedtest",
+                        text = stringResource(R.string.ui_speedtest),
                         color = if (speedTestEnabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
                         fontSize = 11.sp,
                         fontWeight = if (speedTestEnabled) FontWeight.SemiBold else FontWeight.Normal,
@@ -1718,7 +1720,7 @@ private fun CleanIpScannerCard(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = if (scanPaused) "Paused" else "Scanning... ($tested / $scanTotal)",
+                            text = if (scanPaused) stringResource(R.string.ui_paused) else stringResource(R.string.ui_scanning, tested, scanTotal),
                             color = PanelColors.CyanAccent,
                             fontSize = 11.5.sp
                         )
@@ -1746,7 +1748,7 @@ private fun CleanIpScannerCard(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text(if (scanPaused) "Resume" else "Pause", fontSize = 12.sp)
+                        Text(if (scanPaused) stringResource(R.string.ui_resume) else stringResource(R.string.ui_pause), fontSize = 12.sp)
                     }
                     Button(
                         onClick = onStopScan,
@@ -1754,7 +1756,7 @@ private fun CleanIpScannerCard(
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Stop", fontSize = 12.sp)
+                        Text(stringResource(R.string.ui_stop), fontSize = 12.sp)
                     }
                 }
             } else {
@@ -1774,7 +1776,7 @@ private fun CleanIpScannerCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Start scan",
+                        text = stringResource(R.string.ui_start_scan),
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.5.sp
@@ -1915,12 +1917,12 @@ private fun CleanIpResultItemCard(
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = "Jitter: ±${item.jitterMs}ms",
+                    text = stringResource(R.string.ui_jitter_ms, item.jitterMs),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 10.5.sp
                 )
                 Text(
-                    text = "Loss: ${item.lossPercent.toInt()}%",
+                    text = stringResource(R.string.ui_loss_pct, item.lossPercent.toInt()),
                     color = if (item.lossPercent == 0.0) PanelColors.SuccessGreen else Color(0xFFF87171),
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Medium
@@ -1949,7 +1951,7 @@ private fun CleanIpResultItemCard(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "Optimize Config",
+                        text = stringResource(R.string.ui_optimize_config),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1970,7 +1972,7 @@ private fun CleanIpResultItemCard(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "Save",
+                        text = stringResource(R.string.ui_save),
                         color = PanelColors.CyanAccent,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold
@@ -2035,7 +2037,7 @@ private fun InstalledPanelDetailView(
             containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Text(
-                    text = "Edit Panel Port",
+                    text = stringResource(R.string.ui_edit_panel_port),
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
@@ -2044,14 +2046,14 @@ private fun InstalledPanelDetailView(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Specify the listening port configured for your 3X-UI panel on $panelHost.",
+                        text = stringResource(R.string.ui_specify_the_listening_port_configured, panelHost),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                     OutlinedTextField(
                         value = editedPortText,
                         onValueChange = { editedPortText = it.filter(Char::isDigit) },
-                        label = { Text("Port (1 - 65535)") },
+                        label = { Text(stringResource(R.string.ui_port_1_65535)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
                         colors = outlinedColors()
@@ -2069,12 +2071,12 @@ private fun InstalledPanelDetailView(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = PanelColors.PrimaryBlue)
                 ) {
-                    Text("Save Port")
+                    Text(stringResource(R.string.ui_save_port))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showEditPortDialog = false }) {
-                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.ui_cancel), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         )
@@ -2115,7 +2117,7 @@ private fun InstalledPanelDetailView(
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "● Active",
+                                text = stringResource(R.string.ui_active_2),
                                 color = PanelColors.SuccessGreen,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -2124,7 +2126,7 @@ private fun InstalledPanelDetailView(
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Xray server panel • Host: $panelHost",
+                        text = stringResource(R.string.ui_xray_server_panel_host, panelHost),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         lineHeight = 15.sp
@@ -2152,7 +2154,7 @@ private fun InstalledPanelDetailView(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Access Information",
+                        text = stringResource(R.string.ui_access_information),
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
@@ -2175,7 +2177,7 @@ private fun InstalledPanelDetailView(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             AccessField(
-                                label = "Panel URL",
+                                label = stringResource(R.string.ui_panel_url),
                                 value = panel.url.ifBlank { "http://$panelHost:$panelPort$panelPath" },
                                 icon = Icons.Default.Language,
                                 iconColor = PanelColors.SuccessGreen,
@@ -2183,7 +2185,7 @@ private fun InstalledPanelDetailView(
                                 modifier = Modifier.weight(1f)
                             )
                             AccessField(
-                                label = "Username",
+                                label = stringResource(R.string.ui_username),
                                 value = panelUsername,
                                 icon = Icons.Default.Person,
                                 iconColor = PanelColors.CyanAccent,
@@ -2197,7 +2199,7 @@ private fun InstalledPanelDetailView(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             AccessField(
-                                label = "Password",
+                                label = stringResource(R.string.ui_password),
                                 value = if (passwordVisible) panelPassword else "••••••••",
                                 icon = Icons.Default.Lock,
                                 iconColor = Color(0xFFFFB300),
@@ -2208,7 +2210,7 @@ private fun InstalledPanelDetailView(
                                 modifier = Modifier.weight(1f)
                             )
                             AccessField(
-                                label = "Port",
+                                label = stringResource(R.string.ui_port),
                                 value = panelPort.toString(),
                                 icon = Icons.Default.Router,
                                 iconColor = PanelColors.CyanAccent,
@@ -2226,7 +2228,7 @@ private fun InstalledPanelDetailView(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             AccessField(
-                                label = "Path",
+                                label = stringResource(R.string.ui_path),
                                 value = panelPath,
                                 icon = Icons.Default.Description,
                                 iconColor = Color(0xFFA78BFA),
@@ -2234,7 +2236,7 @@ private fun InstalledPanelDetailView(
                                 modifier = Modifier.weight(1f)
                             )
                             AccessField(
-                                label = "Protocol",
+                                label = stringResource(R.string.ui_protocol),
                                 value = panelProtocol.uppercase(),
                                 icon = Icons.Default.Shield,
                                 iconColor = Color(0xFFC084FC),
@@ -2270,7 +2272,7 @@ private fun InstalledPanelDetailView(
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            text = "Open Panel",
+                                            text = stringResource(R.string.ui_open_panel_2),
                                             color = MaterialTheme.colorScheme.onSurface,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 13.sp
@@ -2319,7 +2321,7 @@ private fun InstalledPanelDetailView(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "Copy All",
+                                        text = stringResource(R.string.ui_copy_all),
                                         color = MaterialTheme.colorScheme.onSurface,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 13.sp
@@ -2352,7 +2354,7 @@ private fun InstalledPanelDetailView(
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = "Add to VPN",
+                                    text = stringResource(R.string.ui_add_to_vpn),
                                     color = PanelColors.SuccessGreen,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -2379,7 +2381,7 @@ private fun InstalledPanelDetailView(
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = if (panel.type == PanelType.BPB_WORKER) "FIX BPB" else "Quick Config",
+                                    text = if (panel.type == PanelType.BPB_WORKER) "FIX BPB" else stringResource(R.string.ui_quick_config),
                                     color = PanelColors.CyanAccent,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -2422,7 +2424,7 @@ private fun InstalledPanelDetailView(
                                 modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Remove from device", color = Color(0xFFFF5252), fontSize = 11.5.sp)
+                            Text(stringResource(R.string.ui_remove_from_device), color = Color(0xFFFF5252), fontSize = 11.5.sp)
                         }
                     }
                 }
@@ -2464,15 +2466,15 @@ private fun EmptyCleanIpCard(
             }
 
             Text(
-                text = if (isScanning) "Scanning Clean IPs..." else "No Clean IPs Scanned Yet",
+                text = if (isScanning) stringResource(R.string.ui_scanning_clean_ips) else stringResource(R.string.ui_no_clean_ips_scanned_yet),
                 color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp
             )
 
             Text(
-                text = if (isScanning) "Testing low-latency Cloudflare edges against your ISP route..."
-                    else "Iranian ISPs (MCI, Irancell, Rightel, TCI) throttle many Cloudflare ranges. Scan our curated clean IP subnets to find unthrottled endpoints.",
+                text = if (isScanning) stringResource(R.string.ui_testing_low_latency_cloudflare_edges)
+                    else stringResource(R.string.ui_iranian_isps_mci_irancell_rightel),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
@@ -2488,7 +2490,7 @@ private fun EmptyCleanIpCard(
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Start Clean IP Scan", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_start_clean_ip_scan), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

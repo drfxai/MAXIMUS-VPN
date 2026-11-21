@@ -1,5 +1,7 @@
 package com.example.ui.settings
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,16 +49,16 @@ fun LearnedNetworkPage(rows: List<LearnedNetworks.Row>, onClear: () -> Unit, onD
     var confirm by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(c.bg).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-            TitleBar(c, "Settings", "Smart Connect", Icons.AutoMirrored.Rounded.ArrowBack, onDismiss)
+            TitleBar(c, stringResource(R.string.ui_settings), stringResource(R.string.ui_smart_connect), Icons.AutoMirrored.Rounded.ArrowBack, onDismiss)
             Spacer(Modifier.height(10.dp))
             Panel(c) {
                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                    LabText("Learned network data", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
+                    LabText(stringResource(R.string.ui_learned_network_data), c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
                     LabText(LearnedNetworks.explanation, c.text2, 12.5.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 3, lineHeight = 17.sp)
                 }
                 if (rows.isEmpty()) {
                     Hairline(c)
-                    LabText("Nothing learned yet", c.text3, 13.sp, modifier = Modifier.padding(14.dp), maxLines = 1)
+                    LabText(stringResource(R.string.ui_nothing_learned_yet), c.text3, 13.sp, modifier = Modifier.padding(14.dp), maxLines = 1)
                 }
                 rows.forEach { r ->
                     Hairline(c)
@@ -67,19 +69,19 @@ fun LearnedNetworkPage(rows: List<LearnedNetworks.Row>, onClear: () -> Unit, onD
                     }
                 }
             }
-            SecondaryButton(c, "Clear learned network data", null, Modifier.padding(horizontal = Gutter).padding(top = 12.dp).fillMaxWidth(),
+            SecondaryButton(c, stringResource(R.string.ui_clear_learned_network_data), null, Modifier.padding(horizontal = Gutter).padding(top = 12.dp).fillMaxWidth(),
                 color = c.bad, onClick = { confirm = true })
             Footnote(c, LearnedNetworks.FOOTER)
         }
         if (confirm) {
             AlertDialog(
                 onDismissRequest = { confirm = false },
-                title = { Text("Clear learned network data?", color = c.text) },
+                title = { Text(stringResource(R.string.ui_clear_learned_network_data_2), color = c.text) },
                 text = { Text(LearnedNetworks.FOOTER, color = c.text2) },
                 confirmButton = {
-                    TextButton(onClick = { confirm = false; onClear() }) { Text("Clear", color = c.bad, fontWeight = FontWeight.SemiBold) }
+                    TextButton(onClick = { confirm = false; onClear() }) { Text(stringResource(R.string.ui_clear), color = c.bad, fontWeight = FontWeight.SemiBold) }
                 },
-                dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel", color = c.text2) } },
+                dismissButton = { TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.ui_cancel), color = c.text2) } },
                 containerColor = c.card
             )
         }

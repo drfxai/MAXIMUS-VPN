@@ -1,5 +1,7 @@
 package com.example.ui.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -165,7 +167,7 @@ fun ServerItemCard(
                         ) {
                             if (onEdit != null) {
                                 DropdownMenuItem(
-                                    text = { Text("Edit Configuration", color = AppTheme.colors.textPrimary) },
+                                    text = { Text(stringResource(R.string.ui_edit_configuration), color = AppTheme.colors.textPrimary) },
                                     leadingIcon = {
                                         Icon(Icons.Default.Edit, contentDescription = null, tint = AppTheme.colors.primary)
                                     },
@@ -177,7 +179,7 @@ fun ServerItemCard(
                                 )
                             }
                             DropdownMenuItem(
-                                text = { Text("Test Connectivity", color = AppTheme.colors.textPrimary) },
+                                text = { Text(stringResource(R.string.ui_test_connectivity), color = AppTheme.colors.textPrimary) },
                                 leadingIcon = {
                                     Icon(Icons.Default.NetworkPing, contentDescription = null, tint = AppTheme.colors.primary)
                                 },
@@ -187,7 +189,7 @@ fun ServerItemCard(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Duplicate Profile", color = AppTheme.colors.textPrimary) },
+                                text = { Text(stringResource(R.string.ui_duplicate_profile), color = AppTheme.colors.textPrimary) },
                                 leadingIcon = {
                                     Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AppTheme.colors.metricDownload)
                                 },
@@ -198,7 +200,7 @@ fun ServerItemCard(
                             )
                             if (onShareOffline != null) {
                                 DropdownMenuItem(
-                                    text = { Text("Share offline (QR)", color = AppTheme.colors.textPrimary) },
+                                    text = { Text(stringResource(R.string.ui_share_offline_qr), color = AppTheme.colors.textPrimary) },
                                     leadingIcon = {
                                         Icon(Icons.Default.QrCode2, contentDescription = null, tint = AppTheme.colors.primary)
                                     },
@@ -209,7 +211,7 @@ fun ServerItemCard(
                                 )
                             }
                             DropdownMenuItem(
-                                text = { Text("Copy VLESS Link", color = AppTheme.colors.textPrimary) },
+                                text = { Text(stringResource(R.string.ui_copy_vless_link), color = AppTheme.colors.textPrimary) },
                                 leadingIcon = {
                                     Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AppTheme.colors.primary)
                                 },
@@ -217,11 +219,11 @@ fun ServerItemCard(
                                     showMenu = false
                                     val uri = onExportUri(profile)
                                     clipboardManager.setText(AnnotatedString(uri))
-                                    Toast.makeText(context, "VLESS Link copied to clipboard", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, context.getString(R.string.ui_vless_link_copied_to_clipboard), Toast.LENGTH_SHORT).show()
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Delete Profile", color = AppTheme.colors.statusError) },
+                                text = { Text(stringResource(R.string.ui_delete_profile), color = AppTheme.colors.statusError) },
                                 leadingIcon = {
                                     Icon(Icons.Default.Delete, contentDescription = null, tint = AppTheme.colors.statusError)
                                 },
@@ -271,7 +273,7 @@ fun ServerItemCard(
                     // Security or Node Count Badge
                     if (profile.nodeCount > 1) {
                         BadgeChip(
-                            text = "${profile.nodeCount} NODES",
+                            text = stringResource(R.string.ui_nodes, profile.nodeCount),
                             color = AppTheme.colors.statusConnected
                         )
                     } else if (profile.security != "none" && profile.security.isNotBlank()) {
@@ -291,10 +293,10 @@ fun ServerItemCard(
                             color = AppTheme.colors.primary
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Testing...", color = AppTheme.colors.textMuted, fontSize = 11.sp)
+                        Text(stringResource(R.string.ui_testing_3), color = AppTheme.colors.textMuted, fontSize = 11.sp)
                     }
                 } else if (testingStatus is ServerTestStatus.Unavailable) {
-                    Text("Unavailable", color = AppTheme.colors.statusError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_unavailable), color = AppTheme.colors.statusError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 } else if (testingStatus is ServerTestStatus.Available) {
                     LatencyPill(latencyMs = testingStatus.latencyMs)
                 } else if (testingStatus is ServerTestStatus.Slow) {
@@ -309,8 +311,8 @@ fun ServerItemCard(
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete Server Profile", color = AppTheme.colors.textPrimary) },
-            text = { Text("Are you sure you want to remove '${profile.name}'? This action cannot be undone.", color = AppTheme.colors.textSecondary) },
+            title = { Text(stringResource(R.string.ui_delete_server_profile), color = AppTheme.colors.textPrimary) },
+            text = { Text(stringResource(R.string.ui_are_you_sure_you_want, profile.name), color = AppTheme.colors.textSecondary) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -318,12 +320,12 @@ fun ServerItemCard(
                         onDelete()
                     }
                 ) {
-                    Text("Delete", color = AppTheme.colors.statusError, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_delete), color = AppTheme.colors.statusError, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel", color = AppTheme.colors.textSecondary)
+                    Text(stringResource(R.string.ui_cancel), color = AppTheme.colors.textSecondary)
                 }
             },
             containerColor = AppTheme.colors.surfaceCard

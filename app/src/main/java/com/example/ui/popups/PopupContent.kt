@@ -1,5 +1,7 @@
 package com.example.ui.popups
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -241,15 +243,15 @@ fun CommunityPopupContent(
             Spacer(Modifier.height(6.dp))
             GoldWordmark(20.sp)
             Spacer(Modifier.height(10.dp))
-            Text("Premium Speed.", color = Lux.text, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, lineHeight = 34.sp)
+            Text(stringResource(R.string.ui_premium_speed), color = Lux.text, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, lineHeight = 34.sp)
             Text(
-                "Elite Security.",
+                stringResource(R.string.ui_elite_security),
                 modifier = Modifier.brushed(Brush.horizontalGradient(listOf(Color(0xFFC9B6FF), Lux.violet, Lux.blue))),
                 color = Lux.violet, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, lineHeight = 34.sp
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "Stay connected with the official Maximus VPN channels for secure updates, news, and releases.",
+                stringResource(R.string.ui_stay_connected_with_the_official),
                 color = Lux.textSoft, fontSize = 14.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(18.dp))
@@ -268,7 +270,7 @@ fun CommunityPopupContent(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "Don't show again",
+                stringResource(R.string.ui_don_t_show_again),
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onDontShowAgain).padding(horizontal = 12.dp, vertical = 8.dp),
                 color = Lux.textSoft, fontSize = 13.sp, fontWeight = FontWeight.Medium
             )
@@ -299,14 +301,14 @@ fun UpdatePopupContent(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    "New Update Available",
+                    stringResource(R.string.ui_new_update_available),
                     modifier = Modifier.brushed(goldText),
                     fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                     fontSize = 24.sp, color = Lux.gold, textAlign = TextAlign.Center, maxLines = 1, softWrap = false
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "A new Maximus VPN version is now ready on GitHub.",
+                    stringResource(R.string.ui_a_new_maximus_vpn_version),
                     color = Lux.textSoft, fontSize = 15.sp, lineHeight = 21.sp, textAlign = TextAlign.Center
                 )
                 Spacer(Modifier.height(14.dp))
@@ -320,7 +322,7 @@ fun UpdatePopupContent(
                 ) {
                     Icon(Icons.Filled.Settings, contentDescription = null, tint = Lux.gold, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Version $version", color = Lux.goldLight, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.ui_version, version), color = Lux.goldLight, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -339,7 +341,7 @@ fun UpdatePopupContent(
                             .border(1.dp, Color(0x55B9B6D3), laterShape)
                             .clickable(role = Role.Button, onClick = onLater),
                         contentAlignment = Alignment.Center
-                    ) { Text("Later", color = Lux.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+                    ) { Text(stringResource(R.string.ui_later), color = Lux.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
                     PrimaryButton(
                         "Download", onDownload, Modifier.weight(1.35f),
                         leading = {

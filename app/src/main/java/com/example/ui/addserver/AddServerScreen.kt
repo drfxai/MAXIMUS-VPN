@@ -1,5 +1,7 @@
 package com.example.ui.addserver
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -137,7 +139,7 @@ fun AddServerScreen(
             }
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Add VLESS Server",
+                text = stringResource(R.string.ui_add_vless_server),
                 color = AppTheme.colors.textPrimary,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold
@@ -167,7 +169,7 @@ fun AddServerScreen(
                 onClick = { selectedTabIndex = 0 },
                 text = {
                     Text(
-                        "Quick Import / URL",
+                        stringResource(R.string.ui_quick_import_url),
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
                         color = if (selectedTabIndex == 0) AppTheme.colors.primary else AppTheme.colors.textSecondary
@@ -179,7 +181,7 @@ fun AddServerScreen(
                 onClick = { selectedTabIndex = 1 },
                 text = {
                     Text(
-                        "Advanced Configuration",
+                        stringResource(R.string.ui_advanced_configuration),
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
                         color = if (selectedTabIndex == 1) AppTheme.colors.primary else AppTheme.colors.textSecondary
@@ -194,7 +196,7 @@ fun AddServerScreen(
         if (selectedTabIndex == 0) {
             // --- UNIVERSAL IMPORT / URL MODE ---
             Text(
-                text = "PASTE CONFIGURATION OR SUBSCRIPTION LINK",
+                text = stringResource(R.string.ui_paste_configuration_or_subscription_link),
                 color = AppTheme.colors.textMuted,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -274,7 +276,7 @@ fun AddServerScreen(
                                 parseError = e.localizedMessage ?: "Invalid configuration"
                             }
                         } else {
-                            Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.ui_clipboard_is_empty), Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier
@@ -292,7 +294,7 @@ fun AddServerScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Paste",
+                        text = stringResource(R.string.ui_paste),
                         color = AppTheme.colors.primary,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -318,7 +320,7 @@ fun AddServerScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Batch / QR",
+                        text = stringResource(R.string.ui_batch_qr),
                         color = AppTheme.colors.metricDownload,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -346,7 +348,7 @@ fun AddServerScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Scan from another phone",
+                    text = stringResource(R.string.ui_scan_from_another_phone),
                     color = AppTheme.colors.primary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -367,7 +369,7 @@ fun AddServerScreen(
                             when (res) {
                                 is AppResult.Success -> {
                                     val count = res.data
-                                    Toast.makeText(context, "Successfully downloaded & imported $count nodes!", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, context.getString(R.string.ui_successfully_downloaded_imported_nodes, count), Toast.LENGTH_LONG).show()
                                     onNavigateBack()
                                 }
                                 is AppResult.Error -> {
@@ -382,7 +384,7 @@ fun AddServerScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text(if (downloadingSubscription) "Downloading…" else "Download & Import Subscription", color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(if (downloadingSubscription) stringResource(R.string.ui_downloading) else stringResource(R.string.ui_download_import_subscription), color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
 
@@ -420,19 +422,19 @@ fun AddServerScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Check, contentDescription = null, tint = AppTheme.colors.statusConnected, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Valid ${p.engineType.displayName} (${p.protocolType.displayName}) Configuration", color = AppTheme.colors.statusConnected, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.ui_valid_configuration, p.engineType.displayName, p.protocolType.displayName), color = AppTheme.colors.statusConnected, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        PreviewRow("Server / Group Name", p.name)
-                        PreviewRow("Engine", p.engineType.displayName)
-                        PreviewRow("Protocol", p.protocolType.displayName)
-                        PreviewRow("Address:Port", "${p.address}:${p.port}")
-                        PreviewRow("Transport", p.transport.uppercase())
-                        PreviewRow("Security", p.securityBadge)
-                        if (p.nodeCount > 1) PreviewRow("Parsed Nodes", "${p.nodeCount} Proxies")
-                        if (p.uuid.isNotBlank()) PreviewRow("Credentials", SecretRedactor.maskUuid(p.uuid))
+                        PreviewRow(stringResource(R.string.ui_server_group_name), p.name)
+                        PreviewRow(stringResource(R.string.ui_engine), p.engineType.displayName)
+                        PreviewRow(stringResource(R.string.ui_protocol), p.protocolType.displayName)
+                        PreviewRow(stringResource(R.string.ui_address_port), "${p.address}:${p.port}")
+                        PreviewRow(stringResource(R.string.ui_transport), p.transport.uppercase())
+                        PreviewRow(stringResource(R.string.ui_security), p.securityBadge)
+                        if (p.nodeCount > 1) PreviewRow(stringResource(R.string.ui_parsed_nodes), "${p.nodeCount} Proxies")
+                        if (p.uuid.isNotBlank()) PreviewRow(stringResource(R.string.ui_credentials), SecretRedactor.maskUuid(p.uuid))
                         if (p.sni.isNotBlank()) PreviewRow("SNI", p.sni)
-                        if (p.publicKey.isNotBlank()) PreviewRow("Public Key", "${p.publicKey.take(8)}...")
+                        if (p.publicKey.isNotBlank()) PreviewRow(stringResource(R.string.ui_public_key), "${p.publicKey.take(8)}...")
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
@@ -440,26 +442,26 @@ fun AddServerScreen(
 
         } else {
             // --- ADVANCED MODE ---
-            Text("SERVER BASICS", color = AppTheme.colors.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text(stringResource(R.string.ui_server_basics), color = AppTheme.colors.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Spacer(modifier = Modifier.height(8.dp))
 
-            OutlinedCustomField("Server Name", advName) { advName = it }
+            OutlinedCustomField(stringResource(R.string.ui_server_name), advName) { advName = it }
             Spacer(modifier = Modifier.height(8.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(modifier = Modifier.weight(2.5f)) {
-                    OutlinedCustomField("Host / Address", advAddress) { advAddress = it }
+                    OutlinedCustomField(stringResource(R.string.ui_host_address), advAddress) { advAddress = it }
                 }
                 Box(modifier = Modifier.weight(1f)) {
-                    OutlinedCustomField("Port", advPort) { advPort = it }
+                    OutlinedCustomField(stringResource(R.string.ui_port), advPort) { advPort = it }
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
 
-            OutlinedCustomField("UUID (User ID)", advUuid) { advUuid = it }
+            OutlinedCustomField(stringResource(R.string.ui_uuid_user_id), advUuid) { advUuid = it }
             Spacer(modifier = Modifier.height(14.dp))
 
-            Text("PROTOCOL & SECURITY", color = AppTheme.colors.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text(stringResource(R.string.ui_protocol_security), color = AppTheme.colors.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Spacer(modifier = Modifier.height(8.dp))
 
             // Transport Selector
@@ -471,7 +473,7 @@ fun AddServerScreen(
                     value = advTransport.uppercase(),
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("Transport", color = AppTheme.colors.textSecondary) },
+                    label = { Text(stringResource(R.string.ui_transport), color = AppTheme.colors.textSecondary) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = transportExpanded) },
                     colors = customTextFieldColors(),
                     shape = RoundedCornerShape(12.dp),
@@ -507,7 +509,7 @@ fun AddServerScreen(
                     value = advSecurity.uppercase(),
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("Security Layer", color = AppTheme.colors.textSecondary) },
+                    label = { Text(stringResource(R.string.ui_security_layer), color = AppTheme.colors.textSecondary) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = securityExpanded) },
                     colors = customTextFieldColors(),
                     shape = RoundedCornerShape(12.dp),
@@ -534,37 +536,37 @@ fun AddServerScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            OutlinedCustomField("SNI / Server Name", advSni) { advSni = it }
+            OutlinedCustomField(stringResource(R.string.ui_sni_server_name), advSni) { advSni = it }
             Spacer(modifier = Modifier.height(8.dp))
 
             if (advSecurity == "reality") {
-                OutlinedCustomField("Public Key (pbk)", advPublicKey) { advPublicKey = it }
+                OutlinedCustomField(stringResource(R.string.ui_public_key_pbk), advPublicKey) { advPublicKey = it }
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedCustomField("Short ID (sid)", advShortId) { advShortId = it }
+                OutlinedCustomField(stringResource(R.string.ui_short_id_sid), advShortId) { advShortId = it }
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedCustomField("SpiderX (spx)", advSpiderX) { advSpiderX = it }
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
             if (advTransport == "ws" || advTransport == "http") {
-                OutlinedCustomField("Host Header", advHost) { advHost = it }
+                OutlinedCustomField(stringResource(R.string.ui_host_header), advHost) { advHost = it }
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedCustomField("Path", advPath) { advPath = it }
+                OutlinedCustomField(stringResource(R.string.ui_path), advPath) { advPath = it }
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
             if (advTransport == "grpc") {
-                OutlinedCustomField("Service Name", advServiceName) { advServiceName = it }
+                OutlinedCustomField(stringResource(R.string.ui_service_name), advServiceName) { advServiceName = it }
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            OutlinedCustomField("Flow (e.g. xtls-rprx-vision)", advFlow) { advFlow = it }
+            OutlinedCustomField(stringResource(R.string.ui_flow_e_g_xtls_rprx), advFlow) { advFlow = it }
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedCustomField("Fingerprint (e.g. chrome, firefox)", advFingerprint) { advFingerprint = it }
+            OutlinedCustomField(stringResource(R.string.ui_fingerprint_e_g_chrome_firefox), advFingerprint) { advFingerprint = it }
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedCustomField("Cipher Suites (optional colon/comma separated)", advCipherSuites) { advCipherSuites = it }
+            OutlinedCustomField(stringResource(R.string.ui_cipher_suites_optional_colon_comma), advCipherSuites) { advCipherSuites = it }
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedCustomField("Multi-Domain Fake SNI Pool (comma separated)", advFakeSniPool) { advFakeSniPool = it }
+            OutlinedCustomField(stringResource(R.string.ui_multi_domain_fake_sni_pool), advFakeSniPool) { advFakeSniPool = it }
             Spacer(modifier = Modifier.height(16.dp))
         }
 
@@ -620,7 +622,7 @@ fun AddServerScreen(
                             isTestingConnection = false
                         }
                     } else {
-                        Toast.makeText(context, "Please enter valid server parameters first", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_please_enter_valid_server_parameters), Toast.LENGTH_SHORT).show()
                     }
                 },
                 enabled = !isTestingConnection,
@@ -633,7 +635,7 @@ fun AddServerScreen(
                 } else {
                     Icon(Icons.Default.NetworkPing, contentDescription = null, tint = AppTheme.colors.primary, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Test Ping", color = AppTheme.colors.primary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(stringResource(R.string.ui_test_ping), color = AppTheme.colors.primary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
 
@@ -654,14 +656,14 @@ fun AddServerScreen(
                     if (profileToSave != null) {
                         val addResult = serverViewModel.addServer(profileToSave)
                         if (addResult.isSuccess) {
-                            Toast.makeText(context, "Server '${profileToSave.name}' saved!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.ui_server_saved, profileToSave.name), Toast.LENGTH_SHORT).show()
                             onNavigateBack()
                         } else {
                             val err = addResult as AppResult.Error
                             Toast.makeText(context, err.userFriendlyMessage, Toast.LENGTH_LONG).show()
                         }
                     } else {
-                        Toast.makeText(context, "Please fill required fields (Address, Port, UUID)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_please_fill_required_fields_address), Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = Modifier.weight(1f).testTag("save_server_button"),
@@ -670,7 +672,7 @@ fun AddServerScreen(
             ) {
                 Icon(Icons.Default.Check, contentDescription = null, tint = AppTheme.colors.onPrimary, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Save Server", color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text(stringResource(R.string.ui_save_server), color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
 
@@ -683,7 +685,7 @@ fun AddServerScreen(
             onImportSuccess = { parsedProfile ->
                 showImportDialog = false
                 serverViewModel.addServer(parsedProfile)
-                Toast.makeText(context, "Imported '${parsedProfile.name}'", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.ui_imported, parsedProfile.name), Toast.LENGTH_SHORT).show()
                 onNavigateBack()
             },
             onBatchImport = { rawBatchText ->
@@ -691,7 +693,7 @@ fun AddServerScreen(
                 val batchRes = serverViewModel.importBatch(rawBatchText)
                 Toast.makeText(
                     context,
-                    "Imported ${batchRes.successfulProfiles.size} servers (${batchRes.failedEntries.size} failed)",
+                    context.getString(R.string.ui_imported_servers_failed, batchRes.successfulProfiles.size, batchRes.failedEntries.size),
                     Toast.LENGTH_LONG
                 ).show()
                 onNavigateBack()

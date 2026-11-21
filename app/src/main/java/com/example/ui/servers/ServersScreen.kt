@@ -1,5 +1,7 @@
 package com.example.ui.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -141,13 +143,13 @@ fun ServersScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Proxy Nodes",
+                        text = stringResource(R.string.ui_proxy_nodes),
                         color = AppTheme.colors.textPrimary,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "${serverList.size} universal nodes configured",
+                        text = stringResource(R.string.ui_universal_nodes_configured, serverList.size),
                         color = AppTheme.colors.textSecondary,
                         fontSize = 12.sp
                     )
@@ -173,7 +175,7 @@ fun ServersScreen(
                 item {
                     HubChip(
                         icon = Icons.Default.Hub,
-                        title = "Protocols",
+                        title = stringResource(R.string.ui_protocols),
                         onClick = onNavigateToProtocols
                     )
                 }
@@ -181,28 +183,28 @@ fun ServersScreen(
                 if (freeConfigsEnabled) item {
                     HubChip(
                         icon = Icons.Default.CloudDownload,
-                        title = "Free Configs",
+                        title = stringResource(R.string.ui_free_configs),
                         onClick = onNavigateToFreeConfigs
                     )
                 }
                 item {
                     HubChip(
                         icon = Icons.Default.FileDownload,
-                        title = "Universal Import",
+                        title = stringResource(R.string.ui_universal_import),
                         onClick = onNavigateToImport
                     )
                 }
                 item {
                     HubChip(
                         icon = Icons.Default.RssFeed,
-                        title = "Subscriptions",
+                        title = stringResource(R.string.ui_subscriptions),
                         onClick = onNavigateToSubscriptions
                     )
                 }
                 item {
                     HubChip(
                         icon = Icons.Default.Speed,
-                        title = "Benchmark Lab",
+                        title = stringResource(R.string.ui_benchmark_lab),
                         onClick = onNavigateToBenchmark
                     )
                 }
@@ -236,7 +238,7 @@ fun ServersScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "ALL NODES · ${serverList.size}",
+                    text = stringResource(R.string.ui_all_nodes, serverList.size),
                     color = AppTheme.colors.textMuted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -263,7 +265,7 @@ fun ServersScreen(
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Delete Free", color = AppTheme.colors.statusError, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.ui_delete_free), color = AppTheme.colors.statusError, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -284,7 +286,7 @@ fun ServersScreen(
                             color = AppTheme.colors.primary
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Stop · ${testAllProgress.first}/${testAllProgress.second}", color = AppTheme.colors.primary, fontSize = 12.sp)
+                        Text(stringResource(R.string.ui_stop_2, testAllProgress.first, testAllProgress.second), color = AppTheme.colors.primary, fontSize = 12.sp)
                     } else {
                         Icon(
                             imageVector = Icons.Default.NetworkPing,
@@ -293,7 +295,7 @@ fun ServersScreen(
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Ping All", color = AppTheme.colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.ui_ping_all), color = AppTheme.colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 }
@@ -308,7 +310,7 @@ fun ServersScreen(
                 ) {
                     Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = AppTheme.colors.statusWarning, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Remove ${unreachable.size} unreachable", color = AppTheme.colors.statusWarning, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_remove_unreachable, unreachable.size), color = AppTheme.colors.statusWarning, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -318,7 +320,7 @@ fun ServersScreen(
                     onDismissRequest = { confirmRemoveDead = false },
                     containerColor = AppTheme.colors.surfaceElevated,
                     icon = { Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = AppTheme.colors.statusWarning) },
-                    title = { Text("Remove ${unreachable.size} unreachable nodes?", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold) },
+                    title = { Text(stringResource(R.string.ui_remove_unreachable_nodes, unreachable.size), color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold) },
                     text = {
                         Text(
                             "These subscription or free nodes carried no real request on this network in the last Ping All. " +
@@ -331,15 +333,15 @@ fun ServersScreen(
                             onClick = {
                                 confirmRemoveDead = false
                                 serverViewModel.removeUnreachable { n ->
-                                    android.widget.Toast.makeText(context, "Removed $n unreachable nodes", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.ui_removed_unreachable_nodes, n), android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.statusWarning),
                             modifier = Modifier.testTag("remove_unreachable_confirm")
-                        ) { Text("Remove", color = Color.Black, fontWeight = FontWeight.Bold) }
+                        ) { Text(stringResource(R.string.ui_remove), color = Color.Black, fontWeight = FontWeight.Bold) }
                     },
                     dismissButton = {
-                        TextButton(onClick = { confirmRemoveDead = false }) { Text("Cancel", color = AppTheme.colors.primary) }
+                        TextButton(onClick = { confirmRemoveDead = false }) { Text(stringResource(R.string.ui_cancel), color = AppTheme.colors.primary) }
                     }
                 )
             }
@@ -350,10 +352,10 @@ fun ServersScreen(
                     onDismissRequest = { confirmDeleteFree = false },
                     containerColor = AppTheme.colors.surfaceElevated,
                     icon = { Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = AppTheme.colors.statusError) },
-                    title = { Text("Delete all free configurations?", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold) },
+                    title = { Text(stringResource(R.string.ui_delete_all_free_configurations), color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold) },
                     text = {
                         Text(
-                            "This will remove all downloaded free configurations. VIP and manually imported configurations will not be affected.",
+                            stringResource(R.string.ui_this_will_remove_all_downloaded),
                             color = AppTheme.colors.textSecondary
                         )
                     },
@@ -362,15 +364,15 @@ fun ServersScreen(
                             onClick = {
                                 confirmDeleteFree = false
                                 serverViewModel.deleteAllFree { n ->
-                                    android.widget.Toast.makeText(context, "Deleted $n free configurations", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.ui_deleted_free_configurations, n), android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.statusError),
                             modifier = Modifier.testTag("delete_free_confirm")
-                        ) { Text("Delete All", color = Color.Black, fontWeight = FontWeight.Bold) }
+                        ) { Text(stringResource(R.string.ui_delete_all), color = Color.Black, fontWeight = FontWeight.Bold) }
                     },
                     dismissButton = {
-                        TextButton(onClick = { confirmDeleteFree = false }) { Text("Cancel", color = AppTheme.colors.primary) }
+                        TextButton(onClick = { confirmDeleteFree = false }) { Text(stringResource(R.string.ui_cancel), color = AppTheme.colors.primary) }
                     }
                 )
             }
@@ -412,7 +414,7 @@ fun ServersScreen(
                             Box(modifier = Modifier.weight(1f)) {
                                 if (searchQuery.isEmpty()) {
                                     Text(
-                                        "Search nodes, host, protocol",
+                                        stringResource(R.string.ui_search_nodes_host_protocol),
                                         color = AppTheme.colors.textMuted,
                                         fontSize = 13.sp,
                                         maxLines = 1,
@@ -496,42 +498,42 @@ fun ServersScreen(
                             .border(1.dp, AppTheme.colors.borderSubtle)
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Default Order", color = AppTheme.colors.textPrimary) },
+                            text = { Text(stringResource(R.string.ui_default_order), color = AppTheme.colors.textPrimary) },
                             onClick = {
                                 serverViewModel.setSortOption(ServerSortOption.DEFAULT)
                                 showSortMenu = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Highest Overall Score", color = AppTheme.colors.textPrimary) },
+                            text = { Text(stringResource(R.string.ui_highest_overall_score), color = AppTheme.colors.textPrimary) },
                             onClick = {
                                 serverViewModel.setSortOption(ServerSortOption.SCORE)
                                 showSortMenu = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Lowest Latency / Ping", color = AppTheme.colors.textPrimary) },
+                            text = { Text(stringResource(R.string.ui_lowest_latency_ping), color = AppTheme.colors.textPrimary) },
                             onClick = {
                                 serverViewModel.setSortOption(ServerSortOption.LATENCY)
                                 showSortMenu = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Highest Download Speed", color = AppTheme.colors.textPrimary) },
+                            text = { Text(stringResource(R.string.ui_highest_download_speed), color = AppTheme.colors.textPrimary) },
                             onClick = {
                                 serverViewModel.setSortOption(ServerSortOption.DOWNLOAD_SPEED)
                                 showSortMenu = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Highest Stability", color = AppTheme.colors.textPrimary) },
+                            text = { Text(stringResource(R.string.ui_highest_stability), color = AppTheme.colors.textPrimary) },
                             onClick = {
                                 serverViewModel.setSortOption(ServerSortOption.STABILITY)
                                 showSortMenu = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Alphabetical by Name", color = AppTheme.colors.textPrimary) },
+                            text = { Text(stringResource(R.string.ui_alphabetical_by_name), color = AppTheme.colors.textPrimary) },
                             onClick = {
                                 serverViewModel.setSortOption(ServerSortOption.NAME)
                                 showSortMenu = false
@@ -560,14 +562,14 @@ fun ServersScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = if (searchQuery.isNotBlank() || onlyFavorites) "No matching nodes found" else "No proxy nodes configured",
+                            text = if (searchQuery.isNotBlank() || onlyFavorites) stringResource(R.string.ui_no_matching_nodes_found) else stringResource(R.string.ui_no_proxy_nodes_configured),
                             color = AppTheme.colors.textPrimary,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Tap 'Universal Import' or '+' to add proxy configurations",
+                            text = stringResource(R.string.ui_tap_universal_import_or_to),
                             color = AppTheme.colors.textSecondary,
                             fontSize = 12.sp
                         )
@@ -646,7 +648,7 @@ fun ServersScreen(
             allProfiles = allProfiles,
             onCopy = { text ->
                 clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
-                android.widget.Toast.makeText(context, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(context, context.getString(R.string.ui_copied), android.widget.Toast.LENGTH_SHORT).show()
             },
             onDismiss = { shareProfile = null }
         )

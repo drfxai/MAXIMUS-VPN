@@ -1,5 +1,7 @@
 package com.example.ui.home
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
@@ -66,7 +68,7 @@ fun LeakProtectionCard(connected: Boolean, modifier: Modifier = Modifier) {
                     .background(Brush.linearGradient(listOf(colors.primaryDark, colors.primary))), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Shield, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(18.dp))
                 }
-                Text("Close the last leak", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                Text(stringResource(R.string.ui_close_the_last_leak), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
             }
             Text(LeakProtectionAdvice.message(lockdown), fontSize = 12.sp, color = colors.textSecondary, lineHeight = 17.sp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -74,10 +76,10 @@ fun LeakProtectionCard(connected: Boolean, modifier: Modifier = Modifier) {
                     val until = System.currentTimeMillis() + LeakProtectionAdvice.SNOOZE_MS
                     prefs(context).edit().putLong("snoozed_until", until).apply()
                     snoozedUntil = until
-                }) { Text("Not now", color = colors.textMuted, fontSize = 12.sp) }
+                }) { Text(stringResource(R.string.ui_not_now), color = colors.textMuted, fontSize = 12.sp) }
                 TextButton(onClick = {
                     runCatching { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                }) { Text("Open VPN settings", color = colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                }) { Text(stringResource(R.string.ui_open_vpn_settings), color = colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             }
         }
     }

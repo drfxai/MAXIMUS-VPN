@@ -1,5 +1,7 @@
 package com.example.ui.share
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.VpnService
@@ -126,7 +128,7 @@ fun ScanShareScreen(onBack: () -> Unit, onConnected: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Color(0xFF15171C))) {
         if (granted) CameraPreview(onCode = { text -> onCode(text) })
         else Text(
-            "Allow the camera to scan a code from the other phone.",
+            stringResource(R.string.ui_allow_the_camera_to_scan),
             color = Color.White, fontSize = 15.sp, fontFamily = InterFamily,
             modifier = Modifier.align(Alignment.Center).padding(32.dp).clickable { askCamera.launch(Manifest.permission.CAMERA) }
         )
@@ -134,7 +136,7 @@ fun ScanShareScreen(onBack: () -> Unit, onConnected: () -> Unit) {
 
         Row(Modifier.statusBarsPadding().padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White) }
-            Text("Scan from another phone", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = InterFamily)
+            Text(stringResource(R.string.ui_scan_from_another_phone), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = InterFamily)
         }
 
         Column(
@@ -163,10 +165,10 @@ fun ScanShareScreen(onBack: () -> Unit, onConnected: () -> Unit) {
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(r.profile.name, color = c.text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontFamily = InterFamily)
-                            Text(if (r.isNew) "Added · ${kindLabel(r.profile)}" else "Already saved", color = c.text2, fontSize = 12.5.sp, fontFamily = InterFamily)
+                            Text(if (r.isNew) stringResource(R.string.ui_added, kindLabel(r.profile)) else stringResource(R.string.ui_already_saved), color = c.text2, fontSize = 12.5.sp, fontFamily = InterFamily)
                         }
                         Text(
-                            if (r.isNew) "New" else "Saved", fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = InterFamily,
+                            if (r.isNew) stringResource(R.string.ui_new) else stringResource(R.string.ui_saved), fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = InterFamily,
                             color = if (r.isNew) c.good else c.text2,
                             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(if (r.isNew) c.good.copy(alpha = 0.14f) else c.cardAlt)
                                 .padding(horizontal = 9.dp, vertical = 4.dp)
@@ -199,7 +201,7 @@ fun ScanShareScreen(onBack: () -> Unit, onConnected: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    if (first == null) "Close" else "Done · connect",
+                    if (first == null) stringResource(R.string.ui_close) else stringResource(R.string.ui_done_connect),
                     color = c.onAccent, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, fontFamily = InterFamily
                 )
             }

@@ -1,5 +1,6 @@
 package com.example.ui.home
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -119,7 +120,7 @@ fun LandingTourDialog(
                                 color = AppTheme.colors.textPrimary
                             )
                             Text(
-                                text = "Architecture & Security Model",
+                                text = stringResource(R.string.ui_architecture_security_model),
                                 fontSize = 11.sp,
                                 color = AppTheme.colors.primary,
                                 fontWeight = FontWeight.SemiBold
@@ -154,7 +155,7 @@ fun LandingTourDialog(
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
-                            text = "BUILT FOR THE ADVERSARIAL INTERNET",
+                            text = stringResource(R.string.ui_built_for_the_adversarial_internet),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = AppTheme.colors.primary,
@@ -162,7 +163,7 @@ fun LandingTourDialog(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Maximus VPN replaces legacy VPN protocols that are easily blocked by state-level Deep Packet Inspection (DPI) with modern camouflage protocols designed for unblockable access.",
+                            text = stringResource(R.string.ui_maximus_vpn_replaces_legacy_vpn),
                             fontSize = 12.sp,
                             color = AppTheme.colors.textPrimary,
                             lineHeight = 17.sp
@@ -173,7 +174,7 @@ fun LandingTourDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Core Technology Pillars",
+                    text = stringResource(R.string.ui_core_technology_pillars),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = AppTheme.colors.textPrimary
@@ -185,31 +186,31 @@ fun LandingTourDialog(
                 PillarRow(
                     icon = Icons.Default.Lock,
                     title = "VLESS Reality XTLS",
-                    desc = "Eliminates TLS certificate fingerprints by borrowing public TLS certificates from legitimate destinations (e.g., Apple, Microsoft), rendering packets indistinguishable from ordinary web browsing.",
+                    desc = stringResource(R.string.ui_eliminates_tls_certificate_fingerprints),
                     color = Color(0xFF00E5FF)
                 )
 
                 // Pillar 2: 4-Tier God Mode Cascade
                 PillarRow(
                     icon = Icons.Default.Shield,
-                    title = "Quad-Tier Failover Cascade",
-                    desc = "When a route is cut, the tunnel tries your other servers with real requests, disguised forms first, and keeps traffic blocked until one works.",
+                    title = stringResource(R.string.ui_quad_tier_failover_cascade),
+                    desc = stringResource(R.string.ui_when_a_route_is_cut),
                     color = Color(0xFFFF5252)
                 )
 
                 // Pillar 3: Anti-DPI Desync Engine
                 PillarRow(
                     icon = Icons.Default.Speed,
-                    title = "TCP Window & SNI Desync",
-                    desc = "Splits HTTP/TLS client handshakes across fragment boundaries to confuse middleboxes and state firewalls without sacrificing connection speed.",
+                    title = stringResource(R.string.ui_tcp_window_sni_desync),
+                    desc = stringResource(R.string.ui_splits_http_tls_client_handshakes),
                     color = Color(0xFFB388FF)
                 )
 
                 // Pillar 4: Zero-Knowledge Privacy
                 PillarRow(
                     icon = Icons.Default.Security,
-                    title = "Zero Logs & DNS Shield",
-                    desc = "DNS-over-HTTPS (DoH) sent through the tunnel; the external leak test is shown as not tested until it is run. Ephemeral chat and browser histories reside exclusively in transient memory.",
+                    title = stringResource(R.string.ui_zero_logs_dns_shield),
+                    desc = stringResource(R.string.ui_dns_over_https_doh_sent),
                     color = Color(0xFF00E676)
                 )
 
@@ -224,7 +225,7 @@ fun LandingTourDialog(
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
-                            text = "COMPARISON: TRADITIONAL VS MAXIMUS",
+                            text = stringResource(R.string.ui_comparison_traditional_vs_maximus),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = AppTheme.colors.textMuted,
@@ -266,7 +267,7 @@ fun LandingTourDialog(
                 ) {
                     Icon(imageVector = Icons.Default.Public, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Select a Node & Connect", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(stringResource(R.string.ui_select_a_node_connect), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         }

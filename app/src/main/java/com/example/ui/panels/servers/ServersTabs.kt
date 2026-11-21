@@ -1,5 +1,7 @@
 package com.example.ui.panels.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -69,9 +71,9 @@ internal fun MyServersTab(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val online = rows.count { it.health == Health.ONLINE }
         PageHeader(
-            "Servers",
-            if (rows.isEmpty()) "Your own servers, in Iran and abroad"
-            else "$online of ${rows.size} online · ${rows.sumOf { it.tools.size }} tools installed"
+            stringResource(R.string.ui_servers_2),
+            if (rows.isEmpty()) stringResource(R.string.ui_your_own_servers_in_iran)
+            else stringResource(R.string.ui_of_online_tools_installed, online, rows.size, rows.sumOf { it.tools.size })
         ) {
             if (rows.isNotEmpty()) PrimaryButton("Add", onAdd, icon = Icons.Rounded.Add, compact = true)
         }
@@ -86,8 +88,8 @@ internal fun MyServersTab(
             GroupCard {
                 if (group.isEmpty()) {
                     ListRow(
-                        if (location == ServerLocation.IRAN) "No server in Iran" else "No server abroad",
-                        subtitle = if (location == ServerLocation.IRAN) "The inside end of Maximus Tunnel" else "Where your traffic leaves",
+                        if (location == ServerLocation.IRAN) stringResource(R.string.ui_no_server_in_iran) else stringResource(R.string.ui_no_server_abroad),
+                        subtitle = if (location == ServerLocation.IRAN) stringResource(R.string.ui_the_inside_end_of_maximus) else stringResource(R.string.ui_where_your_traffic_leaves),
                         leading = { FlagIcon(location, height = 14.dp) },
                         trailing = { TextAction("Add", onAdd) }
                     )
@@ -163,7 +165,7 @@ private fun EmptyServers(onAdd: () -> Unit, onInstallCenter: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             LinkedFlags()
             Spacer(Modifier.height(2.dp))
-            Text("Add your first server", color = Sv.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.ui_add_your_first_server), color = Sv.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 "Servers in Iran show the Iranian flag, servers abroad the German flag. " +
                     "Enter a server once; tools then install from the Install tab.",
@@ -171,7 +173,7 @@ private fun EmptyServers(onAdd: () -> Unit, onInstallCenter: () -> Unit) {
             )
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                GhostButton("Browse tools", onInstallCenter, compact = true)
+                GhostButton(stringResource(R.string.ui_browse_tools), onInstallCenter, compact = true)
                 PrimaryButton("Add server", onAdd, icon = Icons.Rounded.Add, compact = true)
             }
         }
@@ -194,10 +196,10 @@ private fun LinkedFlags() {
 @Composable
 private fun TunnelRow(tunnels: Int, onClick: () -> Unit) {
     ListRow(
-        if (tunnels == 0) "Link Iran and abroad" else if (tunnels == 1) "1 tunnel" else "$tunnels tunnels",
-        subtitle = if (tunnels == 0) "Phone → Iran server → server abroad, switching paths by itself" else "Open the Tunnel tab for paths and ports",
+        if (tunnels == 0) stringResource(R.string.ui_link_iran_and_abroad) else if (tunnels == 1) stringResource(R.string.ui_t_1_tunnel) else "$tunnels tunnels",
+        subtitle = if (tunnels == 0) stringResource(R.string.ui_phone_iran_server_server_abroad) else stringResource(R.string.ui_open_the_tunnel_tab_for),
         leading = { IconTile(Icons.Rounded.SyncAlt, accent = tunnels == 0) },
-        trailing = { if (tunnels == 0) Badge("New", Tone.ACCENT) else Chevron() },
+        trailing = { if (tunnels == 0) Badge(stringResource(R.string.ui_new), Tone.ACCENT) else Chevron() },
         onClick = onClick
     )
 }
@@ -229,7 +231,7 @@ internal fun InstallCenterTab(
     onPsiphonServer: () -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PageHeader("Install", "Panels, tunnels and protection for your servers")
+        PageHeader(stringResource(R.string.ui_install), stringResource(R.string.ui_panels_tunnels_and_protection_for))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             for (text in listOf("Verified downloads", "Undo on failure", "Removable")) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -257,10 +259,10 @@ internal fun InstallCenterTab(
                         // Private Psiphon belongs in the Install catalog, not the global tabs.
                         RowDivider(62.dp)
                         ListRow(
-                            title = "Psiphon Server",
-                            subtitle = "Private Psiphon · server entry and phone tunnel test",
+                            title = stringResource(R.string.ui_psiphon_server),
+                            subtitle = stringResource(R.string.ui_private_psiphon_server_entry_and),
                             caption = {
-                                Text("Abroad · installer pending verification",
+                                Text(stringResource(R.string.ui_abroad_installer_pending_verification),
                                     color = Sv.Dim, fontSize = 12.sp)
                             },
                             leading = { IconTile(Icons.Rounded.AutoAwesome, accent = true) },
@@ -324,8 +326,8 @@ private fun ToolRow(tool: ServerTool, installedOn: Int, onClick: () -> Unit) {
         leading = { ToolBadge(tool.id) },
         trailing = {
             when {
-                tool.comingLater -> Badge("Soon", Tone.ACCENT)
-                installedOn > 0 -> Badge("Installed · $installedOn", Tone.GOOD)
+                tool.comingLater -> Badge(stringResource(R.string.ui_soon), Tone.ACCENT)
+                installedOn > 0 -> Badge(stringResource(R.string.ui_installed, installedOn), Tone.GOOD)
                 else -> Chevron()
             }
         },

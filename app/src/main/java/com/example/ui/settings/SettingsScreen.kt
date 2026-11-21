@@ -1,5 +1,7 @@
 package com.example.ui.settings
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -106,12 +108,12 @@ fun SettingsScreen(
         val usable = DnsResolvers.isUsable(address)
         AlertDialog(
             onDismissRequest = { customDns = null },
-            title = { Text("Custom DNS") },
+            title = { Text(stringResource(R.string.ui_custom_dns_2)) },
             text = {
                 OutlinedTextField(
                     value = address,
                     onValueChange = { customDns = it },
-                    label = { Text("IP address or DNS-over-HTTPS URL") },
+                    label = { Text(stringResource(R.string.ui_ip_address_or_dns_over)) },
                     supportingText = { Text("Example: https://1.1.1.1/dns-query") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -124,9 +126,9 @@ fun SettingsScreen(
                         viewModel.setDnsServer(address.trim())
                         customDns = null
                     }
-                ) { Text("Apply DNS") }
+                ) { Text(stringResource(R.string.ui_apply_dns)) }
             },
-            dismissButton = { TextButton(onClick = { customDns = null }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { customDns = null }) { Text(stringResource(R.string.ui_cancel)) } }
         )
     }
 
@@ -556,14 +558,14 @@ fun SettingsScreen(
                 onGitHub = { uriHandler.openUri(CommunityLinks.GITHUB) },
                 onCrypto = {
                     if (com.example.ui.popups.SupportLinks.CRYPTO.isEmpty()) {
-                        Toast.makeText(context, "Crypto support details coming soon.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_crypto_support_details_coming_soon), Toast.LENGTH_SHORT).show()
                     } else {
                         showCryptoSupport = true
                     }
                 },
                 onCoffee = {
                     val url = com.example.ui.popups.SupportLinks.COFFEE
-                    if (url.isBlank()) Toast.makeText(context, "Coming soon.", Toast.LENGTH_SHORT).show()
+                    if (url.isBlank()) Toast.makeText(context, context.getString(R.string.ui_coming_soon), Toast.LENGTH_SHORT).show()
                     else uriHandler.openUri(url)
                 },
                 telegramLogo = { TelegramLogo(size = 20.dp) },
@@ -586,7 +588,7 @@ fun SettingsScreen(
             rows = learnedNetworks,
             onClear = {
                 viewModel.clearLearnedNetworks()
-                Toast.makeText(context, "Learned network data cleared", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.ui_learned_network_data_cleared), Toast.LENGTH_SHORT).show()
             },
             onDismiss = { showLearnedNetworks = false }
         )
@@ -595,22 +597,22 @@ fun SettingsScreen(
     if (showResetConfirm) {
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
-            title = { Text("Reset Settings", color = AppTheme.colors.textPrimary) },
-            text = { Text("Are you sure you want to reset all routing and engine settings to factory defaults?", color = AppTheme.colors.textSecondary) },
+            title = { Text(stringResource(R.string.ui_reset_settings), color = AppTheme.colors.textPrimary) },
+            text = { Text(stringResource(R.string.ui_are_you_sure_you_want_2), color = AppTheme.colors.textSecondary) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showResetConfirm = false
                         viewModel.resetToDefaults()
-                        Toast.makeText(context, "Settings restored to defaults", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_settings_restored_to_defaults), Toast.LENGTH_SHORT).show()
                     }
                 ) {
-                    Text("Reset", color = AppTheme.colors.statusError, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_reset_2), color = AppTheme.colors.statusError, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showResetConfirm = false }) {
-                    Text("Cancel", color = AppTheme.colors.textSecondary)
+                    Text(stringResource(R.string.ui_cancel), color = AppTheme.colors.textSecondary)
                 }
             },
             containerColor = AppTheme.colors.surfaceCard
@@ -621,11 +623,11 @@ fun SettingsScreen(
         val clipboard = LocalClipboardManager.current
         AlertDialog(
             onDismissRequest = { showCryptoSupport = false },
-            title = { Text("Support with Crypto", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold) },
+            title = { Text(stringResource(R.string.ui_support_with_crypto_2), color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Column {
                     Text(
-                        "Thank you for supporting Maximus VPN. Tap an address to copy it.",
+                        stringResource(R.string.ui_thank_you_for_supporting_maximus),
                         color = AppTheme.colors.textSecondary, fontSize = 13.sp
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -638,7 +640,7 @@ fun SettingsScreen(
                                 .background(AppTheme.colors.surfaceElevated)
                                 .clickable {
                                     clipboard.setText(androidx.compose.ui.text.AnnotatedString(address))
-                                    Toast.makeText(context, "$coin address copied", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, context.getString(R.string.ui_address_copied, coin), Toast.LENGTH_SHORT).show()
                                 }
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
@@ -650,7 +652,7 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showCryptoSupport = false }) {
-                    Text("Close", color = AppTheme.colors.primary, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.ui_close), color = AppTheme.colors.primary, fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = AppTheme.colors.surfaceCard

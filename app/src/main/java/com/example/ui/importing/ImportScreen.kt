@@ -1,5 +1,7 @@
 package com.example.ui.importing
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -129,7 +131,7 @@ fun ImportScreen(
 
                 Column {
                     Text(
-                        text = "UNIVERSAL IMPORT HUB",
+                        text = stringResource(R.string.ui_universal_import_hub),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -197,7 +199,7 @@ fun ImportScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Paste Raw Configuration Text",
+                        text = stringResource(R.string.ui_paste_raw_configuration_text),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -214,7 +216,7 @@ fun ImportScreen(
                     ) {
                         Icon(imageVector = Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Paste", fontSize = 12.sp)
+                        Text(text = stringResource(R.string.ui_paste), fontSize = 12.sp)
                     }
                 }
 
@@ -250,11 +252,11 @@ fun ImportScreen(
                     if (uiState.isAnalyzing) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Analyzing Configs...")
+                        Text(stringResource(R.string.ui_analyzing_configs))
                     } else {
                         Icon(imageVector = Icons.Default.Download, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Analyze & Import", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.ui_analyze_import), fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -264,7 +266,7 @@ fun ImportScreen(
 
         // Supported Formats Info
         Text(
-            text = "Supported Protocol & Formats",
+            text = stringResource(R.string.ui_supported_protocol_formats),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
@@ -329,7 +331,7 @@ private fun ImportPreviewDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Import Analysis Summary",
+                text = stringResource(R.string.ui_import_analysis_summary),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -341,16 +343,16 @@ private fun ImportPreviewDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    MetricPill("Found", "${preview.configurationsFound}", MaterialTheme.colorScheme.primary)
-                    MetricPill("Valid", "${preview.validCount}", Color(0xFF4CAF50))
-                    MetricPill("Duplicates", "${preview.duplicateCount}", Color(0xFFFF9800))
-                    MetricPill("Invalid", "${preview.invalidCount}", MaterialTheme.colorScheme.error)
+                    MetricPill(stringResource(R.string.ui_found), "${preview.configurationsFound}", MaterialTheme.colorScheme.primary)
+                    MetricPill(stringResource(R.string.ui_valid), "${preview.validCount}", Color(0xFF4CAF50))
+                    MetricPill(stringResource(R.string.ui_duplicates), "${preview.duplicateCount}", Color(0xFFFF9800))
+                    MetricPill(stringResource(R.string.ui_invalid), "${preview.invalidCount}", MaterialTheme.colorScheme.error)
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
-                    text = "Detected Protocols",
+                    text = stringResource(R.string.ui_detected_protocols),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -374,7 +376,7 @@ private fun ImportPreviewDialog(
                 if (preview.invalidEntries.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Validation Issues (${preview.invalidEntries.size})",
+                        text = stringResource(R.string.ui_validation_issues, preview.invalidEntries.size),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.error
@@ -399,12 +401,12 @@ private fun ImportPreviewDialog(
                 enabled = preview.validCount > 0,
                 modifier = Modifier.testTag("confirm_import_dialog_button")
             ) {
-                Text("Import ${preview.validCount} Nodes")
+                Text(stringResource(R.string.ui_import_nodes, preview.validCount))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.ui_cancel))
             }
         }
     )

@@ -1,5 +1,7 @@
 package com.example.ui.lab
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -43,7 +45,7 @@ internal fun ServicesPage(c: LabColors, s: ServicesUi, vpnOn: Boolean, onRun: ()
         item {
             Panel(c) {
                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                    LabText("Do the sites you use really open?", c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
+                    LabText(stringResource(R.string.ui_do_the_sites_you_use), c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
                     LabText("A ping can pass while Gemini refuses the exit's country or the filter answers instead of YouTube. " +
                         "This opens each site like a browser and reads what came back.",
                         c.text2, 12.5.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 4, lineHeight = 17.sp)
@@ -52,11 +54,11 @@ internal fun ServicesPage(c: LabColors, s: ServicesUi, vpnOn: Boolean, onRun: ()
         }
         item {
             Column(Modifier.padding(horizontal = Gutter)) {
-                if (s.running) SecondaryButton(c, "Stop", Icons.Rounded.Stop, Modifier.fillMaxWidth(), onClick = onStop)
+                if (s.running) SecondaryButton(c, stringResource(R.string.ui_stop), Icons.Rounded.Stop, Modifier.fillMaxWidth(), onClick = onStop)
                 else PrimaryButton(c, if (vpnOn) "Check through the VPN" else "Check without the VPN", Icons.Rounded.Public, Modifier.fillMaxWidth(), onClick = onRun)
                 LabText(
-                    if (vpnOn) "Uses the connected config. Configs run by a separate engine (Psiphon, Tor, DNS tunnel) leave this app outside the tunnel, so the check shows the direct network."
-                    else "Shows what this network allows directly. Connect first to check a config.",
+                    if (vpnOn) stringResource(R.string.ui_uses_the_connected_config_configs)
+                    else stringResource(R.string.ui_shows_what_this_network_allows),
                     c.text3, 12.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp), maxLines = 3, lineHeight = 16.sp
                 )
             }
@@ -91,8 +93,8 @@ internal fun ServicesPage(c: LabColors, s: ServicesUi, vpnOn: Boolean, onRun: ()
         } else if (!s.running) item {
             Panel(c) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 22.dp, horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    LabText("No check yet", c.text, 14.5.sp, FontWeight.SemiBold, maxLines = 1)
-                    LabText("Connect a config and tap Check to see which sites really open through it.", c.text3, 12.5.sp,
+                    LabText(stringResource(R.string.ui_no_check_yet), c.text, 14.5.sp, FontWeight.SemiBold, maxLines = 1)
+                    LabText(stringResource(R.string.ui_connect_a_config_and_tap), c.text3, 12.5.sp,
                         modifier = Modifier.padding(top = 4.dp), maxLines = 3, lineHeight = 17.sp)
                 }
             }

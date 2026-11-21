@@ -1,5 +1,7 @@
 package com.example.ui.panels.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -203,10 +205,10 @@ private fun PickServer(ui: WizardUi, actions: WizardActions) {
             ListRow(
                 row.name,
                 subtitle = when {
-                    clash != null -> "Runs ${toolTitle(clash)}. ${ui.tool.title} needs a server of its own."
-                    !fits -> "${ui.tool.title} only helps on a server abroad"
-                    row.health == Health.SIGN_IN -> "Sign in to this server first"
-                    ui.tool.id in row.tools -> "Installed · tap to update"
+                    clash != null -> stringResource(R.string.ui_runs_needs_a_server_of, toolTitle(clash), ui.tool.title)
+                    !fits -> stringResource(R.string.ui_only_helps_on_a_server, ui.tool.title)
+                    row.health == Health.SIGN_IN -> stringResource(R.string.ui_sign_in_to_this_server)
+                    ui.tool.id in row.tools -> stringResource(R.string.ui_installed_tap_to_update)
                     else -> row.host
                 },
                 subtitleMono = fits && row.health != Health.SIGN_IN && ui.tool.id !in row.tools,
@@ -260,15 +262,15 @@ private fun SettingsStage(ui: WizardUi, actions: WizardActions) {
     when (ui.tool.id) {
         ServerToolCatalog.DNSTT, ServerToolCatalog.SOAR, ServerToolCatalog.COTTEN, ServerToolCatalog.MASTERDNS -> {
             SectionLabel("Delegated domain")
-            SvField(ui.baseDomain, { actions.onChange(ui.copy(baseDomain = it.trim(), dnsChecks = null)) }, "Your domain",
+            SvField(ui.baseDomain, { actions.onChange(ui.copy(baseDomain = it.trim(), dnsChecks = null)) }, stringResource(R.string.ui_your_domain),
                 placeholder = "example.com", keyboard = KeyboardType.Uri, mono = true,
-                supporting = "Any domain you own. The tunnel uses one name under it.")
+                supporting = stringResource(R.string.ui_any_domain_you_own_the))
             SvField(ui.tunnelLabel, { actions.onChange(ui.copy(tunnelLabel = it.trim().lowercase().take(22), dnsChecks = null)) },
-                "Tunnel name", mono = true, supporting = "Short is faster: every DNS query carries it.")
+                stringResource(R.string.ui_tunnel_name), mono = true, supporting = stringResource(R.string.ui_short_is_faster_every_dns))
             if (ui.tool.id == ServerToolCatalog.DNSTT) {
             SectionLabel("Backup domains")
             val backupProblem = DnsDelegation.backupProblem(ui.baseDomain, ui.backups)
-            SvField(ui.backupDomains, { actions.onChange(ui.copy(backupDomains = it.take(300), dnsChecks = null)) }, "Backup domains (optional)",
+            SvField(ui.backupDomains, { actions.onChange(ui.copy(backupDomains = it.take(300), dnsChecks = null)) }, stringResource(R.string.ui_backup_domains_optional),
                 placeholder = "example.net, example.org", keyboard = KeyboardType.Uri, mono = true,
                 supporting = backupProblem ?: "Other domains you own, up to ${DnsDelegation.MAX_BACKUPS}. If the main one is blocked, " +
                     "the app moves to the next without dropping the connection.")
@@ -277,9 +279,9 @@ private fun SettingsStage(ui: WizardUi, actions: WizardActions) {
         }
         ServerToolCatalog.HYSTERIA2 -> {
             SectionLabel("UDP port")
-            SvField(ui.port, { actions.onChange(ui.copy(port = it.filter(Char::isDigit).take(5))) }, "Port",
+            SvField(ui.port, { actions.onChange(ui.copy(port = it.filter(Char::isDigit).take(5))) }, stringResource(R.string.ui_port),
                 placeholder = "random", keyboard = KeyboardType.Number, mono = true,
-                supporting = "A random high port is harder to block than 443. Empty keeps the current one.",
+                supporting = stringResource(R.string.ui_a_random_high_port_is),
                 trailing = {
                     androidx.compose.material3.IconButton(onClick = actions.onRandomPort) {
                         Icon(Icons.Rounded.Casino, "Random port", tint = Sv.Muted)
@@ -291,8 +293,8 @@ private fun SettingsStage(ui: WizardUi, actions: WizardActions) {
     if (ui.reinstall && ui.tool.id in setOf(ServerToolCatalog.DNSTT, ServerToolCatalog.HYSTERIA2)) {
         GroupCard {
             ListRow(
-                "Create new keys",
-                subtitle = "Old configs stop working. The app updates its own.",
+                stringResource(R.string.ui_create_new_keys),
+                subtitle = stringResource(R.string.ui_old_configs_stop_working_the),
                 trailing = {
                     Switch(ui.renew, { actions.onChange(ui.copy(renew = it)) },
                         colors = SwitchDefaults.colors(checkedTrackColor = Sv.Accent, uncheckedTrackColor = Sv.Raised, uncheckedBorderColor = Sv.CardBorder))
@@ -314,29 +316,29 @@ private fun DnsRecordsCard(ui: WizardUi, actions: WizardActions) {
                     Spacer(Modifier.weight(1f))
                     if (check != null) {
                         when (check.status) {
-                            DnsDelegation.Status.OK -> Badge("Live", Tone.GOOD, dot = true)
-                            DnsDelegation.Status.WRONG -> Badge("Wrong", Tone.BAD, dot = true)
-                            DnsDelegation.Status.MISSING -> Badge("Not yet", Tone.WARN, dot = true)
-                            DnsDelegation.Status.UNKNOWN -> Badge("Unknown", Tone.NEUTRAL, dot = true)
+                            DnsDelegation.Status.OK -> Badge(stringResource(R.string.ui_live_2), Tone.GOOD, dot = true)
+                            DnsDelegation.Status.WRONG -> Badge(stringResource(R.string.ui_wrong), Tone.BAD, dot = true)
+                            DnsDelegation.Status.MISSING -> Badge(stringResource(R.string.ui_not_yet), Tone.WARN, dot = true)
+                            DnsDelegation.Status.UNKNOWN -> Badge(stringResource(R.string.ui_unknown), Tone.NEUTRAL, dot = true)
                         }
                     }
                 }
                 Text(r.note, color = Sv.Muted, fontSize = 12.sp, lineHeight = 17.sp)
-                CopyLine("Name", r.name) { actions.onCopy(r.name) }
-                CopyLine("Value", r.value) { actions.onCopy(r.value) }
+                CopyLine(stringResource(R.string.ui_name), r.name) { actions.onCopy(r.name) }
+                CopyLine(stringResource(R.string.ui_value), r.value) { actions.onCopy(r.value) }
                 if (check != null && check.status != DnsDelegation.Status.OK && check.detail.isNotBlank()) {
                     Text(check.detail, color = Sv.Muted, fontSize = 12.sp)
                 }
             }
         }
     }
-    GhostButton(if (ui.dnsProvisioning) "Creating records…" else "Create records in Cloudflare", actions.onProvisionDns,
+    GhostButton(if (ui.dnsProvisioning) stringResource(R.string.ui_creating_records) else stringResource(R.string.ui_create_records_in_cloudflare), actions.onProvisionDns,
         Modifier.fillMaxWidth(), Icons.Rounded.NetworkCheck, enabled = !ui.dnsProvisioning && !ui.dnsChecking)
     if (ui.dnsProvisionResult.isNotBlank()) Notice(ui.dnsProvisionResult,
         if (ui.dnsProvisionResult.startsWith("Created") || ui.dnsProvisionResult.startsWith("Verified")) NoticeKind.OK else NoticeKind.WARN)
-    GhostButton(if (ui.dnsChecking) "Checking…" else "Check DNS", actions.onCheckDns, Modifier.fillMaxWidth(),
+    GhostButton(if (ui.dnsChecking) stringResource(R.string.ui_checking) else stringResource(R.string.ui_check_dns), actions.onCheckDns, Modifier.fillMaxWidth(),
         Icons.Rounded.NetworkCheck, enabled = !ui.dnsChecking && !ui.dnsProvisioning)
-    Text("Cloudflare setup uses the limited DNS token saved under Smart domains. It never overwrites existing DNS records. DNS propagation and a real tunnel test are still required.", color = Sv.Dim, fontSize = 12.sp)
+    Text(stringResource(R.string.ui_cloudflare_setup_uses_the_limited), color = Sv.Dim, fontSize = 12.sp)
 }
 
 @Composable
@@ -444,7 +446,7 @@ internal fun LogCard(lines: List<String>, initiallyOpen: Boolean = false, title:
         Column(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, color = Sv.TextSoft, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Text(if (open) "Hide" else "Show ${lines.size} lines", color = Sv.Muted, fontSize = 12.sp)
+                Text(if (open) stringResource(R.string.ui_hide) else stringResource(R.string.ui_show_lines, lines.size), color = Sv.Muted, fontSize = 12.sp)
             }
             AnimatedVisibility(open) {
                 Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -483,7 +485,7 @@ private fun DoneStage(ui: WizardUi, actions: WizardActions) {
     if (ui.profileName != null) {
         SectionLabel("Added to your configs")
         GroupCard {
-            ListRow(ui.profileName, subtitle = if (ui.testOk == true) "Request verified through this profile; Android TUN not tested" else "Installed; traffic has not been verified", leading = { ToolBadge(ui.tool.id, 32.dp) },
+            ListRow(ui.profileName, subtitle = if (ui.testOk == true) stringResource(R.string.ui_request_verified_through_this_profile) else stringResource(R.string.ui_installed_traffic_has_not_been), leading = { ToolBadge(ui.tool.id, 32.dp) },
                 trailing = { if (ui.link != null) TextAction("Copy link", { actions.onCopy(ui.link) }, icon = Icons.Rounded.ContentCopy) })
             RowDivider(0.dp)
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -491,11 +493,11 @@ private fun DoneStage(ui: WizardUi, actions: WizardActions) {
                     ui.testing -> Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(14.dp), color = Sv.Blue, strokeWidth = 2.dp)
                         Spacer(Modifier.width(10.dp))
-                        Text("Sending a real request through it…", color = Sv.Muted, fontSize = 13.sp)
+                        Text(stringResource(R.string.ui_sending_a_real_request_through), color = Sv.Muted, fontSize = 13.sp)
                     }
                     ui.testResult != null -> Notice(ui.testResult, if (ui.testOk == true) NoticeKind.OK else NoticeKind.WARN)
                 }
-                GhostButton("Test from this phone", actions.onTest, Modifier.fillMaxWidth(), Icons.Rounded.NetworkCheck, enabled = !ui.testing, compact = true)
+                GhostButton(stringResource(R.string.ui_test_from_this_phone), actions.onTest, Modifier.fillMaxWidth(), Icons.Rounded.NetworkCheck, enabled = !ui.testing, compact = true)
             }
         }
     }
@@ -525,11 +527,11 @@ private fun WizardBottomBar(ui: WizardUi, actions: WizardActions) {
             Text(ui.steps.getOrNull(ui.currentStep - 1)?.let { "$it…" } ?: "Connecting…", color = Sv.Muted, fontSize = 13.sp)
         }
         WizardStage.FAILED -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GhostButton("Close", actions.onDone, Modifier.weight(1f))
+            GhostButton(stringResource(R.string.ui_close), actions.onDone, Modifier.weight(1f))
             PrimaryButton("Try again", actions.onRetry, Modifier.weight(1f), Icons.Rounded.Refresh)
         }
         WizardStage.DONE -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GhostButton("Open server", actions.onOpenServer, Modifier.weight(1f))
+            GhostButton(stringResource(R.string.ui_open_server), actions.onOpenServer, Modifier.weight(1f))
             PrimaryButton("Done", actions.onDone, Modifier.weight(1f))
         }
     }

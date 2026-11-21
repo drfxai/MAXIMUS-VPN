@@ -1,5 +1,7 @@
 package com.example.ui.home
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -108,7 +110,7 @@ internal fun SmartConnectEntry(state: ConnectionState, mode: SmartConnectMode, o
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text("Smart Connect", color = AppTheme.colors.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.ui_smart_connect), color = AppTheme.colors.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
             Text(title, color = AppTheme.colors.textPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Text(detail, color = AppTheme.colors.textSecondary, fontSize = 12.sp, maxLines = 1)
         }
@@ -148,7 +150,7 @@ internal fun SmartConnectSheet(state: ConnectionState, mode: SmartConnectMode, s
     ) {
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
             val phrase = if (mode == SmartConnectMode.SEARCHING) "searching for a route that carries traffic" else "connected"
-            TitleBar(c, "Smart Connect", network?.let { "$it · $phrase" } ?: phrase.replaceFirstChar { it.uppercase() }, back = null)
+            TitleBar(c, stringResource(R.string.ui_smart_connect), network?.let { "$it · $phrase" } ?: phrase.replaceFirstChar { it.uppercase() }, back = null)
             Spacer(Modifier.height(10.dp))
             when (mode) {
                 SmartConnectMode.SEARCHING -> Searching(c, search, selectedName, onStop)
@@ -170,16 +172,16 @@ private fun Searching(c: LabColors, search: SearchProgress, selectedName: String
                 Meter(c, SmartConnectRows.position(s.stage), c.accent, Modifier.padding(top = 12.dp).fillMaxWidth())
             }
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Total(c, search.tested, "Tested", Modifier.weight(1f))
-                Total(c, search.verified, "Verified", Modifier.weight(1f))
-                Total(c, search.failed, "Failed", Modifier.weight(1f))
+                Total(c, search.tested, stringResource(R.string.ui_tested), Modifier.weight(1f))
+                Total(c, search.verified, stringResource(R.string.ui_verified), Modifier.weight(1f))
+                Total(c, search.failed, stringResource(R.string.ui_failed), Modifier.weight(1f))
             }
         }
     }
     GroupLabel(c, "Stages")
     Stages(c, SmartConnectRows.stageRows(search, limits, selectedName))
-    SecondaryButton(c, "Stop", Icons.Rounded.Stop, Modifier.padding(horizontal = Gutter).padding(top = 12.dp).fillMaxWidth(), onClick = onStop)
-    Footnote(c, "Traffic stays blocked while the search runs. Counts are real requests made on this network.")
+    SecondaryButton(c, stringResource(R.string.ui_stop), Icons.Rounded.Stop, Modifier.padding(horizontal = Gutter).padding(top = 12.dp).fillMaxWidth(), onClick = onStop)
+    Footnote(c, stringResource(R.string.ui_traffic_stays_blocked_while_the))
 }
 
 @Composable
@@ -209,7 +211,7 @@ private fun Connected(c: LabColors, state: ConnectionState, search: SearchProgre
     }
     GroupLabel(c, "How it was found")
     Stages(c, SmartConnectRows.stageRows(search, limits, summary = true))
-    Footnote(c, "Android VPN traffic and the local engine proxy are measured separately.")
+    Footnote(c, stringResource(R.string.ui_android_vpn_traffic_and_the))
 }
 
 @Composable

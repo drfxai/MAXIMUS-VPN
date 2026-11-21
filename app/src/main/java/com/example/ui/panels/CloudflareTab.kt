@@ -1,5 +1,7 @@
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -211,8 +213,8 @@ private fun SmartDomainsEntry(onOpen: () -> Unit) {
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Smart domains", color = Cf.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text("Names on your own Cloudflare domain for your servers", color = Cf.Muted, fontSize = 12.5.sp, lineHeight = 17.sp)
+                Text(stringResource(R.string.ui_smart_domains), color = Cf.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.ui_names_on_your_own_cloudflare), color = Cf.Muted, fontSize = 12.5.sp, lineHeight = 17.sp)
             }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(20.dp))
         }
@@ -250,14 +252,14 @@ private fun CloudflareHero(panelCount: Int, tokenReady: Boolean, busy: Boolean) 
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text("Cloudflare Workers", color = Cf.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                Text("Your own BPB panel, free", color = Cf.Muted, fontSize = 12.5.sp)
+                Text(stringResource(R.string.ui_your_own_bpb_panel_free), color = Cf.Muted, fontSize = 12.5.sp)
             }
             StatusChip(
                 text = when {
-                    busy -> "Installing"
-                    panelCount > 0 -> "Live"
-                    tokenReady -> "Token ready"
-                    else -> "Not set up"
+                    busy -> stringResource(R.string.ui_installing)
+                    panelCount > 0 -> stringResource(R.string.ui_live_2)
+                    tokenReady -> stringResource(R.string.ui_token_ready)
+                    else -> stringResource(R.string.ui_not_set_up)
                 },
                 color = when {
                     busy -> Cf.Blue
@@ -343,15 +345,15 @@ private fun SetupCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Deploy a BPB panel", color = Cf.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.ui_deploy_a_bpb_panel), color = Cf.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    if (tokenReady) "Step 3 of 3 · ready to install" else "Three steps · about two minutes",
+                    if (tokenReady) stringResource(R.string.ui_step_3_of_3_ready) else stringResource(R.string.ui_three_steps_about_two_minutes),
                     color = Cf.Muted,
                     fontSize = 12.5.sp
                 )
             }
             TextButton(onClick = onOpenDocs) {
-                Text("Guide", color = Cf.Muted, fontSize = 13.sp)
+                Text(stringResource(R.string.ui_guide), color = Cf.Muted, fontSize = 13.sp)
                 Spacer(Modifier.width(4.dp))
                 Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = Cf.Muted, modifier = Modifier.size(14.dp))
             }
@@ -383,9 +385,9 @@ private fun SetupCard(
         StepRow(
             number = 1,
             done = tokenReady,
-            title = "Cloudflare account",
-            subtitle = "Free account with a verified email",
-            action = "Sign up",
+            title = stringResource(R.string.ui_cloudflare_account),
+            subtitle = stringResource(R.string.ui_free_account_with_a_verified),
+            action = stringResource(R.string.ui_sign_up),
             onAction = onSignUp
         )
         HorizontalDivider(color = Cf.CardBorder, modifier = Modifier.padding(start = 60.dp))
@@ -396,11 +398,11 @@ private fun SetupCard(
             StepBadge(number = 2, done = tokenReady, active = !tokenReady)
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Create token", color = Cf.Text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.ui_create_token), color = Cf.Text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
                 CloudflarePageText(CfStepColors)
                 TokenChips(TokenTemplate.WORKER_NAME, TokenTemplate.WORKER.map { it.label } + "Your accounts", CfStepColors)
                 CfOrangeButton(
-                    text = "Create token in Cloudflare",
+                    text = stringResource(R.string.ui_create_token_in_cloudflare),
                     icon = Icons.AutoMirrored.Filled.OpenInNew,
                     filled = !tokenReady,
                     onClick = onCreateToken
@@ -414,16 +416,16 @@ private fun SetupCard(
                 StepBadge(number = 3, done = false, active = tokenReady)
                 Spacer(Modifier.width(16.dp))
                 Column {
-                    Text("Paste it back and install", color = Cf.Text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.ui_paste_it_back_and_install), color = Cf.Text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "When you come back, Maximus offers the copied token. Your login details appear here when done.",
+                        stringResource(R.string.ui_when_you_come_back_maximus),
                         color = Cf.Muted, fontSize = 12.5.sp, lineHeight = 17.sp
                     )
                 }
             }
             if (copiedHint != null && !tokenReady) {
                 CfOrangeButton(
-                    text = "Use copied token $copiedHint",
+                    text = stringResource(R.string.ui_use_copied_token, copiedHint),
                     icon = Icons.Default.ContentPaste,
                     filled = true,
                     onClick = {
@@ -439,7 +441,7 @@ private fun SetupCard(
             CfField(
                 value = token,
                 onValueChange = onTokenChange,
-                placeholder = "Cloudflare API token",
+                placeholder = stringResource(R.string.ui_cloudflare_api_token),
                 icon = Icons.Default.Key,
                 secret = !tokenVisible,
                 trailing = {
@@ -466,7 +468,7 @@ private fun SetupCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Advanced: custom login and account ID",
+                    stringResource(R.string.ui_advanced_custom_login_and_account),
                     color = Cf.Muted,
                     fontSize = 12.5.sp,
                     modifier = Modifier.weight(1f)
@@ -481,12 +483,12 @@ private fun SetupCard(
 
             AnimatedVisibility(visible = loginExpanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Leave any field empty and Maximus fills it in for you.", color = Cf.Dim, fontSize = 11.5.sp)
-                    CfField(value = username, onValueChange = { username = it }, placeholder = "Username", icon = Icons.Default.Person)
+                    Text(stringResource(R.string.ui_leave_any_field_empty_and), color = Cf.Dim, fontSize = 11.5.sp)
+                    CfField(value = username, onValueChange = { username = it }, placeholder = stringResource(R.string.ui_username), icon = Icons.Default.Person)
                     CfField(
                         value = password,
                         onValueChange = { password = it },
-                        placeholder = "Password",
+                        placeholder = stringResource(R.string.ui_password),
                         icon = Icons.Default.Lock,
                         secret = !passVisible,
                         trailing = {
@@ -500,7 +502,7 @@ private fun SetupCard(
                             }
                         }
                     )
-                    CfField(value = account, onValueChange = onAccountChange, placeholder = "Account ID", icon = Icons.Default.Tag)
+                    CfField(value = account, onValueChange = onAccountChange, placeholder = stringResource(R.string.ui_account_id), icon = Icons.Default.Tag)
                 }
             }
 
@@ -678,11 +680,11 @@ private fun InstallButton(enabled: Boolean, busy: Boolean, onClick: () -> Unit) 
         if (busy) {
             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Cf.Muted)
             Spacer(Modifier.width(10.dp))
-            Text("Installing…", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(stringResource(R.string.ui_installing_2), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         } else {
             Icon(Icons.Default.RocketLaunch, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(10.dp))
-            Text(if (enabled) "Install BPB panel" else "Paste a token to install", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(if (enabled) stringResource(R.string.ui_install_bpb_panel) else stringResource(R.string.ui_paste_a_token_to_install), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         }
     }
 }
@@ -708,9 +710,9 @@ private fun DeployProgressCard(isBusy: Boolean, statusText: String, logs: List<S
     ) {
         Text(
             text = when {
-                done -> "Panel deployed"
-                failed -> "Install stopped"
-                else -> "Installing on Cloudflare"
+                done -> stringResource(R.string.ui_panel_deployed)
+                failed -> stringResource(R.string.ui_install_stopped)
+                else -> stringResource(R.string.ui_installing_on_cloudflare)
             },
             color = when {
                 done -> Cf.Green
@@ -810,7 +812,7 @@ private fun DeployedResultCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Cf.Green, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Your BPB panel is live", color = Cf.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.ui_your_bpb_panel_is_live), color = Cf.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f))
             IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                 Icon(Icons.Default.Close, contentDescription = "Close", tint = Cf.Muted, modifier = Modifier.size(16.dp))
             }
@@ -833,7 +835,7 @@ private fun DeployedResultCard(
             ) {
                 Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Open panel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text(stringResource(R.string.ui_open_panel), fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
             OutlinedButton(
                 onClick = { onCopy("Private link", panel.url) },
@@ -844,7 +846,7 @@ private fun DeployedResultCard(
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Copy link", fontSize = 13.sp)
+                Text(stringResource(R.string.ui_copy_link), fontSize = 13.sp)
             }
         }
         PanelActions(panel = panel, busy = busy, onImportToVpn = onImportToVpn, onFixBpb = onFixBpb)
@@ -881,9 +883,9 @@ private fun DeployedPanelsCard(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Your BPB panels", color = Cf.Text, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text(stringResource(R.string.ui_your_bpb_panels), color = Cf.Text, fontWeight = FontWeight.Bold, fontSize = 17.sp)
         Text(
-            "FIX BPB adds TLS fragmentation, a plain-TLS fingerprint, HTTP/1.1 ALPN and a tuned cipher list. Use it when a panel's configs do not connect.",
+            stringResource(R.string.ui_fix_bpb_adds_tls_fragmentation),
             color = Cf.Muted,
             fontSize = 12.sp,
             lineHeight = 16.sp
@@ -988,7 +990,7 @@ private fun CustomDomainSection(
 
         if (expanded) {
             Text(
-                "Use a domain already on this Cloudflare account. The token needs Zone and Workers Routes permissions. The certificate can take a few minutes after attaching.",
+                stringResource(R.string.ui_use_a_domain_already_on),
                 color = Cf.Muted,
                 fontSize = 11.5.sp,
                 lineHeight = 15.sp
@@ -1043,7 +1045,7 @@ private fun CustomDomainSection(
             ) {
                 Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Attach domain", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                Text(stringResource(R.string.ui_attach_domain), fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
             }
         }
     }
@@ -1066,7 +1068,7 @@ private fun PanelActions(
         ) {
             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Add to VPN", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+            Text(stringResource(R.string.ui_add_to_vpn), fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
         }
         OutlinedButton(
             onClick = { onFixBpb(panel) },

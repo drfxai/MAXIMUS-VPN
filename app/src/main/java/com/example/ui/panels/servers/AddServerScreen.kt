@@ -1,5 +1,7 @@
 package com.example.ui.panels.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -56,8 +58,8 @@ data class AddServerActions(
 internal fun AddServerScreen(ui: AddServerUi, actions: AddServerActions) {
     val confirming = ui.fingerprint.isNotBlank()
     ScreenFrame(
-        title = if (ui.editingId != null) "Sign in to server" else "Add server",
-        subtitle = "Saved encrypted on this phone",
+        title = if (ui.editingId != null) stringResource(R.string.ui_sign_in_to_server) else stringResource(R.string.ui_add_server),
+        subtitle = stringResource(R.string.ui_saved_encrypted_on_this_phone),
         onBack = actions.onBack,
         bottomBar = {
             when {
@@ -89,30 +91,30 @@ internal fun AddServerScreen(ui: AddServerUi, actions: AddServerActions) {
                 ) {
                     FlagIcon(location, height = 14.dp)
                     Spacer(Modifier.width(8.dp))
-                    Text(if (location == ServerLocation.IRAN) "In Iran" else "Abroad",
+                    Text(if (location == ServerLocation.IRAN) stringResource(R.string.ui_in_iran) else stringResource(R.string.ui_abroad),
                         color = if (selected) Sv.Text else Sv.Muted, fontSize = 14.sp,
                         fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal)
                 }
             }
         }
         Text(
-            if (ui.location == ServerLocation.IRAN) "For relays and the inside end of Maximus Tunnel."
-            else "Where your traffic leaves. Tunnels and fast protocols run here.",
+            if (ui.location == ServerLocation.IRAN) stringResource(R.string.ui_for_relays_and_the_inside)
+            else stringResource(R.string.ui_where_your_traffic_leaves_tunnels),
             color = Sv.Dim, fontSize = 12.sp, modifier = Modifier.padding(start = 2.dp)
         )
 
         SectionLabel("Connection")
-        SvField(ui.name, { actions.onChange(ui.copy(name = it)) }, "Name (optional)",
-            placeholder = if (ui.location == ServerLocation.IRAN) "Tehran relay" else "Frankfurt")
-        SvField(ui.host, { actions.onChange(ui.copy(host = it.trim(), fingerprint = "")) }, "IP address or host name",
+        SvField(ui.name, { actions.onChange(ui.copy(name = it)) }, stringResource(R.string.ui_name_optional),
+            placeholder = if (ui.location == ServerLocation.IRAN) stringResource(R.string.ui_tehran_relay) else stringResource(R.string.ui_frankfurt))
+        SvField(ui.host, { actions.onChange(ui.copy(host = it.trim(), fingerprint = "")) }, stringResource(R.string.ui_ip_address_or_host_name),
             placeholder = "203.0.113.7", keyboard = KeyboardType.Uri, mono = true)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SvField(ui.port, { actions.onChange(ui.copy(port = it.filter(Char::isDigit).take(5), fingerprint = "")) }, "SSH port",
+            SvField(ui.port, { actions.onChange(ui.copy(port = it.filter(Char::isDigit).take(5), fingerprint = "")) }, stringResource(R.string.ui_ssh_port),
                 Modifier.weight(0.4f), keyboard = KeyboardType.Number, mono = true)
-            SvField(ui.user, { actions.onChange(ui.copy(user = it.trim())) }, "User", Modifier.weight(0.6f), mono = true)
+            SvField(ui.user, { actions.onChange(ui.copy(user = it.trim())) }, stringResource(R.string.ui_user), Modifier.weight(0.6f), mono = true)
         }
-        SvField(ui.password, { actions.onChange(ui.copy(password = it)) }, "Password", secret = true,
-            supporting = "Later you can switch to key login and turn passwords off.")
+        SvField(ui.password, { actions.onChange(ui.copy(password = it)) }, stringResource(R.string.ui_password), secret = true,
+            supporting = stringResource(R.string.ui_later_you_can_switch_to))
 
         AnimatedVisibility(confirming) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -123,7 +125,7 @@ internal fun AddServerScreen(ui: AddServerUi, actions: AddServerActions) {
                             IconTile(Icons.Rounded.Fingerprint, 32.dp, accent = true)
                             Spacer(Modifier.width(12.dp))
                             Column {
-                                Text("SSH fingerprint", color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                Text(stringResource(R.string.ui_ssh_fingerprint), color = Sv.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                                 Text("SHA-256", color = Sv.Dim, fontSize = 12.sp)
                             }
                         }

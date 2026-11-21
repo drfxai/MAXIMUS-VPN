@@ -1,5 +1,7 @@
 package com.example.ui.settings
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,13 +49,13 @@ fun ConfigPreviewDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Code, contentDescription = null, tint = AppTheme.colors.primary, modifier = Modifier.size(22.dp))
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Xray Configuration Preview", color = AppTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ui_xray_configuration_preview), color = AppTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "Generated JSON sent to Xray-core (UUIDs and Keys sanitized):",
+                    text = stringResource(R.string.ui_generated_json_sent_to_xray),
                     color = AppTheme.colors.textSecondary,
                     fontSize = 12.sp
                 )
@@ -93,12 +95,12 @@ fun ConfigPreviewDialog(
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AppTheme.colors.onPrimary, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Copy JSON", color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ui_copy_json), color = AppTheme.colors.onPrimary, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close", color = AppTheme.colors.textSecondary)
+                Text(stringResource(R.string.ui_close), color = AppTheme.colors.textSecondary)
             }
         },
         containerColor = AppTheme.colors.surfaceCard,

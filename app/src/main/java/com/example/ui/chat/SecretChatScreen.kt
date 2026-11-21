@@ -1,5 +1,7 @@
 package com.example.ui.chat
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -72,7 +74,7 @@ fun SecretChatScreen(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = if (activeConversation != null) activeConversation!!.peerAlias.ifBlank { activeConversation!!.peerAtomicId.take(9) + "..." } else "Messaging Preview (Unavailable)",
+                                text = if (activeConversation != null) activeConversation!!.peerAlias.ifBlank { activeConversation!!.peerAtomicId.take(9) + "..." } else stringResource(R.string.ui_messaging_preview_unavailable),
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -82,7 +84,7 @@ fun SecretChatScreen(
                                 color = Color(0xFF9C27B0).copy(alpha = 0.25f)
                             ) {
                                 Text(
-                                    text = "OFFLINE",
+                                    text = stringResource(R.string.ui_offline),
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFCE93D8),
@@ -92,7 +94,7 @@ fun SecretChatScreen(
                         }
                         if (activeConversation != null) {
                             Text(
-                                text = "Auto-Shred: ${activeConversation!!.ephemeralTimer.label}",
+                                text = stringResource(R.string.ui_auto_shred, activeConversation!!.ephemeralTimer.label),
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -176,7 +178,7 @@ fun SecretChatScreen(
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = "My 20-Digit Atomic ID",
+                                            text = stringResource(R.string.ui_my_20_digit_atomic_id),
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 14.sp
                                         )
@@ -185,7 +187,7 @@ fun SecretChatScreen(
                                         onClick = {
                                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                             clipboard.setPrimaryClip(ClipData.newPlainText("Maximus Atomic ID", myAtomicId))
-                                            Toast.makeText(context, "Atomic ID copied to clipboard", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, context.getString(R.string.ui_atomic_id_copied_to_clipboard), Toast.LENGTH_SHORT).show()
                                         },
                                         modifier = Modifier.size(32.dp)
                                     ) {
@@ -213,7 +215,7 @@ fun SecretChatScreen(
 
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "Local identifier only. Authenticated key exchange and peer transport are not implemented.",
+                                    text = stringResource(R.string.ui_local_identifier_only_authenticated_key),
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -229,13 +231,13 @@ fun SecretChatScreen(
                         ) {
                             Icon(Icons.Default.AddComment, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Save Local Contact")
+                            Text(stringResource(R.string.ui_save_local_contact))
                         }
                     }
 
                     item {
                         Text(
-                            text = "LOCAL CONTACTS (${conversations.size})",
+                            text = stringResource(R.string.ui_local_contacts, conversations.size),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -259,12 +261,12 @@ fun SecretChatScreen(
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
-                                        text = "No local contacts",
+                                        text = stringResource(R.string.ui_no_local_contacts),
                                         fontWeight = FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = "Messaging is unavailable in this build",
+                                        text = stringResource(R.string.ui_messaging_is_unavailable_in_this),
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                     )
@@ -413,7 +415,7 @@ fun SecretChatScreen(
                             OutlinedTextField(
                                 value = inputMessage,
                                 onValueChange = { inputMessage = it },
-                                placeholder = { Text("Messaging unavailable: peer transport not integrated", fontSize = 12.sp) },
+                                placeholder = { Text(stringResource(R.string.ui_messaging_unavailable_peer_transport_not), fontSize = 12.sp) },
                                 enabled = false,
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(24.dp),
@@ -448,17 +450,17 @@ fun SecretChatScreen(
     if (showNewChatDialog) {
         AlertDialog(
             onDismissRequest = { showNewChatDialog = false },
-            title = { Text("Save Local Contact ID") },
+            title = { Text(stringResource(R.string.ui_save_local_contact_id)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "This saves a local contact only. It does not establish an encrypted or network session.",
+                        text = stringResource(R.string.ui_this_saves_a_local_contact),
                         fontSize = 13.sp
                     )
                     OutlinedTextField(
                         value = peerIdInput,
                         onValueChange = { peerIdInput = it },
-                        label = { Text("20-Digit Atomic ID") },
+                        label = { Text(stringResource(R.string.ui_t_20_digit_atomic_id)) },
                         placeholder = { Text("XXXX-XXXX-XXXX-XXXX-XXXX") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -466,7 +468,7 @@ fun SecretChatScreen(
                     OutlinedTextField(
                         value = peerAliasInput,
                         onValueChange = { peerAliasInput = it },
-                        label = { Text("Alias / Contact Name (Optional)") },
+                        label = { Text(stringResource(R.string.ui_alias_contact_name_optional)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -483,16 +485,16 @@ fun SecretChatScreen(
                             peerIdInput = ""
                             peerAliasInput = ""
                         } else {
-                            Toast.makeText(context, "Please enter 20 valid digits", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.ui_please_enter_20_valid_digits), Toast.LENGTH_SHORT).show()
                         }
                     }
                 ) {
-                    Text("Save")
+                    Text(stringResource(R.string.ui_save))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showNewChatDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.ui_cancel))
                 }
             }
         )
@@ -502,9 +504,9 @@ fun SecretChatScreen(
     if (showNukeConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showNukeConfirmDialog = false },
-            title = { Text("Delete All Local Contact Data?") },
+            title = { Text(stringResource(R.string.ui_delete_all_local_contact_data)) },
             text = {
-                Text("This removes the app's local contact records. Flash storage may retain system-managed remnants, so this is deletion—not guaranteed forensic erasure.")
+                Text(stringResource(R.string.ui_this_removes_the_app_s))
             },
             confirmButton = {
                 Button(
@@ -512,16 +514,16 @@ fun SecretChatScreen(
                         chatManager.nukeAllChats()
                         activeConversation = null
                         showNukeConfirmDialog = false
-                        Toast.makeText(context, "Local contact data deleted.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_local_contact_data_deleted), Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Delete All")
+                    Text(stringResource(R.string.ui_delete_all))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showNukeConfirmDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.ui_cancel))
                 }
             }
         )

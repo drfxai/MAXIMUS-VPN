@@ -1,5 +1,7 @@
 package com.example.ui.subscription
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -156,7 +158,7 @@ internal fun SubscriptionsContent(
                     Spacer(Modifier.width(12.dp))
                 }
                 Text(
-                    text = "Subscriptions",
+                    text = stringResource(R.string.ui_subscriptions),
                     fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -170,7 +172,7 @@ internal fun SubscriptionsContent(
                     ) {
                         Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Update all", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ui_update_all), fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -182,7 +184,7 @@ internal fun SubscriptionsContent(
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 shape = RoundedCornerShape(16.dp),
                 icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Add subscription", fontWeight = FontWeight.SemiBold) },
+                text = { Text(stringResource(R.string.ui_add_subscription), fontWeight = FontWeight.SemiBold) },
                 modifier = Modifier.testTag("add_subscription_fab")
             )
         }
@@ -238,8 +240,8 @@ internal fun SubscriptionsContent(
     pendingDelete?.let { sub ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete ${sub.name}?", fontWeight = FontWeight.SemiBold) },
-            text = { Text("Its ${sub.nodeCount} nodes are removed from the server list too.") },
+            title = { Text(stringResource(R.string.ui_delete_2, sub.name), fontWeight = FontWeight.SemiBold) },
+            text = { Text(stringResource(R.string.ui_its_nodes_are_removed_from, sub.nodeCount)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -247,9 +249,9 @@ internal fun SubscriptionsContent(
                         pendingDelete = null
                     },
                     modifier = Modifier.testTag("confirm_delete_subscription")
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                ) { Text(stringResource(R.string.ui_delete), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text(stringResource(R.string.ui_cancel)) } }
         )
     }
 }
@@ -278,7 +280,7 @@ private fun OverviewCard(subscriptions: List<SubscriptionInfo>) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Total nodes", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.ui_total_nodes), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
                         text = "%,d".format(total),
                         fontSize = 32.sp,
@@ -293,7 +295,7 @@ private fun OverviewCard(subscriptions: List<SubscriptionInfo>) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = if (failing > 0) "$failing need attention" else if (lastUpdate > 0) "Updated ${timeAgo(lastUpdate)} ago" else "Not updated yet",
+                        text = if (failing > 0) stringResource(R.string.ui_need_attention, failing) else if (lastUpdate > 0) stringResource(R.string.ui_updated_ago, timeAgo(lastUpdate)) else stringResource(R.string.ui_not_updated_yet),
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Medium,
                         color = if (failing > 0) Failing else MaterialTheme.colorScheme.onSurfaceVariant
@@ -485,7 +487,7 @@ private fun SubscriptionCard(
             IconButton(onClick = onDelete, modifier = Modifier.testTag("delete_subscription_${subscription.id}")) {
                 Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
             }
-            TextButton(onClick = onPreset, enabled = syncEnabled) { Text("Preset") }
+            TextButton(onClick = onPreset, enabled = syncEnabled) { Text(stringResource(R.string.ui_preset)) }
         }
     }
 }
@@ -518,10 +520,10 @@ private fun EmptySubscriptions(onAddClick: () -> Unit) {
                 Icon(Icons.Default.RssFeed, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
             }
             Spacer(Modifier.height(14.dp))
-            Text("No subscriptions yet", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Text(stringResource(R.string.ui_no_subscriptions_yet), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(4.dp))
             Text(
-                "Paste a provider link, or add one of the free sources below.",
+                stringResource(R.string.ui_paste_a_provider_link_or),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -529,7 +531,7 @@ private fun EmptySubscriptions(onAddClick: () -> Unit) {
             Button(onClick = onAddClick, shape = RoundedCornerShape(12.dp)) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Add subscription", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.ui_add_subscription), fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -581,10 +583,10 @@ private fun FreeSourcesSection(
                 }
                 Spacer(Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Free Config Hub", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text(stringResource(R.string.ui_free_config_hub), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "${sources.size} public sources, checked before import",
+                        text = stringResource(R.string.ui_public_sources_checked_before_import, sources.size),
                         fontSize = 14.sp,
                         lineHeight = 19.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -623,7 +625,7 @@ private fun FreeSourcesSection(
                                     if (source.id == "maximus_free") {
                                         Spacer(Modifier.width(8.dp))
                                         Text(
-                                            "Recommended",
+                                            stringResource(R.string.ui_recommended),
                                             fontSize = 10.5.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = Healthy,
@@ -657,7 +659,7 @@ private fun FreeSourcesSection(
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                     Text(
-                        text = "Public relays are not trusted infrastructure. Avoid sensitive traffic until a node has passed Maximus health and security checks.",
+                        text = stringResource(R.string.ui_public_relays_are_not_trusted),
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -695,19 +697,19 @@ private fun SubscriptionPresetDialog(
     var countries by remember(subscription.id) { mutableStateOf(initial.excludedCountries.sorted().joinToString(",")) }
     val codes = countries.split(',', ' ', ';').map { it.trim().uppercase() }.filter { it.isNotEmpty() }.toSet()
     val valid = codes.all { it.matches(Regex("[A-Z]{2}")) } && codes.size <= 250
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Subscription preset") }, text = {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.ui_subscription_preset)) }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Applies to current nodes and future updates. Custom TLS, routes and explicit per-node core choices are preserved.")
+            Text(stringResource(R.string.ui_applies_to_current_nodes_and))
             for ((choice, label) in listOf(null to "Keep imported core", com.example.data.model.EngineType.XRAY to "Xray default",
                 com.example.data.model.EngineType.SING_BOX to "Prefer sing-box when compatible")) {
                 TextButton(onClick = { core = choice }) { Text((if (core == choice) "✓ " else "") + label) }
             }
             OutlinedTextField(value = countries, onValueChange = { if (it.length <= 1000) countries = it },
-                label = { Text("Exclude countries from Auto-select") }, placeholder = { Text("US, DE, RU") }, isError = !valid)
-            Text("Country codes only. Unknown locations stay eligible; excluded servers remain available for manual connection.", fontSize = 12.sp)
+                label = { Text(stringResource(R.string.ui_exclude_countries_from_auto_select)) }, placeholder = { Text("US, DE, RU") }, isError = !valid)
+            Text(stringResource(R.string.ui_country_codes_only_unknown_locations), fontSize = 12.sp)
         }
-    }, confirmButton = { TextButton(onClick = { onApply(com.example.vpn.subscription.SubscriptionPreset(core, codes)) }, enabled = valid) { Text("Apply") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    }, confirmButton = { TextButton(onClick = { onApply(com.example.vpn.subscription.SubscriptionPreset(core, codes)) }, enabled = valid) { Text(stringResource(R.string.ui_apply)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.ui_cancel)) } })
 }
 
 @Composable
@@ -721,15 +723,15 @@ private fun AddSubscriptionDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "Add Subscription", fontWeight = FontWeight.Bold)
+            Text(text = stringResource(R.string.ui_add_subscription_2), fontWeight = FontWeight.Bold)
         },
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Provider / Name (Optional)") },
-                    placeholder = { Text("e.g. My Premium Proxy Sub") },
+                    label = { Text(stringResource(R.string.ui_provider_name_optional)) },
+                    placeholder = { Text(stringResource(R.string.ui_e_g_my_premium_proxy)) },
                     modifier = Modifier.fillMaxWidth().testTag("sub_name_input")
                 )
 
@@ -738,7 +740,7 @@ private fun AddSubscriptionDialog(
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("Subscription HTTPS URL") },
+                    label = { Text(stringResource(R.string.ui_subscription_https_url)) },
                     placeholder = { Text("https://example.com/api/v1/client/subscribe?token=...") },
                     modifier = Modifier.fillMaxWidth().testTag("sub_url_input")
                 )
@@ -750,12 +752,12 @@ private fun AddSubscriptionDialog(
                 enabled = url.isNotBlank(),
                 modifier = Modifier.testTag("confirm_add_sub_button")
             ) {
-                Text("Add & Sync")
+                Text(stringResource(R.string.ui_add_sync))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.ui_cancel))
             }
         }
     )

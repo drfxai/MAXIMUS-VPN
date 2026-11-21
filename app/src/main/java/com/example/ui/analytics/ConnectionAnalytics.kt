@@ -1,5 +1,7 @@
 package com.example.ui.analytics
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -94,8 +96,8 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = c.text) }
                     Column {
-                        LabText("Analytics", c.text, 27.sp, FontWeight.Bold)
-                        LabText("Connection performance · up to 60 minutes", c.text2, 12.sp)
+                        LabText(stringResource(R.string.ui_analytics), c.text, 27.sp, FontWeight.Bold)
+                        LabText(stringResource(R.string.ui_connection_performance_up_to_60), c.text2, 12.sp)
                     }
                 }
             }
@@ -109,7 +111,7 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                 }
             }
             item {
-                AnalyticsCard(c, "Connection latency", "Recent latency measurements") {
+                AnalyticsCard(c, stringResource(R.string.ui_connection_latency), stringResource(R.string.ui_recent_latency_measurements)) {
                     AnalyticsPlot(c, samples, { it.latencyMs }, unit = "ms")
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Metric(c, "Average", latency.takeIf { it.isNotEmpty() }?.average()?.let { "${it.toInt()} ms" }, Modifier.weight(1f))
@@ -119,7 +121,7 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                 }
             }
             item {
-                AnalyticsCard(c, "Transfer speed", "Observed traffic rate through the app") {
+                AnalyticsCard(c, stringResource(R.string.ui_transfer_speed), stringResource(R.string.ui_observed_traffic_rate_through_the)) {
                     TransferBars(c, samples)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Metric(c, "Avg. download", down.takeIf { it.isNotEmpty() }?.average()?.let(::speed), Modifier.weight(1f))
@@ -128,7 +130,7 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                 }
             }
             item {
-                AnalyticsCard(c, "Connection stability", "Share of recorded samples with verified traffic") {
+                AnalyticsCard(c, stringResource(R.string.ui_connection_stability), stringResource(R.string.ui_share_of_recorded_samples_with)) {
                     if (samples.isNotEmpty()) Canvas(Modifier.fillMaxWidth().height(11.dp)) {
                         val step = size.width / samples.size
                         samples.forEachIndexed { i, sample ->
@@ -148,7 +150,7 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                 }
             }
             item {
-                AnalyticsCard(c, "Session summary", "Latest tunnel counters on this device") {
+                AnalyticsCard(c, stringResource(R.string.ui_session_summary), stringResource(R.string.ui_latest_tunnel_counters_on_this)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Metric(c, "Downloaded", tail?.let { TrafficStats.formatBytes(it.downloaded) }, Modifier.weight(1f))
                         Metric(c, "Uploaded", tail?.let { TrafficStats.formatBytes(it.uploaded) }, Modifier.weight(1f))
@@ -183,7 +185,7 @@ private fun Metric(c: LabColors, label: String, value: String?, modifier: Modifi
 private fun AnalyticsPlot(c: LabColors, samples: List<AnalyticsSample>, primary: (AnalyticsSample) -> Long?, unit: String) {
     val maximum = samples.maxOfOrNull { primary(it) ?: 0 } ?: 0
     if (samples.none { primary(it) != null }) {
-        LabText("Latency measurements are not available yet.", c.text2, 13.sp, modifier = Modifier.padding(vertical = 12.dp))
+        LabText(stringResource(R.string.ui_latency_measurements_are_not_available), c.text2, 13.sp, modifier = Modifier.padding(vertical = 12.dp))
         return
     }
     LabText("$maximum $unit", c.text2, 10.sp)
@@ -215,7 +217,7 @@ private fun AnalyticsPlot(c: LabColors, samples: List<AnalyticsSample>, primary:
 @Composable
 private fun TransferBars(c: LabColors, samples: List<AnalyticsSample>) {
     if (samples.none { it.downloadBps != null || it.uploadBps != null }) {
-        LabText("Transfer samples appear after traffic is verified.", c.text2, 13.sp)
+        LabText(stringResource(R.string.ui_transfer_samples_appear_after_traffic), c.text2, 13.sp)
         return
     }
     val groups = samples.chunked(((samples.size + 11) / 12).coerceAtLeast(1)).map { group ->
@@ -244,8 +246,8 @@ private fun TransferBars(c: LabColors, samples: List<AnalyticsSample>) {
 @Composable
 private fun ChartTime(c: LabColors) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        LabText("Earlier", c.text2, 10.sp)
-        LabText("Latest sample", c.text2, 10.sp)
+        LabText(stringResource(R.string.ui_earlier), c.text2, 10.sp)
+        LabText(stringResource(R.string.ui_latest_sample), c.text2, 10.sp)
     }
 }
 

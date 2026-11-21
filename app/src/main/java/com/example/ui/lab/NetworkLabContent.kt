@@ -1,5 +1,7 @@
 package com.example.ui.lab
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -287,7 +289,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
     val activity = if (s.running != null) "Testing" else if (s.network != null) "Active" else "Idle"
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
-            TitleBar(c, "Maximus LAB", "Network Intelligence · $mode · $activity", null, trailing = {
+            TitleBar(c, "Maximus LAB", stringResource(R.string.ui_network_intelligence, mode, activity), null, trailing = {
                 Box(Modifier.size(38.dp).clip(CircleShape).border(1.dp, c.stroke, CircleShape).clickable(onClick = actions.onRefreshNetwork),
                     contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Refresh, "Measure the network again", tint = c.text2, modifier = Modifier.size(18.dp)) }
             })
@@ -295,9 +297,9 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
         item { GroupLabel(c, "Built-in connections") }
         item {
             Panel(c) {
-                NavRow(c, Icons.Rounded.Shield, "Aether / WARP", "Cloudflare tunnel") { actions.onBuiltinConnection(false) }
+                NavRow(c, Icons.Rounded.Shield, "Aether / WARP", stringResource(R.string.ui_cloudflare_tunnel)) { actions.onBuiltinConnection(false) }
                 Hairline(c)
-                NavRow(c, Icons.Rounded.Language, "Serverless Direct", "Direct access with DPI profiles") { actions.onBuiltinConnection(true) }
+                NavRow(c, Icons.Rounded.Language, "Serverless Direct", stringResource(R.string.ui_direct_access_with_dpi_profiles)) { actions.onBuiltinConnection(true) }
             }
         }
         s.message?.let { m -> item { Notice(c, m, actions.onDismissMessage) } }
@@ -330,7 +332,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                     Hairline(c)
                     Column(Modifier.fillMaxWidth().padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            LabText("Network state", c.text2, 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                            LabText(stringResource(R.string.ui_network_state), c.text2, 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
                             Badge(st.primary.title, stateColor(c, st.primary))
                         }
                         val extra = st.restrictions - st.primary
@@ -350,18 +352,18 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                     Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             LabText(best.strategy, c.text, 16.sp, FontWeight.SemiBold, maxLines = 1)
-                            LabText("${best.profileId} · verified ${relativeTime(best.lastVerifiedAt)}", c.text3, 12.sp, maxLines = 1)
+                            LabText(stringResource(R.string.ui_verified_2, best.profileId, relativeTime(best.lastVerifiedAt)), c.text3, 12.sp, maxLines = 1)
                         }
-                        Badge("Verified", c.good)
+                        Badge(stringResource(R.string.ui_verified), c.good)
                     }
                     Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LabText("Confidence", c.text2, 12.sp, modifier = Modifier.width(78.dp), maxLines = 1)
+                        LabText(stringResource(R.string.ui_confidence), c.text2, 12.sp, modifier = Modifier.width(78.dp), maxLines = 1)
                         Meter(c, best.confidence.toFloat(), c.good, Modifier.weight(1f))
                         LabText(pct(best.confidence), c.text, 12.5.sp, FontWeight.SemiBold, Modifier.padding(start = 10.dp), maxLines = 1)
                     }
                 } else {
                     Column(Modifier.padding(14.dp)) {
-                        LabText("Nothing verified on this network yet", c.text, 14.5.sp, FontWeight.Medium, maxLines = 1)
+                        LabText(stringResource(R.string.ui_nothing_verified_on_this_network), c.text, 14.5.sp, FontWeight.Medium, maxLines = 1)
                         LabText(s.plan?.reason ?: "Run an experiment when a config stops working.", c.text3, 12.sp, maxLines = 2)
                     }
                 }
@@ -371,8 +373,8 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
             Row(Modifier.padding(horizontal = Gutter, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 val busy = s.running != null || s.analysisRunning
                 PrimaryButton(c, if (s.analysisRunning) "Analysing…" else "Start full analysis", Icons.Rounded.Insights, Modifier.weight(1f), !busy, onClick = actions.onFullAnalysis)
-                if (busy) SecondaryButton(c, "Live", Icons.Rounded.MonitorHeart) { actions.onOpen(LabSection.LIVE) }
-                else SecondaryButton(c, "One config", Icons.Rounded.PlayArrow) { actions.onPick(true) }
+                if (busy) SecondaryButton(c, stringResource(R.string.ui_live_2), Icons.Rounded.MonitorHeart) { actions.onOpen(LabSection.LIVE) }
+                else SecondaryButton(c, stringResource(R.string.ui_one_config), Icons.Rounded.PlayArrow) { actions.onPick(true) }
             }
         }
         bestNow(s)?.let { b -> item { BestConnectionCard(c, b, actions) } }
@@ -388,7 +390,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                     val untested = report.paths.count { it.status == PathStatus.NOT_TESTED }
                     if (untested > 0) {
                         Hairline(c)
-                        LabText("$untested paths not tested · see the full report", c.text3, 12.sp, modifier = Modifier.padding(14.dp), maxLines = 1)
+                        LabText(stringResource(R.string.ui_paths_not_tested_see_the, untested), c.text3, 12.sp, modifier = Modifier.padding(14.dp), maxLines = 1)
                     }
                 }
             }
@@ -471,7 +473,7 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
             }
         }
         item {
-            Footnote(c, "LAB never changes saved configs, the kill switch or DNS. It tests derived copies with real requests while the VPN is off, and reports only what this phone measured.")
+            Footnote(c, stringResource(R.string.ui_lab_never_changes_saved_configs))
         }
     }
 }
@@ -497,16 +499,16 @@ private fun ConfigPicker(c: LabColors, configs: List<LabConfigOption>, vpnOn: Bo
             .padding(top = 10.dp, bottom = 16.dp)) {
             Box(Modifier.align(Alignment.CenterHorizontally).width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.stroke))
             Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
-                LabText("Run an experiment", c.text, 17.sp, FontWeight.SemiBold, maxLines = 1)
-                LabText("Pick the config that stopped working. LAB measures it as it is, then tests up to 5 safe copies. The saved config is not changed.",
+                LabText(stringResource(R.string.ui_run_an_experiment), c.text, 17.sp, FontWeight.SemiBold, maxLines = 1)
+                LabText(stringResource(R.string.ui_pick_the_config_that_stopped),
                     c.text2, 12.5.sp, maxLines = 3, lineHeight = 17.sp)
                 if (vpnOn) {
                     Spacer(Modifier.height(8.dp))
-                    Badge("Disconnect the VPN first", c.okay)
+                    Badge(stringResource(R.string.ui_disconnect_the_vpn_first), c.okay)
                 }
             }
             Hairline(c)
-            if (configs.isEmpty()) LabText("No saved configs yet.", c.text3, 13.sp, modifier = Modifier.padding(18.dp))
+            if (configs.isEmpty()) LabText(stringResource(R.string.ui_no_saved_configs_yet), c.text3, 13.sp, modifier = Modifier.padding(18.dp))
             configs.take(8).forEachIndexed { i, cfg ->
                 if (i > 0) Hairline(c, 18.dp)
                 Row(Modifier.fillMaxWidth().clickable(enabled = !vpnOn) { actions.onRun(cfg.id) }.padding(horizontal = 18.dp, vertical = 12.dp),
@@ -527,7 +529,7 @@ private fun ConfigPicker(c: LabColors, configs: List<LabConfigOption>, vpnOn: Bo
 @Composable
 private fun NetworksPage(c: LabColors, s: LabSnapshot, relativeTime: (Long) -> String) {
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)) {
-        if (s.networks.isEmpty()) item { Empty(c, "No network measured yet", "LAB measures the network the phone is on when you open it or the network changes.") }
+        if (s.networks.isEmpty()) item { Empty(c, stringResource(R.string.ui_no_network_measured_yet), stringResource(R.string.ui_lab_measures_the_network_the)) }
         else item {
             Panel(c) {
                 s.networks.forEachIndexed { i, n ->
@@ -536,7 +538,7 @@ private fun NetworksPage(c: LabColors, s: LabSnapshot, relativeTime: (Long) -> S
                 }
             }
         }
-        item { Footnote(c, "Other networks show their last measurement and its age. They are never shown as current.") }
+        item { Footnote(c, stringResource(R.string.ui_other_networks_show_their_last)) }
     }
 }
 
@@ -553,7 +555,7 @@ private fun NetworkRow(c: LabColors, n: LabStore.NetworkSeen, current: Boolean, 
         }
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            LabText(if (current) "Current · measured now" else "Last tested ${relativeTime(n.lastMeasuredAt)}", if (current) c.good else c.text2, 12.sp, FontWeight.Medium,
+            LabText(if (current) stringResource(R.string.ui_current_measured_now) else stringResource(R.string.ui_last_tested, relativeTime(n.lastMeasuredAt)), if (current) c.good else c.text2, 12.sp, FontWeight.Medium,
                 Modifier.width(150.dp), maxLines = 1)
             Meter(c, n.health?.let { it / 100f }, stabilityColor(c, n.health), Modifier.weight(1f))
             LabText(n.health?.let { "$it%" } ?: "—", c.text2, 12.sp, FontWeight.Medium, Modifier.padding(start = 8.dp), maxLines = 1)
@@ -581,7 +583,7 @@ private fun LivePage(c: LabColors, state: NetworkLabUiState, actions: NetworkLab
                 }
             }
         }
-        if (s.steps.isEmpty()) item { Empty(c, "Nothing running", "Run an experiment from the LAB home to follow it here.") }
+        if (s.steps.isEmpty()) item { Empty(c, stringResource(R.string.ui_nothing_running), stringResource(R.string.ui_run_an_experiment_from_the)) }
         else item {
             Panel(c) {
                 Column(Modifier.padding(vertical = 8.dp)) {
@@ -591,7 +593,7 @@ private fun LivePage(c: LabColors, state: NetworkLabUiState, actions: NetworkLab
         }
         if (s.running != null || s.analysisRunning) item {
             Row(Modifier.padding(horizontal = Gutter, vertical = 12.dp)) {
-                SecondaryButton(c, if (s.analysisRunning) "Stop analysis" else "Stop experiment", Icons.Rounded.Stop, Modifier.fillMaxWidth(), color = c.bad, onClick = actions.onCancel)
+                SecondaryButton(c, if (s.analysisRunning) stringResource(R.string.ui_stop_analysis) else stringResource(R.string.ui_stop_experiment), Icons.Rounded.Stop, Modifier.fillMaxWidth(), color = c.bad, onClick = actions.onCancel)
             }
         }
         s.message?.let { m -> item { Notice(c, m, actions.onDismissMessage) } }
@@ -599,7 +601,7 @@ private fun LivePage(c: LabColors, state: NetworkLabUiState, actions: NetworkLab
         if (advanced) item {
             Panel(c) {
                 Column(Modifier.background(c.cardAlt).padding(12.dp)) {
-                    if (s.log.isEmpty()) LabText("No log yet.", c.text3, 12.sp)
+                    if (s.log.isEmpty()) LabText(stringResource(R.string.ui_no_log_yet), c.text3, 12.sp)
                     s.log.takeLast(40).forEach { LabText(it, c.text2, 11.sp, maxLines = 3, lineHeight = 15.sp) }
                 }
             }
@@ -629,8 +631,8 @@ private fun StepRow(c: LabColors, step: LabStep, first: Boolean, last: Boolean) 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LabText(step.title, if (step.state == LabStep.State.PENDING || step.state == LabStep.State.SKIPPED) c.text3 else c.text, 13.5.sp,
                     if (step.state == LabStep.State.RUNNING) FontWeight.SemiBold else FontWeight.Medium, Modifier.weight(1f), maxLines = 1)
-                if (step.state == LabStep.State.RUNNING) Badge("Running", c.accent)
-                if (step.state == LabStep.State.SKIPPED) LabText("Skipped", c.text3, 11.5.sp, maxLines = 1)
+                if (step.state == LabStep.State.RUNNING) Badge(stringResource(R.string.ui_running), c.accent)
+                if (step.state == LabStep.State.SKIPPED) LabText(stringResource(R.string.ui_skipped), c.text3, 11.5.sp, maxLines = 1)
             }
             if (step.detail.isNotBlank()) LabText(step.detail, c.text2, 12.sp, maxLines = 2, lineHeight = 16.sp)
         }
@@ -662,7 +664,7 @@ private fun bestNow(s: LabSnapshot): BestNow? {
 private fun BestConnectionCard(c: LabColors, b: BestNow, actions: NetworkLabActions) {
     Panel(c) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
-            LabText("BEST CONNECTION NOW", c.text3, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
+            LabText(stringResource(R.string.ui_best_connection_now), c.text3, 11.5.sp, FontWeight.SemiBold, maxLines = 1)
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
                 LabText(b.pick?.name ?: if (b.running) "Searching…" else "No working path", c.text, 16.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
                 Badge(b.status.title, pathColor(c, b.status))
@@ -683,15 +685,15 @@ private fun LiveSummary(c: LabColors, live: LiveAnalysis) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LabText("${live.networkLabel} · ${live.state}", c.text, 14.5.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
-                LabText("${live.testsDone}/${live.budget} tests", c.text3, 12.sp, maxLines = 1)
+                LabText(stringResource(R.string.ui_tests, live.testsDone, live.budget), c.text3, 12.sp, maxLines = 1)
             }
             Box(Modifier.fillMaxWidth().padding(top = 8.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.divider)) {
                 Box(Modifier.fillMaxWidth((live.testsDone.toFloat() / live.budget.coerceAtLeast(1)).coerceIn(0f, 1f)).height(4.dp).background(c.accent))
             }
             LabText(live.phase.title, c.text2, 12.5.sp, FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(top = 8.dp))
             LabText(live.hypothesis, c.text2, 12.5.sp, maxLines = 3, lineHeight = 17.sp)
-            live.currentTest?.let { LabText("Testing now: $it", c.accent, 12.5.sp, FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(top = 4.dp)) }
-            live.firstWorking?.let { LabText("First working path: ${it.name} (${it.family.title})", c.good, 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp)) }
+            live.currentTest?.let { LabText(stringResource(R.string.ui_testing_now, it), c.accent, 12.5.sp, FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(top = 4.dp)) }
+            live.firstWorking?.let { LabText(stringResource(R.string.ui_first_working_path, it.name, it.family.title), c.good, 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp)) }
             live.events.takeLast(3).forEach { LabText("• $it", c.text3, 11.5.sp, maxLines = 2, lineHeight = 15.sp) }
         }
     }
@@ -702,7 +704,7 @@ private fun ReportHeadline(c: LabColors, r: AnalysisReport, relativeTime: (Long)
     Column(Modifier.fillMaxWidth().padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             LabText(r.state, c.text, 15.sp, FontWeight.SemiBold, Modifier.weight(1f), maxLines = 1)
-            r.best?.let { Badge(it.status.title, pathColor(c, it.status)) } ?: Badge("No path", c.bad)
+            r.best?.let { Badge(it.status.title, pathColor(c, it.status)) } ?: Badge(stringResource(R.string.ui_no_path), c.bad)
         }
         LabText(r.note, c.text2, 12.5.sp, maxLines = 3, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
         LabText("${r.mode} · ${relativeTime(r.finishedAt)}", c.text3, 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
@@ -749,7 +751,7 @@ private fun ReportPage(c: LabColors, state: NetworkLabUiState, actions: NetworkL
     val r = state.snapshot.analysis
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)) {
         if (r == null) {
-            item { Empty(c, "No analysis yet", "Tap Start full analysis on the LAB home. It measures this network, tests your saved configs outside the VPN and ranks what works.") }
+            item { Empty(c, stringResource(R.string.ui_no_analysis_yet), stringResource(R.string.ui_tap_start_full_analysis_on)) }
             return@LazyColumn
         }
         item { Panel(c) { ReportHeadline(c, r, relativeTime) } }
@@ -783,7 +785,7 @@ private fun ReportPage(c: LabColors, state: NetworkLabUiState, actions: NetworkL
         item { GroupLabel(c, "Ranked methods") }
         item {
             Panel(c) {
-                if (r.ranked.isEmpty()) LabText("No saved config was tested in this run.", c.text3, 12.5.sp, modifier = Modifier.padding(14.dp))
+                if (r.ranked.isEmpty()) LabText(stringResource(R.string.ui_no_saved_config_was_tested), c.text3, 12.5.sp, modifier = Modifier.padding(14.dp))
                 r.ranked.forEachIndexed { i, m -> if (i > 0) Hairline(c); MethodRow(c, i + 1, m) }
             }
         }
@@ -795,8 +797,8 @@ private fun ReportPage(c: LabColors, state: NetworkLabUiState, actions: NetworkL
                 }
             }
         }
-        if (!state.aiReady) item { Footnote(c, "AI analysis unavailable: no AI provider is set up. Every result above comes from measurements on this phone.") }
-        item { Footnote(c, "Saved configs are never changed. Old results only change what is tried first; every status above was measured in this run or says it was not tested.") }
+        if (!state.aiReady) item { Footnote(c, stringResource(R.string.ui_ai_analysis_unavailable_no_ai)) }
+        item { Footnote(c, stringResource(R.string.ui_saved_configs_are_never_changed)) }
     }
 }
 
@@ -812,7 +814,7 @@ private fun stateColor(c: LabColors, s: ExperimentState) = when (s) {
 @Composable
 private fun ExperimentsPage(c: LabColors, experiments: List<LabExperiment>, relativeTime: (Long) -> String) {
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (experiments.isEmpty()) item { Empty(c, "No experiments yet", "Experiments start when you run one, or by themselves at Auto LAB.") }
+        if (experiments.isEmpty()) item { Empty(c, stringResource(R.string.ui_no_experiments_yet), stringResource(R.string.ui_experiments_start_when_you_run)) }
         items(experiments, key = { it.experimentId }) { ExperimentCard(c, it, relativeTime) }
     }
 }
@@ -840,7 +842,7 @@ private fun ExperimentCard(c: LabColors, e: LabExperiment, relativeTime: (Long) 
         if (open) {
             Hairline(c)
             Column(Modifier.padding(14.dp)) {
-                e.baselineFailure?.let { LabText("Baseline failure: ${title(it)}", c.text2, 12.5.sp, FontWeight.Medium, maxLines = 1) }
+                e.baselineFailure?.let { LabText(stringResource(R.string.ui_baseline_failure, title(it)), c.text2, 12.5.sp, FontWeight.Medium, maxLines = 1) }
                 e.note?.let { LabText(it, c.text3, 12.sp, maxLines = 3, lineHeight = 16.sp) }
             }
             e.candidates.forEachIndexed { i, cand ->
@@ -854,7 +856,7 @@ private fun ExperimentCard(c: LabColors, e: LabExperiment, relativeTime: (Long) 
                     }
                     LabText(cand.changes.joinToString(" · ") { "${it.field}: ${it.to.ifBlank { "off" }}" }.ifBlank { "no field change" }, c.text3, 11.5.sp, maxLines = 2)
                     LabText(
-                        if (!cand.securityPassed) "Refused by the security gate: ${cand.securityReason ?: "unsafe change"}"
+                        if (!cand.securityPassed) stringResource(R.string.ui_refused_by_the_security_gate, cand.securityReason ?: "unsafe change")
                         else "${cand.stats.successes} of ${cand.stats.attempts} requests passed" + (cand.stats.medianLatencyMs?.let { " · median $it ms" } ?: ""),
                         if (cand.securityPassed) c.text2 else c.bad, 11.5.sp, maxLines = 2
                     )
@@ -882,14 +884,14 @@ private fun DiscoveriesPage(c: LabColors, state: NetworkLabUiState, actions: Net
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (state.aiReady) item {
             Row(Modifier.padding(horizontal = Gutter)) {
-                SecondaryButton(c, if (state.advising) "LAB Agent is reading…" else "Ask LAB Agent to explain", Icons.Rounded.Lightbulb, Modifier.fillMaxWidth(), !state.advising, onClick = actions.onAskAgent)
+                SecondaryButton(c, if (state.advising) stringResource(R.string.ui_lab_agent_is_reading) else stringResource(R.string.ui_ask_lab_agent_to_explain), Icons.Rounded.Lightbulb, Modifier.fillMaxWidth(), !state.advising, onClick = actions.onAskAgent)
             }
         }
         if (state.suggestions.isNotEmpty()) item {
             Panel(c) {
                 Row(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    LabText("Suggested changes", c.text, 14.sp, FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
-                    Badge("AI · not tested", c.okay)
+                    LabText(stringResource(R.string.ui_suggested_changes), c.text, 14.sp, FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+                    Badge(stringResource(R.string.ui_ai_not_tested), c.okay)
                 }
                 state.suggestions.forEachIndexed { i, sug ->
                     if (i > 0) Hairline(c, 14.dp)
@@ -901,10 +903,10 @@ private fun DiscoveriesPage(c: LabColors, state: NetworkLabUiState, actions: Net
                         TextAction(c, "Test", enabled = state.snapshot.running == null && !state.vpnOn) { actions.onTestSuggestion(sug) }
                     }
                 }
-                Footnote(c, "A test runs only if the change passes the LAB allowlist and security gate.", inPanel = true)
+                Footnote(c, stringResource(R.string.ui_a_test_runs_only_if), inPanel = true)
             }
         }
-        if (items.isEmpty()) item { Empty(c, "No discoveries yet", "Findings from experiments and research appear here.") }
+        if (items.isEmpty()) item { Empty(c, stringResource(R.string.ui_no_discoveries_yet), stringResource(R.string.ui_findings_from_experiments_and_research)) }
         items(items, key = { it.id }) { d -> DiscoveryRow(c, d, relativeTime) }
     }
 }
@@ -922,14 +924,14 @@ private fun DiscoveryRow(c: LabColors, d: LabDiscovery, relativeTime: (Long) -> 
                 Dot(tint, 7.dp)
                 Spacer(Modifier.width(7.dp))
                 LabText(d.kind.label().uppercase(), c.text3, 10.5.sp, FontWeight.SemiBold, Modifier.weight(1f), letterSpacing = 0.6.sp, maxLines = 1)
-                Badge(if (d.verified) "Measured" else "Unverified", if (d.verified) c.good else c.okay)
+                Badge(if (d.verified) stringResource(R.string.ui_measured) else stringResource(R.string.ui_unverified), if (d.verified) c.good else c.okay)
             }
             Spacer(Modifier.height(8.dp))
             LabText(d.title, c.text, 14.5.sp, FontWeight.SemiBold, maxLines = 2)
             LabText(d.detail, c.text2, 12.5.sp, maxLines = 3, lineHeight = 17.sp)
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                LabText("Confidence", c.text3, 11.5.sp, modifier = Modifier.width(72.dp), maxLines = 1)
+                LabText(stringResource(R.string.ui_confidence), c.text3, 11.5.sp, modifier = Modifier.width(72.dp), maxLines = 1)
                 Meter(c, d.confidence.toFloat(), if (d.verified) c.good else c.okay, Modifier.width(80.dp))
                 LabText(pct(d.confidence), c.text2, 11.5.sp, FontWeight.Medium, Modifier.padding(start = 8.dp).weight(1f), maxLines = 1)
             }
@@ -944,7 +946,7 @@ private fun DiscoveryRow(c: LabColors, d: LabDiscovery, relativeTime: (Long) -> 
 private fun VerifiedPage(c: LabColors, s: LabSnapshot, actions: NetworkLabActions, relativeTime: (Long) -> String) {
     val list = s.verified.sortedWith(compareBy<VerifiedNetworkProfile> { it.state == PromotionState.RETIRED }.thenByDescending { it.confidence })
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (list.isEmpty()) item { Empty(c, "No verified profiles", "A copy becomes verified after at least 3 passing real requests on a network.") }
+        if (list.isEmpty()) item { Empty(c, stringResource(R.string.ui_no_verified_profiles), stringResource(R.string.ui_a_copy_becomes_verified_after)) }
         items(list, key = { it.profileId }) { VerifiedCard(c, it, it.contextKey == s.network?.contextKey, s.running == null, actions, relativeTime) }
     }
 }
@@ -965,11 +967,11 @@ private fun VerifiedCard(c: LabColors, v: VerifiedNetworkProfile, here: Boolean,
                 LabText(v.strategy, c.text, 15.sp, FontWeight.SemiBold, maxLines = 1)
                 LabText("${v.profileId} · ${v.networkLabel}", c.text3, 12.sp, maxLines = 1)
             }
-            Badge(if (v.disabled) "Disabled" else title(v.state), if (v.disabled) c.text3 else promotionColor(c, v.state))
+            Badge(if (v.disabled) stringResource(R.string.ui_disabled) else title(v.state), if (v.disabled) c.text3 else promotionColor(c, v.state))
         }
         Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            MeterLine(c, "Success", v.stats.successRate, c.good)
-            MeterLine(c, "Confidence", v.confidence, c.accent)
+            MeterLine(c, stringResource(R.string.ui_success), v.stats.successRate, c.good)
+            MeterLine(c, stringResource(R.string.ui_confidence), v.confidence, c.accent)
         }
         Hairline(c, 14.dp)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -983,7 +985,7 @@ private fun VerifiedCard(c: LabColors, v: VerifiedNetworkProfile, here: Boolean,
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Shield, null, tint = if (v.securityPassed) c.good else c.bad, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(5.dp))
-            LabText(if (v.securityPassed) "Security gate passed" else "Security gate refused", c.text2, 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
+            LabText(if (v.securityPassed) stringResource(R.string.ui_security_gate_passed) else stringResource(R.string.ui_security_gate_refused), c.text2, 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
             TextAction(c, "Retest", here && idle && !retired && !v.disabled) { actions.onRetest(v.profileId) }
             TextAction(c, if (v.disabled) "Enable" else "Disable", !retired) { actions.onDisable(v.profileId, !v.disabled) }
             TextAction(c, "Retire", !retired, c.bad) { actions.onRetire(v.profileId) }
@@ -992,11 +994,11 @@ private fun VerifiedCard(c: LabColors, v: VerifiedNetworkProfile, here: Boolean,
         if (open) {
             Hairline(c)
             Column(Modifier.background(c.cardAlt).fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                LabText("Mutation  ${v.mutationProfileId}", c.text2, 12.sp, maxLines = 1)
-                LabText("Network  ${v.contextKey}", c.text2, 12.sp, maxLines = 1)
-                v.endpoint?.let { LabText("Edge address  $it", c.text2, 12.sp, maxLines = 1) }
+                LabText(stringResource(R.string.ui_mutation, v.mutationProfileId), c.text2, 12.sp, maxLines = 1)
+                LabText(stringResource(R.string.ui_network, v.contextKey), c.text2, 12.sp, maxLines = 1)
+                v.endpoint?.let { LabText(stringResource(R.string.ui_edge_address, it), c.text2, 12.sp, maxLines = 1) }
                 LabText("Requests  ${v.stats.successes} of ${v.stats.attempts} passed" + if (v.stats.consecutiveFailures > 0) " · ${v.stats.consecutiveFailures} recent failure(s)" else "", c.text2, 12.sp, maxLines = 1)
-                LabText("Rollback  the original config is used unchanged", c.text3, 12.sp, maxLines = 2)
+                LabText(stringResource(R.string.ui_rollback_the_original_config_is), c.text3, 12.sp, maxLines = 2)
             }
         }
     }
@@ -1018,10 +1020,10 @@ private fun ResearchPage(c: LabColors, items: List<LabResearchItem>, actions: Ne
     LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(Modifier.padding(horizontal = Gutter)) {
-                SecondaryButton(c, "Check sources", Icons.Rounded.Refresh, Modifier.fillMaxWidth(), onClick = actions.onResearchRefresh)
+                SecondaryButton(c, stringResource(R.string.ui_check_sources), Icons.Rounded.Refresh, Modifier.fillMaxWidth(), onClick = actions.onResearchRefresh)
             }
         }
-        if (items.isEmpty()) item { Empty(c, "No research yet", "Check sources to look for new core releases and transport ideas.") }
+        if (items.isEmpty()) item { Empty(c, stringResource(R.string.ui_no_research_yet), stringResource(R.string.ui_check_sources_to_look_for)) }
         else item {
             Panel(c) {
                 items.forEachIndexed { i, r ->
@@ -1039,7 +1041,7 @@ private fun ResearchPage(c: LabColors, items: List<LabResearchItem>, actions: Ne
             }
         }
         item {
-            Footnote(c, "Research reads public release notes. Nothing found here runs by itself: an idea becomes an experiment only through the LAB allowlist and security gate, and is verified only by real requests on this phone.")
+            Footnote(c, stringResource(R.string.ui_research_reads_public_release_notes))
         }
     }
 }

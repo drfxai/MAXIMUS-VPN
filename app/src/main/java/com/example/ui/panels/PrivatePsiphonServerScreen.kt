@@ -1,5 +1,7 @@
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -39,10 +41,10 @@ internal fun PrivatePsiphonServerScreen(vm: ServersViewModel, state: ServersStat
     var entry by remember { mutableStateOf("") }
     val server = state.servers.firstOrNull { it.id == chosen } ?: state.servers.singleOrNull()
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Private Psiphon Server", style = MaterialTheme.typography.titleLarge)
-        Text("Use a private psiphond server-entry.dat from a VPS you control. The key is encrypted on this phone. Import does not install a server or prove tunnel connectivity.")
+        Text(stringResource(R.string.ui_private_psiphon_server), style = MaterialTheme.typography.titleLarge)
+        Text(stringResource(R.string.ui_use_a_private_psiphond_server))
         if (state.servers.isEmpty()) {
-            Button(onClick = { vm.openAdd() }) { Text("Add a VPS first") }
+            Button(onClick = { vm.openAdd() }) { Text(stringResource(R.string.ui_add_a_vps_first)) }
         } else {
             Row(Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -56,25 +58,25 @@ internal fun PrivatePsiphonServerScreen(vm: ServersViewModel, state: ServersStat
                 .firstOrNull { it.serviceId == PrivatePsiphonServerScripts.TOOL_ID }
             Card(Modifier.fillMaxWidth(), border = BorderStroke(1.dp, Color(0xFF274F77))) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Selected VPS: ${server.displayName}")
+                    Text(stringResource(R.string.ui_selected_vps_2, server.displayName))
                     if (managed == null) {
                         OutlinedTextField(
                             value = entry,
                             onValueChange = { if (it.length <= 262_144) entry = it },
-                            label = { Text("Paste private server-entry.dat (hex)") },
+                            label = { Text(stringResource(R.string.ui_paste_private_server_entry_dat)) },
                             visualTransformation = PasswordVisualTransformation(),
                             minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth()
                         )
                         Button(onClick = {
                             vm.importPrivatePsiphonEntry(server.id, entry)
                             entry = ""
-                        }, enabled = entry.isNotBlank()) { Text("Encrypt & register private node") }
+                        }, enabled = entry.isNotBlank()) { Text(stringResource(R.string.ui_encrypt_register_private_node_2)) }
                     } else {
-                        Text("Managed profile: ${managed.state.name}")
-                        Text("This is not an approved Auto-Connect node until a recent real traffic test succeeds.")
-                        Button(onClick = { vm.testPrivatePsiphon(server.id) }) { Text("Test real Psiphon tunnel") }
+                        Text(stringResource(R.string.ui_managed_profile, managed.state.name))
+                        Text(stringResource(R.string.ui_this_is_not_an_approved))
+                        Button(onClick = { vm.testPrivatePsiphon(server.id) }) { Text(stringResource(R.string.ui_test_real_psiphon_tunnel)) }
                         state.tests["${server.id}/${PrivatePsiphonServerScripts.TOOL_ID}"]?.let { test ->
-                            Text(if (test.first) "Tunnel verified" else "Tunnel not verified",
+                            Text(if (test.first) stringResource(R.string.ui_tunnel_verified) else stringResource(R.string.ui_tunnel_not_verified),
                                 color = if (test.first) Color(0xFF00D6A4) else MaterialTheme.colorScheme.error)
                             Text(test.second)
                         }
@@ -82,7 +84,7 @@ internal fun PrivatePsiphonServerScreen(vm: ServersViewModel, state: ServersStat
                 }
             }
         }
-        Text("Remote Psiphon auto-install is not enabled in this build. The backend requires an independently reviewed psiphond SHA-256 and must pass a real Android-to-VPS test before production activation.",
+        Text(stringResource(R.string.ui_remote_psiphon_auto_install_is),
             style = MaterialTheme.typography.bodySmall)
     }
 }

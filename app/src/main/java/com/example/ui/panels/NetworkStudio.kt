@@ -1,5 +1,7 @@
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -58,7 +60,7 @@ internal fun StudioHeading(onBack: () -> Unit, onCloudflare: () -> Unit) {
             VerticalDivider(Modifier.height(36.dp), color = StudioLine)
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text("Smart Manager", color = StudioText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                Text("One workspace. Every server.", color = StudioMuted, fontSize = 12.sp)
+                Text(stringResource(R.string.ui_one_workspace_every_server), color = StudioMuted, fontSize = 12.sp)
             }
 
         }
@@ -168,7 +170,7 @@ internal fun StudioResources(facts: ServerFacts?) {
 
 @Composable
 internal fun StudioTableHeader() {
-    Text("SERVICES", Modifier.padding(vertical = 6.dp), color = StudioMuted,
+    Text(stringResource(R.string.ui_services), Modifier.padding(vertical = 6.dp), color = StudioMuted,
         fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
 }
 
@@ -184,7 +186,7 @@ internal fun StudioServiceRow(name: String, icon: ImageVector, status: String, t
                 }
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                     Text(name, color = StudioText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Managed service", color = StudioMuted, fontSize = 11.sp)
+                    Text(stringResource(R.string.ui_managed_service), color = StudioMuted, fontSize = 11.sp)
                 }
                 TextButton(onClick, enabled = enabled) {
                     Text(action, fontSize = 12.sp)
@@ -205,18 +207,18 @@ internal fun StudioReadiness(udp53: Boolean?, dnsVerified: Boolean, onReview: ()
         Row(Modifier.fillMaxWidth().padding(7.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Security, null, Modifier.size(18.dp), tint = StudioBlue)
             Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
-                Text(if (dnsVerified) "DNS traffic verified" else "DNS verification pending",
+                Text(if (dnsVerified) stringResource(R.string.ui_dns_traffic_verified) else stringResource(R.string.ui_dns_verification_pending),
                     color = if (dnsVerified) Mx.Green else StudioMuted, fontSize = 10.sp)
                 Text(when (udp53) {
-                    true -> "UDP 53 available"
-                    false -> "UDP 53 occupied"
-                    null -> "UDP 53 needs inspection"
+                    true -> stringResource(R.string.ui_udp_53_available)
+                    false -> stringResource(R.string.ui_udp_53_occupied)
+                    null -> stringResource(R.string.ui_udp_53_needs_inspection)
                 }, color = StudioText, fontSize = 11.sp)
             }
             Button(onReview, shape = RoundedCornerShape(7.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = StudioGold, contentColor = AppTheme.colors.onPrimary),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)) {
-                Text("Review install plan", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.ui_review_install_plan), fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -226,7 +228,7 @@ internal fun StudioReadiness(udp53: Boolean?, dnsVerified: Boolean, onReview: ()
 internal fun StudioActivity(message: String) {
     Row(Modifier.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Default.Terminal, null, Modifier.size(17.dp), tint = StudioBlue)
-        Text("Last operation", Modifier.padding(horizontal = 7.dp), color = StudioText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.ui_last_operation), Modifier.padding(horizontal = 7.dp), color = StudioText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Text(message, color = StudioMuted, fontSize = 10.sp)
     }
 }

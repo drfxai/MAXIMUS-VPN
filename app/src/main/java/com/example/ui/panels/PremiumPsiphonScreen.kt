@@ -1,6 +1,8 @@
 
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -74,10 +76,10 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState, ini
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
         .background(Mx.Black).padding(8.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
         PsiphonSettingsImportButton(vm, state.busy.isBlank() && state.psiphonInstall?.running != true)
-        MxHero("MAXIMUS VPN  /  PRIVATE SERVER", "Private Psiphon Server",
-            "Guided deployment • encrypted server entry • real tunnel verification")
+        MxHero(stringResource(R.string.ui_maximus_vpn_private_server), stringResource(R.string.ui_private_psiphon_server),
+            stringResource(R.string.ui_guided_deployment_encrypted_server_entry))
 
-        MxCard("Deployment Flow", "Secure • reviewed • VPS-powered", Mx.Gold) {
+        MxCard(stringResource(R.string.ui_deployment_flow), stringResource(R.string.ui_secure_reviewed_vps_powered), Mx.Gold) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     steps.take(3).forEachIndexed { i, label ->
@@ -94,8 +96,8 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState, ini
         }
 
         if (state.servers.isEmpty()) {
-            MxCard("Add a VPS", "A personally controlled server is required", Mx.Gold) {
-                MxAction("Connect VPS", { vm.openAdd() }, Modifier.fillMaxWidth(), strong = true)
+            MxCard(stringResource(R.string.ui_add_a_vps), stringResource(R.string.ui_a_personally_controlled_server_is), Mx.Gold) {
+                MxAction(stringResource(R.string.ui_connect_vps), { vm.openAdd() }, Modifier.fillMaxWidth(), strong = true)
             }
             return@Column
         }
@@ -140,18 +142,18 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState, ini
             }
 
             installing?.let { progress ->
-                MxCard("Private Psiphon deployment", "Actual SSH operation • never marks tunnel verified", Mx.Cyan) {
-                    MxInfoRow("Operation", progress.stage,
+                MxCard(stringResource(R.string.ui_private_psiphon_deployment), stringResource(R.string.ui_actual_ssh_operation_never_marks), Mx.Cyan) {
+                    MxInfoRow(stringResource(R.string.ui_operation), progress.stage,
                         if (progress.error.isBlank()) Mx.Cyan else Mx.Orange)
-                    MxInfoRow("Managed server", if (progress.serverInstalled) "Started" else "Not confirmed",
+                    MxInfoRow(stringResource(R.string.ui_managed_server), if (progress.serverInstalled) "Started" else "Not confirmed",
                         if (progress.serverInstalled) Mx.Green else Mx.Orange)
-                    MxInfoRow("Client entry", if (progress.entryRegistered) "Encrypted and registered" else "Pending",
+                    MxInfoRow(stringResource(R.string.ui_client_entry), if (progress.entryRegistered) "Encrypted and registered" else "Pending",
                         if (progress.entryRegistered) Mx.Green else Mx.Orange)
                     if (progress.running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     if (progress.error.isNotBlank()) Text(progress.error +
                         " Inspect VPS facts and the operation journal before retrying.",
                         color = Mx.Orange, fontSize = 11.sp)
-                    if (progress.entryRegistered) MxAction("Verify phone-to-VPS tunnel", {
+                    if (progress.entryRegistered) MxAction(stringResource(R.string.ui_verify_phone_to_vps_tunnel), {
                         vm.testPrivatePsiphon(progress.serverId)
                     }, Modifier.fillMaxWidth(), strong = true)
                 }
@@ -166,12 +168,12 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState, ini
                         }, {
                             vm.testPrivatePsiphon(server.id)
                         }, test, Modifier.weight(1f))
-                        MxCard("Cloudflare Helper", "Domain and DNS setup for your private node",
+                        MxCard(stringResource(R.string.ui_cloudflare_helper), stringResource(R.string.ui_domain_and_dns_setup_for),
                             Mx.Gold, Modifier.weight(1f)) {
-                            Text("DNS changes and API tokens are managed in Smart Domains.",
+                            Text(stringResource(R.string.ui_dns_changes_and_api_tokens),
                                 color = Mx.Muted, fontSize = 11.sp)
-                            MxStatus("HTTPS proxy not assumed", Mx.Cyan)
-                            MxAction("Open Smart Manager • Cloudflare", {
+                            MxStatus(stringResource(R.string.ui_https_proxy_not_assumed), Mx.Cyan)
+                            MxAction(stringResource(R.string.ui_open_smart_manager_cloudflare), {
                                 vm.openDetail(server.id)
                             }, Modifier.fillMaxWidth())
                         }
@@ -182,49 +184,49 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState, ini
                             vm.importPrivatePsiphonEntry(server.id, entry)
                             entry = ""
                         }, { vm.testPrivatePsiphon(server.id) }, test)
-                        MxCard("Cloudflare Helper", "Managed through Smart Manager", Mx.Gold) {
-                            Text("Use the Cloudflare tab or Smart Domains for scoped DNS setup. No record is changed here.",
+                        MxCard(stringResource(R.string.ui_cloudflare_helper), stringResource(R.string.ui_managed_through_smart_manager), Mx.Gold) {
+                            Text(stringResource(R.string.ui_use_the_cloudflare_tab_or),
                                 color = Mx.Muted, fontSize = 11.sp)
                         }
                     }
                 }
             }
 
-            MxCard("Smart Checks", "Pre-deployment SSH, resource and tunnel checks", Mx.Gold) {
-                MxInfoRow("SSH reachability",
+            MxCard(stringResource(R.string.ui_smart_checks), stringResource(R.string.ui_pre_deployment_ssh_resource_and), Mx.Gold) {
+                MxInfoRow(stringResource(R.string.ui_ssh_reachability),
                     if (fresh) "Inspected" else "Pending",
                     if (fresh) Mx.Green else Mx.Orange)
-                MxInfoRow("SSH fingerprint",
+                MxInfoRow(stringResource(R.string.ui_ssh_fingerprint),
                     if (server.hostKeySha256.isNotBlank()) "Pinned" else "Pending",
                     if (server.hostKeySha256.isNotBlank()) Mx.Green else Mx.Orange)
-                MxInfoRow("Open ports", if (facts?.socketInspectionAvailable == true)
+                MxInfoRow(stringResource(R.string.ui_open_ports), if (facts?.socketInspectionAvailable == true)
                     "TCP ${facts.tcpPorts.size} / UDP ${facts.udpPorts.size}" else "Not inspected", Mx.Cyan)
-                MxInfoRow("Firewall", facts?.firewall ?: "Not inspected", Mx.Cyan)
+                MxInfoRow(stringResource(R.string.ui_firewall), facts?.firewall ?: "Not inspected", Mx.Cyan)
                 MxInfoRow("psiphond", when {
                     facts?.psiphonInstalled == true -> "Service detected • unverified"
                     facts?.psiphonDataRetained == true -> "Service absent • private keys retained"
                     else -> "Not detected"
                 }, Mx.Orange)
-                MxInfoRow("Upstream SHA-256 review", "Pinned official AMD64 binary", Mx.Green)
-                MxInfoRow("Android-to-VPS test", if (verified) "Verified" else "Pending",
+                MxInfoRow(stringResource(R.string.ui_upstream_sha_256_review), "Pinned official AMD64 binary", Mx.Green)
+                MxInfoRow(stringResource(R.string.ui_android_to_vps_test), if (verified) "Verified" else "Pending",
                     if (verified) Mx.Green else Mx.Orange)
-                MxAction("Run Compatibility Check", { vm.refresh(server.id) }, Modifier.fillMaxWidth())
+                MxAction(stringResource(R.string.ui_run_compatibility_check), { vm.refresh(server.id) }, Modifier.fillMaxWidth())
             }
 
-            MxCard("Management", "Manage your VPS and securely imported private node", Mx.Gold) {
+            MxCard(stringResource(R.string.ui_management), stringResource(R.string.ui_manage_your_vps_and_securely), Mx.Gold) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     MxAction("VPS", { vm.openDetail(server.id) }, Modifier.weight(1f))
-                    MxAction("Scan", { vm.refresh(server.id) }, Modifier.weight(1f))
-                    MxAction("Test tunnel", { vm.testPrivatePsiphon(server.id) },
+                    MxAction(stringResource(R.string.ui_scan), { vm.refresh(server.id) }, Modifier.weight(1f))
+                    MxAction(stringResource(R.string.ui_test_tunnel), { vm.testPrivatePsiphon(server.id) },
                         Modifier.weight(1.2f), enabled = node != null)
                 }
-                Text("Installation uses a pinned official AMD64 binary and an isolated systemd user. Use VPS management to inspect services; node traffic still requires a real phone test.",
+                Text(stringResource(R.string.ui_installation_uses_a_pinned_official),
                     color = Mx.Muted, fontSize = 10.sp)
             }
         }
         if (state.busy.isNotBlank()) Text(state.busy, color = Mx.Cyan, fontSize = 11.sp)
         if (state.error.isNotBlank()) Text(state.error, color = Mx.Red, fontSize = 11.sp)
-        Text("Server installation and encrypted bootstrap registration are not evidence of VPN traffic. Test real traffic after setup.",
+        Text(stringResource(R.string.ui_server_installation_and_encrypted_bootst),
             color = Mx.Muted, fontSize = 10.sp, modifier = Modifier.padding(5.dp))
     }
 
@@ -239,20 +241,20 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState, ini
             node == null && installing?.running != true
         AlertDialog(
             onDismissRequest = { showSafety = false },
-            title = { Text("Approve private Psiphon VPS installation") },
+            title = { Text(stringResource(R.string.ui_approve_private_psiphon_vps_installation)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Official psiphond for Linux AMD64. Fixed upstream commit, exact 37.8 MB size, verified SHA-256. No unsigned installer, no custom shell commands.")
-                    Text("VPS: ${server?.displayName ?: "Not selected"} • root SSH required")
+                    Text(stringResource(R.string.ui_official_psiphond_for_linux_amd64))
+                    Text(stringResource(R.string.ui_vps_root_ssh_required, server?.displayName ?: "Not selected"))
                     OutlinedTextField(value = installIp, onValueChange = { installIp = it.take(15) },
-                        label = { Text("Public IPv4 advertised to clients") },
-                        placeholder = { Text("Example: 8.8.8.8") }, singleLine = true)
+                        label = { Text(stringResource(R.string.ui_public_ipv4_advertised_to_clients)) },
+                        placeholder = { Text(stringResource(R.string.ui_example_8_8_8_8)) }, singleLine = true)
                     OutlinedTextField(value = installPort, onValueChange = {
                         installPort = it.filter(Char::isDigit).take(5)
-                    }, label = { Text("Dedicated TCP OSSH port") }, singleLine = true)
-                    Text("Creates a dedicated systemd service and private keys on this VPS. Failed installs are rolled back where possible; interrupted outcomes require manual inspection. The public IP must be reachable from clients; cloud NAT setups may need provider-side port forwarding.")
-                    Text("After installation, the private server entry is encrypted on this phone. Tunnel connectivity remains UNVERIFIED until you run the phone test.")
-                    if (!allowed) Text("Unavailable: inspect the VPS, select an unused port/public IPv4, ensure Linux AMD64/root SSH, and resolve existing Psiphon files or node registration.",
+                    }, label = { Text(stringResource(R.string.ui_dedicated_tcp_ossh_port)) }, singleLine = true)
+                    Text(stringResource(R.string.ui_creates_a_dedicated_systemd_service))
+                    Text(stringResource(R.string.ui_after_installation_the_private_server))
+                    if (!allowed) Text(stringResource(R.string.ui_unavailable_inspect_the_vps_select),
                         color = Mx.Orange)
                 }
             },
@@ -260,10 +262,10 @@ internal fun PremiumPsiphonScreen(vm: ServersViewModel, state: ServersState, ini
                 TextButton(enabled = allowed, onClick = {
                     vm.installPrivatePsiphon(requireNotNull(server).id, installIp, requireNotNull(port))
                     showSafety = false
-                }) { Text("Approve & install on VPS") }
+                }) { Text(stringResource(R.string.ui_approve_install_on_vps)) }
             },
             dismissButton = {
-                TextButton(onClick = { showSafety = false }) { Text("Cancel") }
+                TextButton(onClick = { showSafety = false }) { Text(stringResource(R.string.ui_cancel)) }
             }
         )
     }
@@ -288,17 +290,17 @@ private fun PsDeployment(
     facts: ServerFacts?, fresh: Boolean, readiness: Float,
     vm: ServersViewModel, onInstallation: () -> Unit, modifier: Modifier = Modifier
 ) {
-    MxCard("One-Click Deployment", "Secure private Psiphon on your selected VPS",
+    MxCard(stringResource(R.string.ui_one_click_deployment), stringResource(R.string.ui_secure_private_psiphon_on_your),
         Mx.Gold, modifier) {
-        MxInfoRow("Selected VPS", server.displayName, Mx.Cyan)
-        MxInfoRow("SSH host verification", if (server.canSignIn) "Trusted" else "Required",
+        MxInfoRow(stringResource(R.string.ui_selected_vps), server.displayName, Mx.Cyan)
+        MxInfoRow(stringResource(R.string.ui_ssh_host_verification), if (server.canSignIn) "Trusted" else "Required",
             if (server.canSignIn) Mx.Green else Mx.Orange)
-        MxInfoRow("System", facts?.osName ?: "Unknown")
-        MxInfoRow("Port conflict prevention", if (fresh && facts?.socketInspectionAvailable == true)
+        MxInfoRow(stringResource(R.string.ui_system), facts?.osName ?: "Unknown")
+        MxInfoRow(stringResource(R.string.ui_port_conflict_prevention), if (fresh && facts?.socketInspectionAvailable == true)
             "Inspected" else "Run scan", if (fresh && facts?.socketInspectionAvailable == true) Mx.Green else Mx.Orange)
-        MxInfoRow("psiphond installer", "Official binary • SHA-256 pinned • AMD64 only", Mx.Green)
-        MxAction("Install on Selected Server", onInstallation, Modifier.fillMaxWidth(), strong = true)
-        MxAction("Run Compatibility Check", { vm.refresh(server.id) }, Modifier.fillMaxWidth())
+        MxInfoRow(stringResource(R.string.ui_psiphond_installer), "Official binary • SHA-256 pinned • AMD64 only", Mx.Green)
+        MxAction(stringResource(R.string.ui_install_on_selected_server), onInstallation, Modifier.fillMaxWidth(), strong = true)
+        MxAction(stringResource(R.string.ui_run_compatibility_check), { vm.refresh(server.id) }, Modifier.fillMaxWidth())
     }
 }
 @Composable
@@ -307,14 +309,14 @@ private fun PsReadiness(
     facts: ServerFacts?, readiness: Float, registered: Boolean, verified: Boolean,
     modifier: Modifier = Modifier
 ) {
-    MxCard("Installation Readiness", "Measured prerequisites — not installation success",
+    MxCard(stringResource(R.string.ui_installation_readiness), stringResource(R.string.ui_measured_prerequisites_not_installation),
         Mx.Cyan, modifier) {
-        MxProgress("Ready prerequisites", readiness)
-        MxInfoRow("Node Registration", if (registered) "Registered" else "Unregistered",
+        MxProgress(stringResource(R.string.ui_ready_prerequisites), readiness)
+        MxInfoRow(stringResource(R.string.ui_node_registration), if (registered) "Registered" else "Unregistered",
             if (registered) Mx.Green else Mx.Orange)
-        MxInfoRow("Tunnel Verification", if (verified) "Verified" else "Pending",
+        MxInfoRow(stringResource(R.string.ui_tunnel_verification), if (verified) "Verified" else "Pending",
             if (verified) Mx.Green else Mx.Orange)
-        MxInfoRow("System Health", if (facts == null) "Unknown" else
+        MxInfoRow(stringResource(R.string.ui_system_health), if (facts == null) "Unknown" else
             "${facts.cpus} CPU • ${facts.ramAvailableMb} MB free", Mx.Cyan)
     }
 }
@@ -324,31 +326,31 @@ private fun PsImport(
     onImport: () -> Unit, onTest: () -> Unit,
     test: Pair<Boolean, String>?, modifier: Modifier = Modifier
 ) {
-    MxCard("Secure Import (server-entry.dat)",
-        "Already have a private psiphond entry? Encrypt and register it.",
+    MxCard(stringResource(R.string.ui_secure_import_server_entry_dat),
+        stringResource(R.string.ui_already_have_a_private_psiphond),
         Mx.Gold, modifier) {
         if (!registered) {
             OutlinedTextField(value = entry, onValueChange = {
                 if (it.length <= 262_144) onEntryChange(it)
-            }, label = { Text("Paste private server-entry.dat (hex)") },
+            }, label = { Text(stringResource(R.string.ui_paste_private_server_entry_dat)) },
                 visualTransformation = PasswordVisualTransformation(),
                 minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = Mx.White, unfocusedTextColor = Mx.White,
                     focusedBorderColor = Mx.Gold, unfocusedBorderColor = Mx.Line,
                     focusedLabelColor = Mx.Gold, unfocusedLabelColor = Mx.Muted))
-            MxAction("Encrypt & Register Private Node", onImport, Modifier.fillMaxWidth(),
+            MxAction(stringResource(R.string.ui_encrypt_register_private_node), onImport, Modifier.fillMaxWidth(),
                 strong = true, enabled = entry.isNotBlank())
         } else {
-            MxStatus("Encrypted node registered", Mx.Green)
-            MxAction("Test real Psiphon tunnel", onTest, Modifier.fillMaxWidth(), strong = true)
+            MxStatus(stringResource(R.string.ui_encrypted_node_registered), Mx.Green)
+            MxAction(stringResource(R.string.ui_test_real_psiphon_tunnel), onTest, Modifier.fillMaxWidth(), strong = true)
             if (test != null) {
-                MxStatus(if (test.first) "Tunnel verified" else "Tunnel not verified",
+                MxStatus(if (test.first) stringResource(R.string.ui_tunnel_verified) else stringResource(R.string.ui_tunnel_not_verified),
                     if (test.first) Mx.Green else Mx.Orange)
                 Text(test.second, color = Mx.Muted, fontSize = 11.sp)
             }
         }
-        Text("The private entry is hidden and stored with Android Keystore encryption.",
+        Text(stringResource(R.string.ui_the_private_entry_is_hidden),
             color = Mx.Muted, fontSize = 10.sp)
     }
 }

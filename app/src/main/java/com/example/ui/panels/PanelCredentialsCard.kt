@@ -1,5 +1,7 @@
 package com.example.ui.panels
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -110,7 +112,7 @@ internal fun PanelCredentialsCard(
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Panel access",
+                        text = stringResource(R.string.ui_panel_access),
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
@@ -126,20 +128,20 @@ internal fun PanelCredentialsCard(
             }
 
             CredentialRow(
-                label = "LOGIN LINK",
+                label = stringResource(R.string.ui_login_link),
                 value = link,
                 icon = Icons.Default.Language,
                 maxLines = 2,
                 onCopy = { copy("Login link", link) }
             )
             CredentialRow(
-                label = "USERNAME",
+                label = stringResource(R.string.ui_username_2),
                 value = username,
                 icon = Icons.Default.Person,
                 onCopy = { copy("Username", username) }
             )
             CredentialRow(
-                label = "PASSWORD",
+                label = stringResource(R.string.ui_password_2),
                 value = if (passwordVisible) password else "•".repeat(password.length.coerceIn(8, 20)),
                 icon = Icons.Default.Lock,
                 valueColor = Accent,
@@ -188,7 +190,7 @@ internal fun PanelCredentialsCard(
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Copy link, username & password", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.ui_copy_link_username_password), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

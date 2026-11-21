@@ -1,5 +1,7 @@
 package com.example.ui.servers
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -153,7 +155,7 @@ private fun XrayConfigEditor(
             .testTag("edit_config_screen")
     ) {
         EditTopBar(
-            title = "Edit Configuration",
+            title = stringResource(R.string.ui_edit_configuration),
             subtitle = draft.name.ifBlank { "${draft.address}:$portText" },
             saving = saving,
             onBack = { leave() },
@@ -186,11 +188,11 @@ private fun XrayConfigEditor(
         ) {
             error?.let { ErrorBanner(it) }
 
-            EditSection("Server") {
+            EditSection(stringResource(R.string.ui_server)) {
                 if (draft.profileType == com.example.data.model.ProfileType.VLESS && draft.protocolType in setOf(
                     com.example.data.model.ProtocolType.VLESS, com.example.data.model.ProtocolType.VMESS,
                     com.example.data.model.ProtocolType.TROJAN, com.example.data.model.ProtocolType.SHADOWSOCKS)) {
-                    EditDropdown("Core", draft.engineType.name, listOf("AUTO", "XRAY", "SING_BOX")) {
+                    EditDropdown(stringResource(R.string.ui_core), draft.engineType.name, listOf("AUTO", "XRAY", "SING_BOX")) {
                         val core = com.example.data.model.EngineType.valueOf(it)
                         var changed = com.example.vpn.engine.ProfileExtras.with(
                             draft.copy(engineType = core, canonicalFingerprint = ""), "engine", null)
@@ -198,11 +200,11 @@ private fun XrayConfigEditor(
                         draft = com.example.vpn.engine.ProfileExtras.with(changed, "coreLocked", core != com.example.data.model.EngineType.AUTO)
                     }
                 }
-                EditField("Remarks", draft.name) { draft = draft.copy(name = it) }
+                EditField(stringResource(R.string.ui_remarks), draft.name) { draft = draft.copy(name = it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    EditField("Address", draft.address, Modifier.weight(1f)) { draft = draft.copy(address = it) }
+                    EditField(stringResource(R.string.ui_address), draft.address, Modifier.weight(1f)) { draft = draft.copy(address = it) }
                     EditField(
-                        "Port", portText, Modifier.width(92.dp),
+                        stringResource(R.string.ui_port), portText, Modifier.width(92.dp),
                         keyboardType = KeyboardType.Number
                     ) { portText = it.filter(Char::isDigit).take(5) }
                 }
@@ -213,29 +215,29 @@ private fun XrayConfigEditor(
                 }
                 EditField(secretLabel, draft.uuid, monospace = true) { draft = draft.copy(uuid = it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    EditField("Encryption", draft.encryption, Modifier.weight(1f)) { draft = draft.copy(encryption = it) }
+                    EditField(stringResource(R.string.ui_encryption), draft.encryption, Modifier.weight(1f)) { draft = draft.copy(encryption = it) }
                     EditDropdown("Flow", draft.flow, FLOWS, Modifier.weight(1.4f)) { draft = draft.copy(flow = it) }
                 }
             }
 
-            EditSection("Transport") {
+            EditSection(stringResource(R.string.ui_transport)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val networks = if (draft.protocolType == com.example.data.model.ProtocolType.HYSTERIA2) listOf("hysteria") else NETWORKS
-                    EditDropdown("Network", network, networks, Modifier.weight(1f)) { draft = draft.copy(transport = it) }
-                    EditDropdown("Target strategy", draft.targetStrategy.ifBlank { "AsIs" }, TARGET_STRATEGIES, Modifier.weight(1f)) {
+                    EditDropdown(stringResource(R.string.ui_network_2), network, networks, Modifier.weight(1f)) { draft = draft.copy(transport = it) }
+                    EditDropdown(stringResource(R.string.ui_target_strategy), draft.targetStrategy.ifBlank { "AsIs" }, TARGET_STRATEGIES, Modifier.weight(1f)) {
                         draft = draft.copy(targetStrategy = if (it == "AsIs") "" else it)
                     }
                 }
                 when (network) {
-                    "grpc" -> EditField("Service name", draft.serviceName) { draft = draft.copy(serviceName = it) }
+                    "grpc" -> EditField(stringResource(R.string.ui_service_name_2), draft.serviceName) { draft = draft.copy(serviceName = it) }
                     "tcp", "hysteria", "udp" -> Unit
                     else -> {
-                        EditField("Host", draft.host) { draft = draft.copy(host = it) }
-                        EditField("Path", draft.path, monospace = true) { draft = draft.copy(path = it) }
+                        EditField(stringResource(R.string.ui_host), draft.host) { draft = draft.copy(host = it) }
+                        EditField(stringResource(R.string.ui_path), draft.path, monospace = true) { draft = draft.copy(path = it) }
                         if (network == "xhttp" || network == "splithttp") {
                             val mode = com.example.vpn.engine.ProfileExtras.read(draft)
                                 .optString(com.example.vpn.engine.ProfileExtras.XHTTP_MODE).ifBlank { "auto" }
-                            EditDropdown("XHTTP mode", mode, com.example.vpn.engine.ProfileExtras.XHTTP_MODES) {
+                            EditDropdown(stringResource(R.string.ui_xhttp_mode), mode, com.example.vpn.engine.ProfileExtras.XHTTP_MODES) {
                                 draft = com.example.vpn.engine.ProfileExtras.with(
                                     draft, com.example.vpn.engine.ProfileExtras.XHTTP_MODE, if (it == "auto") null else it
                                 )
@@ -249,11 +251,11 @@ private fun XrayConfigEditor(
                 ) { draft = draft.copy(finalMask = it) }
             }
 
-            EditSection("Security") {
+            EditSection(stringResource(R.string.ui_security)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     EditDropdown("TLS", security, SECURITIES, Modifier.weight(1f)) { draft = draft.copy(security = it) }
                     if (security != "none") {
-                        EditDropdown("Fingerprint", draft.fingerprint, FINGERPRINTS, Modifier.weight(1f)) {
+                        EditDropdown(stringResource(R.string.ui_fingerprint), draft.fingerprint, FINGERPRINTS, Modifier.weight(1f)) {
                             draft = draft.copy(fingerprint = it)
                         }
                     }
@@ -263,10 +265,10 @@ private fun XrayConfigEditor(
                 }
                 if (security == "tls") {
                     EditDropdown("ALPN", draft.alpn, ALPNS) { draft = draft.copy(alpn = it) }
-                    EditField("Cipher suites", draft.cipherSuites, monospace = true) { draft = draft.copy(cipherSuites = it) }
+                    EditField(stringResource(R.string.ui_cipher_suites), draft.cipherSuites, monospace = true) { draft = draft.copy(cipherSuites = it) }
                     EditSwitch(
                         title = "allowInsecure",
-                        subtitle = "Trust the server certificate pinned below",
+                        subtitle = stringResource(R.string.ui_trust_the_server_certificate_pinned),
                         checked = draft.allowInsecure
                     ) {
                         draft = draft.copy(allowInsecure = it)
@@ -274,7 +276,7 @@ private fun XrayConfigEditor(
                     }
                 }
                 if (security == "reality") {
-                    EditField("Public key (pbk)", draft.publicKey, monospace = true) { draft = draft.copy(publicKey = it) }
+                    EditField(stringResource(R.string.ui_public_key_pbk_2), draft.publicKey, monospace = true) { draft = draft.copy(publicKey = it) }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         EditField("Short ID", draft.shortId, Modifier.weight(1f), monospace = true) { draft = draft.copy(shortId = it) }
                         EditField("SpiderX", draft.spiderX, Modifier.weight(1f), monospace = true) { draft = draft.copy(spiderX = it) }
@@ -283,17 +285,17 @@ private fun XrayConfigEditor(
             }
 
             if (security == "tls") {
-                EditSection("Certificate & ECH") {
-                    EditField("ECH config list", draft.echConfigList, monospace = true) { draft = draft.copy(echConfigList = it) }
+                EditSection(stringResource(R.string.ui_certificate_ech)) {
+                    EditField(stringResource(R.string.ui_ech_config_list), draft.echConfigList, monospace = true) { draft = draft.copy(echConfigList = it) }
                     EditField("ECH sockopt (JSON)", draft.echSockopt, monospace = true, minLines = 2) {
                         draft = draft.copy(echSockopt = it)
                     }
                     EditField(
-                        "Verify peer certificate by name", draft.verifyPeerCertByName,
+                        stringResource(R.string.ui_verify_peer_certificate_by_name), draft.verifyPeerCertByName,
                         placeholder = "example.com, cdn.example.com"
                     ) { draft = draft.copy(verifyPeerCertByName = it) }
                     EditField(
-                        "Certificate fingerprint (SHA-256)", draft.pinnedPeerCertSha256,
+                        stringResource(R.string.ui_certificate_fingerprint_sha_256), draft.pinnedPeerCertSha256,
                         monospace = true, minLines = 2
                     ) { draft = draft.copy(pinnedPeerCertSha256 = it) }
                     Row(
@@ -314,7 +316,7 @@ private fun XrayConfigEditor(
                         }
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            if (fetching) "Fetching…" else "Fetch certificate fingerprint",
+                            if (fetching) stringResource(R.string.ui_fetching) else stringResource(R.string.ui_fetch_certificate_fingerprint),
                             color = AppTheme.colors.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -326,18 +328,18 @@ private fun XrayConfigEditor(
 
     if (confirmDelete) {
         ConfirmDialog(
-            title = "Delete node",
-            text = "Remove '${profile.name}'? This cannot be undone.",
-            confirm = "Delete",
+            title = stringResource(R.string.ui_delete_node),
+            text = stringResource(R.string.ui_remove_this_cannot_be_undone, profile.name),
+            confirm = stringResource(R.string.ui_delete),
             onConfirm = { confirmDelete = false; onDelete() },
             onDismiss = { confirmDelete = false }
         )
     }
     if (confirmDiscard) {
         ConfirmDialog(
-            title = "Discard changes?",
-            text = "Your edits to this node have not been saved.",
-            confirm = "Discard",
+            title = stringResource(R.string.ui_discard_changes),
+            text = stringResource(R.string.ui_your_edits_to_this_node),
+            confirm = stringResource(R.string.ui_discard),
             onConfirm = { confirmDiscard = false; onBack() },
             onDismiss = { confirmDiscard = false }
         )
@@ -354,7 +356,7 @@ private fun EditTopBar(title: String, subtitle: String, saving: Boolean, onBack:
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        TopBarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", AppTheme.colors.textPrimary) { onBack() }
+        TopBarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.ui_back), AppTheme.colors.textPrimary) { onBack() }
         Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
             Text(title, color = AppTheme.colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Text(
@@ -365,13 +367,13 @@ private fun EditTopBar(title: String, subtitle: String, saving: Boolean, onBack:
                 overflow = TextOverflow.Ellipsis
             )
         }
-        TopBarIcon(Icons.Default.Delete, "Delete", AppTheme.colors.statusError, Modifier.testTag("edit_config_delete")) { onDelete() }
+        TopBarIcon(Icons.Default.Delete, stringResource(R.string.ui_delete), AppTheme.colors.statusError, Modifier.testTag("edit_config_delete")) { onDelete() }
         if (saving) {
             Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = AppTheme.colors.primary)
             }
         } else {
-            TopBarIcon(Icons.Default.Check, "Save", AppTheme.colors.primary, Modifier.testTag("edit_config_save")) { onSave() }
+            TopBarIcon(Icons.Default.Check, stringResource(R.string.ui_save), AppTheme.colors.primary, Modifier.testTag("edit_config_save")) { onSave() }
         }
     }
 }
@@ -431,7 +433,7 @@ private fun DnsTunnelEditor(
             .background(AppTheme.colors.background)
             .testTag("edit_dns_tunnel_screen")
     ) {
-        EditTopBar("Edit DNS tunnel", name.ifBlank { domain }, saving, onBack = { leave() }, onDelete = { confirmDelete = true }) {
+        EditTopBar(stringResource(R.string.ui_edit_dns_tunnel), name.ifBlank { domain }, saving, onBack = { leave() }, onDelete = { confirmDelete = true }) {
             val p = built.getOrElse { error = it.message ?: "Check the settings."; return@EditTopBar }
             error = null
             saving = true
@@ -452,24 +454,24 @@ private fun DnsTunnelEditor(
         ) {
             error?.let { ErrorBanner(it) }
 
-            EditSection("Tunnel") {
-                EditField("Remarks", name) { name = it }
-                EditField("Tunnel domain", domain, monospace = true, placeholder = "t.example.com", keyboardType = KeyboardType.Uri) { domain = it }
-                EditField("Server public key", pubkey, monospace = true, minLines = 2, placeholder = "64 hex digits") { pubkey = it }
+            EditSection(stringResource(R.string.ui_tunnel)) {
+                EditField(stringResource(R.string.ui_remarks), name) { name = it }
+                EditField(stringResource(R.string.ui_tunnel_domain), domain, monospace = true, placeholder = "t.example.com", keyboardType = KeyboardType.Uri) { domain = it }
+                EditField(stringResource(R.string.ui_server_public_key), pubkey, monospace = true, minLines = 2, placeholder = stringResource(R.string.ui_t_64_hex_digits)) { pubkey = it }
             }
 
-            EditSection("Backup domains") {
+            EditSection(stringResource(R.string.ui_backup_domains)) {
                 EditField(
-                    "One per line, up to ${DnsttSidecar.MAX_BACKUP_DOMAINS}", backups, monospace = true, minLines = 2,
+                    stringResource(R.string.ui_one_per_line_up_to, DnsttSidecar.MAX_BACKUP_DOMAINS), backups, monospace = true, minLines = 2,
                     placeholder = "t.example.net", keyboardType = KeyboardType.Uri
                 ) { backups = it }
                 Hint("When the tunnel domain stops answering for about 15 seconds, the app moves to the next one " +
                     "without dropping the connection. Your server must answer them all (the Install Center sets this up).")
             }
 
-            EditSection("Resolvers") {
+            EditSection(stringResource(R.string.ui_resolvers)) {
                 EditField(
-                    "One per line, up to ${DnsttSidecar.MAX_RESOLVERS}", resolvers, monospace = true, minLines = 3,
+                    stringResource(R.string.ui_one_per_line_up_to, DnsttSidecar.MAX_RESOLVERS), resolvers, monospace = true, minLines = 3,
                     placeholder = "https://1.1.1.1/dns-query", keyboardType = KeyboardType.Uri
                 ) { resolvers = it }
                 ChipRow(RESOLVER_PRESETS.filter { (_, v) -> resolvers.lines().none { it.trim().equals(v, true) } }.map { it.first }) { label ->
@@ -480,8 +482,8 @@ private fun DnsTunnelEditor(
                     "A resolver that stops answering is rested for a while; fake \"name does not exist\" answers never count against it.")
             }
 
-            EditSection("Query rate") {
-                FieldLabel("DNS queries per second")
+            EditSection(stringResource(R.string.ui_query_rate)) {
+                FieldLabel(stringResource(R.string.ui_dns_queries_per_second))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     (1..DnsttSidecar.MAX_QPS).forEach { n ->
                         val on = n == qps
@@ -502,14 +504,14 @@ private fun DnsTunnelEditor(
                     }
                 }
                 EditSwitch(
-                    title = "Count the limit per resolver",
-                    subtitle = if (resolverCount > 1) "Faster with several resolvers, but more queries in all" else "Needs two or more resolvers",
+                    title = stringResource(R.string.ui_count_the_limit_per_resolver),
+                    subtitle = if (resolverCount > 1) stringResource(R.string.ui_faster_with_several_resolvers_but) else stringResource(R.string.ui_needs_two_or_more_resolvers),
                     checked = perResolver && resolverCount > 1
                 ) { perResolver = it }
                 val total = if (perResolver && resolverCount > 1) qps * resolverCount else qps
                 Text(
-                    if (total > DnsttSidecar.MAX_QPS) "Up to $total queries a second in all. Networks that block more than about 5 a second may cut this tunnel."
-                    else "Up to $total ${if (total == 1) "query" else "queries"} a second in all. Networks block more than about 5 a second.",
+                    if (total > DnsttSidecar.MAX_QPS) stringResource(R.string.ui_up_to_queries_a_second, total)
+                    else androidx.compose.ui.platform.LocalContext.current.resources.getQuantityString(R.plurals.dns_queries_per_second_total, total, total),
                     color = if (total > DnsttSidecar.MAX_QPS) AppTheme.colors.statusWarning else AppTheme.colors.textMuted,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
@@ -520,18 +522,18 @@ private fun DnsTunnelEditor(
 
     if (confirmDelete) {
         ConfirmDialog(
-            title = "Delete node",
-            text = "Remove '${profile.name}'? This cannot be undone.",
-            confirm = "Delete",
+            title = stringResource(R.string.ui_delete_node),
+            text = stringResource(R.string.ui_remove_this_cannot_be_undone, profile.name),
+            confirm = stringResource(R.string.ui_delete),
             onConfirm = { confirmDelete = false; onDelete() },
             onDismiss = { confirmDelete = false }
         )
     }
     if (confirmDiscard) {
         ConfirmDialog(
-            title = "Discard changes?",
-            text = "Your edits to this node have not been saved.",
-            confirm = "Discard",
+            title = stringResource(R.string.ui_discard_changes),
+            text = stringResource(R.string.ui_your_edits_to_this_node),
+            confirm = stringResource(R.string.ui_discard),
             onConfirm = { confirmDiscard = false; onBack() },
             onDismiss = { confirmDiscard = false }
         )
@@ -779,7 +781,7 @@ private fun ConfirmDialog(title: String, text: String, confirm: String, onConfir
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = AppTheme.colors.textSecondary) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.ui_cancel), color = AppTheme.colors.textSecondary) }
         },
         containerColor = AppTheme.colors.surfaceCard
     )
@@ -827,7 +829,7 @@ private fun SlipstreamEditor(
             .background(AppTheme.colors.background)
             .testTag("edit_slipstream_screen")
     ) {
-        EditTopBar("Edit Slipstream", name.ifBlank { domain }, saving, onBack = { leave() }, onDelete = { confirmDelete = true }) {
+        EditTopBar(stringResource(R.string.ui_edit_slipstream), name.ifBlank { domain }, saving, onBack = { leave() }, onDelete = { confirmDelete = true }) {
             val p = built.getOrElse { error = it.message ?: "Check the settings."; return@EditTopBar }
             error = null
             saving = true
@@ -848,14 +850,14 @@ private fun SlipstreamEditor(
         ) {
             error?.let { ErrorBanner(it) }
 
-            EditSection("Tunnel") {
-                EditField("Remarks", name) { name = it }
-                EditField("Tunnel domain", domain, monospace = true, placeholder = "t.example.com", keyboardType = KeyboardType.Uri) { domain = it }
+            EditSection(stringResource(R.string.ui_tunnel)) {
+                EditField(stringResource(R.string.ui_remarks), name) { name = it }
+                EditField(stringResource(R.string.ui_tunnel_domain), domain, monospace = true, placeholder = "t.example.com", keyboardType = KeyboardType.Uri) { domain = it }
             }
 
-            EditSection("Resolvers") {
+            EditSection(stringResource(R.string.ui_resolvers)) {
                 EditField(
-                    "One per line, up to ${SlipstreamSidecar.MAX_RESOLVERS}", resolvers, monospace = true, minLines = 3,
+                    stringResource(R.string.ui_one_per_line_up_to, SlipstreamSidecar.MAX_RESOLVERS), resolvers, monospace = true, minLines = 3,
                     placeholder = "1.1.1.1", keyboardType = KeyboardType.Uri
                 ) { resolvers = it }
                 ChipRow(SLIPSTREAM_RESOLVER_PRESETS.filter { (_, v) -> resolvers.lines().none { it.trim().equals(v, true) } }.map { it.first }) { label ->
@@ -866,18 +868,18 @@ private fun SlipstreamEditor(
                     "connection over all of them and keeps going when one slows down.")
             }
 
-            EditSection("Speed") {
+            EditSection(stringResource(R.string.ui_speed)) {
                 EditSwitch(
-                    title = "BBR congestion control",
-                    subtitle = "Often faster on long or lossy routes; dcubic is gentler on the network",
+                    title = stringResource(R.string.ui_bbr_congestion_control),
+                    subtitle = stringResource(R.string.ui_often_faster_on_long_or),
                     checked = bbr
                 ) { bbr = it }
             }
 
-            EditSection("Security") {
+            EditSection(stringResource(R.string.ui_security)) {
                 Hint(
                     if (certPem.isNotBlank())
-                        "This profile pins the server certificate, so a resolver on the path cannot read or change the tunnel."
+                        stringResource(R.string.ui_this_profile_pins_the_server)
                     else
                         "This profile has no pinned certificate, so the tunnel is not authenticated. Import it again from a " +
                             "link that carries the certificate, or set the server up from the Install Center, to pin it."
@@ -888,18 +890,18 @@ private fun SlipstreamEditor(
 
     if (confirmDelete) {
         ConfirmDialog(
-            title = "Delete node",
-            text = "Remove '${profile.name}'? This cannot be undone.",
-            confirm = "Delete",
+            title = stringResource(R.string.ui_delete_node),
+            text = stringResource(R.string.ui_remove_this_cannot_be_undone, profile.name),
+            confirm = stringResource(R.string.ui_delete),
             onConfirm = { confirmDelete = false; onDelete() },
             onDismiss = { confirmDelete = false }
         )
     }
     if (confirmDiscard) {
         ConfirmDialog(
-            title = "Discard changes?",
-            text = "Your edits to this node have not been saved.",
-            confirm = "Discard",
+            title = stringResource(R.string.ui_discard_changes),
+            text = stringResource(R.string.ui_your_edits_to_this_node),
+            confirm = stringResource(R.string.ui_discard),
             onConfirm = { confirmDiscard = false; onBack() },
             onDismiss = { confirmDiscard = false }
         )
@@ -949,32 +951,32 @@ private fun CottenDnsEditor(profile: VlessProfile, onBack: () -> Unit,
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (mode == "masterdns") {
-                Hint("Tunnel mode: MasterDNS")
+                Hint(stringResource(R.string.ui_tunnel_mode_masterdns))
             } else {
                 Box {
                     TextButton(onClick = { modeMenu = true }, enabled = !saving) {
-                        Text(if (mode == "legacy") "Tunnel mode: Normal" else "Tunnel mode: CottenMax")
+                        Text(if (mode == "legacy") stringResource(R.string.ui_tunnel_mode_normal) else stringResource(R.string.ui_tunnel_mode_cottenmax))
                     }
                     DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
-                        DropdownMenuItem(text = { Text("Normal") }, onClick = { mode = "legacy"; modeMenu = false })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.ui_normal)) }, onClick = { mode = "legacy"; modeMenu = false })
                         DropdownMenuItem(text = { Text("CottenMax") }, onClick = { mode = "cottenmax"; modeMenu = false })
                     }
                 }
-                Hint("CottenMax requires a compatible server. Reconnect after saving a change.")
+                Hint(stringResource(R.string.ui_cottenmax_requires_a_compatible_server))
             }
             error?.let { Text(it, color = AppTheme.colors.statusError) }
-            EditField("Name", name) { name = it }
-            EditField("Delegated tunnel domain", domain, monospace = true) { domain = it }
-            EditField("Resolvers: one IP[:port] per line, up to 64", resolvers, monospace = true, minLines = 3) { resolvers = it }
-            EditField("DNS transport: auto, udp, tcp, dot or doh", transport, monospace = true) { transport = it }
-            EditField("TLS certificate name (optional, for dot/doh)", tlsName, monospace = true) { tlsName = it }
-            EditField("Backup domains on compatible servers (up to three)", backups, monospace = true, minLines = 2) { backups = it }
-            Hint("The server key is preserved. Import a new CottenDNS link to replace it. TLS certificate checks remain enabled.")
-            Hint("DoT and DoH keep the resolver connection encrypted: if they fail, the connection stops instead of retrying over plain DNS. Auto mode allows UDP/TCP DNS recovery. CottenMax and Legacy remain separate server modes.")
+            EditField(stringResource(R.string.ui_name), name) { name = it }
+            EditField(stringResource(R.string.ui_delegated_tunnel_domain), domain, monospace = true) { domain = it }
+            EditField(stringResource(R.string.ui_resolvers_one_ip_port_per), resolvers, monospace = true, minLines = 3) { resolvers = it }
+            EditField(stringResource(R.string.ui_dns_transport_auto_udp_tcp), transport, monospace = true) { transport = it }
+            EditField(stringResource(R.string.ui_tls_certificate_name_optional_for), tlsName, monospace = true) { tlsName = it }
+            EditField(stringResource(R.string.ui_backup_domains_on_compatible_servers), backups, monospace = true, minLines = 2) { backups = it }
+            Hint(stringResource(R.string.ui_the_server_key_is_preserved))
+            Hint(stringResource(R.string.ui_dot_and_doh_keep_the))
         }
     }
-    if (discard) ConfirmDialog("Discard changes?", "Unsaved edits will be lost.", "Discard", { onBack() }, { discard = false })
-    if (remove) ConfirmDialog("Delete node", "Remove this CottenDNS profile?", "Delete", { remove = false; onDelete() }, { remove = false })
+    if (discard) ConfirmDialog(stringResource(R.string.ui_discard_changes), stringResource(R.string.ui_unsaved_edits_will_be_lost), "Discard", { onBack() }, { discard = false })
+    if (remove) ConfirmDialog(stringResource(R.string.ui_delete_node), stringResource(R.string.ui_remove_this_cottendns_profile), "Delete", { remove = false; onDelete() }, { remove = false })
 }
 
 
@@ -1001,12 +1003,12 @@ private fun SoarEditor(profile: VlessProfile, onBack: () -> Unit,
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             error?.let { Text(it, color = AppTheme.colors.statusError) }
-            EditField("Name", name) { name = it }
+            EditField(stringResource(R.string.ui_name), name) { name = it }
             Hint("Server: ${profile.address}. Import a new soar:// link to change its domain or public key.")
-            EditField("Resolvers: one IP[:port] per line, up to 64", resolvers, monospace = true, minLines = 6) { resolvers = it }
-            Hint("Manual resolvers only. No built-in resolver or range discovery is added, even when the imported link enables discovery. Resolver responses alone do not verify the VPN. SOAR carries TCP; UDP applications require another compatible route.")
+            EditField(stringResource(R.string.ui_resolvers_one_ip_port_per), resolvers, monospace = true, minLines = 6) { resolvers = it }
+            Hint(stringResource(R.string.ui_manual_resolvers_only_no_built))
         }
     }
-    if (discard) ConfirmDialog("Discard changes?", "Unsaved edits will be lost.", "Discard", { onBack() }, { discard = false })
-    if (remove) ConfirmDialog("Delete node", "Remove this SOAR profile?", "Delete", { remove = false; onDelete() }, { remove = false })
+    if (discard) ConfirmDialog(stringResource(R.string.ui_discard_changes), stringResource(R.string.ui_unsaved_edits_will_be_lost), "Discard", { onBack() }, { discard = false })
+    if (remove) ConfirmDialog(stringResource(R.string.ui_delete_node), stringResource(R.string.ui_remove_this_soar_profile), "Delete", { remove = false; onDelete() }, { remove = false })
 }
