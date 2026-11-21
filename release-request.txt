@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PRs #251, #252 and #253 (bdb968085941b6d48fc52ae8cee50033231c0251).
-Includes Psiphon YouTube support (QUIC kept local, FakeDNS, YouTube path probe), the self-excluded TUN check (bulk.tun not testable, tun.forwarded device-path meter) and Psiphon over an upstream chain hop (all server entry sources allowed, skip reasons reported).
+V1.0.4 signed Android rebuild after PRs #250, #251, #252 and #253 (df299a4daf4adcb046491890a03b78f20cd99bf3).
+Includes the sidecar-engine TUN bulk gate skip when the app is excluded (#250), Psiphon YouTube support (QUIC kept local, FakeDNS, YouTube path probe), the self-excluded TUN check (bulk.tun not testable, tun.forwarded device-path meter) and Psiphon over an upstream chain hop (all server entry sources allowed, skip reasons reported).
