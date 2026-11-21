@@ -105,6 +105,15 @@ data class TrafficEvidence(
 ) {
     val bidirectional: Boolean get() = download is LegResult.Passed && upload is LegResult.Passed
 
+    /**
+     * Nothing was measured because Android refused to bind the app's socket to the VPN network (the app is
+     * excluded from its own VPN): the check is not applicable, never a failure of the route.
+     */
+    val bindRefused: Boolean get() {
+        fun refused(leg: LegResult) = leg is LegResult.NotTested && leg.reason.contains(VpnBindRefusedException.MARKER)
+        return refused(download) && (refused(upload) || upload is LegResult.NotTested)
+    }
+
     /** Small requests passed (the connection is verified) but a bulk transfer stopped part-way. */
     val bulkStalled: Boolean get() =
         (download as? LegResult.Failed)?.stalled == true || (upload as? LegResult.Failed)?.stalled == true

@@ -50,7 +50,9 @@ object DiagnosticReportBuilder {
         val runtime: JSONObject,
         val profileRef: String?,
         /** EngineRegistry.statuses on the current network: bundled, configured and what each engine did here. */
-        val engines: List<EngineStatus> = emptyList()
+        val engines: List<EngineStatus> = emptyList(),
+        /** TunPathStatus.view(): whether the app is excluded from its own VPN and what the TUN forwarded. */
+        val tunPath: com.example.vpn.verify.TunPathStatus.View? = null
     )
 
     private fun time(ms: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
@@ -112,6 +114,20 @@ object DiagnosticReportBuilder {
                 .put("detail", e.describe())
                 .put("verifiedThroughTun", e.bidirectional && e.path == com.example.vpn.verify.ProbePath.TUN)
         } ?: JSONObject.NULL)
+        // Engine path and device (TUN) path, each verified / not testable / failed / not tested.
+        val paths = RoutePaths.of(c, i.tests, i.tunPath)
+        root.put("paths", JSONObject()
+            .put("selfExcluded", paths.selfExcluded)
+            .put("engine", JSONObject().put("state", paths.engine.state.name).put("detail", paths.engine.detail))
+            .put("device", JSONObject().put("state", paths.device.state.name).put("detail", paths.device.detail)))
+        val tunView = i.tunPath
+        root.put("tunForwarded", tunView?.cumulative?.let { w ->
+            JSONObject().put("state", tunView.state.name)
+                .put("rxBytes", w.downBytes).put("txBytes", w.upBytes)
+                .put("flows", w.flows).put("dataFlows", w.dataFlows).put("activeFlows", w.activeFlows)
+                .put("engineUnreachable", w.engineUnreachable).put("resets", w.resets)
+                .put("windowMs", w.windowMs)
+        } ?: JSONObject.NULL)
         root.put("tests", JSONArray().apply {
             i.tests.takeLast(MAX_TESTS).forEach { t ->
                 put(JSONObject()
@@ -157,10 +173,11 @@ object DiagnosticReportBuilder {
         sb.appendLine("Connection: ${c.statusLabel}" + (c.failureStage?.let { " · stage $it" } ?: ""))
         c.verifiedAt?.let { sb.appendLine("Traffic last verified: ${time(it)}") }
         c.trafficEvidence?.takeIf { it.appliesTo(c) }?.let { e ->
-            sb.appendLine("Bulk upload/download: ${if (e.bidirectional) "PASS" else if (e.bulkStalled) "STALLED" else "PARTIAL"} · path ${e.path.name}")
-            if (e.path != com.example.vpn.verify.ProbePath.TUN)
-                sb.appendLine("Android TUN bulk proof: NOT VERIFIED by this local engine-port test")
+            sb.appendLine("Bulk upload/download: ${if (e.bidirectional) "PASS" else if (e.bindRefused) "NOT TESTABLE" else if (e.bulkStalled) "STALLED" else "PARTIAL"} · path ${e.path.name}")
         }
+        val paths = RoutePaths.of(c, i.tests, i.tunPath)
+        sb.appendLine("Engine path: ${paths.engine.state.word} · ${paths.engine.detail}")
+        sb.appendLine("Device (TUN) path: ${paths.device.state.word} · ${paths.device.detail}")
         sb.appendLine("Session ${c.sessionId ?: "-"} · attempt ${c.attemptId ?: "-"} · profile ${i.profileRef ?: "-"}")
         sb.appendLine("Network: ${i.networkProfile ?: "not measured"}")
         if (i.engines.isNotEmpty()) {

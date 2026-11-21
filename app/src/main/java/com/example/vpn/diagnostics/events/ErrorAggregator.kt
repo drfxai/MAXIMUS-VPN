@@ -23,8 +23,12 @@ object ErrorAggregator {
         val summary: String get() = "$count × $name" + (stage?.let { " (${it.name})" } ?: "")
     }
 
-    private fun isFailure(e: DiagEvent) =
-        e.result == "FAIL" || e.severity == Severity.ERROR || e.severity == Severity.FATAL || e.severity == Severity.WARN && e.failureStage != null
+    private fun isFailure(e: DiagEvent): Boolean {
+        // A check that could not apply (bulk.tun with the app excluded from its own VPN) is never a failure.
+        if (e.result == "NOT_TESTABLE" || e.name == "test.not_testable") return false
+        return e.result == "FAIL" || e.severity == Severity.ERROR || e.severity == Severity.FATAL ||
+            e.severity == Severity.WARN && e.failureStage != null
+    }
 
     /** Failure groups, most frequent first; each set is bounded so one noisy error cannot grow a report. */
     fun aggregate(events: List<DiagEvent>, maxIds: Int = 10): List<Group> =
