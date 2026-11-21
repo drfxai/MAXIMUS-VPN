@@ -1838,7 +1838,7 @@ class RayVpnService : VpnService() {
                     }.getOrDefault(false), activeMetered = false, networkKey = network)
                 val recentlyGood = freezes.good(network, requestedProfile.id)
                     ?.let { gateNow - it.at in 0 until com.example.vpn.smart.BulkGate.RECENT_GOOD_MS } == true
-                if (com.example.vpn.smart.BulkGate.applies(smartPick = true, tunPath = true, metered = meteredHere,
+                if (com.example.vpn.smart.BulkGate.applies(smartPick = true, tunPath = !appOutsideVpn, metered = meteredHere,
                         freezeHistory = freezes.frozen(network).isNotEmpty(), recentlyGood = recentlyGood, gatedSoFar = gated)) {
                     showForegroundNotification("Checking a bulk download through ${profile.name}...")
                     val read = withTimeoutOrNull(com.example.vpn.smart.BulkGate.BUDGET_MS + 500L) {
