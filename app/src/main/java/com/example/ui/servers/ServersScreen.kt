@@ -333,7 +333,7 @@ fun ServersScreen(
                             onClick = {
                                 confirmRemoveDead = false
                                 serverViewModel.removeUnreachable { n ->
-                                    android.widget.Toast.makeText(context, context.getString(R.string.ui_removed_unreachable_nodes, n), android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.ui_removed_unreachable_nodes, n.toString()), android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.statusWarning),
@@ -364,7 +364,7 @@ fun ServersScreen(
                             onClick = {
                                 confirmDeleteFree = false
                                 serverViewModel.deleteAllFree { n ->
-                                    android.widget.Toast.makeText(context, context.getString(R.string.ui_deleted_free_configurations, n), android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.ui_deleted_free_configurations, n.toString()), android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.statusError),

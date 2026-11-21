@@ -369,7 +369,7 @@ fun AddServerScreen(
                             when (res) {
                                 is AppResult.Success -> {
                                     val count = res.data
-                                    Toast.makeText(context, context.getString(R.string.ui_successfully_downloaded_imported_nodes, count), Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, context.getString(R.string.ui_successfully_downloaded_imported_nodes, count.toString()), Toast.LENGTH_LONG).show()
                                     onNavigateBack()
                                 }
                                 is AppResult.Error -> {
@@ -693,7 +693,7 @@ fun AddServerScreen(
                 val batchRes = serverViewModel.importBatch(rawBatchText)
                 Toast.makeText(
                     context,
-                    context.getString(R.string.ui_imported_servers_failed, batchRes.successfulProfiles.size, batchRes.failedEntries.size),
+                    context.getString(R.string.ui_imported_servers_failed, batchRes.successfulProfiles.size.toString(), batchRes.failedEntries.size.toString()),
                     Toast.LENGTH_LONG
                 ).show()
                 onNavigateBack()

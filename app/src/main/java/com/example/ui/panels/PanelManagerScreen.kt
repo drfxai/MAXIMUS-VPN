@@ -389,7 +389,7 @@ fun PanelManagerScreen(
                     },
                     onUpdatePort = { newPort ->
                         viewModel.updatePanelPort(activePanel, newPort)
-                        Toast.makeText(context, context.getString(R.string.ui_panel_port_updated_to, newPort), Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.ui_panel_port_updated_to, newPort.toString()), Toast.LENGTH_SHORT).show()
                     },
                     onImportToVpn = {
                         if (activePanel.type == PanelType.BPB_WORKER) viewModel.importBpbToProfiles(activePanel)

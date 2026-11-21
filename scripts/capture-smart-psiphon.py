@@ -61,6 +61,11 @@ def relaunch():
     adb("shell", "am", "force-stop", PACKAGE)
     adb("shell", "am", "start", "-W", "-n", PACKAGE + "/com.example.MainActivity")
     time.sleep(9)
+    # First launch after `pm clear`: the language picker comes before everything else.
+    if contains("Choose your language") or contains("Выберите язык"):
+        tap("English")
+        tap("Continue")
+        time.sleep(3)
     if contains("Don't show again"):
         tap("Don't show again")
         time.sleep(2)
