@@ -28,8 +28,17 @@ object ChainRunner {
         override fun stop() = onStop()
     }
 
+    /** Carries the hop's own startup failure (e.g. Psiphon's last skip reason) so reports say why. */
     class HopStartFailure(val engineId: String, cause: Exception) :
-        IllegalStateException("Could not start ${EngineChain.titleOf(engineId)} in this chain.", cause)
+        IllegalStateException(message(engineId, cause), cause) {
+        private companion object {
+            fun message(engineId: String, cause: Exception): String {
+                val reason = cause.message?.trim()?.take(400).orEmpty()
+                val head = "Could not start ${EngineChain.titleOf(engineId)} in this chain"
+                return if (reason.isEmpty()) "$head." else "$head: $reason"
+            }
+        }
+    }
 
     /** Builds one hop's work directory, SOCKS port and login; [upstreamSocks] is the next hop's port. */
     fun interface ContextFactory {
