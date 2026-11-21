@@ -1,2 +1,2 @@
-V1.0.4 signed Android rebuild after PR #248 (753d83f1d45f48fb37a8fce4e88f3428cc264706).
-Includes the recovery changes from PRs #247 and #248: Lantern route replay, Aether short gateway recheck, Psiphon-over-Lantern, separate Android VPN and engine verification, repeated resolver checks and destination-scoped clean-IP results.
+V1.0.4 signed Android rebuild after PRs #251, #252 and #253 (bdb968085941b6d48fc52ae8cee50033231c0251).
+Includes Psiphon YouTube support (QUIC kept local, FakeDNS, YouTube path probe), the self-excluded TUN check (bulk.tun not testable, tun.forwarded device-path meter) and Psiphon over an upstream chain hop (all server entry sources allowed, skip reasons reported).
