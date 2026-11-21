@@ -425,7 +425,7 @@ private fun SetupCard(
             }
             if (copiedHint != null && !tokenReady) {
                 CfOrangeButton(
-                    text = stringResource(R.string.ui_use_copied_token, copiedHint),
+                    text = stringResource(R.string.ui_use_copied_token, copiedHint.orEmpty()),
                     icon = Icons.Default.ContentPaste,
                     filled = true,
                     onClick = {
