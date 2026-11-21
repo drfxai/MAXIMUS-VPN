@@ -206,7 +206,7 @@ class PsiphonSidecar(
             "DataRootDirectory", "MigrateDataStoreDirectory", "ListenInterface", "UseUnixDomainSockets",
             "LocalSocksProxyUnixPath", "LocalHttpProxyUnixPath", "EgressRegion", "EnableUpgradeDownload",
             "UpgradeDownloadURLs", "UpgradeDownloadClientVersionHeader", "UseNoticeFiles", "DisableTunnels",
-            "UpstreamProxyURL", "UpstreamProxyUrl", "UpstreamProxyAllowAllServerEntrySources", "ClientPlatform", "NetworkID", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters"
+            "UpstreamProxyURL", "UpstreamProxyUrl", "ClientPlatform", "NetworkID", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters"
         )
 
         /** A new Psiphon profile; [region] is a two-letter country code, or empty for any. */
@@ -263,6 +263,9 @@ class PsiphonSidecar(
 
         // Protocol identifiers from the pinned Psiphon common/protocol source. QUIC and refraction
         // transports are deliberately absent from the TCP-only / upstream-SOCKS recipe.
+        /** Set only for a chain hop (see [buildConfig]); a build's settings can never turn it on. */
+        private val CHAIN_ONLY_FIELDS = listOf("UpstreamProxyAllowAllServerEntrySources")
+
         val TCP_PROTOCOLS = setOf("SSH", "OSSH", "TLS-OSSH", "SHADOWSOCKS-OSSH", "UNFRONTED-MEEK-OSSH",
             "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH")
 
@@ -338,7 +341,7 @@ class PsiphonSidecar(
         /** The config file ConsoleClient reads: the build's settings plus what this connection needs. */
         fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false): JSONObject {
             val config = JSONObject(networkSettings.toString())
-            val owned = LOCAL_FIELDS.map { it.lowercase() }.toSet()
+            val owned = (LOCAL_FIELDS + CHAIN_ONLY_FIELDS).map { it.lowercase() }.toSet()
             config.keys().asSequence().filter { it.lowercase() in owned }.toList().forEach { config.remove(it) }
             config.put("LocalSocksProxyPort", socksPort)
             // ConsoleClient defaults to 127.0.0.1 when ListenInterface is absent.
