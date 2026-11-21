@@ -212,6 +212,9 @@ class RayVpnService : VpnService() {
     /** The session's tun.forwarded watch (self-excluded sessions only); separate so the relay gate never waits on it. */
     private var tunForwardJob: Job? = null
 
+    /** The YouTube path check of the current Psiphon attempt ([launchVideoPathProbe]). */
+    private var videoProbeJob: Job? = null
+
     /** The remembered route (network, recipe id) the current session runs on, once verified. */
     @Volatile private var activeRoute: Pair<String, String>? = null
 
@@ -1906,6 +1909,7 @@ class RayVpnService : VpnService() {
                     com.example.vpn.smart.EngineRouteHints.record(this@RayVpnService, routeNetwork, requestedProfile)
                 }
                 launchTrafficCheck(check.first)
+                launchVideoPathProbe(requestedProfile)
             } else {
                 val stage = check.second ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN
                 showForegroundNotification("Tunnel up, no traffic yet (${stage.name})")
@@ -2896,6 +2900,48 @@ class RayVpnService : VpnService() {
     private fun probeStepMs(): Int = if (slowTunnel()) SLOW_PROBE_STEP_MS else 4_000
 
     /**
+     * Psiphon sessions only: once traffic is verified, check through the engine's local port that YouTube's front
+     * end and its video CDN answer (www.youtube.com/generate_204, redirector.googlevideo.com/report_mapping), and
+     * record what UDP and DNS do on this path (QUIC ended locally, names resolved by Psiphon). Background, once,
+     * never changes the connection; its result only counts for the attempt it ran in.
+     */
+    private fun launchVideoPathProbe(requested: VlessProfile) {
+        val engineId = com.example.vpn.sidecar.EngineUdp.engineId(requested)
+        if (engineId != com.example.vpn.sidecar.PsiphonSidecar.ID) return
+        val endpoint = engineEndpoint ?: return
+        val state = _vpnState.value
+        val attemptId = state.attemptId ?: return
+        val registry = com.example.vpn.diagnostics.events.Tests.registry
+        val udp = com.example.vpn.sidecar.EngineUdp.describe(engineId)
+        val dns = if (com.example.vpn.sidecar.EngineUdp.remoteDns(requested))
+            "FakeDNS in the TUN; names resolved by $engineId on its server" else "Xray resolver through the engine"
+        videoProbeJob?.cancel()
+        videoProbeJob = serviceScope.launch(Dispatchers.IO) {
+            val testId = registry.queue("video.engine_proxy", state.sessionId,
+                com.example.vpn.diagnostics.events.DiagEvent.profileRef(state.activeProfile?.id))
+            registry.start(testId)
+            val result = try {
+                kotlinx.coroutines.runInterruptible {
+                    com.example.vpn.verify.VideoPathProbe(com.example.vpn.verify.RouteDialers.engine(endpoint),
+                        stepTimeoutMs = com.example.vpn.verify.TrafficCheck.STEP_TIMEOUT_MS).run(udp, dns)
+                }
+            } catch (e: CancellationException) {
+                registry.cancel(testId, "connection check cancelled")
+                throw e
+            }
+            if (_vpnState.value.attemptId != attemptId) {
+                registry.cancel(testId, "stale connection attempt")
+                return@launch
+            }
+            registry.finish(testId, result.passed, "ENGINE_PROXY: ${result.describe()}",
+                if (result.passed) null else com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED)
+            com.example.vpn.diagnostics.events.EventLog.event("probe.video_path",
+                attributes = result.attributes(engineId), result = if (result.passed) "PASS" else "FAIL")
+            XrayLogManager.i("VPN", "YouTube path check through $engineId: ${result.describe()}")
+        }
+    }
+
+    /**
      * After the first verified request: a download counted byte for byte and an upload the far side echoes,
      * along the same route. Runs in the background so it never delays the connection, and its result only
      * counts for the attempt and network it was measured on. A stalled bulk transfer is reported, not acted on.
@@ -3683,6 +3729,8 @@ class RayVpnService : VpnService() {
         trafficCheckJob = null
         tunForwardJob?.cancel()
         tunForwardJob = null
+        videoProbeJob?.cancel()
+        videoProbeJob = null
         engineEndpoint = null
         tunMtu = null
 
