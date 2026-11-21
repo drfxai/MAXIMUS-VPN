@@ -18,7 +18,11 @@ class TestRegistry(
     private val clock: () -> Long = System::currentTimeMillis,
     private val log: (DiagEvent) -> Unit = { EventLog.record(it) }
 ) {
-    enum class State { QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED }
+    /**
+     * [NOT_TESTABLE]: the test could not apply to this session (for example bulk.tun when the app is excluded
+     * from its own VPN). It is finished, it is never a failure and never counts as one.
+     */
+    enum class State { QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED, NOT_TESTABLE }
 
     data class Entry(
         val id: String,
@@ -33,7 +37,8 @@ class TestRegistry(
         val cancelReason: String? = null,
         val failureStage: com.example.vpn.diagnostics.FailureStage? = null
     ) {
-        val finished: Boolean get() = state == State.COMPLETED || state == State.FAILED || state == State.CANCELLED
+        val finished: Boolean get() = state == State.COMPLETED || state == State.FAILED || state == State.CANCELLED ||
+            state == State.NOT_TESTABLE
         val durationMs: Long? get() = if (startedAt != null && endedAt != null) endedAt - startedAt else null
     }
 
@@ -58,7 +63,7 @@ class TestRegistry(
             },
             durationMs = e.durationMs,
             failureStage = e.failureStage,
-            result = when (e.state) { State.COMPLETED -> "PASS"; State.FAILED -> "FAIL"; State.CANCELLED -> "CANCELLED"; else -> null }
+            result = when (e.state) { State.COMPLETED -> "PASS"; State.FAILED -> "FAIL"; State.CANCELLED -> "CANCELLED"; State.NOT_TESTABLE -> "NOT_TESTABLE"; else -> null }
         ))
     }
 
@@ -106,6 +111,21 @@ class TestRegistry(
             else it.copy(state = if (success) State.COMPLETED else State.FAILED, endedAt = clock(), result = result, startedAt = it.startedAt ?: clock(), failureStage = if (success) null else stage)
         } ?: return false
         emit(e, if (success) Severity.INFO else Severity.WARN)
+        return true
+    }
+
+    /**
+     * Records that the test could not apply here ([result] says why). Same session rules as [finish]; no failure
+     * stage is kept, so it never shows among the failures.
+     */
+    fun notTestable(id: String, result: String): Boolean {
+        val session = currentSession
+        val e = update(id) {
+            if (it.finished) null
+            else if (it.sessionId != null && it.sessionId != session) null
+            else it.copy(state = State.NOT_TESTABLE, endedAt = clock(), result = result, startedAt = it.startedAt ?: clock(), failureStage = null)
+        } ?: return false
+        emit(e, Severity.INFO)
         return true
     }
 

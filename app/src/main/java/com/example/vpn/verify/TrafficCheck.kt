@@ -198,6 +198,8 @@ class TrafficCheck(
             }
         } catch (e: TransferException) {
             if (e.cause is Socks5.Socks5Exception) return grade(UploadProbe.Outcome.NOT_TESTED, 0) to "$t: ${e.cause?.message}"
+            // Android would not bind this app's socket to the VPN network: nothing about the route was measured.
+            if (e.cause is VpnBindRefusedException) return grade(UploadProbe.Outcome.NOT_TESTED, 0) to "$t: ${e.cause?.message}"
             val stage = if (e.timedOut) FailureStage.TIMEOUT else FailureStage.of(e.cause ?: e)
             // Part of the body went and then nothing more before the deadline: where it stalled. Socket writes
             // count local buffering, so the count is "written locally", not remote receipt.
@@ -212,6 +214,8 @@ class TrafficCheck(
         val stage = FailureStage.of(e.cause ?: e)
         // A reference the engine could not reach says nothing about this route's bulk transfers.
         (e.cause as? Socks5.Socks5Exception)?.let { return LegResult.NotTested("$t: ${it.message}") }
+        // The app may not use the VPN network (excluded from its own VPN): not testable, never a failure.
+        (e.cause as? VpnBindRefusedException)?.let { return LegResult.NotTested("$t: ${it.message}") }
         val stalled = e.moved > 0 && (stage == FailureStage.TIMEOUT || e.timedOut)
         return LegResult.Failed(if (e.timedOut) FailureStage.TIMEOUT else stage, e.moved, stalled,
             "$t: ${e.cause?.javaClass?.simpleName ?: "error"}")
