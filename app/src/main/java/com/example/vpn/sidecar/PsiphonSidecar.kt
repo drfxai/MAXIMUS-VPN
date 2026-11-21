@@ -206,7 +206,11 @@ class PsiphonSidecar(
             "DataRootDirectory", "MigrateDataStoreDirectory", "ListenInterface", "UseUnixDomainSockets",
             "LocalSocksProxyUnixPath", "LocalHttpProxyUnixPath", "EgressRegion", "EnableUpgradeDownload",
             "UpgradeDownloadURLs", "UpgradeDownloadClientVersionHeader", "UseNoticeFiles", "DisableTunnels",
-            "UpstreamProxyURL", "UpstreamProxyUrl", "ClientPlatform", "NetworkID", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters"
+            "UpstreamProxyURL", "UpstreamProxyUrl", "ClientPlatform", "NetworkID", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters",
+            // Split tunnel sends "own region" destinations around Psiphon, classified from a lookup on the
+            // phone's own (filtered) network. In Iran that returns 10.10.34.x for blocked names such as
+            // YouTube's, so nothing may go direct: MAXIMUS sends all app traffic into Psiphon.
+            "SplitTunnelOwnRegion", "SplitTunnelRegions"
         )
 
         /** A new Psiphon profile; [region] is a two-letter country code, or empty for any. */
@@ -353,6 +357,8 @@ class PsiphonSidecar(
             config.put("DataRootDirectory", dataDir.absolutePath)
             // The program is pinned and license-tracked; it must not replace itself.
             config.put("EnableUpgradeDownload", false)
+            // Everything is tunneled (see LOCAL_FIELDS): no destination is dialed outside Psiphon.
+            config.put("SplitTunnelOwnRegion", false)
             if (region.isNotEmpty()) config.put("EgressRegion", region)
             if (!config.has("DNSResolverAlternateServers")) {
                 config.put("DNSResolverAlternateServers", JSONArray(DEFAULT_DNS_SERVERS))
