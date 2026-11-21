@@ -75,6 +75,8 @@ class ChainRunnerTest {
         } catch (e: IllegalStateException) {
             assertEquals("psiphon failed", e.cause?.message)
             assertEquals("psiphon", (e as ChainRunner.HopStartFailure).engineId)
+            // The hop's own reason reaches the report, not just "could not start".
+            assertTrue(e.message!!, e.message!!.endsWith(": psiphon failed"))
         }
         // The exit (tor), already started, was stopped.
         assertEquals(1, runs.size)

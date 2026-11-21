@@ -97,6 +97,11 @@ class PsiphonSidecar(
     /** Only structured, known notices can move diagnostics beyond server discovery. */
     internal class StartupProgress {
         @Volatile private var stage = 0
+        /** The last SkipServerEntry reason, reduced to its fixed text and a short token (never an address). */
+        @Volatile private var lastSkip: String? = null
+        @Volatile private var skips = 0
+        /** The last notice name seen (names only; notice data can hold addresses). */
+        @Volatile private var lastNotice: String? = null
 
         fun observe(line: String) {
             if (line.length > 32_768) return
@@ -108,6 +113,11 @@ class PsiphonSidecar(
                 line.substring(0, start).trimEnd().substringAfterLast(' ')
             }
             val data = notice.optJSONObject("data") ?: notice
+            if (NOTICE_NAME.matches(kind)) lastNotice = kind
+            if (kind == "SkipServerEntry") {
+                skips++
+                skipReason(data.optString("reason"))?.let { lastSkip = it }
+            }
             val observed = when (kind) {
                 "AvailableEgressRegions" -> if ((data.optJSONArray("regions")?.length() ?: 0) > 0) 1 else 0
                 "ConnectingServer" -> 2
@@ -124,7 +134,30 @@ class PsiphonSidecar(
                 1 -> "server candidates found but no tunnel became ready"
                 else -> "server discovery or bootstrap did not produce a ready tunnel"
             }
-            return "Psiphon startup timed out after ${timeoutMs / 1000}s: $phase; traffic is unverified."
+            val detail = buildList {
+                lastSkip?.let { add("last skipped server: $it" + if (skips > 1) " ($skips skips)" else "") }
+                lastNotice?.let { add("last notice: $it") }
+            }
+            val suffix = if (detail.isEmpty()) "" else " (${detail.joinToString("; ")})"
+            return "Psiphon startup timed out after ${timeoutMs / 1000}s: $phase$suffix; traffic is unverified."
+        }
+
+        private companion object {
+            val NOTICE_NAME = Regex("^[A-Za-z][A-Za-z0-9]{0,47}$")
+            val SKIP_TEXT = Regex("^[A-Za-z][A-Za-z ]{2,79}$")
+            val SKIP_TOKEN = Regex("^[A-Za-z0-9_*.-]{1,48}$")
+
+            /**
+             * Psiphon's skip reasons are a fixed text, then ": " and one value (a server entry source,
+             * provider ID or protocol name). Anything that is not that shape is dropped, so an address
+             * can never reach a report.
+             */
+            fun skipReason(reason: String): String? {
+                val text = reason.substringBefore(':').trim()
+                if (!SKIP_TEXT.matches(text)) return null
+                val token = reason.substringAfter(':', "").trim()
+                return if (token.isNotEmpty() && SKIP_TOKEN.matches(token)) "$text: $token" else text
+            }
         }
     }
 
@@ -230,6 +263,9 @@ class PsiphonSidecar(
 
         // Protocol identifiers from the pinned Psiphon common/protocol source. QUIC and refraction
         // transports are deliberately absent from the TCP-only / upstream-SOCKS recipe.
+        /** Set only for a chain hop (see [buildConfig]); a build's settings can never turn it on. */
+        private val CHAIN_ONLY_FIELDS = listOf("UpstreamProxyAllowAllServerEntrySources")
+
         val TCP_PROTOCOLS = setOf("SSH", "OSSH", "TLS-OSSH", "SHADOWSOCKS-OSSH", "UNFRONTED-MEEK-OSSH",
             "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH")
 
@@ -305,7 +341,7 @@ class PsiphonSidecar(
         /** The config file ConsoleClient reads: the build's settings plus what this connection needs. */
         fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false): JSONObject {
             val config = JSONObject(networkSettings.toString())
-            val owned = LOCAL_FIELDS.map { it.lowercase() }.toSet()
+            val owned = (LOCAL_FIELDS + CHAIN_ONLY_FIELDS).map { it.lowercase() }.toSet()
             config.keys().asSequence().filter { it.lowercase() in owned }.toList().forEach { config.remove(it) }
             config.put("LocalSocksProxyPort", socksPort)
             // ConsoleClient defaults to 127.0.0.1 when ListenInterface is absent.
@@ -328,6 +364,14 @@ class PsiphonSidecar(
                     "${encode(upstreamUser)}:${encode(upstreamPass)}@"
                 } else ""
                 config.put("UpstreamProxyURL", "socks5://${auth}127.0.0.1:$upstreamSocks")
+                // With an upstream proxy, psiphon-tunnel-core (dialParameters.go) only dials server
+                // entries whose source is EMBEDDED or REMOTE, so entries learned from obfuscated lists,
+                // discovery, DSL or exchange are skipped ("server entry source disallowed with upstream
+                // proxy") and a chain can end with no candidates at all. That rule protects against a
+                // hostile upstream proxy enumerating Psiphon servers. Here the upstream is our own local
+                // hop, so the party who could enumerate them is that hop's operator (e.g. Lantern), which
+                // sees the Psiphon server addresses it is asked to reach. We accept that for chains.
+                config.put("UpstreamProxyAllowAllServerEntrySources", true)
             }
             if (!config.has("ClientPlatform")) config.put("ClientPlatform", "Android")
             config.put("EmitSensitiveNetworkParameters", false)
