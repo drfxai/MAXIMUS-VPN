@@ -5,6 +5,7 @@
     <string name="notification_channel_desc">Показывает текущее состояние подключения Maximus VPN и кнопки управления</string>
     <string name="connection_limited_bulk">Подключено, но крупные загрузки зависают</string>
     <string name="connection_try_another_server">Попробовать другой сервер</string>
+    <string name="connection_limited_bulk_pinned_hint">Вы выбрали этот сервер сами, поэтому Maximus не переключится автоматически. «Попробовать другой сервер» покинет его и продолжит с умным подключением (режим Trade сохраняет свой выход).</string>
     <string name="widget_description">Подключайте и отключайте Maximus с главного экрана</string>
 
     <!-- Нижняя навигация -->
