@@ -1,0 +1,10 @@
+{
+  "source": "Chocolate4U/Iran-v2ray-rules",
+  "license": "GPL-3.0",
+  "tag": "202611211258",
+  "files": {
+    "geoip-lite.dat": "2b5073fd9f9335c94899fb5d5628f92dccb70b010507f6f5f6974f92c77bcb1f",
+    "geosite-lite.dat": "8e63e42bc9139f123e749e69a21d03f459463c34c41da6df78c549e539b6343f",
+    "geoip-services.dat": "93971c1c668652ac977f7b41448dfeeee68b60d485361c46f8d533f24e969c33"
+  }
+}
