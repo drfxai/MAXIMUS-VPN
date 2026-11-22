@@ -38,7 +38,7 @@ object FreezeFailover {
     enum class Rescue(val key: String, val label: String) {
         DEEP_FRAGMENT("deep-fragment", "FRAGMENT"),
         XHTTP("xhttp", "XHTTP"),
-        /** TCP_MAXSEG ~1360 on the server socket ([UplinkShield]); for the upload stall at the 16 KB grade. */
+        /** TCP_MAXSEG 1360/1220/1140 on the server socket ([UplinkShield.LADDER]); for the upload stall at the 16 KB grade. */
         UPLINK_SHIELD("uplink-shield", "UPLINK SHIELD")
     }
 
@@ -83,7 +83,9 @@ object FreezeFailover {
         /** The upload stalled at the 16 KB grade ([UplinkShield.signature]). */
         val uplinkStall: Boolean = false,
         /** The Uplink Shield has not just failed to help on this network ([UplinkShieldBook.mayTry]). */
-        val shieldMayTry: Boolean = true
+        val shieldMayTry: Boolean = true,
+        /** The MSS ladder step to try on this network ([UplinkShieldBook.nextMss]). */
+        val shieldMss: Int = UplinkShield.MSS
     )
 
     fun decide(i: Input): Decision {
@@ -91,7 +93,7 @@ object FreezeFailover {
         if (!i.rescueTried) {
             // An upload that stalls at the 16 KB grade: the MSS clamp first, for any TCP config (REALITY and ECH too).
             if (!i.engineProgram && i.uplinkStall && i.shieldMayTry && canShield(i.running))
-                return Decision.Retry(i.server.id, UplinkShield.enable(i.running), Rescue.UPLINK_SHIELD)
+                return Decision.Retry(i.server.id, UplinkShield.enable(i.running, i.shieldMss), Rescue.UPLINK_SHIELD)
             if (!i.engineProgram && canDeepFragment(i.running)) return Decision.Retry(i.server.id, deepFragment(i.running), Rescue.DEEP_FRAGMENT)
             if (!i.engineProgram) xhttpForm(i.server, i.saved, i.frozen)?.let { return Decision.Retry(i.server.id, it, Rescue.XHTTP) }
         }
