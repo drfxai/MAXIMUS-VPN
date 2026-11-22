@@ -343,13 +343,17 @@ class CdnCleanIpFinder(
         network: String,
         expectedCountry: String?,
         preferred: List<String> = emptyList(),
-        speedTop: Int = 2
+        speedTop: Int = 2,
+        /** False when the caller already ruled on the SNI proxy ([CleanEdgePlan]): no blocking check here. */
+        checkProxy: Boolean = true,
+        /** The CDN when the caller already looked it up; null looks it up here (a DNS answer for a domain address). */
+        knownCdn: Cdn? = null
     ): Found {
         if (!CdnEdgeScanner.fronted(profile)) return Found(null, emptyList(), "not a CDN-fronted TLS config")
         val sni = CdnEdgeScanner.tlsName(profile)!!
-        val cdn = cdnOf(profile)
+        val cdn = knownCdn ?: cdnOf(profile)
         cache.best(network, cdn, sni).takeIf { it.isNotEmpty() }?.let { return Found(cdn, it, fromCache = true) }
-        if (cdn == Cdn.CLOUDFLARE && cloudflareProxied(network, expectedCountry)) {
+        if (checkProxy && cdn == Cdn.CLOUDFLARE && cloudflareProxied(network, expectedCountry)) {
             return Found(cdn, emptyList(), "this network proxies Cloudflare TLS by name; a clean Cloudflare IP cannot help here")
         }
         val port = profile.port.takeIf { it in 1..65535 } ?: 443

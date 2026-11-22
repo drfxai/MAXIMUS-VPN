@@ -46,7 +46,7 @@ class SmartConnectRowsTest {
         assertEquals("5 tested", rows[2].detail)
         assertEquals("4 tested so far", rows[3].detail)
         assertTrue(rows[3].current)
-        assertEquals("Clean Cloudflare address · WARP and Tor in GOD MODE only", rows[4].detail)
+        assertEquals("Clean CDN address · WARP and Tor in GOD MODE only", rows[4].detail)
         assertEquals("Other families and built-in engines, up to 90 s", rows[5].detail)
         assertEquals("Dead Cloudflare configs, up to 60 s", rows[6].detail)
         assertEquals(listOf(StageBadge.FAILED, StageBadge.FAILED, StageBadge.FAILED, StageBadge.TESTING,

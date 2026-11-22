@@ -31,4 +31,37 @@ class LearnedNetworksTest {
     @Test fun theExplanationUsesTheBooksOwnLimit() {
         assertEquals("Routes that worked, per carrier or Wi-Fi. Kept for 3 days, no passwords or keys.", LearnedNetworks.explanation)
     }
+
+    @Test fun clearingWipesEveryPerNetworkStoreAndReportsFailures() {
+        val net = "cell:43211"
+        var winners: String? = null
+        val revival = com.example.vpn.lab.RevivalWinnerMemory({ winners }, { winners = it })
+        revival.record(net, "cfg", "ech")
+        var resolvers: String? = null
+        val pool = com.example.vpn.dns.VerifiedResolverPool({ resolvers }, { resolvers = it })
+        pool.record(net, listOf(com.example.vpn.dns.ResolverScanner.Result("8.8.8.8", "test", 3, 3, 40)))
+        var edges: String? = null
+        val cache = com.example.vpn.cleanip.CleanIpCache({ edges }, { edges = it })
+        cache.put(net, com.example.vpn.cleanip.Cdn.CLOUDFLARE, "edge.example.com", listOf("104.16.1.1"))
+        cache.record(net, com.example.vpn.cleanip.SniProxyDetector.Verdict(proxied = true, conclusive = true, reasons = emptyList()))
+        assertTrue(revival.wins(net).isNotEmpty() && pool.verified(net).isNotEmpty())
+
+        val failed = LearnedNetworks.clearAll(listOf(
+            "routes" to { error("disk full") },
+            "revival winners" to { revival.clear() },
+            "verified resolvers" to { pool.clear() },
+            "clean CDN addresses" to { cache.clear() }
+        ))
+
+        // One store failing does not keep the others.
+        assertEquals(listOf("routes"), failed)
+        assertTrue(revival.wins(net).isEmpty())
+        assertTrue(pool.verified(net).isEmpty())
+        assertTrue(cache.best(net, com.example.vpn.cleanip.Cdn.CLOUDFLARE, "edge.example.com").isEmpty())
+        assertEquals(null, cache.sniProxied(net))
+        // And it is persisted: fresh instances over what was saved remember nothing.
+        assertTrue(com.example.vpn.lab.RevivalWinnerMemory({ winners }, { winners = it }).wins(net).isEmpty())
+        assertTrue(com.example.vpn.dns.VerifiedResolverPool({ resolvers }, { resolvers = it }).verified(net).isEmpty())
+        assertEquals(null, com.example.vpn.cleanip.CleanIpCache({ edges }, { edges = it }).sniProxied(net))
+    }
 }
