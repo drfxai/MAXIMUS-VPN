@@ -199,8 +199,7 @@ object ProfileExtras {
     const val WG_KEEPALIVE = "wgKeepAlive"
 
     // patterniha (PattN / Free-Configs) share-link fields with no column of their own.
-    // TODO: applied by fork sidecar in a later PR. Upstream Xray has no equivalent for these yet, so for now
-    // they are only stored and written back to exported links.
+    // Applied by the fork Xray sidecar (vpn/sidecar/ForkXraySidecar) on connect; stock Xray runs without them.
     const val PATT_DIAL_MODE = "pattDialMode"           // link key `dialMode`, e.g. "oob.0"
     const val PATT_TCP_USER_TIMEOUT = "pattTcpUserTimeout" // link key `tut`, milliseconds > 0
     const val PATT_SESSION_RESUMPTION = "pattSessionResumption" // link key `esr=1`

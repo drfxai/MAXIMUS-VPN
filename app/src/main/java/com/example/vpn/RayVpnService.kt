@@ -1630,8 +1630,21 @@ class RayVpnService : VpnService() {
             }
             // Capture both families; the native engine only accepts traffic allowed by its peer.
             com.example.vpn.safety.VpnRoutePolicy.ROUTES.forEach { builder.addRoute(it.address, it.prefix) }
-            val sidecarEngine = if (amnezia == null) com.example.vpn.sidecar.Sidecars.forProfile(profile) else null
+            var sidecarEngine = if (amnezia == null) com.example.vpn.sidecar.Sidecars.forProfile(profile) else null
             val engineChain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
+            // A saved server whose link carries patterniha-fork-only fields runs on the fork (the Serverless program) as a
+            // local SOCKS sidecar; without that program it runs on stock Xray with those fields dropped (ForkXraySidecar).
+            if (amnezia == null && sidecarEngine == null && engineChain == null && reuseSidecar == null &&
+                com.example.vpn.sidecar.ForkXraySidecar.applies(profile)) {
+                val fields = com.example.vpn.sidecar.ForkXraySidecar.forkFields(profile).joinToString(",")
+                if (com.example.vpn.sidecar.Sidecars.isBundled(com.example.vpn.sidecar.ForkXraySidecar)) {
+                    sidecarEngine = com.example.vpn.sidecar.ForkXraySidecar
+                    XrayLogManager.i("VPN", "fork-xray · link fields [$fields] need the patterniha Xray fork; running it as a local sidecar.")
+                } else {
+                    profile = com.example.vpn.sidecar.ForkXraySidecar.stockProfile(profile)
+                    XrayLogManager.w("VPN", "fork-xray · fork program not in this build; stock Xray runs without [$fields].")
+                }
+            }
             appOutsideVpn = sidecarEngine != null || engineChain != null
             // A separate engine program cannot ask Android to keep its own sockets out of the VPN, so the app's
             // own traffic is left out then. The user's per-app routing (Settings › Routing & DNS) is applied too.
@@ -1706,6 +1719,20 @@ class RayVpnService : VpnService() {
                 }
                 profile = reuseSidecar
             } else if (engineChain != null) profile = startChain(engineChain, settings)
+            else if (sidecarEngine === com.example.vpn.sidecar.ForkXraySidecar) {
+                profile = try {
+                    startSidecar(com.example.vpn.sidecar.ForkXraySidecar, profile, settings)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException || e is InterruptedException) throw e
+                    // The fork did not start: stock Xray carries the server without the fork-only fields.
+                    XrayLogManager.w("VPN", "fork-xray · sidecar did not start (${e.javaClass.simpleName}); stock Xray without fork fields.")
+                    com.example.vpn.diagnostics.events.EventLog.event("fork_xray.fallback", attributes = mapOf("reason" to e.javaClass.simpleName))
+                    sidecar?.stop()
+                    sidecar = null
+                    sidecarEngine = null
+                    com.example.vpn.sidecar.ForkXraySidecar.stockProfile(profile)
+                }
+            }
             else if (sidecarEngine != null) profile = startSidecar(sidecarEngine, profile, settings)
             mutateState { it.copy(activeRoute = com.example.data.model.ConnectionRoute.label(profile)) }
             engineEndpoint = if (sidecarEngine?.id == com.example.vpn.sidecar.ByedpiSidecar.ID)

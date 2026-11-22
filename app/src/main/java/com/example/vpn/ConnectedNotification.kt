@@ -49,6 +49,6 @@ object ConnectedNotification {
     private val SIDECAR_NAMES = mapOf(
         "psiphon" to "Psiphon", "tor" to "Tor", "dns-tunnel" to "DNS tunnel", "cotten-dns" to "Cotten",
         "soar" to "Soar", "slipstream" to "Slipstream", "mihomo" to "Mihomo", "masque" to "MASQUE",
-        "byedpi" to "ByeDPI", "matrix-transport" to "Matrix",
+        "byedpi" to "ByeDPI", "matrix-transport" to "Matrix", "fork-xray" to "Xray (fork)",
     )
 }
