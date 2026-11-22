@@ -2440,6 +2440,9 @@ class RayVpnService : VpnService() {
                 cancelled = { connectionOwner?.isActive == false }) else null
             var runningProfile = started?.profile ?: profile
             var engineContext = started?.context ?: context
+            if (engine.id in com.example.vpn.dns.DnsTunnelResolverOrder.ENGINES) {
+                runningProfile = preferVerifiedResolvers(engine, runningProfile)
+            }
             if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) {
                 runningProfile = prioritizeDnsTunnelResolvers(engine, runningProfile)
             }
@@ -2556,6 +2559,51 @@ class RayVpnService : VpnService() {
         val ordered = com.example.vpn.sidecar.ResolverReach.prioritize(s.resolvers, resolvers.zip(outcomes))
         return if (ordered == s.resolvers) profile
             else com.example.vpn.sidecar.CottenDnsSidecar.withSettings(profile, s.copy(resolvers = ordered))
+    }
+
+    private val resolverScanRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Puts the resolvers the scanner verified on this network first (config-based profiles: reorder only;
+     * profiles left on the engine's default resolver: verified ones are added in front), and starts a
+     * background rescan when this network has no fresh scan. The saved profile is never changed.
+     */
+    private fun preferVerifiedResolvers(engine: com.example.vpn.sidecar.SidecarEngine, profile: VlessProfile): VlessProfile {
+        val network = ledgerNetwork()
+        val pool = com.example.RayApplication.instance.resolverPool
+        val applied = com.example.vpn.dns.DnsTunnelResolverOrder.apply(engine.id, profile, pool.verified(network))
+        if (applied.changed) XrayLogManager.i("DNS", "Resolvers verified on this network go first" +
+            if (applied.configFree) " (added to the default resolver)" else " (config order otherwise kept)")
+        if (pool.needsScan(network) && resolverScanRunning.compareAndSet(false, true)) {
+            val configured = runCatching {
+                when (engine.id) {
+                    com.example.vpn.sidecar.CottenDnsSidecar.ID -> com.example.vpn.sidecar.CottenDnsSidecar.settings(profile).resolvers
+                    com.example.vpn.sidecar.SlipstreamSidecar.ID -> com.example.vpn.sidecar.SlipstreamSidecar.settings(profile).resolvers
+                    else -> com.example.vpn.sidecar.DnsttSidecar.settings(profile).resolvers
+                        .filter { it.kind != com.example.vpn.sidecar.DnsttSidecar.ResolverKind.DOH }.map { it.address }
+                }.map({ com.example.vpn.dns.VerifiedResolverPool.hostOf(it) })
+            }.getOrDefault(emptyList())
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    val bundled = (0 until 4).flatMap { day ->
+                        com.example.vpn.BundledResolvers.labSample(network, System.currentTimeMillis() + day * 86_400_000L)
+                    }
+                    val ranked = com.example.vpn.dns.ResolverScanner.scan(
+                        com.example.vpn.dns.ResolverScanner.candidates(configured, bundled))
+                    // A scan that outlived a network change describes the old network: drop it.
+                    if (ledgerNetwork() == network) {
+                        pool.record(network, ranked)
+                        XrayLogManager.i("DNS", "Resolver scan: ${ranked.size} honest resolvers answered on this network" +
+                            if (ranked.isEmpty()) "" else ranked.take(3).joinToString(prefix = " (best: ", postfix = ")") { "${it.ip} ${it.score}" })
+                    }
+                } catch (t: Throwable) {
+                    XrayLogManager.w("DNS", "Resolver scan stopped: ${t.message ?: t.javaClass.simpleName}")
+                } finally {
+                    resolverScanRunning.set(false)
+                }
+            }
+        }
+        return applied.profile
     }
 
     /** The network key the engine ledger files evidence under (the same one route memory uses). */

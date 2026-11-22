@@ -86,6 +86,15 @@ class RayApplication : Application() {
         )
     }
 
+    /** DNS resolvers verified per network by the resolver scanner, preferred by the DNS-tunnel engines. */
+    val resolverPool: com.example.vpn.dns.VerifiedResolverPool by lazy {
+        val prefs = getSharedPreferences("resolver_pool", MODE_PRIVATE)
+        com.example.vpn.dns.VerifiedResolverPool(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
     /** Recovers degraded BPB / Cloudflare-fronted configs with derived copies; originals are never changed. */
     val bpbRecovery: com.example.vpn.connectivity.BpbRecoveryEngine by lazy {
         com.example.vpn.connectivity.BpbRecoveryEngine(ledger = recoveryLedger, fragmentReverted = { key, network ->
