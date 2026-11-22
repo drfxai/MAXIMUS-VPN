@@ -8,6 +8,8 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
 import okio.Buffer
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,7 +28,11 @@ import java.security.MessageDigest
 class GeoFilesUpdaterTest {
     private lateinit var dir: File
     private val server = MockWebServer()
-    private val client = OkHttpClient()
+    // The updater accepts HTTPS download URLs only, so the mock release server speaks TLS.
+    private val held = HeldCertificate.Builder().addSubjectAlternativeName("localhost").build()
+    private val trust = HandshakeCertificates.Builder().addTrustedCertificate(held.certificate).build()
+    private val client = OkHttpClient.Builder().sslSocketFactory(trust.sslSocketFactory(), trust.trustManager).build()
+    private val base get() = "https://localhost:${server.port}"
 
     private val bundled = JSONObject()
         .put("source", GeoFilesUpdater.REPO).put("license", "GPL-3.0").put("tag", "202611211258")
@@ -41,6 +47,8 @@ class GeoFilesUpdaterTest {
     private fun sha(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
 
     @Before fun setUp() {
+        server.useHttps(HandshakeCertificates.Builder().heldCertificate(held).build().sslSocketFactory(), false)
+        server.start(java.net.InetAddress.getByName("localhost"), 0)
         dir = Files.createTempDirectory("geo").toFile()
         GeoAssets.FILES.values.forEach { File(dir, it).writeText("old-$it") }
     }
@@ -52,7 +60,6 @@ class GeoFilesUpdaterTest {
 
     /** Serves a release [tag]; [published] overrides the checksum file text for a name. */
     private fun serve(tag: String, published: Map<String, String> = emptyMap(), body: Map<String, ByteArray> = payload) {
-        val base = server.url("/").toString().trimEnd('/')
         val assets = JSONArray()
         payload.forEach { (name, bytes) ->
             assets.put(JSONObject().put("name", name).put("size", bytes.size).put("browser_download_url", "$base/d/$name"))
@@ -75,7 +82,7 @@ class GeoFilesUpdaterTest {
         }
     }
 
-    private fun download() = runBlocking { GeoFilesUpdater.download(client, server.url("/latest").toString(), bundled, dir) }
+    private fun download() = runBlocking { GeoFilesUpdater.download(client, "$base/latest", bundled, dir) }
 
     @Test
     fun verifiedNewerReleaseIsInstalledAndManifestUpdated() {
@@ -111,6 +118,7 @@ class GeoFilesUpdaterTest {
     fun tamperedBodyIsRejected() {
         serve("202611221249", body = payload + ("geoip-lite.dat" to "ip-v3".toByteArray()))
         runCatching { download() }.onSuccess { fail("tampered file accepted") }
+            .onFailure { assertTrue(it.message!!, it.message!!.contains("checksum mismatch")) }
         GeoAssets.FILES.values.forEach { assertEquals("old-$it", File(dir, it).readText()) }
     }
 
@@ -128,6 +136,13 @@ class GeoFilesUpdaterTest {
         val wrong = GeoFilesUpdater.manifestFor(bundled, "202611221249", payload.mapValues { "f".repeat(64) })
         runCatching { GeoAssets.installFiles(dir, wrong, staged) }.onSuccess { fail("unverified install accepted") }
         GeoAssets.FILES.values.forEach { assertEquals("old-$it", File(dir, it).readText()) }
+    }
+
+    @Test
+    fun plainHttpReleaseIsRejected() {
+        val release = JSONObject().put("tag_name", "202611221249").put("assets", JSONArray()
+            .put(JSONObject().put("name", "geoip-lite.dat").put("size", 1).put("browser_download_url", "http://example.com/x"))).toString()
+        assertTrue(runCatching { GeoFilesUpdater.parseRelease(release) }.isFailure)
     }
 
     @Test
