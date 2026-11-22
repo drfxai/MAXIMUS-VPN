@@ -255,5 +255,68 @@ replace('https.rs', '    let (address, port) = request.address.unwrap_or((reques
     let (address, port) = request.address.unwrap_or((request.host, request.port));""")
 with (src / 'https.rs').open('a') as output:
     output.write('\n#[path = "maximus_api_lane.rs"]\nmod maximus_api_lane;\n')
+# MASQUE-H2 download path (idea from UAC SNI Spoofer core/aether h2_receive.rs and its
+# AETHER_MASQUE_H2_SOCKET_TUNING, AGPL-3.0-only, used with the owner's authorization; rewritten here).
+# 1) Backpressure: when the netstack's inbound queue is full, wait for room instead of dropping the
+#    datagram, and only then return the bytes to the HTTP/2 flow-control window, so a slow consumer
+#    slows the server down instead of making every inner TCP flow retransmit and shrink its window.
+#    A wait is bounded (H2_INBOUND_WAIT) so a wedged consumer can never freeze ping/close handling.
+# 2) 1 MB SO_SNDBUF/SO_RCVBUF on the outer TCP socket, set before connect so the window scale fits.
+replace('masque_h2.rs', '''                    Some(Ok(chunk)) => {
+                        let _ = recv_body.flow_control().release_capacity(chunk.len());
+                        capsules.push(&chunk);
+                        let got_data = drain_capsules(&mut capsules, &inbound_tx, &addr_tx);''', '''                    Some(Ok(chunk)) => {
+                        capsules.push(&chunk);
+                        let got_data = drain_capsules(&mut capsules, &inbound_tx, &addr_tx).await;
+                        // Flow-control credit goes back only once the packets were handed on.
+                        let _ = recv_body.flow_control().release_capacity(chunk.len());''')
+replace('masque_h2.rs', '''fn drain_capsules(
+    capsules: &mut CapsuleParser,''', """/// Longest wait for room in the netstack's inbound queue before one datagram is dropped.
+const H2_INBOUND_WAIT: Duration = Duration::from_secs(2);
+
+async fn drain_capsules(
+    capsules: &mut CapsuleParser,""")
+replace('masque_h2.rs', '''                match inbound_tx.try_send(pkt) {
+                    Ok(()) => {}
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        log::trace!("[h2] inbound queue full, dropping datagram");
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => return delivered,
+                }''', '''                match inbound_tx.try_send(pkt) {
+                    Ok(()) => {}
+                    Err(mpsc::error::TrySendError::Full(pkt)) => {
+                        // Backpressure: wait for the consumer rather than drop (MAXIMUS).
+                        match tokio::time::timeout(H2_INBOUND_WAIT, inbound_tx.send(pkt)).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(_)) => return delivered,
+                            Err(_) => log::debug!("[h2] inbound queue stalled, dropped one datagram"),
+                        }
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => return delivered,
+                }''')
+replace('masque_h2.rs', '''        None => crate::egress::tcp_connect(peer)
+            .await
+            .map_err(AetherError::Io),
+    }
+}''', '''        None => maximus_h2_tcp_connect(peer).await.map_err(AetherError::Io),
+    }
+}
+
+/// SO_SNDBUF / SO_RCVBUF asked for on the outer HTTP/2 TCP socket (the kernel may clamp it).
+const MAXIMUS_H2_SOCKET_BUFFER: u32 = 1024 * 1024;
+
+/// `egress::tcp_connect` plus 1 MB socket buffers, set before connect (MAXIMUS).
+async fn maximus_h2_tcp_connect(peer: SocketAddr) -> std::io::Result<TcpStream> {
+    let socket = if peer.is_ipv4() {
+        tokio::net::TcpSocket::new_v4()?
+    } else {
+        tokio::net::TcpSocket::new_v6()?
+    };
+    crate::egress::apply(socket2::SockRef::from(&socket))?;
+    // Best effort: a refused size keeps the system default.
+    let _ = socket.set_send_buffer_size(MAXIMUS_H2_SOCKET_BUFFER);
+    let _ = socket.set_recv_buffer_size(MAXIMUS_H2_SOCKET_BUFFER);
+    socket.connect(peer).await
+}''')
 (root / 'MAXIMUS_POLICY').write_text('WARP API: CA + hostname on every lane (direct, OOB, relay); MASQUE: mandatory upstream SPKI pins\n')
 print('Aether authenticated registration and gateway pin policy applied')

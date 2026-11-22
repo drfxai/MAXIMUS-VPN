@@ -267,8 +267,10 @@ object VlessParser {
      */
     fun toUri(profile: VlessProfile): String {
         val queryParams = mutableListOf<String>()
-        if (profile.cipherSuites.isNotBlank()) queryParams.add("cipherSuites=${encodeUrl(profile.cipherSuites)}")
-        if (profile.finalMask.isNotBlank()) queryParams.add("finalmask=${encodeUrl(profile.finalMask)}")
+        // A profile imported from a patterniha link keeps patterniha's short keys so the link opens in PattN too.
+        val patt = com.example.vpn.engine.ProfileExtras.usesPatternihaKeys(profile)
+        if (profile.cipherSuites.isNotBlank()) queryParams.add("${if (patt) "cs" else "cipherSuites"}=${encodeUrl(profile.cipherSuites)}")
+        if (profile.finalMask.isNotBlank()) queryParams.add("${if (patt) "fm" else "finalmask"}=${encodeUrl(profile.finalMask)}")
         if (profile.engineType == com.example.data.model.EngineType.SING_BOX) queryParams.add("core=sing-box")
 
         if (profile.transport.isNotBlank()) {
@@ -331,6 +333,9 @@ object VlessParser {
         }
         extras.optString(com.example.vpn.engine.ProfileExtras.MLDSA65_VERIFY).takeIf { it.isNotBlank() }?.let {
             queryParams.add("pqv=${encodeUrl(it)}")
+        }
+        com.example.vpn.engine.ProfileExtras.pattQuery(profile).forEach { (key, value) ->
+            queryParams.add("$key=${encodeUrl(value)}")
         }
 
         val queryString = if (queryParams.isNotEmpty()) "?${queryParams.joinToString("&")}" else ""

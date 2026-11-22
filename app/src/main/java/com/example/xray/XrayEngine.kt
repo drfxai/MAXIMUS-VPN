@@ -119,6 +119,12 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
             val config = JSONObject(configJson)
             val env = config.optJSONObject("env") ?: JSONObject().also { config.put("env", it) }
             env.put("xray.tun.fd", tunFd.toString())
+            // geoip:/geosite: rules (Iran presets, imported configs) read the bundled GeoFiles from here.
+            val geoDir = GeoAssets.ensureReady()
+            if (geoDir != null) GeoAssets.applyAssetLocation(config, geoDir)
+            else if (configJson.contains("geosite:") || configJson.contains("geoip:")) {
+                XrayLogManager.appendLog("GeoFiles unavailable; geoip:/geosite: rules in this config will fail to load.", "ERROR")
+            }
             val inbounds = config.optJSONArray("inbounds") ?: org.json.JSONArray().also { config.put("inbounds", it) }
             if ((0 until inbounds.length()).none { inbounds.optJSONObject(it)?.optString("protocol") == "tun" }) {
                 inbounds.put(JSONObject().apply {

@@ -253,12 +253,25 @@ class RayApplication : Application() {
         com.example.vpn.sidecar.MatrixTransportSidecar.identityDirectory = { java.io.File(noBackupFilesDir, "engines/matrix-transport") }
         com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
         com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
+        // Bundled Iran GeoFiles for Xray's geoip:/geosite: rules; copied off the main thread, and again on
+        // demand by XrayEngine if the VPN starts first.
+        com.example.xray.GeoAssets.install(this)
+        CoroutineScope(Dispatchers.IO).launch { com.example.xray.GeoAssets.ensureReady() }
         com.example.vpn.BundledResolvers.updatedAsset = { part -> com.example.update.ResolverPackUpdater.open(this, part) }
         com.example.vpn.sidecar.Sidecars.torStarter = { torrc, port -> com.example.vpn.sidecar.TorInApp.start(this, torrc, port) }
         com.example.vpn.sidecar.Sidecars.privatePsiphonSettings = { id ->
             com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)
         }
         com.example.vpn.sidecar.Sidecars.psiphonNetworkIdentity = { com.example.vpn.smart.NetworkIdentity.current(this) }
+        com.example.vpn.sidecar.Sidecars.psiphonLinkMetered = {
+            val manager = getSystemService(android.net.ConnectivityManager::class.java)
+            manager?.let { cm ->
+                com.example.vpn.smart.NetworkCapabilityDetector.physical(cm)?.let(cm::getNetworkCapabilities)
+            }?.let { !it.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) } == true
+        }
+        com.example.vpn.sidecar.Sidecars.psiphonClientPlatform = {
+            Triple(android.os.Build.VERSION.RELEASE.orEmpty(), android.os.Build.VERSION.SDK_INT, packageName)
+        }
         com.example.vpn.sidecar.Sidecars.psiphonLinkDns = {
             val manager = getSystemService(android.net.ConnectivityManager::class.java)
             val link = manager?.let { cm ->

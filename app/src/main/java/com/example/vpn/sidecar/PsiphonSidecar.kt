@@ -66,12 +66,16 @@ class PsiphonSidecar(
         val privateId = privateId(profile)
         val source = if (privateId.isNotEmpty()) requireNotNull(privateSettings(privateId))
             else requireNotNull(networkSettings())
+        val platform = runCatching { Sidecars.psiphonClientPlatform?.invoke() }.getOrNull()
         val config = buildConfig(source, if (privateId.isNotEmpty()) "" else region(profile),
             context.socksPort, dataDir, context.upstreamSocks, context.upstreamUser,
-            context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null)
+            context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null,
+            clientPlatform = clientPlatform(platform?.first, platform?.third),
+            clientApiLevel = platform?.second ?: 0)
         // ConsoleClient otherwise shares tactics and dial history under UNKNOWN across
         // unrelated networks. Upstream uses this identifier locally and logs its prefix.
         val link = runCatching { Sidecars.psiphonNetworkIdentity?.invoke() }.getOrNull()
+        val metered = runCatching { Sidecars.psiphonLinkMetered?.invoke() }.getOrNull() == true
         networkId(link, context.upstreamSocks != null)?.let { config.put("NetworkID", it) }
         val configFile = File(context.workDir, CONFIG_FILE)
         PrivateEngineFile.write(configFile, config.toString())
@@ -85,7 +89,7 @@ class PsiphonSidecar(
                 "-formatNotices"
             ),
             environment = if (linkDns.isEmpty()) emptyMap() else mapOf("MAXIMUS_PSIPHON_LINK_DNS" to linkDns.joinToString(",")),
-            readyTimeoutMs = READY_TIMEOUT_MS,
+            readyTimeoutMs = readyTimeoutMs(link, metered, context.upstreamSocks != null),
             // Psiphon's SOCKS server takes any user name and password as transport arguments; it
             // cannot check a login, so none is sent.
             socksAuth = false,
@@ -185,8 +189,36 @@ class PsiphonSidecar(
         const val KEY_PRIVATE_PROFILE_ID = "privateProfileId"
         const val CONFIG_FILE = "psiphon.config"
         const val DATA_DIR = "data"
-        /** The port opens early (see the class comment); this only covers a slow first start. */
+        /** The port opens early (see the class comment); this only covers a slow first start (Wi-Fi). */
         const val READY_TIMEOUT_MS = 60_000L
+        /**
+         * Cellular or metered links (Iranian mobile carriers throttle and reset handshakes) and chain hops
+         * (every Psiphon dial goes through the next hop first) need longer to find a working server.
+         */
+        const val SLOW_READY_TIMEOUT_MS = 120_000L
+
+        /** Parallel dials when the build's settings do not choose (the library default is 10). */
+        const val FAST_WORKER_POOL = 16
+        /** Through a chain hop each dial rides the next hop's tunnel, so fewer run at once. */
+        const val CHAIN_WORKER_POOL = 12
+        /** Seconds between establishment rounds when the build's settings do not choose (default 2). */
+        const val FAST_PAUSE_SECONDS = 1
+
+        /** [link] is [Sidecars.psiphonNetworkIdentity]'s "wifi:…" / "cell:…" key. Pure. */
+        internal fun readyTimeoutMs(link: String?, metered: Boolean, chained: Boolean): Long =
+            if (chained || metered || link?.substringBefore(':') == "cell") SLOW_READY_TIMEOUT_MS else READY_TIMEOUT_MS
+
+        private val PLATFORM_PART = Regex("[^A-Za-z0-9._-]")
+
+        /**
+         * The Android form psiphon-tunnel-core's own Android library reports, "Android_<release>_<package>"
+         * (MobileLibrary/Android PsiphonTunnel.java); servers match it by containing "Android". Pure.
+         */
+        internal fun clientPlatform(release: String?, packageName: String?): String {
+            val r = release?.replace(PLATFORM_PART, "")?.take(16).orEmpty()
+            val p = packageName?.replace(PLATFORM_PART, "")?.take(64).orEmpty()
+            return if (r.isEmpty() || p.isEmpty()) "Android" else "Android_${r}_$p"
+        }
         /** The notice Psiphon prints when it has at least one tunnel. */
         val TUNNEL_UP = Regex("Tunnels.*\"count\":\\s*[1-9]")
 
@@ -206,7 +238,7 @@ class PsiphonSidecar(
             "DataRootDirectory", "MigrateDataStoreDirectory", "ListenInterface", "UseUnixDomainSockets",
             "LocalSocksProxyUnixPath", "LocalHttpProxyUnixPath", "EgressRegion", "EnableUpgradeDownload",
             "UpgradeDownloadURLs", "UpgradeDownloadClientVersionHeader", "UseNoticeFiles", "DisableTunnels",
-            "UpstreamProxyURL", "UpstreamProxyUrl", "ClientPlatform", "NetworkID", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters",
+            "UpstreamProxyURL", "UpstreamProxyUrl", "ClientPlatform", "ClientAPILevel", "NetworkID", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters",
             // Split tunnel sends "own region" destinations around Psiphon, classified from a lookup on the
             // phone's own (filtered) network. In Iran that returns 10.10.34.x for blocked names such as
             // YouTube's, so nothing may go direct: MAXIMUS sends all app traffic into Psiphon.
@@ -343,15 +375,22 @@ class PsiphonSidecar(
             (settings.opt(key) as? JSONArray)?.length()?.let { it > 0 } == true
 
         /** The config file ConsoleClient reads: the build's settings plus what this connection needs. */
-        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false): JSONObject {
+        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false, clientPlatform: String = "Android", clientApiLevel: Int = 0): JSONObject {
             val config = JSONObject(networkSettings.toString())
             val owned = (LOCAL_FIELDS + CHAIN_ONLY_FIELDS).map { it.lowercase() }.toSet()
             config.keys().asSequence().filter { it.lowercase() in owned }.toList().forEach { config.remove(it) }
             config.put("LocalSocksProxyPort", socksPort)
             // ConsoleClient defaults to 127.0.0.1 when ListenInterface is absent.
             // Avoid enumerating Android interfaces just to bind that same address.
-            config.put("ClientPlatform", "Android")
+            config.put("ClientPlatform", clientPlatform)
+            if (clientApiLevel > 0) config.put("ClientAPILevel", clientApiLevel)
             config.put("EmitDiagnosticNetworkParameters", false)
+            // Faster establishment (field names checked against config.go at the pinned commit): more
+            // parallel dials and a shorter pause between rounds. A build's own values win.
+            if (!config.has("ConnectionWorkerPoolSize"))
+                config.put("ConnectionWorkerPoolSize", if (upstreamSocks != null) CHAIN_WORKER_POOL else FAST_WORKER_POOL)
+            if (!config.has("EstablishTunnelPausePeriodSeconds"))
+                config.put("EstablishTunnelPausePeriodSeconds", FAST_PAUSE_SECONDS)
             // Xray only needs SOCKS; an HTTP proxy would be one more open local port.
             config.put("DisableLocalHTTPProxy", true)
             config.put("DataRootDirectory", dataDir.absolutePath)

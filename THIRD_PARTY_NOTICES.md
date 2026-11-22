@@ -595,6 +595,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   2606:4700:103::/48 seed, the measured IPv4 MASQUE gateway list, the strict v4/v6 fallback, the ECH fallback blob
   and the MASQUE-H2 fingerprint profile option.
 
+### MASQUE-H2 receive backpressure and socket buffers in the Aether executable (2026-11-22)
+
+- Source idea: UAC SNI Spoofer `core/aether/src/h2_receive.rs` (wait for the netstack queue instead of dropping
+  datagrams when it is full) and its `AETHER_MASQUE_H2_SOCKET_TUNING` (1 MB SO_SNDBUF/SO_RCVBUF on the outer HTTP/2
+  TCP socket), https://github.com/Floxu1/UAC-SNI-Spoofer-Android, AGPL-3.0-only, reused with the authorization of the
+  MAXIMUS VPN repository owner. Rewritten as a source patch in `scripts/connections/harden-aether.py` against
+  Aether 2.4.0's `masque_h2.rs` (separately built AGPL-3.0 executable; its complete corresponding source ships as
+  `Aether-source.tar.gz`). No UAC branding, servers or credentials are used.
+
 ## Alan-RIP-Dpi — TLS record slicing and Uplink Shield (2026-11-15)
 
 - Upstream: https://github.com/DrAlanK/Alan-RIP-Dpi-Android (v1.6.0, commit `f4810b4`) and
@@ -791,3 +800,18 @@ under "MIT License (libXray)"):
 - luxxuria/harvester — https://github.com/luxxuria/harvester (`ping_tested.txt`)
 
 The Epodonios and ebrasha lists were removed on 2026-11-22 because their files no longer exist (HTTP 404).
+
+## Iran GeoFiles — Chocolate4U/Iran-v2ray-rules (2026-11-22)
+
+The APK bundles three unmodified data files from the Chocolate4U/Iran-v2ray-rules release
+`202611211258`, used by Xray-core for `geoip:` / `geosite:` routing rules. They are data, not code,
+and are distributed under the GNU General Public License v3.0 (full text in the APK at
+`assets/licenses/sing-box-GPL-3.0.txt` and at https://www.gnu.org/licenses/gpl-3.0.txt).
+
+- Source: https://github.com/Chocolate4U/Iran-v2ray-rules (release https://github.com/Chocolate4U/Iran-v2ray-rules/releases/tag/202611211258)
+- Files in the APK: `assets/geo/geoip-lite.dat` (SHA-256 `2b5073fd9f9335c94899fb5d5628f92dccb70b010507f6f5f6974f92c77bcb1f`),
+  `assets/geo/geosite-lite.dat` (`8e63e42bc9139f123e749e69a21d03f459463c34c41da6df78c549e539b6343f`),
+  `assets/geo/geoip-services.dat` (`93971c1c668652ac977f7b41448dfeeee68b60d485361c46f8d533f24e969c33`).
+- `scripts/fetch-geofiles.sh` re-downloads them and checks each against the release's `.sha256sum` file and the pinned hash.
+- The lists are compiled upstream from v2fly domain-list-community, MaxMind/IP2Location data and the
+  maintainers' own Iranian domain and IP lists; see the upstream README for each source's terms.

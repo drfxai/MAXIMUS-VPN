@@ -158,7 +158,17 @@ data class BenchmarkStageResult(
 enum class RoutingMode(val title: String, val description: String) {
     GLOBAL("Global Proxy", "Route all device network traffic through the proxy tunnel"),
     RULE_BYPASS_LAN("Bypass LAN & Direct Local", "Bypass local private subnets (192.168.x, 10.x) and route international traffic"),
-    BYPASS_SELECTED("Custom Bypass List", "Bypass traffic matching specific user-defined domain and IP lists")
+    BYPASS_SELECTED("Custom Bypass List", "Bypass traffic matching specific user-defined domain and IP lists"),
+    /** Bypass LAN, plus Iranian sites and IPs direct (bundled GeoFiles: geosite:category-ir, domain:ir, geoip:ir). */
+    IRAN_DIRECT("Iran Direct", "LAN, Iranian domains (.ir and geosite:category-ir) and Iranian IPs (geoip:ir) go direct"),
+    /** [IRAN_DIRECT] plus geosite:ads blocked. */
+    IRAN_DIRECT_BLOCK_ADS("Iran Direct + Block Ads", "As Iran Direct, and ad domains (geosite:ads) are blocked");
+
+    /** Modes whose Xray rules need the bundled GeoFiles. */
+    val usesGeoFiles: Boolean get() = this == IRAN_DIRECT || this == IRAN_DIRECT_BLOCK_ADS
+
+    /** Modes that send LAN, loopback and private addresses direct. */
+    val bypassesLan: Boolean get() = this == RULE_BYPASS_LAN || usesGeoFiles
 }
 
 enum class ProfileType(val displayName: String, val badge: String) {

@@ -82,6 +82,51 @@ object XrayConfigBuilder {
      * A first rule sends private-source traffic on the share inbounds to the proxy outbound; a second
      * rule blocks anything else arriving on them, so the proxy is unreachable from the upstream network.
      */
+    /**
+     * "Iran direct" presets, following the Chocolate4U/Iran-v2ray-rules template: ads blocked (optional),
+     * LAN and private addresses direct, Iranian domains (.ir TLD and geosite:category-ir) direct, Iranian
+     * IPs (geoip:ir) direct, everything else through the proxy. The geo categories come from the bundled
+     * GeoFiles (see GeoAssets); XrayEngine points Xray's asset location at them.
+     */
+    internal fun addIranDirectRules(rulesArray: JSONArray, blockAds: Boolean) {
+        if (blockAds) {
+            rulesArray.put(JSONObject().apply {
+                put("type", "field")
+                put("outboundTag", "block")
+                put("domain", JSONArray().put(GeoAssets.GEOSITE_ADS))
+            })
+        }
+        rulesArray.put(JSONObject().apply {
+            put("type", "field")
+            put("outboundTag", "direct")
+            put("ip", JSONArray().apply {
+                put(GeoAssets.GEOIP_PRIVATE)
+                put("100.64.0.0/10")
+            })
+        })
+        rulesArray.put(JSONObject().apply {
+            put("type", "field")
+            put("outboundTag", "direct")
+            put("domain", JSONArray().apply {
+                put("domain:local")
+                put("full:localhost")
+                put("domain:lan")
+                put("domain:ir")
+                put(GeoAssets.GEOSITE_CATEGORY_IR)
+            })
+        })
+        rulesArray.put(JSONObject().apply {
+            put("type", "field")
+            put("outboundTag", "direct")
+            put("ip", JSONArray().put(GeoAssets.GEOIP_IR))
+        })
+        rulesArray.put(JSONObject().apply {
+            put("type", "field")
+            put("outboundTag", "proxy")
+            put("network", "tcp,udp")
+        })
+    }
+
     private fun addHotspotShareRouting(rulesArray: JSONArray, settings: AppSettings) {
         if (!hotspotShareActive(settings)) return
         val tags = JSONArray().put(SHARE_SOCKS_TAG).put(SHARE_HTTP_TAG)
@@ -201,6 +246,9 @@ object XrayConfigBuilder {
         addHotspotShareRouting(rulesArray, settings)
 
         when (settings.routingMode) {
+            RoutingMode.IRAN_DIRECT, RoutingMode.IRAN_DIRECT_BLOCK_ADS -> {
+                addIranDirectRules(rulesArray, blockAds = settings.routingMode == RoutingMode.IRAN_DIRECT_BLOCK_ADS)
+            }
             RoutingMode.GLOBAL -> {
                 rulesArray.put(JSONObject().apply {
                     put("type", "field")
