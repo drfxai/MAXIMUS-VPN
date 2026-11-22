@@ -595,6 +595,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   2606:4700:103::/48 seed, the measured IPv4 MASQUE gateway list, the strict v4/v6 fallback, the ECH fallback blob
   and the MASQUE-H2 fingerprint profile option.
 
+### MASQUE-H2 receive backpressure and socket buffers in the Aether executable (2026-11-22)
+
+- Source idea: UAC SNI Spoofer `core/aether/src/h2_receive.rs` (wait for the netstack queue instead of dropping
+  datagrams when it is full) and its `AETHER_MASQUE_H2_SOCKET_TUNING` (1 MB SO_SNDBUF/SO_RCVBUF on the outer HTTP/2
+  TCP socket), https://github.com/Floxu1/UAC-SNI-Spoofer-Android, AGPL-3.0-only, reused with the authorization of the
+  MAXIMUS VPN repository owner. Rewritten as a source patch in `scripts/connections/harden-aether.py` against
+  Aether 2.4.0's `masque_h2.rs` (separately built AGPL-3.0 executable; its complete corresponding source ships as
+  `Aether-source.tar.gz`). No UAC branding, servers or credentials are used.
+
 ## Alan-RIP-Dpi — TLS record slicing and Uplink Shield (2026-11-15)
 
 - Upstream: https://github.com/DrAlanK/Alan-RIP-Dpi-Android (v1.6.0, commit `f4810b4`) and
