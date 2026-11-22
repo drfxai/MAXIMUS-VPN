@@ -28,6 +28,9 @@ import com.example.vpn.connectivity.RecoveryProfiles
  * ([NetworkFirewalls]), Cloudflare ECH recipes whose DoH resolver does not return the ECH key here are
  * skipped ([com.example.vpn.connectivity.EchKeyCheck]), and when no clean Cloudflare address is
  * validated on this network yet, [findCleanIps] scans for some through the first dead config.
+ *
+ * What won is remembered per network for about a day ([RevivalWinnerMemory]): the configs revived here lead
+ * the next run's pool, and the recipe that won for a config (or for any config here) leads its recipe order.
  */
 class ConfigRevival(
     private val engine: BpbRecoveryEngine,
@@ -38,7 +41,9 @@ class ConfigRevival(
     /** Each Cloudflare ECH DoH resolver → whether it returns the ECH key on this network (empty: not checked). */
     private val echCheck: () -> Map<String, Boolean> = { emptyMap() },
     /** Scans for clean Cloudflare addresses through a config on a network, records them, and returns them. */
-    private val findCleanIps: (VlessProfile, String?) -> List<String> = { _, _ -> emptyList() }
+    private val findCleanIps: (VlessProfile, String?) -> List<String> = { _, _ -> emptyList() },
+    /** Which config and recipe won here lately ([RevivalWinnerMemory]): tried first on the next run on that network. */
+    private val winners: RevivalWinnerMemory = RevivalWinnerMemory()
 ) {
     enum class Outcome(val title: String) {
         REVIVED("Revived"),
@@ -96,7 +101,8 @@ class ConfigRevival(
         onProgress: (Progress) -> Unit = {}
     ): Report {
         val wall = firewall ?: NetworkFirewalls.detect(network)
-        val pool = eligible(profiles)
+        // Configs revived on this network lately lead, so a run cut short by its deadline still reaches them.
+        val pool = winners.winnersFirst(network, all(profiles)) { it.effectiveFingerprint }.take(MAX_CONFIGS)
         if (pool.isEmpty()) return Report(emptyList(), wall)
         onProgress(Progress(0, pool.size, "Testing ${pool.size} configs as they are"))
         val plain = pool.chunked(BATCH).flatMap { batch -> probe(batch).let { r -> batch.indices.map { r.getOrNull(it) ?: notRun } } }
@@ -159,7 +165,11 @@ class ConfigRevival(
     ): Result {
         // The cause limits the recipes only when the error says it plainly (a name or address problem);
         // otherwise every strategy is allowed and the cause only orders them. The gate and the real request decide.
-        val candidates = engine.generate(p, RevivalTriage.stage(cause), network, ips) { rp -> bias(rp)?.plus(RevivalTriage.boost(cause, rp)) }
+        // The recipe that won here lately (for this config, else for another) is tried first ([RevivalWinnerMemory]).
+        val fp = p.effectiveFingerprint
+        val candidates = engine.generate(p, RevivalTriage.stage(cause), network, ips) { rp ->
+            bias(rp)?.plus(RevivalTriage.boost(cause, rp))?.plus(winners.boost(network, fp, rp.key))
+        }
         if (candidates.isEmpty()) return Result(p.id, name, Outcome.NOT_REVIVED, when (cause) {
             RevivalTriage.Cause.NAME_NOT_RESOLVED, RevivalTriage.Cause.ADDRESS_UNREACHABLE ->
                 "${cause.title.replaceFirstChar(Char::lowercase)}; only another address could help and none is validated on this network"
@@ -172,6 +182,7 @@ class ConfigRevival(
                 if (ran == 0) (tested.firstNotNullOfOrNull { (it.test as? DerivedRecoveryCandidate.TestResult.NotRun)?.reason } ?: "no recipe could be tested")
                 else "no recipe got a request through ($ran tried); the server, its UUID or its Worker may be down", tried = ran)
         val ms = (winner.test as DerivedRecoveryCandidate.TestResult.Passed).latencyMs
+        winners.record(network, fp, winner.recoveryProfileKey)
         return Result(p.id, name, Outcome.REVIVED, "${describe(winner.recoveryProfileKey, winner.endpoint)} · used next time it connects",
             ms, ran, winner.recoveryProfileKey)
     }

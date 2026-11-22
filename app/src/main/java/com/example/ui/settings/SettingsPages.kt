@@ -147,6 +147,14 @@ fun ConnectionSettingsPage(
                     onCheckedChange = actions::setPowerButtonFallback
                 )
                 SettingsDivider()
+                SettingsSwitchRow(
+                    title = stringResource(R.string.ui_speed_pick_on_metered),
+                    subtitle = stringResource(R.string.ui_speed_pick_on_metered_subtitle),
+                    icon = Icons.Default.Speed,
+                    checked = settings.speedPickOnMetered,
+                    onCheckedChange = actions::setSpeedPickOnMetered
+                )
+                SettingsDivider()
                 SettingsNavRow(
                     title = stringResource(R.string.ui_learned_network_data),
                     subtitle = learnedSummary,

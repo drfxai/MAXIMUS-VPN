@@ -87,6 +87,7 @@ class SettingsRepository(context: Context) {
             scoringProfile = scoringProfile,
             autoFailoverEnabled = prefs.getBoolean("auto_failover", true),
             powerButtonFallback = prefs.getBoolean("power_button_fallback", true),
+            speedPickOnMetered = prefs.getBoolean("speed_pick_on_metered", false),
             failoverThresholdMs = prefs.getLong("failover_threshold", 800L),
             failoverPacketLossThreshold = prefs.getFloat("failover_loss", 30f).toDouble(),
             benchmarkConcurrency = prefs.getInt("benchmark_concurrency", 6),
@@ -123,6 +124,7 @@ class SettingsRepository(context: Context) {
             .putString("scoring_profile", settings.scoringProfile.name)
             .putBoolean("auto_failover", settings.autoFailoverEnabled)
             .putBoolean("power_button_fallback", settings.powerButtonFallback)
+            .putBoolean("speed_pick_on_metered", settings.speedPickOnMetered)
             .putLong("failover_threshold", settings.failoverThresholdMs)
             .putFloat("failover_loss", settings.failoverPacketLossThreshold.toFloat())
             .putInt("benchmark_concurrency", settings.benchmarkConcurrency)

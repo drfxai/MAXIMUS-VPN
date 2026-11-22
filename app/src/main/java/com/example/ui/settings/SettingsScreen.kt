@@ -698,6 +698,7 @@ private class ViewModelSettingsActions(private val vm: SettingsViewModel) : Sett
     override fun setScoringProfile(profile: ScoringProfile) = vm.setScoringProfile(profile)
     override fun setAutoFailover(enabled: Boolean) = vm.setAutoFailover(enabled)
     override fun setPowerButtonFallback(enabled: Boolean) = vm.setPowerButtonFallback(enabled)
+    override fun setSpeedPickOnMetered(enabled: Boolean) = vm.setSpeedPickOnMetered(enabled)
     override fun setPreferredEngine(engine: EngineType) = vm.setPreferredEngine(engine)
     override fun setRoutingMode(mode: RoutingMode) = vm.setRoutingMode(mode)
     override fun setDnsServer(dns: String) = vm.setDnsServer(dns)

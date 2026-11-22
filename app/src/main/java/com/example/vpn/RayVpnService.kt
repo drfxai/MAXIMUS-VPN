@@ -554,6 +554,9 @@ class RayVpnService : VpnService() {
      * the download check finds the chosen one stalls (see [switchAfterStall]). Cleared by every user Connect.
      */
     @Volatile private var smartRunnersUp: List<com.example.vpn.smart.ServerRace.Winner> = emptyList()
+
+    /** The post-connect speed pick already ran (or switched) since the user's last Connect: never twice. */
+    @Volatile private var speedPickRan = false
     @Volatile private var stallSwitches = 0
     /** The later Smart Connect stages already ran after a stall or freeze since the user's Connect. */
     @Volatile private var stallEscalated = false
@@ -859,6 +862,7 @@ class RayVpnService : VpnService() {
             val compare = raceFirst && smart && startedByUser && !force
             if (startedByUser) {
                 smartRunnersUp = emptyList()
+                speedPickRan = false
                 stallSwitches = 0
                 stallEscalated = false
                 freezeRescue = null
@@ -1734,6 +1738,14 @@ class RayVpnService : VpnService() {
             updateState(_vpnState.value.copy(status = ConnectionStatus.PROXY_CONNECTING))
             showForegroundNotification("Connecting Proxy via ${activeEngine.engineType.displayName}...")
 
+            // Post-connect speed pick: the race's other verified servers ride along in this core as loopback
+            // probes, measured once the transfer check passed (PostConnectSpeedPick, startSpeedPick).
+            com.example.vpn.smart.PostConnectSpeedPick.clear()
+            if (raced && raceFirst && !force && !exact && activeRecovery == null && amnezia == null &&
+                sidecarEngine == null && engineChain == null && runtime == EngineSelectionPolicy.Runtime.XRAY) {
+                runCatching { stageSpeedProbes(settings) }
+                    .onFailure { XrayLogManager.w("SMART", "speed-pick · probes not staged: ${it.javaClass.simpleName}") }
+            }
             val startResult = if (activeEngine is NativeTunVpnEngine) {
                 (activeEngine as NativeTunVpnEngine).startWithTun(xrayProfile, settings.copy(mtu = safeMtu), pfd.fd) { fd -> safeProtectFd(fd) }
             } else {
@@ -3560,6 +3572,7 @@ class RayVpnService : VpnService() {
                 (evidence.upload as? com.example.vpn.verify.LegResult.Failed)?.stalled != true -> {
                 // Passed the transfer check here: last-known-good on this network.
                 freezes.recordGood(network, running.id, rescue?.rescue?.key)
+                if (rescue == null) startSpeedPick(attemptId, network, running)
                 if (label != null) {
                     XrayLogManager.i("FAILOVER", "$label: passed the transfer check (${download.bytes / 1024} KB)" +
                         if (uplinkStall) "; the upload still stalls at the 16 KB grade." else ".")
@@ -3569,6 +3582,98 @@ class RayVpnService : VpnService() {
             }
             (download as? com.example.vpn.verify.LegResult.Failed)?.stalled == true ->
                 switchAfterStall(attemptId, network, running, stallBytes = (download as? com.example.vpn.verify.LegResult.Failed)?.bytes)
+        }
+    }
+
+    private fun speedPickMetered(): Boolean =
+        _environment.value?.signals?.contains(com.example.vpn.smart.NetworkEnvironment.Signal.METERED) == true ||
+            runCatching {
+                val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return@runCatching false
+                val n = com.example.vpn.smart.NetworkCapabilityDetector.physical(cm) ?: return@runCatching cm.isActiveNetworkMetered
+                cm.getNetworkCapabilities(n)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
+            }.getOrDefault(false)
+
+    /**
+     * Before a Smart pick's Xray core starts: the race's other verified servers (up to
+     * [com.example.vpn.smart.PostConnectSpeedPick.MAX_ALTERNATES]) become loopback probes in that core, unless the
+     * speed pick already ran since the last Connect or the network is metered without the user's permission.
+     */
+    private fun stageSpeedProbes(settings: AppSettings) {
+        val pick = com.example.vpn.smart.PostConnectSpeedPick
+        val network = com.example.vpn.smart.NetworkKey.current(this)
+        val frozen = networkMemory.freezes.frozen(network)
+        val byOwner = smartRunnersUp.filter { !com.example.vpn.sidecar.Sidecars.isEngineProfile(it.owner) &&
+            it.profile.profileType != ProfileType.XRAY_JSON }.associateBy { it.owner.id }
+        val ids = pick.pickAlternates(smartRunnersUp.map { it.owner.id }.filter { it in byOwner }, current = "", exclude = frozen)
+        val metered = speedPickMetered()
+        if (!pick.applies(smartPick = true, tunPath = !appOutsideVpn, metered = metered,
+                allowMetered = settings.speedPickOnMetered, alternates = ids.size, alreadyRan = speedPickRan)) {
+            if (metered && ids.isNotEmpty() && !speedPickRan && !settings.speedPickOnMetered)
+                XrayLogManager.i("SMART", "speed-pick · skipped on a metered network (Settings → Failover to allow it).")
+            return
+        }
+        val probes = ids.mapIndexedNotNull { i, id ->
+            val w = byOwner[id] ?: return@mapIndexedNotNull null
+            val tag = "${pick.TAG_PREFIX}$i"
+            val out = runCatching {
+                pick.standaloneOutbound(org.json.JSONObject(com.example.xray.XrayConfigBuilder.buildJson(w.profile, AppSettings())), tag)
+            }.getOrNull() ?: return@mapIndexedNotNull null
+            com.example.vpn.smart.PostConnectSpeedPick.Probe(id, tag, com.example.vpn.sidecar.Sidecars.freeLoopbackPort(),
+                com.example.vpn.sidecar.Sidecars.randomToken(9), com.example.vpn.sidecar.Sidecars.randomToken(), out)
+        }
+        if (probes.isNotEmpty()) pick.stage(probes)
+    }
+
+    /**
+     * The Smart pick passed its transfer check: time a ~2 MB download through it (the TUN) and through each probe
+     * the core carries, one after another, and move to an alternate only when it was more than 10% faster
+     * ([com.example.vpn.smart.PostConnectSpeedPick.decide]). Runs at most once per Connect; a pinned session never moves.
+     */
+    private fun startSpeedPick(attemptId: String, network: String, running: VlessProfile) {
+        val pick = com.example.vpn.smart.PostConnectSpeedPick
+        val probes = pick.active
+        if (probes.isEmpty() || speedPickRan) return
+        speedPickRan = true
+        serviceScope.launch(Dispatchers.IO) {
+            if (exitPinned() || _vpnState.value.attemptId != attemptId) return@launch
+            fun measure(dialer: com.example.vpn.verify.Dialer, target: com.example.vpn.verify.TrafficCheck.Target): Long? = runCatching {
+                (com.example.vpn.verify.TrafficCheck(dialer, downloads = listOf(target), stepTimeoutMs = pick.STEP_TIMEOUT_MS)
+                    .timedDownload(target) as? com.example.vpn.verify.LegResult.Passed)?.bytesPerSecond
+            }.getOrNull()
+            // The first reference that works through the server in use times every route, so the rates compare.
+            var measured: Pair<com.example.vpn.verify.TrafficCheck.Target, Long>? = null
+            for (t in com.example.vpn.verify.TrafficCheck.SPEED_PICK_DOWNLOADS) {
+                if (!isActive || _vpnState.value.attemptId != attemptId) return@launch
+                val rate = kotlinx.coroutines.runInterruptible { measure(com.example.vpn.verify.RouteDialers.vpn(this@RayVpnService), t) }
+                if (rate != null) { measured = t to rate; break }
+            }
+            val (target, current) = measured ?: run {
+                XrayLogManager.i("SMART", "speed-pick · the download through the server in use could not be timed; staying.")
+                return@launch
+            }
+            val rates = linkedMapOf<String, Long?>()
+            for (p in probes) {
+                if (!isActive || _vpnState.value.attemptId != attemptId) return@launch
+                rates[p.ownerId] = kotlinx.coroutines.runInterruptible {
+                    measure(com.example.vpn.verify.RouteDialers.engine(com.example.vpn.verify.Socks5.Endpoint("127.0.0.1", p.port, p.user, p.pass)), target)
+                }
+                rates[p.ownerId]?.let { networkMemory.speeds.record(network, p.ownerId, it, stalled = false) }
+            }
+            val kb = { r: Long? -> r?.let { "${it / 1024} KB/s" } ?: "not measured" }
+            XrayLogManager.i("SMART", "speed-pick · in use ${kb(current)}; " +
+                rates.entries.joinToString { "${com.example.vpn.diagnostics.events.DiagEvent.profileRef(it.key) ?: "alt"} ${kb(it.value)}" })
+            val to = pick.decide(current, rates)
+            com.example.vpn.diagnostics.events.EventLog.event("smart.speed_pick", attributes = mapOf(
+                "result" to if (to == null) "stay" else "switch", "alternates" to rates.size.toString(),
+                "current_bps" to current.toString(), "best_bps" to (rates.values.filterNotNull().maxOrNull()?.toString() ?: "none")))
+            if (to == null || _vpnState.value.attemptId != attemptId || exitPinned()) return@launch
+            val lead = smartRunnersUp.firstOrNull { it.owner.id == to } ?: return@launch
+            XrayLogManager.i("SMART", "speed-pick · switching: ${com.example.core.SecretRedactor.redact(lead.owner.name)} was more " +
+                "than ${(pick.SWITCH_MARGIN * 100).toInt()}% faster than ${com.example.core.SecretRedactor.redact(running.name)}.")
+            launchSwitch("speed-pick") { ticket ->
+                smartRunnersUp = smartRunnersUp.filter { it.owner.id != lead.owner.id }
+                connect(lead.owner, smart = true, exclude = setOf(running.id), ticket = ticket)
+            }
         }
     }
 

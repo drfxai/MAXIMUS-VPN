@@ -55,6 +55,18 @@ class TrafficCheckTest {
         assertEquals(30_000, TrafficCheck.stepTimeoutFor(9_000))
     }
 
+    @Test fun theSpeedPickDownloadTimesMoreThanTheOrdinaryCap() {
+        val size = 2 * 1024 * 1024
+        server.enqueue(MockResponse().setBody(Buffer().write(ByteArray(size))))
+        server.enqueue(MockResponse().setBody(Buffer().write(ByteArray(size - 10))))
+        server.start()
+        val t = target("/big", size)
+        val r = check(timeoutMs = 10_000).timedDownload(t)
+        assertTrue(r.toString(), r is LegResult.Passed && r.bytes == size && r.bytesPerSecond > 0)
+        val short = check(timeoutMs = 10_000).timedDownload(t)
+        assertTrue("a short body is never a rate", short is LegResult.Failed)
+    }
+
     @Test fun aFailedSmallReferenceDoesNotRejectAWorkingRoute() {
         server.enqueue(MockResponse().setResponseCode(503))
         server.enqueue(MockResponse().setResponseCode(204))

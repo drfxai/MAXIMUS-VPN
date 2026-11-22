@@ -168,6 +168,27 @@ class TrafficCheck(
         }
     }
 
+    /**
+     * Post-connect speed pick ([com.example.vpn.smart.PostConnectSpeedPick]): one timed download of [t], which may be
+     * larger than the ordinary checks (up to [SPEED_PICK_MAX_BODY], never kept in memory). Passed, with its rate, only
+     * when every byte arrived within [stepTimeoutMs].
+     */
+    fun timedDownload(t: Target): LegResult {
+        require(t.expectBytes in 1..SPEED_PICK_MAX_BODY)
+        val started = clock()
+        return try {
+            val r = exchange(t, "GET", null, keepBody = false, bodyLimit = SPEED_PICK_MAX_BODY)
+            when {
+                r.status !in 200..299 -> LegResult.NotTested("$t answered HTTP ${r.status}")
+                r.bodyBytes == t.expectBytes -> LegResult.Passed(r.bodyBytes, clock() - started)
+                else -> LegResult.Failed(FailureStage.HTTP_REQUEST_FAILED, r.bodyBytes, stalled = false,
+                    reason = "$t sent ${r.bodyBytes} of ${t.expectBytes} bytes")
+            }
+        } catch (e: TransferException) {
+            failed(e, t)
+        }
+    }
+
     /** One upload of [size] bytes to [t]: the grade, plus a reason when it was not confirmed. */
     internal fun uploadGrade(t: Target, size: Int): Pair<UploadProbe.Grade, String?> {
         val marker = token(32)
@@ -264,7 +285,8 @@ class TrafficCheck(
     }
 
     internal fun exchange(t: Target, method: String, payload: ByteArray?, keepBody: Boolean, extraHeaders: Map<String, String> = emptyMap(),
-                          progress: ((Int) -> Unit)? = null, onBody: ((Int) -> Unit)? = null, maxBodyBytes: Int? = null): Response {
+                          progress: ((Int) -> Unit)? = null, onBody: ((Int) -> Unit)? = null, maxBodyBytes: Int? = null,
+                          bodyLimit: Int = MAX_BODY): Response {
         require(method in setOf("GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"))
         require(extraHeaders.all { (key, value) -> key.matches(Regex("[A-Za-z0-9-]+")) &&
             value.length <= 8192 && value.none { it == '\r' || it == '\n' } &&
@@ -321,9 +343,9 @@ class TrafficCheck(
                 // Capped read: the first bytes of the body (raw, chunk framing included) and no more.
                 maxBodyBytes != null -> readFixed(input, if (!chunked && length != null) minOf(length, maxBodyBytes) else maxBodyBytes,
                     body, counter, untilEof = true)
-                chunked -> readChunked(input, body, counter)
-                length != null -> readFixed(input, length, body, counter)
-                else -> readFixed(input, MAX_BODY, body, counter, untilEof = true)
+                chunked -> readChunked(input, body, counter, bodyLimit)
+                length != null -> readFixed(input, length, body, counter, limit = bodyLimit)
+                else -> readFixed(input, bodyLimit, body, counter, untilEof = true, limit = bodyLimit)
             }
             return Response(status, total, body, headers.second)
         } catch (e: Exception) {
@@ -380,6 +402,8 @@ class TrafficCheck(
         private const val MAX_HEAD = 16 * 1024
         // A 256 KB upload grade is echoed back inside JSON, so the body cap sits above it.
         private const val MAX_BODY = 640 * 1024
+        /** The speed pick's download cap ([timedDownload]); its body is counted, never kept. */
+        const val SPEED_PICK_MAX_BODY = 4 * 1024 * 1024
         private const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
         val SMALL = Target("www.gstatic.com", 443, "/generate_204")
@@ -392,6 +416,16 @@ class TrafficCheck(
             Target("httpbin.org", 443, "/bytes/$DOWNLOAD_BYTES", DOWNLOAD_BYTES),
             Target("httpbingo.org", 443, "/bytes/$DOWNLOAD_BYTES", DOWNLOAD_BYTES),
             Target("speed.cloudflare.com", 443, "/__down?bytes=$DOWNLOAD_BYTES", DOWNLOAD_BYTES, cloudflare = true)
+        )
+        /**
+         * Post-connect speed pick ([com.example.vpn.smart.PostConnectSpeedPick]): ~2 MB, with 1 MiB references on other
+         * providers when Cloudflare is not reachable; the first that works through the server in use times every route.
+         */
+        val SPEED_PICK_DOWNLOADS = listOf(
+            Target("speed.cloudflare.com", 443, "/__down?bytes=${com.example.vpn.smart.PostConnectSpeedPick.DOWNLOAD_BYTES}",
+                com.example.vpn.smart.PostConnectSpeedPick.DOWNLOAD_BYTES, cloudflare = true),
+            Target("cachefly.cachefly.net", 443, "/1mb.test", 1024 * 1024),
+            Target("proof.ovh.net", 443, "/files/1Mb.dat", 1024 * 1024)
         )
         /** The bulk gate's download (Fly.io, not Cloudflare, so it works through a Worker exit and on cf=0). */
         val GATE_DOWNLOAD = Target("httpbingo.org", 443, "/bytes/${com.example.vpn.smart.BulkGate.DOWNLOAD_BYTES}",
@@ -427,8 +461,9 @@ class TrafficCheck(
             return status to headers
         }
 
-        private fun readFixed(input: InputStream, length: Int, body: ByteArrayOutputStream?, counter: (Int) -> Unit, untilEof: Boolean = false): Int {
-            val cap = length.coerceAtMost(MAX_BODY)
+        private fun readFixed(input: InputStream, length: Int, body: ByteArrayOutputStream?, counter: (Int) -> Unit, untilEof: Boolean = false,
+                              limit: Int = MAX_BODY): Int {
+            val cap = length.coerceAtMost(limit)
             val buf = ByteArray(8192)
             var total = 0
             while (total < cap) {
@@ -444,14 +479,14 @@ class TrafficCheck(
             return total
         }
 
-        private fun readChunked(input: InputStream, body: ByteArrayOutputStream?, counter: (Int) -> Unit): Int {
+        private fun readChunked(input: InputStream, body: ByteArrayOutputStream?, counter: (Int) -> Unit, limit: Int = MAX_BODY): Int {
             var total = 0
             while (true) {
                 val sizeLine = readLine(input)
                 val size = sizeLine.substringBefore(';').trim().toIntOrNull(16) ?: throw IOException("Bad chunk size")
                 if (size == 0) { readLine(input); return total }
-                if (total + size > MAX_BODY) throw IOException("Response too long")
-                total += readFixed(input, size, body, counter)
+                if (total + size > limit) throw IOException("Response too long")
+                total += readFixed(input, size, body, counter, limit = limit)
                 readLine(input)
             }
         }
