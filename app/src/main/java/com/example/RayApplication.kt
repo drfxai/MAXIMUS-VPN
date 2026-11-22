@@ -143,22 +143,60 @@ class RayApplication : Application() {
                 }
             },
             findCleanIps = { profile, _ ->
-                // Edge addresses that pass TCP, TLS (with the config's SNI) and the config's own WebSocket or
-                // HTTP exchange; each one found is recorded for this network, which is what makes it a recipe.
                 val scanNetwork = com.example.vpn.smart.NetworkIdentity.current(this)
                 val scope = com.example.vpn.connectivity.EndpointScoringEngine.destinationScope(scanNetwork, profile)
-                val found = kotlinx.coroutines.runBlocking {
-                    com.example.panels.CleanIpOptimizer().scan(profile, targetPort = profile.port, enableSpeedTest = false, candidateCount = 64,
-                        preferred = endpointScores.remembered(scope, limit = 4), enough = 6,
-                        assertNetwork = { check(com.example.vpn.smart.NetworkIdentity.current(this@RayApplication) == scanNetwork) { "Network changed during clean-IP scan" } }) { }
-                }.take(6)
+                val country = networkCountry()
+                val cdn = cdnCleanIps.cdnOf(profile)
+                // On a network that proxies Cloudflare TLS by name, no Cloudflare edge is "clean": skip that scan.
+                val cfUseful = cdn != com.example.vpn.cleanip.Cdn.CLOUDFLARE || !cdnCleanIps.cloudflareProxied(scanNetwork, country)
+                // Edge addresses that pass TCP, TLS (with the config's SNI) and the config's own WebSocket or
+                // HTTP exchange; each one found is recorded for this network, which is what makes it a recipe.
+                val found = if (cdn == com.example.vpn.cleanip.Cdn.CLOUDFLARE && cfUseful && com.example.panels.CleanIpOptimizer.canRevive(profile)) {
+                    kotlinx.coroutines.runBlocking {
+                        com.example.panels.CleanIpOptimizer().scan(profile, targetPort = profile.port, enableSpeedTest = false, candidateCount = 64,
+                            preferred = endpointScores.remembered(scope, limit = 4), enough = 6,
+                            assertNetwork = { check(com.example.vpn.smart.NetworkIdentity.current(this@RayApplication) == scanNetwork) { "Network changed during clean-IP scan" } }) { }
+                    }.take(6)
+                } else emptyList()
                 check(com.example.vpn.smart.NetworkIdentity.current(this) == scanNetwork) { "Network changed during clean-IP scan" }
                 val now = System.currentTimeMillis()
                 endpointScores.record(found.filter { it.originVerified }.map { com.example.vpn.connectivity.EndpointScoringEngine.Measurement(it.ip, scope, now, true, it.medianMs) })
-                found.map { it.ip }
+                // XHTTP, gRPC and H2 configs, Fastly/Gcore/CloudFront fronts, and too few WebSocket edges: handshake-ranked
+                // edges of the config's own CDN with its own server name, cached per network. Revival still sends a
+                // real request through each copy before using it.
+                val more = if (found.size >= 3 || !cfUseful) emptyList() else runCatching {
+                    kotlinx.coroutines.runBlocking { cdnCleanIps.find(profile, scanNetwork, country, preferred = found.map { it.ip }).ips }
+                }.getOrDefault(emptyList())
+                check(com.example.vpn.smart.NetworkIdentity.current(this) == scanNetwork) { "Network changed during clean-IP scan" }
+                (found.map { it.ip } + more).distinct().take(8)
             }
         )
     }
+
+    /** Clean CDN edges per network and whether the network proxies Cloudflare TLS by name. */
+    val cleanIpCache: com.example.vpn.cleanip.CleanIpCache by lazy {
+        val prefs = getSharedPreferences("clean_ip_cache", MODE_PRIVATE)
+        com.example.vpn.cleanip.CleanIpCache(
+            load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() }
+        )
+    }
+
+    /** Clean-IP scans for every CDN transport and CDN, used by config revival. */
+    val cdnCleanIps: com.example.vpn.cleanip.CdnCleanIpFinder by lazy {
+        com.example.vpn.cleanip.CdnCleanIpFinder(cleanIpCache, resolve = { name ->
+            // The config's own name, looked up on the phone's network (not the tunnel or the blocking interface).
+            val physical = getSystemService(android.net.ConnectivityManager::class.java)
+                ?.let { com.example.vpn.smart.NetworkCapabilityDetector.physical(it) }
+            (physical?.getAllByName(name) ?: java.net.InetAddress.getAllByName(name))
+                .filterIsInstance<java.net.Inet4Address>().mapNotNull { it.hostAddress }
+        })
+    }
+
+    /** The mobile network's country (ISO alpha-2, upper case), or null when unknown. */
+    private fun networkCountry(): String? = runCatching {
+        getSystemService(android.telephony.TelephonyManager::class.java)?.networkCountryIso?.trim()?.uppercase(java.util.Locale.US)
+    }.getOrNull()?.ifBlank { null }
 
     /** Iran intelligence rules from the signed free list's manifest; they only nudge the order servers are tried in. */
     val iranIntel: com.example.vpn.connectivity.IranIntelligence.Store by lazy {

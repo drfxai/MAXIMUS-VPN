@@ -101,16 +101,20 @@ class ConfigRevival(
         onProgress(Progress(0, pool.size, "Testing ${pool.size} configs as they are"))
         val plain = pool.chunked(BATCH).flatMap { batch -> probe(batch).let { r -> batch.indices.map { r.getOrNull(it) ?: notRun } } }
         val dead = pool.filterIndexed { i, _ -> plain[i] is DerivedRecoveryCandidate.TestResult.Failed }
+        // Configs that answer but slowly get a chance at a faster clean edge (address only; nothing else changes).
+        val slow = pool.filterIndexed { i, _ -> (plain[i] as? DerivedRecoveryCandidate.TestResult.Passed)?.let { it.latencyMs >= SLOW_MS } == true }
         var ech = emptyMap<String, Boolean>()
         var ips = endpoints(network)
         var scanned = false
-        if (dead.isNotEmpty() && !cancelled()) {
-            onProgress(Progress(0, pool.size, "Checking which resolvers return the ECH key"))
-            ech = runCatching { echCheck() }.getOrDefault(emptyMap())
+        if ((dead.isNotEmpty() || slow.isNotEmpty()) && !cancelled()) {
+            if (dead.isNotEmpty()) {
+                onProgress(Progress(0, pool.size, "Checking which resolvers return the ECH key"))
+                ech = runCatching { echCheck() }.getOrDefault(emptyMap())
+            }
             if (ips.isEmpty()) {
                 onProgress(Progress(0, pool.size, "Looking for clean Cloudflare IPs"))
                 // One dead origin must not prevent discovering a path for another origin.
-                for (parent in dead.distinctBy { it.sni.ifBlank { it.host } }.take(3)) {
+                for (parent in (dead + slow).distinctBy { it.sni.ifBlank { it.host } }.take(3)) {
                     if (cancelled()) break
                     // A scanner may return valid edges before its cache is committed. Do not
                     // discard those live results by only reading the endpoint cache again.
@@ -130,6 +134,10 @@ class ConfigRevival(
             val before = plain[i]
             when {
                 cancelled() -> results += Result(p.id, name, Outcome.NOT_TESTED, "stopped before this config")
+                before is DerivedRecoveryCandidate.TestResult.Passed && before.latencyMs >= SLOW_MS && ips.isNotEmpty() -> {
+                    onProgress(Progress(i, pool.size, name))
+                    results += speedUp(p, name, network, ips, before.latencyMs)
+                }
                 before is DerivedRecoveryCandidate.TestResult.Passed ->
                     results += Result(p.id, name, Outcome.ALREADY_WORKING, "answers as it is; nothing was changed", before.latencyMs)
                 before is DerivedRecoveryCandidate.TestResult.NotRun ->
@@ -168,7 +176,33 @@ class ConfigRevival(
             ms, ran, winner.recoveryProfileKey)
     }
 
+    /**
+     * A config that answers in [ms] but slowly: tries only the clean-edge recipes (the address swapped, SNI,
+     * Host, path and credentials kept). The fastest copy is confirmed and recorded only when it beats the config
+     * by [FASTER_RATIO]; otherwise the config stays as it is and nothing is recorded.
+     */
+    private fun speedUp(p: VlessProfile, name: String, network: String?, ips: List<String>, ms: Long): Result {
+        val working = Result(p.id, name, Outcome.ALREADY_WORKING, "answers as it is ($ms ms); no faster clean IP was found", ms)
+        val candidates = engine.generate(p, null, network, ips) { rp -> if (rp.needsEndpoint()) 0.0 else null }
+            .filter { it.security.passed }.take(BATCH)
+        if (candidates.isEmpty()) return working
+        val first = probe(candidates.map { it.profile })
+        val best = candidates.indices
+            .mapNotNull { i -> (first.getOrNull(i) as? DerivedRecoveryCandidate.TestResult.Passed)?.let { candidates[i] to it.latencyMs } }
+            .minByOrNull { it.second }
+        if (best == null || best.second > ms * FASTER_RATIO) return working.copy(tried = candidates.size)
+        val confirmed = engine.test(listOf(best.first), probe).firstOrNull()?.test as? DerivedRecoveryCandidate.TestResult.Passed
+            ?: return working.copy(tried = candidates.size)
+        return Result(p.id, name, Outcome.REVIVED,
+            "${describe(best.first.recoveryProfileKey, best.first.endpoint)} · $ms → ${confirmed.latencyMs} ms · used next time it connects",
+            confirmed.latencyMs, candidates.size, best.first.recoveryProfileKey)
+    }
+
     companion object {
+        /** A config answering slower than this gets a faster clean edge tried (ms). */
+        const val SLOW_MS = 2_500L
+        /** A clean-edge copy replaces a slow config only when it takes at most this share of its time. */
+        const val FASTER_RATIO = 0.7
         /** Real-request batch size ([com.example.xray.RealDelayProbe.MAX_BATCH]). */
         const val BATCH = 5
         /** Seconds each real request may take (FIX BPB uses the same). */
@@ -208,7 +242,7 @@ class ConfigRevival(
                 id.startsWith("fragment-tlshello") -> "ClientHello fragments"
                 id.startsWith("fingerprint-") -> "${id.removePrefix("fingerprint-").replaceFirstChar { it.uppercase() }} fingerprint"
                 id == "alpn-http11" -> "HTTP/1.1 only"
-                id.startsWith("endpoint-") -> "Clean Cloudflare IP${endpoint?.let { " $it" }.orEmpty()}"
+                id.startsWith("endpoint-") -> "Clean ${endpoint?.let { com.example.vpn.cleanip.CdnRanges.cdnOf(it)?.label } ?: "CDN"} IP${endpoint?.let { " $it" }.orEmpty()}"
                 else -> id
             }
         }
