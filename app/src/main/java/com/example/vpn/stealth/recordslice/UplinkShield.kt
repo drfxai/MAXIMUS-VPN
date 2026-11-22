@@ -28,6 +28,12 @@ import kotlin.random.Random
 object UplinkShield {
     const val EXTRA_KEY = "uplinkShield"
     const val MSS = 1360
+    /**
+     * MSS steps tried in order on a network where the upload still stalls: 1360, then 1220, then 1140 (room for
+     * PPPoE/GTP/IPsec overheads on carrier paths). The step that cleared the stall is kept per network
+     * ([com.example.vpn.smart.UplinkShieldBook.activeMss]).
+     */
+    val LADDER = listOf(MSS, 1220, 1140)
     const val JITTER = 24
     const val WINDOW_BYTES = 16384
     /** Accepted MSS values: anything below the IPv4 minimum or above a plain 1500-byte Ethernet MSS is ignored. */
@@ -74,6 +80,9 @@ object UplinkShield {
         }
         return root
     }
+
+    /** The ladder step after [mss], or null when [mss] is the last (or not on the ladder and below its end). */
+    fun nextStep(mss: Int): Int? = LADDER.firstOrNull { it < mss }
 
     /** Write sizes that cover [total] bytes: [mss]±[JITTER] each (never under 512), the last one what is left. */
     fun chunkSizes(total: Int, mss: Int = MSS, random: Random = Random.Default): List<Int> {

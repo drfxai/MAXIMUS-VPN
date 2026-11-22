@@ -611,7 +611,8 @@ object XrayConfigBuilder {
                         put("path", if (profile.path.isNotBlank()) profile.path else "/")
                         if (profile.host.isNotBlank()) put("host", profile.host)
                         put("mode", extras.optString(com.example.vpn.engine.ProfileExtras.XHTTP_MODE).ifBlank { "auto" })
-                        extras.optJSONObject(com.example.vpn.engine.ProfileExtras.XHTTP_EXTRA)?.let { put("extra", it) }
+                        // XHTTP speed profile for this network: fills only the keys the link does not set.
+                        put("extra", XhttpProfiles.apply(extras.optJSONObject(com.example.vpn.engine.ProfileExtras.XHTTP_EXTRA)))
                     }
                     put("xhttpSettings", xhttpObj)
                 }

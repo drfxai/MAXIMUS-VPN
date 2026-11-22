@@ -113,7 +113,7 @@ class RecordSliceConfigTest {
         assertTrue(book.mayTry("cell:43235"))
         assertFalse(book.active("cell:43235"))
         book.record("cell:43235", helped = true)
-        book.record("cell:43211", helped = false)
+        book.record("cell:43211", helped = false, mss = UplinkShield.LADDER.last())
         assertTrue(book.active("cell:43235"))
         assertFalse(book.mayTry("cell:43211"))
         assertTrue(book.mayTry("wifi"))

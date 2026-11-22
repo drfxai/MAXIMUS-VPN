@@ -29,7 +29,7 @@ class UplinkShieldBookInconclusiveTest {
     }
 
     @Test fun oneFailureSkipsItAtOnce() {
-        book().record(net, helped = false)
+        book().record(net, helped = false, mss = 1140)   // the last MSS ladder step
         assertFalse(book().mayTry(net))
     }
 
@@ -43,7 +43,7 @@ class UplinkShieldBookInconclusiveTest {
         book().recordInconclusive(net)
         book().record(net, helped = true)
         assertTrue(book().active(net))
-        book().record(net, helped = false)
+        book().record(net, helped = false, mss = 1140)   // the last MSS ladder step
         assertEquals(0, book().recordInconclusive(net))      // the failure's 12 h hold is kept
         assertFalse(book().mayTry(net))
     }
