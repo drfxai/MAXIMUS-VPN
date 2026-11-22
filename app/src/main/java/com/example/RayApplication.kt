@@ -259,6 +259,15 @@ class RayApplication : Application() {
             com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)
         }
         com.example.vpn.sidecar.Sidecars.psiphonNetworkIdentity = { com.example.vpn.smart.NetworkIdentity.current(this) }
+        com.example.vpn.sidecar.Sidecars.psiphonLinkMetered = {
+            val manager = getSystemService(android.net.ConnectivityManager::class.java)
+            manager?.let { cm ->
+                com.example.vpn.smart.NetworkCapabilityDetector.physical(cm)?.let(cm::getNetworkCapabilities)
+            }?.let { !it.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) } == true
+        }
+        com.example.vpn.sidecar.Sidecars.psiphonClientPlatform = {
+            Triple(android.os.Build.VERSION.RELEASE.orEmpty(), android.os.Build.VERSION.SDK_INT, packageName)
+        }
         com.example.vpn.sidecar.Sidecars.psiphonLinkDns = {
             val manager = getSystemService(android.net.ConnectivityManager::class.java)
             val link = manager?.let { cm ->

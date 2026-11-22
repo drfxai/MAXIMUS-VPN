@@ -86,6 +86,39 @@ class PsiphonSidecarTest {
         assertTrue(PsiphonSidecar { valid.toString() }.problem(PsiphonSidecar.profile())!!.contains("HTTPS"))
     }
     // Placeholders only: real network settings come from Psiphon Inc. through a CI secret.
+    @Test fun startBudgetIsLongerOnCellularMeteredAndChains() {
+        assertEquals(60_000L, PsiphonSidecar.readyTimeoutMs("wifi:abcdef123456", metered = false, chained = false))
+        assertEquals(60_000L, PsiphonSidecar.readyTimeoutMs(null, metered = false, chained = false))
+        assertEquals(120_000L, PsiphonSidecar.readyTimeoutMs("cell:43235", metered = false, chained = false))
+        assertEquals(120_000L, PsiphonSidecar.readyTimeoutMs("wifi:abcdef123456", metered = true, chained = false))
+        assertEquals(120_000L, PsiphonSidecar.readyTimeoutMs("wifi:abcdef123456", metered = false, chained = true))
+    }
+
+    @Test fun reportsAndroidClientPlatformAndFasterEstablishment() {
+        assertEquals("Android_14_com.drfxai.maximusvpn", PsiphonSidecar.clientPlatform("14", "com.drfxai.maximusvpn"))
+        assertEquals("Android", PsiphonSidecar.clientPlatform(null, "com.drfxai.maximusvpn"))
+        assertEquals("Android_15QPR1_x", PsiphonSidecar.clientPlatform("15 QPR1", "x"))
+        val dir = Files.createTempDirectory("psiphon-fast").toFile()
+        try {
+            val direct = PsiphonSidecar.buildConfig(JSONObject(settings).put("ClientAPILevel", 1), "", 40123, dir,
+                clientPlatform = "Android_14_com.drfxai.maximusvpn", clientApiLevel = 34)
+            assertEquals("Android_14_com.drfxai.maximusvpn", direct.getString("ClientPlatform"))
+            assertEquals(34, direct.getInt("ClientAPILevel"))
+            assertEquals(PsiphonSidecar.FAST_WORKER_POOL, direct.getInt("ConnectionWorkerPoolSize"))
+            assertEquals(PsiphonSidecar.FAST_PAUSE_SECONDS, direct.getInt("EstablishTunnelPausePeriodSeconds"))
+            assertFalse(direct.has("LimitTunnelProtocols"))
+            val chained = PsiphonSidecar.buildConfig(JSONObject(settings), "", 40123, dir, upstreamSocks = 40124)
+            assertEquals(PsiphonSidecar.CHAIN_WORKER_POOL, chained.getInt("ConnectionWorkerPoolSize"))
+            // The build's own choices win.
+            val own = PsiphonSidecar.buildConfig(JSONObject(settings).put("ConnectionWorkerPoolSize", 4)
+                .put("EstablishTunnelPausePeriodSeconds", 5), "", 40123, dir)
+            assertEquals(4, own.getInt("ConnectionWorkerPoolSize"))
+            assertEquals(5, own.getInt("EstablishTunnelPausePeriodSeconds"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     private val settings = JSONObject()
         .put("PropagationChannelId", "TEST-CHANNEL")
         .put("SponsorId", "TEST-SPONSOR")
