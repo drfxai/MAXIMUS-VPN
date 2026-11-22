@@ -115,6 +115,10 @@ class RayApplication : Application() {
                 }
             },
             endpoints = { network -> endpointScores.validated(network) },
+            winners = getSharedPreferences("revival_winners", MODE_PRIVATE).let { prefs ->
+                com.example.vpn.lab.RevivalWinnerMemory(load = { prefs.getString("v1", null) },
+                    save = { prefs.edit().putString("v1", it).apply() })
+            },
             echCheck = {
                 com.example.vpn.connectivity.EchKeyCheck.check(com.example.vpn.connectivity.RecoveryProfiles.CLOUDFLARE_ECH_DOH) { url ->
                     // On the phone's own network: during a connect this app's traffic is held in the blocking interface.

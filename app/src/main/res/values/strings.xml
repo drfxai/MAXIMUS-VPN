@@ -1345,6 +1345,8 @@
     <string name="ui_power_button_fallback">Power button fallback</string>
     <string name="ui_your_server_first_recovery_engines">Your server first; recovery engines (MASQUE, Psiphon, Tor) only if it carries no traffic</string>
     <string name="ui_starts_only_the_selected_config">Starts only the selected config</string>
+    <string name="ui_speed_pick_on_metered">Speed pick on metered networks</string>
+    <string name="ui_speed_pick_on_metered_subtitle">After Smart Connect, compare download speed with up to 2 other working servers (about 6 MB) on mobile data too</string>
     <string name="ui_proxy_core">Proxy core</string>
     <string name="ui_local_proxy_mode">Local proxy mode</string>
     <string name="ui_local_socks5_proxy">Local SOCKS5 proxy</string>

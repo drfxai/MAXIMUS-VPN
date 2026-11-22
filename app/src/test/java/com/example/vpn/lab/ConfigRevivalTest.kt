@@ -71,6 +71,29 @@ class ConfigRevivalTest {
         assertNull("a different network has nothing recorded", engine.active(dead, "wifi:home"))
     }
 
+    @Test fun theRecipeThatWonOnThisNetworkIsTriedFirstNextTime() {
+        val dead = cf("w9", "edge9.example.workers.dev")
+        var wins: String? = null
+        val memory = { RevivalWinnerMemory({ wins }, { wins = it }, { now }) }
+        fun run(network: String): List<VlessProfile> {
+            // A fresh ledger each run: only the winner memory carries what won.
+            var ledgerJson: String? = null
+            val fresh = BpbRecoveryEngine(ledger = RecoveryLedger({ ledgerJson }, { ledgerJson = it }), clock = { now },
+                maxCandidates = ConfigRevival.RECIPES_PER_CONFIG)
+            val probed = mutableListOf<VlessProfile>()
+            ConfigRevival(fresh, winners = memory(), probe = { ps ->
+                probed += ps
+                ps.map { p -> if (p.finalMask == BpbFix.FINAL_MASK_V1) TestResult.Passed(300) else TestResult.Failed("timeout") }
+            }).run(listOf(dead), network).results.single().also { assertEquals(ConfigRevival.Outcome.REVIVED, it.outcome) }
+            return probed.drop(1) // the first probe is the config as it is
+        }
+        run(net)
+        assertEquals("bpb-fragment-v1@v1", memory().recipeFor(net, dead.effectiveFingerprint))
+        assertNull("nothing is remembered for another network", memory().recipeFor("wifi:other", dead.effectiveFingerprint))
+        // Next time on this network the winning recipe is the first one tried.
+        assertEquals(BpbFix.FINAL_MASK_V1, run(net).first().finalMask)
+    }
+
     @Test fun fragmentV1RevivesWhenOnlyItGetsThrough() {
         val dead = cf("w2", "pages.example.pages.dev")
         val results = revival(works = { it.finalMask == BpbFix.FINAL_MASK_V1 }).run(listOf(dead), net).results

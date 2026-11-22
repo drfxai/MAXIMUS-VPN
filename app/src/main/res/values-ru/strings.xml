@@ -1348,6 +1348,8 @@
     <string name="ui_power_button_fallback">Резерв для кнопки питания</string>
     <string name="ui_your_server_first_recovery_engines">Сначала ваш сервер; движки восстановления (MASQUE, Psiphon, Tor) — только если он не передаёт трафик</string>
     <string name="ui_starts_only_the_selected_config">Запускается только выбранная конфигурация</string>
+    <string name="ui_speed_pick_on_metered">Выбор по скорости в лимитных сетях</string>
+    <string name="ui_speed_pick_on_metered_subtitle">После Smart Connect сравнивать скорость загрузки ещё с 2 рабочими серверами (около 6 МБ) и в мобильной сети</string>
     <string name="ui_proxy_core">Ядро прокси</string>
     <string name="ui_local_proxy_mode">Режим локального прокси</string>
     <string name="ui_local_socks5_proxy">Локальный прокси SOCKS5</string>

@@ -70,6 +70,12 @@ class SettingsViewModel(
         settingsRepository.updateSettings(current.copy(powerButtonFallback = enabled))
     }
 
+    fun setSpeedPickOnMetered(enabled: Boolean) {
+        val current = settingsRepository.getSettings()
+        XrayLogManager.i("SETTINGS", "Speed pick on metered networks updated: $enabled")
+        settingsRepository.updateSettings(current.copy(speedPickOnMetered = enabled))
+    }
+
     fun setRoutingMode(mode: RoutingMode) {
         val current = settingsRepository.getSettings()
         XrayLogManager.i("SETTINGS", "Routing mode updated: ${current.routingMode.name} -> ${mode.name}")

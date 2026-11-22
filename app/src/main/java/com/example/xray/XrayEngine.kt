@@ -85,6 +85,23 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
         activeProfile = profile
         val configJson = com.example.vpn.sidecar.ByedpiSidecar.addHealthInbound(
             JSONObject(XrayConfigBuilder.buildJson(profile, settings)), profile).toString()
+        // Post-connect speed pick: alternates measured through this core (PostConnectSpeedPick). A config the core
+        // refuses with them is started again without them, so the probes can never cost the connection.
+        val probes = com.example.vpn.smart.PostConnectSpeedPick.consume()
+        com.example.vpn.smart.PostConnectSpeedPick.markActive(emptyList())
+        if (probes.isNotEmpty()) {
+            val withProbes = runCatching {
+                com.example.vpn.smart.PostConnectSpeedPick.addProbes(JSONObject(configJson), probes).toString()
+            }.getOrNull()
+            if (withProbes != null) {
+                val result = start(withProbes, tunFd, settings.dnsServer, settings.mtu, protectFd)
+                if (result is AppResult.Success) {
+                    com.example.vpn.smart.PostConnectSpeedPick.markActive(probes)
+                    return result
+                }
+                XrayLogManager.appendLog("Xray refused the speed-pick probes; starting without them.", "ENGINE")
+            }
+        }
         return start(configJson, tunFd, settings.dnsServer, settings.mtu, protectFd)
     }
 
@@ -197,6 +214,7 @@ class XrayEngineImpl private constructor() : XrayEngine, NativeTunVpnEngine {
     override fun stop(): AppResult<Unit> {
         // Liveness checks may clear the flag after a crash. Still stop native resources.
         XrayLogManager.appendLog("Stopping native Xray-core...", "ENGINE")
+        com.example.vpn.smart.PostConnectSpeedPick.markActive(emptyList())
         if (nativeCoreMayRun.getAndSet(false)) runCatching { invokeXray("stopXray") }
         runCatching { callLibXray("resetDNS") }
         isRunningFlag.set(false)

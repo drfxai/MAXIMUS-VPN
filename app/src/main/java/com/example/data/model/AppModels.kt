@@ -328,6 +328,11 @@ data class AppSettings(
      * [autoFailoverEnabled] and Trade mode). Off: the power button starts only the selected config, as saved.
      */
     val powerButtonFallback: Boolean = true,
+    /**
+     * Post-connect speed pick ([com.example.vpn.smart.PostConnectSpeedPick]) on metered networks too: each Smart
+     * Connect then downloads up to ~6 MB to compare servers. Off by default; on unmetered networks it always runs.
+     */
+    val speedPickOnMetered: Boolean = false,
     val failoverThresholdMs: Long = 800L,
     val failoverPacketLossThreshold: Double = 30.0,
     val benchmarkConcurrency: Int = 6,

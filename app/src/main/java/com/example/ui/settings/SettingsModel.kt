@@ -30,6 +30,7 @@ interface SettingsActions {
     fun setScoringProfile(profile: ScoringProfile) {}
     fun setAutoFailover(enabled: Boolean) {}
     fun setPowerButtonFallback(enabled: Boolean) {}
+    fun setSpeedPickOnMetered(enabled: Boolean) {}
     fun setPreferredEngine(engine: EngineType) {}
     fun setRoutingMode(mode: RoutingMode) {}
     fun setDnsServer(dns: String) {}
