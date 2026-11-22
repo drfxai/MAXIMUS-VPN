@@ -261,6 +261,8 @@
     <string name="ui_report_error">Report Error</string>
     <string name="ui_sanitized_report_copied_to_clipboard">Sanitized report copied to clipboard</string>
     <string name="ui_export_report">Export Report</string>
+    <string name="ui_copy_full_report">Copy full report</string>
+    <string name="ui_full_report_copied_to_clipboard">Full report copied to clipboard (secrets redacted)</string>
     <string name="ui_core_engine">Core Engine</string>
     <string name="ui_tunnel_ip">Tunnel IP</string>
     <string name="ui_active_node">Active Node</string>

@@ -233,6 +233,53 @@ class DiagnosticsViewModel(
         }
     }
 
+    /**
+     * Builds the full report (overview, short summary, every engine and the detailed JSON) off the
+     * main thread, redacted for the clipboard, and hands the text back on the main thread.
+     */
+    fun buildFullReport(onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            runCatching {
+                val overview = formatReportText(generateDiagnosticReport())
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.vpn.diagnostics.events.EventLog.flush()
+                    val i = com.example.vpn.diagnostics.report.ReportExporter.inputs()
+                    val engines = i.engines.joinToString("\n") { e ->
+                        "${e.engineId}: ${e.state.name.lowercase()}" + (e.detail.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
+                    }
+                    val header = listOf(
+                        "App: ${com.example.BuildConfig.VERSION_NAME} (versionCode ${com.example.BuildConfig.VERSION_CODE}, " +
+                            "build ${com.example.BuildConfig.RELEASE_BUILD}, commit ${com.example.BuildConfig.GIT_COMMIT}, ${com.example.BuildConfig.BUILD_TIME})",
+                        "Network type: ${currentNetworkType()}",
+                        "Network profile: ${i.networkProfile ?: "not measured"}"
+                    )
+                    com.example.vpn.diagnostics.report.FullReport.compose(header, listOf(
+                        com.example.vpn.diagnostics.report.FullReport.Section("Overview", overview),
+                        com.example.vpn.diagnostics.report.FullReport.Section("Summary", com.example.vpn.diagnostics.report.DiagnosticReportBuilder.summary(i)),
+                        com.example.vpn.diagnostics.report.FullReport.Section("Engines", engines.ifBlank { "No engine status recorded" }),
+                        com.example.vpn.diagnostics.report.FullReport.Section("Detailed report (JSON)", com.example.vpn.diagnostics.report.DiagnosticReportBuilder.json(i).toString(2))
+                    ))
+                }
+            }.onSuccess(onReady)
+                .onFailure { XrayLogManager.w("DIAG", "Could not build the full report: ${it.message}") }
+        }
+    }
+
+    /** The phone's current underlying network: Wi-Fi, cellular, Ethernet, ... (never an address). */
+    private fun currentNetworkType(): String = runCatching {
+        val cm = RayApplication.instance.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return@runCatching "No network"
+        val kinds = buildList {
+            if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) add("Wi-Fi")
+            if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) add("Cellular")
+            if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) add("Ethernet")
+            if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_BLUETOOTH)) add("Bluetooth")
+            if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) add("VPN")
+        }
+        val metered = if (caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) "unmetered" else "metered"
+        (kinds.ifEmpty { listOf("Other") }.joinToString(" + ")) + " · $metered"
+    }.getOrDefault("Unknown")
+
     private fun dateFormatForDns(time: Long): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", Locale.US).format(Date(time))
 
