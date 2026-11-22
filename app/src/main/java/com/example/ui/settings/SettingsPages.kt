@@ -734,7 +734,11 @@ data class UpdatesDataUi(
     val resolverStatus: String? = null,
     val cleanIpBusy: Boolean = false,
     val cleanIpStatus: String? = null,
-    val vpnOnlyUpdates: Boolean = false
+    val vpnOnlyUpdates: Boolean = false,
+    val geoTag: String = "",
+    val geoBusy: Boolean = false,
+    val geoStatus: String? = null,
+    val geoViaVpn: Boolean = true
 )
 
 @Composable
@@ -749,7 +753,9 @@ fun UpdatesSettingsPage(
     onRefreshCleanIps: () -> Unit,
     onVpnOnlyUpdates: (Boolean) -> Unit,
     onChangelog: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onUpdateGeoFiles: () -> Unit = {},
+    onGeoViaVpn: (Boolean) -> Unit = {}
 ) {
     Column {
         SettingsTopBar(stringResource(R.string.ui_app_updates), onBack = onBack)
@@ -814,6 +820,32 @@ fun UpdatesSettingsPage(
                 )
             }
             listOfNotNull(data.resolverStatus, data.cleanIpStatus).forEach { SettingsFootnote(it) }
+
+            SettingsSectionLabel(stringResource(R.string.ui_geofiles))
+            SettingsGroup {
+                SettingsNavRow(
+                    title = stringResource(R.string.ui_update_geofiles),
+                    subtitle = when {
+                        data.geoBusy -> stringResource(R.string.ui_geofiles_downloading)
+                        data.geoTag.isNotBlank() -> stringResource(R.string.ui_geofiles_current_tag, data.geoTag)
+                        else -> stringResource(R.string.ui_geofiles_iran_rules)
+                    },
+                    icon = Icons.Default.Public,
+                    trailing = { if (data.geoBusy) SmallSpinner() else SettingsChevron() },
+                    modifier = Modifier.testTag("settings_update_geofiles"),
+                    onClick = onUpdateGeoFiles
+                )
+                SettingsDivider()
+                SettingsSwitchRow(
+                    title = stringResource(R.string.ui_geofiles_via_proxy),
+                    subtitle = stringResource(R.string.ui_geofiles_via_proxy_sub),
+                    icon = Icons.Default.VpnLock,
+                    checked = data.geoViaVpn,
+                    onCheckedChange = onGeoViaVpn,
+                    modifier = Modifier.testTag("settings_geofiles_via_proxy")
+                )
+            }
+            data.geoStatus?.let { SettingsFootnote(it) }
 
         }
     }
