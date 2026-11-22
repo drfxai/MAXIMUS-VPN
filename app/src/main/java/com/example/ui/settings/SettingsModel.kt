@@ -114,22 +114,31 @@ internal object SettingsLabels {
         RoutingMode.RULE_BYPASS_LAN -> "Bypass LAN"
         RoutingMode.GLOBAL -> "Global proxy"
         RoutingMode.BYPASS_SELECTED -> "Custom bypass"
+        RoutingMode.IRAN_DIRECT -> "Iran direct"
+        RoutingMode.IRAN_DIRECT_BLOCK_ADS -> "Iran direct + ads"
     }
 
     fun routingTitle(mode: RoutingMode): String = when (mode) {
         RoutingMode.RULE_BYPASS_LAN -> "Bypass LAN & local"
         RoutingMode.GLOBAL -> "Global proxy"
         RoutingMode.BYPASS_SELECTED -> "Custom bypass list"
+        RoutingMode.IRAN_DIRECT -> "Iran direct"
+        RoutingMode.IRAN_DIRECT_BLOCK_ADS -> "Iran direct + block ads"
     }
 
     fun routingDescription(mode: RoutingMode): String = when (mode) {
         RoutingMode.RULE_BYPASS_LAN -> "LAN and private IPs go direct; everything else is tunnelled"
         RoutingMode.GLOBAL -> "All traffic goes through the tunnel"
         RoutingMode.BYPASS_SELECTED -> "Your custom domain and IP patterns go direct"
+        RoutingMode.IRAN_DIRECT -> "LAN, Iranian sites (.ir, category-ir) and Iranian IPs go direct; the rest is tunnelled (Xray engine)"
+        RoutingMode.IRAN_DIRECT_BLOCK_ADS -> "As Iran direct, and Iranian ad domains are blocked (Xray engine)"
     }
 
     /** Order shown in the routing list (unchanged from the previous screen). */
-    val routingModes = listOf(RoutingMode.RULE_BYPASS_LAN, RoutingMode.GLOBAL, RoutingMode.BYPASS_SELECTED)
+    val routingModes = listOf(
+        RoutingMode.RULE_BYPASS_LAN, RoutingMode.GLOBAL, RoutingMode.BYPASS_SELECTED,
+        RoutingMode.IRAN_DIRECT, RoutingMode.IRAN_DIRECT_BLOCK_ADS
+    )
 
     /** Literal endpoints keep DNS bootstrap independent of the ISP resolver. */
     val dnsPresets = listOf(

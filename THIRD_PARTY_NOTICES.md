@@ -784,3 +784,18 @@ under GPL-3.0. Network availability depends on the upstream service.
 
 The Android release builds [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go/tree/735cffbcb3030644c519b2934bf2e199f19bbc98) from the pinned upstream revision.
 The executable retains upstream's MIT license. The corresponding copyright and permission notice is included in this repository at `app/src/main/assets/licenses/amneziawg-go.LICENSE`.
+
+## Iran GeoFiles — Chocolate4U/Iran-v2ray-rules (2026-11-22)
+
+The APK bundles three unmodified data files from the Chocolate4U/Iran-v2ray-rules release
+`202611211258`, used by Xray-core for `geoip:` / `geosite:` routing rules. They are data, not code,
+and are distributed under the GNU General Public License v3.0 (full text in the APK at
+`assets/licenses/sing-box-GPL-3.0.txt` and at https://www.gnu.org/licenses/gpl-3.0.txt).
+
+- Source: https://github.com/Chocolate4U/Iran-v2ray-rules (release https://github.com/Chocolate4U/Iran-v2ray-rules/releases/tag/202611211258)
+- Files in the APK: `assets/geo/geoip-lite.dat` (SHA-256 `2b5073fd9f9335c94899fb5d5628f92dccb70b010507f6f5f6974f92c77bcb1f`),
+  `assets/geo/geosite-lite.dat` (`8e63e42bc9139f123e749e69a21d03f459463c34c41da6df78c549e539b6343f`),
+  `assets/geo/geoip-services.dat` (`93971c1c668652ac977f7b41448dfeeee68b60d485361c46f8d533f24e969c33`).
+- `scripts/fetch-geofiles.sh` re-downloads them and checks each against the release's `.sha256sum` file and the pinned hash.
+- The lists are compiled upstream from v2fly domain-list-community, MaxMind/IP2Location data and the
+  maintainers' own Iranian domain and IP lists; see the upstream README for each source's terms.
