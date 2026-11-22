@@ -145,6 +145,39 @@ object ConnectionEngineRunner {
         route.write(org.json.JSONObject(candidate.extraSettings).put("carrier", carrier).put("exitNode", exitNode)
             .put(RELAY_FOLLOW_UP, true).apply { remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP); remove("rescan") }).toString())
 
+    /** Method name of WARP's MASQUE HTTP/2 tunnel dialled through Lantern (Radiance) as the relay hop. */
+    const val H2_LANTERN = "h2-lantern"
+
+    /**
+     * Aether's readiness window through the Lantern hop, counted after Radiance itself is ready (its own start-up,
+     * up to 60 s, is waited for before Aether starts): registration is already stored, the gateway scan and the
+     * tunnel go through Lantern.
+     */
+    const val LANTERN_ATTEMPT_MS = 90_000L
+
+    /**
+     * WARP through Lantern (Radiance) instead of only scanning gateways directly: the user's own Aether run
+     * ([manual]), Cloudflare filtered here ([cloudflareBlocked]: cf_quick = filtered or a fresh cf=0 reading), no saved
+     * server verified on this network for the saved-server relay ([relayExitNode] absent), Radiance in this build,
+     * and no exit node, Tor or Psiphon mode of the user's own. Never for the background relay run. Automatic runs
+     * (Smart Connect) do not use it: they reach Lantern itself next anyway.
+     */
+    fun lanternRelayEligible(engineId: String, automatic: Boolean, manual: Boolean, cloudflareBlocked: Boolean,
+                             lanternAvailable: Boolean, options: AetherSettings, relayExitNode: String?,
+                             relayOnly: Boolean): Boolean =
+        engineId == AetherSidecar.ID && automatic && manual && cloudflareBlocked && lanternAvailable &&
+            relayExitNode.isNullOrBlank() && !relayOnly && options.exitNode.isBlank() &&
+            options.tor == "off" && options.psiphon == "off"
+
+    /** [candidate] (an HTTP/2 carrier) as MASQUE HTTP/2 through the Lantern hop: no split hello, no remembered gateway. */
+    fun lanternRelayed(candidate: VlessProfile): VlessProfile = candidate.copy(extraSettings =
+        org.json.JSONObject(candidate.extraSettings).put("carrier", "h2").put(LanternRelayHop.EXTRA, true)
+            .put(RELAY_FOLLOW_UP, true).apply {
+                remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP); remove("rescan")
+                remove(AetherSidecar.SNI_SPLIT); remove(AetherSidecar.CLEAN_H2_PEER)
+                remove(BuiltinExitNode.EXIT_ENDPOINT); remove(BuiltinExitNode.EXIT_VARIANT)
+            }.toString())
+
     /**
      * Whole-ladder budget for automatic Aether on a metered link that is Irancell or measured Cloudflare-filtered:
      * once it is spent no further direct carrier starts (WARP through a verified saved server still may, it is
@@ -205,7 +238,8 @@ object ConnectionEngineRunner {
     internal fun startFailureReason(engineId: String, e: Throwable, stage: String): String {
         val message = e.message
         return when {
-            e is BuiltinExitNode.ExitNodeFailure && message in BuiltinExitNode.REASONS -> message!!
+            e is BuiltinExitNode.ExitNodeFailure && (message in BuiltinExitNode.REASONS ||
+                message in LanternRelayHop.REASONS) -> message!!
             engineId == AetherSidecar.ID && message in setOf("WARP API TLS unreachable via forced Direct OOB route",
                 AetherApiBridge.INCOMPATIBLE_OOB, AetherApiBridge.UNREACHABLE_WITHOUT_IDENTITY) -> message!!
             else -> stage
@@ -308,8 +342,12 @@ object ConnectionEngineRunner {
         return candidate.copy(extraSettings = org.json.JSONObject(e.toString()).put("family", "ipv4").toString())
     }
 
+    internal const val LANTERN_QUEUE_REASON = "Cloudflare is filtered here and no saved server is verified on this network: " +
+        "trying WARP through Lantern (Radiance) as the relay hop"
+
     /** One line telling the user what to do when Aether found nothing on a link whose Cloudflare TLS is filtered. */
-    const val CLOUDFLARE_FILTERED_HINT = "Cloudflare TLS is filtered on this network: Smart Connect can try saved servers, Psiphon or Tor"
+    const val CLOUDFLARE_FILTERED_HINT = "Cloudflare TLS is filtered on this network: connect with Lantern or Serverless; " +
+        "Smart Connect can also try saved servers, Psiphon or Tor"
 
     /**
      * The order the methods are tried in: a method verified here first, then WireGuard when Cloudflare TLS
@@ -435,6 +473,8 @@ object ConnectionEngineRunner {
         manual: Boolean = false,
         /** Cloudflare is filtered here (cf=0 / CLOUDFLARE_TLS_PATH_FAILURE): a gateway-scan failure starts [WarpDataPlaneHold]. */
         cloudflareBlocked: Boolean = preferWireGuard,
+        /** Radiance (Lantern) can be started as a relay hop for WARP ([lanternRelayEligible]). */
+        lanternAvailable: Boolean = false,
         onProgress: (String) -> Unit = {},
         cancelled: () -> Boolean = { false }
     ): Started {
@@ -460,7 +500,8 @@ object ConnectionEngineRunner {
         fun scope(): String? = if (!automatic) null else methodScope(BuiltinMethodMemory.network(), engine.id, profile, settings.dnsServer)
         fun method(candidate: VlessProfile) = ProfileExtras.read(candidate).let {
             if (engine.id == AetherSidecar.ID) {
-                if (it.optBoolean(RELAY_FOLLOW_UP)) it.optString("carrier") + "-relay"
+                if (LanternRelayHop.requested(it)) H2_LANTERN
+                else if (it.optBoolean(RELAY_FOLLOW_UP)) it.optString("carrier") + "-relay"
                 else if (it.optString(AetherSidecar.CLEAN_H2_PEER).isNotBlank()) CLEAN_H2
                 else if (it.optBoolean(AetherSidecar.SNI_SPLIT) && it.optString("carrier") == "h2") H2_SPLIT
                 else if (it.optBoolean(MTU_FOLLOW_UP)) WIREGUARD_MTU
@@ -505,11 +546,27 @@ object ConnectionEngineRunner {
         // ladder ran here under a minute ago: an automatic run stops at once so the search goes on.
         val ladderKind = if (relayOnly) "relay" else "ladder"
         val guarded = engine.id == AetherSidecar.ID && automatic
-        if (guarded && !manual && WarpDataPlaneHold.blocked(networkKey)) {
+        val lanternChoice = if (lanternRelayEligible(engine.id, automatic, manual, cloudflareBlocked, lanternAvailable,
+                AetherSettings.read(ProfileExtras.read(profile)), relayExitNode, relayOnly))
+            carrierChoices.firstOrNull { ProfileExtras.read(it).let { e -> e.optString("carrier") == "h2" && !e.optBoolean(AetherSidecar.SNI_SPLIT) } }
+                ?.let(::lanternRelayed) else null
+        val held = guarded && WarpDataPlaneHold.blocked(networkKey)
+        if (held && !manual) {
             val why = WarpDataPlaneHold.describe(networkKey)
             record(ladderKind, "warp-data", "SKIP", why)
             throw NoVerifiedPath(listOf("$ladderKind: $why"), null)
         }
+        // Build 170 (Irancell, cf_quick = filtered): the user's own Aether run repeated both 45 s gateway scans three
+        // times inside the hold, each ending TLS_HANDSHAKE_FAILED. With Cloudflare still filtered the direct scans are
+        // skipped: WARP goes through Lantern when it can, otherwise the run fails at once and names what works here.
+        val lanternOnly = held && manual && cloudflareBlocked && !relayOnly && lanternChoice != null
+        if (held && manual && cloudflareBlocked && !relayOnly && lanternChoice == null) {
+            val why = WarpDataPlaneHold.fastFailMessage(networkKey)
+            record(ladderKind, "warp-data", "SKIP", why)
+            throw NoVerifiedPath(listOf(why), null)
+        }
+        if (lanternOnly) record(ladderKind, "warp-data", "SKIP", WarpDataPlaneHold.describe(networkKey) +
+            "; direct gateway scans skipped, trying WARP through Lantern (Radiance) as the relay hop")
         if (guarded) AetherLadderGuard.begin(networkKey, ladderKind, enforce = !manual)?.let { since ->
             val why = "the same Aether $ladderKind ran on this network ${since / 1000}s ago; not repeated within " +
                 "${AetherLadderGuard.MIN_GAP_MS / 1000}s"
@@ -525,7 +582,7 @@ object ConnectionEngineRunner {
             .map { name -> IrancellWarp.forAttempt(ordered.first { method(it) == name }, manual) } else emptyList()
         val irancellBudgetMs = if (manual) irancellPlan.sumOf(IrancellWarp::manualAttemptMs) else IrancellWarp.BUDGET_MS
         if (irancellHttp2 && irancellPlan.isEmpty()) attempts += "irancell: no MASQUE HTTP/2 carrier available"
-        if (irancellHttp2) record("ladder", "queue", "START",
+        if (irancellHttp2 && !lanternOnly) record("ladder", "queue", "START",
             "Irancell MASQUE HTTP/2: ${irancellPlan.joinToString(", ") { method(it) }.ifEmpty { "none available" }}; " +
                 "${irancellBudgetMs / 1000}s readiness budget; account API racing enabled")
         val failedRegistrationKinds = mutableSetOf<String>()
@@ -554,6 +611,7 @@ object ConnectionEngineRunner {
         // otherwise one quick recheck of the first method.
         if (relayOnly && relays.isEmpty()) throw NoVerifiedPath(listOf("relay: no saved server to carry WARP through"), null)
         val queue = ArrayDeque(when {
+            lanternOnly -> listOf(lanternChoice!!)
             irancellHttp2 -> irancellPlan
             relayOnly -> relays
             recheckOnly && relays.isNotEmpty() -> relays
@@ -567,6 +625,7 @@ object ConnectionEngineRunner {
                 else "WARP data was blocked on this network recently; one quick recheck of ${method(ordered.first())} only")
         }
         var warpInWarpQueued = recheckOnly || irancellHttp2
+        var lanternQueued = lanternOnly
         var noizeQueued = recheckOnly || irancellHttp2 || preferred == WIREGUARD_NOIZE
         var mtuQueued = recheckOnly || irancellHttp2 || preferred == WIREGUARD_MTU
         val ladderBudget = ladderBudgetMs(engine.id, automatic, metered, onIrancell, preferWireGuard)
@@ -590,6 +649,17 @@ object ConnectionEngineRunner {
             record("ladder", "queue", "START", AetherStartupStall.SUMMARY)
         var deferRelay = false
         var raced = false
+        /**
+         * The direct carriers are done (or out of budget): WARP through Lantern once, when eligible. Not after the
+         * WireGuard defer, which hands the session to saved servers at once. False when nothing was queued.
+         */
+        fun queueLantern(reason: String): Boolean {
+            if (lanternQueued || lanternChoice == null || deferRelay) return false
+            lanternQueued = true
+            record(H2_LANTERN, "queue", "START", reason)
+            queue.addLast(lanternChoice)
+            return true
+        }
         /** HTTPS through the engine's SOCKS port, rechecked after 6 s for Aether on the same transport generation. */
         fun verify(name: String, process: RunningEngine, launch: SidecarLaunch, ctx: SidecarContext,
                    reserveForNextRelay: Boolean = false, check: () -> Unit): AccessProbe.Result {
@@ -805,12 +875,18 @@ object ConnectionEngineRunner {
             }
             if (queue.isEmpty()) {
                 // Every direct carrier failed: WARP through the saved server that works on this network.
-                if (relayQueued || relays.isEmpty()) break
-                relayQueued = true
-                relays.forEach { record(method(it), "queue", "START", "direct WARP carried no data here; trying WARP through a verified saved server") }
-                queue.addAll(relays)
+                if (!relayQueued && relays.isNotEmpty()) {
+                    relayQueued = true
+                    relays.forEach { record(method(it), "queue", "START", "direct WARP carried no data here; trying WARP through a verified saved server") }
+                    queue.addAll(relays)
+                } else if (!queueLantern(LANTERN_QUEUE_REASON)) break
             }
-            if (irancellHttp2 && System.currentTimeMillis() - ladderStartedAt >= irancellBudgetMs) break
+            // The Irancell readiness budget covers the direct carriers; the Lantern attempt has its own window.
+            if (irancellHttp2 && System.currentTimeMillis() - ladderStartedAt >= irancellBudgetMs &&
+                !LanternRelayHop.requested(ProfileExtras.read(queue.first()))) {
+                queue.clear()
+                if (!queueLantern(LANTERN_QUEUE_REASON)) break
+            }
             val candidate = queue.removeFirst()
             checkCancellation()
             val extras = ProfileExtras.read(candidate)
@@ -854,7 +930,9 @@ object ConnectionEngineRunner {
                 running = process
                 checkCancellation()
                 stage = "local proxy did not become ready"
-                val window = if (name == CLEAN_H2) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
+                val lanternHop = LanternRelayHop.requested(extras)
+                val window = if (lanternHop) minOf(launch.readyTimeoutMs, LANTERN_ATTEMPT_MS)
+                    else if (name == CLEAN_H2) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
                     else if (irancellHttp2 && manual) IrancellWarp.manualAttemptMs(candidate)
                     else if (engine.id == AetherSidecar.ID && manual && !automatic && carrier in setOf("h2", "h3")) {
                         val options = AetherSettings.read(extras)
@@ -871,7 +949,8 @@ object ConnectionEngineRunner {
                 val left = ladderBudget?.takeIf { !(irancellHttp2 && manual) && !extras.optBoolean(RELAY_FOLLOW_UP) }
                     ?.let { maxOf(LADDER_MIN_ATTEMPT_MS, it - (System.currentTimeMillis() - ladderStartedAt)) }
                 val capped = if (left != null) minOf(window, left) else window
-                val ready = if (irancellHttp2) {
+                val ready = if (lanternHop) process.awaitReady(capped)
+                else if (irancellHttp2) {
                     val wait = IrancellWarp.waitMs(capped, ladderStartedAt, System.currentTimeMillis(), irancellBudgetMs)
                     val watch = IrancellWarp.RegistrationWatch()
                     process.awaitReadyUnless(wait) {
@@ -905,7 +984,8 @@ object ConnectionEngineRunner {
                         WarpDataPlaneHold.record(networkKey)
                         WarpRegistrationMemory.clear(networkKey)
                         record("ladder", "warp-data", "REMEMBER", "gateway scan found no serving tunnel with Cloudflare filtered; " +
-                            "automatic Aether and the background relay held for ${WarpDataPlaneHold.HOLD_MS / 60_000} min on this network " +
+                            "automatic Aether, the background relay and your own Aether runs' direct scans (while Cloudflare stays filtered) " +
+                            "held for ${WarpDataPlaneHold.HOLD_MS / 60_000} min on this network " +
                             "(registration works: the saved identity is kept)")
                     }
                     // Registration is shared by H2/H3 MASQUE. Do not repeat a failed signup

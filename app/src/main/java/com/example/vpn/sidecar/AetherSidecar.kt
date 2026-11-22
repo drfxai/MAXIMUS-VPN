@@ -97,7 +97,9 @@ object AetherSidecar : SidecarEngine {
     override fun startPrepared(profile: VlessProfile, settings: AppSettings, launch: SidecarLaunch, context: SidecarContext): RunningEngine? {
         val extras = ProfileExtras.read(profile)
         val options = AetherSettings.read(extras)
-        val exit = BuiltinExitNode.start(options, settings, context, BuiltinExitNode.Route.read(extras))
+        // WARP through Lantern (LanternRelayHop): Radiance's SOCKS port is the upstream instead of a saved-server exit.
+        val exit = if (LanternRelayHop.requested(extras)) LanternRelayHop.start(settings, context)
+            else BuiltinExitNode.start(options, settings, context, BuiltinExitNode.Route.read(extras))
         var api: BuiltinExitNode.Started? = null
         try {
             api = AetherApiBridge.start(profile, settings, context)

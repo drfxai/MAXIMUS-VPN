@@ -11,7 +11,9 @@ import com.example.vpn.sidecar.SidecarProcess
  * "Aether gateway scan did not reach a serving tunnel within 19s"; an identical ladder ran again 23 s later on the same
  * network, and the background wireguard-relay started on the metered link two minutes after. For [HOLD_MS] after such
  * a failure, automatic Aether ladders (Smart Connect, the LAB recovery's Irancell WARP attempt, the deferred Aether run)
- * and the background relay are skipped on that network. A user's own test on the Connections page still runs.
+ * and the background relay are skipped on that network. A user's own run still starts, but while Cloudflare is still
+ * filtered it skips the direct gateway scans: WARP through Lantern when it can, otherwise it stops at once with
+ * [fastFailMessage] (ConnectionEngineRunner.start).
  *
  * This is not [WarpRegistrationMemory]: registration succeeded, so that memory is cleared and the saved identity kept.
  * Kept in memory and in [BuiltinMethodMemory]'s store (survives a service restart); cleared when a WARP carrier carries
@@ -60,6 +62,20 @@ object WarpDataPlaneHold {
         heldAt(network, now)?.let { "WARP data plane blocked on this network (gateway scan found no serving tunnel with " +
             "Cloudflare filtered) ${(now - it) / 60_000} min ago; automatic Aether held for ${HOLD_MS / 60_000} min" }
             ?: "no WARP data-plane block remembered"
+
+    /**
+     * What the user's own Aether run says when it stops at once inside the hold with Cloudflare still filtered and no
+     * Lantern hop to carry WARP (build 170: three manual runs each spent two 45 s scans and ended TLS_HANDSHAKE_FAILED
+     * while Lantern, Serverless and Tor carried traffic on the same network).
+     */
+    fun fastFailMessage(network: String?, now: Long = System.currentTimeMillis()): String {
+        val at = heldAt(network, now)
+        val ago = at?.let { " ${(now - it) / 60_000} min ago" }.orEmpty()
+        val left = at?.let { " for about ${maxOf(1L, (HOLD_MS - (now - it) + 59_999) / 60_000)} more min" }.orEmpty()
+        return "Aether skipped: Cloudflare is filtered on this network and WARP's gateway scan found no serving tunnel " +
+            "here$ago, so Aether's direct scans are paused$left. Connect with Lantern or Serverless instead; " +
+            "they do not depend on Cloudflare's TLS"
+    }
 
     internal fun resetForTest() = inMemory.clear()
 }

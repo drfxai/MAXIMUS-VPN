@@ -2449,6 +2449,8 @@ class RayVpnService : VpnService() {
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,
                 relayExitRoute = relayExitRoute, metered = metered, manual = exactSession, cloudflareBlocked = cfBlocked,
+                lanternAvailable = engine.id == com.example.vpn.sidecar.AetherSidecar.ID &&
+                    runCatching { com.example.vpn.sidecar.LanternRelayHop.available() }.getOrDefault(false),
                 cancelled = { connectionOwner?.isActive == false }) else null
             var runningProfile = started?.profile ?: profile
             var engineContext = started?.context ?: context
