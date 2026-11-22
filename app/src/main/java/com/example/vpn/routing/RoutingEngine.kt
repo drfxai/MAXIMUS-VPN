@@ -39,7 +39,7 @@ object RoutingEngine {
 
         // Block private/loopback/multicast traffic if kill switch is active and not on LAN bypass
         if (isLoopbackOrBroadcast(dstIp)) {
-            return if (settings.routingMode == RoutingMode.RULE_BYPASS_LAN) {
+            return if (settings.routingMode.bypassesLan) {
                 RoutingDecision.DIRECT
             } else {
                 RoutingDecision.BLOCK
@@ -57,7 +57,8 @@ object RoutingEngine {
                 }
             }
 
-            RoutingMode.RULE_BYPASS_LAN -> {
+            // Packet-level mirror: Iranian domains/IPs are decided by Xray's geo rules, not here.
+            RoutingMode.RULE_BYPASS_LAN, RoutingMode.IRAN_DIRECT, RoutingMode.IRAN_DIRECT_BLOCK_ADS -> {
                 if (isLan) {
                     RoutingDecision.DIRECT
                 } else {
