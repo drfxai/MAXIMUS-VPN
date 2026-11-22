@@ -1,12 +1,12 @@
 <div align="center">
 
+**English** | [Русский](README.ru.md) | [فارسی](README.fa.md)
+
 <img src="docs/media/cover.webp" alt="MAXIMUS VPN — Your network. Your control." width="100%">
 
 # MAXIMUS VPN
 
 **An Android network toolkit. One place to connect, investigate and recover.**
-
-[English](README.md) · [فارسی](README.fa.md)
 
 [![Release](https://img.shields.io/github/v/release/drfxai/MAXIMUS-VPN?style=flat-square&color=d4a843)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
 [![Android 7+](https://img.shields.io/badge/Android-7.0%2B-38bdb0?style=flat-square)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
@@ -18,6 +18,14 @@
 Smart Connect · Network LAB · Clean IP discovery · Private server tools
 
 </div>
+
+## Language picker
+
+On first launch MAXIMUS asks which language to use — **English** or **Русский** — before any other onboarding. You can switch at any time in **Settings › Appearance**; Android 13+ also lists MAXIMUS under the system per-app language setting.
+
+<p align="center"><img src="docs/assets/language-picker-demo.gif" width="320" alt="Animated preview of the MAXIMUS VPN first-launch language picker switching between English and Russian"></p>
+
+<p align="center"><sub>Animated preview of the first-launch screen · <a href="docs/assets/language-picker-demo.mp4">Watch the MP4</a></sub></p>
 
 ## See the app
 
@@ -85,6 +93,6 @@ Report reproducible bugs through [Issues](https://github.com/drfxai/MAXIMUS-VPN/
 
 Your network. Your control.
 
-[Download](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) · [فارسی](README.fa.md) · [Documentation](docs/README.md)
+[Download](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) · [Русский](README.ru.md) · [فارسی](README.fa.md) · [Documentation](docs/README.md)
 
 </div>
