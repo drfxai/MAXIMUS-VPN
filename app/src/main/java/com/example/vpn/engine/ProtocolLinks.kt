@@ -198,6 +198,20 @@ object ProfileExtras {
     const val WG_PRESHARED_KEY = "wgPreSharedKey"
     const val WG_KEEPALIVE = "wgKeepAlive"
 
+    // patterniha (PattN / Free-Configs) share-link fields with no column of their own.
+    // TODO: applied by fork sidecar in a later PR. Upstream Xray has no equivalent for these yet, so for now
+    // they are only stored and written back to exported links.
+    const val PATT_DIAL_MODE = "pattDialMode"           // link key `dialMode`, e.g. "oob.0"
+    const val PATT_TCP_USER_TIMEOUT = "pattTcpUserTimeout" // link key `tut`, milliseconds > 0
+    const val PATT_SESSION_RESUMPTION = "pattSessionResumption" // link key `esr=1`
+    const val PATT_CURVE_PREFERENCES = "pattCurvePreferences"   // link key `cp`, comma list
+    // TODO: applied by fork sidecar in a later PR. `echOutbound` is a JSON outbound that would carry the ECH
+    // config lookup (tlsSettings.echSockopt.dialerProxy); stored and round-tripped only for now.
+    const val PATT_ECH_OUTBOUND = "pattEchOutbound"
+    /** Set to [LINK_STYLE_PATTERNIHA] when the link used `fm`/`cs`, so an exported link uses the same keys. */
+    const val LINK_STYLE = "linkStyle"
+    const val LINK_STYLE_PATTERNIHA = "patterniha"
+
     val XHTTP_MODES = listOf("auto", "packet-up", "stream-up", "stream-one")
 
     fun read(profile: VlessProfile): JSONObject =
@@ -212,8 +226,11 @@ object ProfileExtras {
     /** Adds the XHTTP `mode` and `extra` and the REALITY `pqv` of a share link's query to [profile]. */
     fun fromQuery(profile: VlessProfile, params: Map<String, String>): VlessProfile {
         var p = profile.copy(
-            cipherSuites = params["cipherSuites"] ?: params["ciphers"] ?: profile.cipherSuites,
-            finalMask = params["finalmask"] ?: params["finalMask"] ?: profile.finalMask,
+            cipherSuites = params["cipherSuites"] ?: params["ciphers"] ?: params["cs"]?.takeIf { it.isNotBlank() }
+                ?: profile.cipherSuites,
+            finalMask = params["finalmask"] ?: params["finalMask"] ?: params["fm"]?.takeIf { it.isNotBlank() }
+                ?: profile.finalMask,
+            echConfigList = profile.echConfigList.ifBlank { params["ech"].orEmpty() },
             engineType = when (params["core"]?.lowercase()) {
                 "sing-box", "singbox" -> com.example.data.model.EngineType.SING_BOX
                 "xray" -> com.example.data.model.EngineType.XRAY
@@ -232,6 +249,35 @@ object ProfileExtras {
         if (p.security.equals("reality", ignoreCase = true)) {
             params["pqv"]?.takeIf { it.isNotBlank() }?.let { p = with(p, MLDSA65_VERIFY, it) }
         }
+        return pattFromQuery(p, params)
+    }
+
+    /** Keeps the patterniha link fields `fm`, `cs`, `dialMode`, `tut`, `esr`, `cp` and `echOutbound`. */
+    internal fun pattFromQuery(profile: VlessProfile, params: Map<String, String>): VlessProfile {
+        var p = profile
+        if (!params["fm"].isNullOrBlank() || !params["cs"].isNullOrBlank()) p = with(p, LINK_STYLE, LINK_STYLE_PATTERNIHA)
+        params["dialMode"]?.trim()?.takeIf { it.isNotEmpty() }?.let { p = with(p, PATT_DIAL_MODE, it) }
+        params["tut"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let { p = with(p, PATT_TCP_USER_TIMEOUT, it) }
+        params["esr"]?.trim()?.lowercase()?.let { if (it == "1" || it == "true") p = with(p, PATT_SESSION_RESUMPTION, true) }
+        params["cp"]?.trim()?.takeIf { it.isNotEmpty() }?.let { p = with(p, PATT_CURVE_PREFERENCES, it) }
+        params["echOutbound"]?.takeIf { it.isNotBlank() }?.let { raw ->
+            runCatching { JSONObject(raw) }.getOrNull()?.let { p = with(p, PATT_ECH_OUTBOUND, it) }
+        }
         return p
+    }
+
+    /** True when [profile] came from a link that used patterniha's short keys (`fm`, `cs`). */
+    fun usesPatternihaKeys(profile: VlessProfile): Boolean = read(profile).optString(LINK_STYLE) == LINK_STYLE_PATTERNIHA
+
+    /** The stored patterniha fields as raw (not yet URL-encoded) link query pairs, in a stable order. */
+    fun pattQuery(profile: VlessProfile): List<Pair<String, String>> {
+        val json = read(profile)
+        val out = mutableListOf<Pair<String, String>>()
+        json.optString(PATT_DIAL_MODE).takeIf { it.isNotBlank() }?.let { out += "dialMode" to it }
+        json.optInt(PATT_TCP_USER_TIMEOUT, 0).takeIf { it > 0 }?.let { out += "tut" to it.toString() }
+        if (json.optBoolean(PATT_SESSION_RESUMPTION, false)) out += "esr" to "1"
+        json.optString(PATT_CURVE_PREFERENCES).takeIf { it.isNotBlank() }?.let { out += "cp" to it }
+        json.optJSONObject(PATT_ECH_OUTBOUND)?.let { out += "echOutbound" to it.toString() }
+        return out
     }
 }
