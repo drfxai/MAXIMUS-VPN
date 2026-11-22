@@ -48,14 +48,14 @@ class LastKnownGoodTest {
     }
 
     @Test fun aRefreshNeverDeletesProtectedOrInUseConfigs() {
-        val saved = (1..30).map { p(it) }
-        val fresh = (31..60).map { p(it) }
+        val saved = (1..50).map { p(it) }
+        val fresh = (51..100).map { p(it) }
         val plan = FreeListSwap.plan(saved, fresh, protectedIds = setOf("id1", "id2", "id3"), activeId = "id4")
         assertEquals(setOf("id1", "id2", "id3", "id4"), plan.retained.map { it.id }.toSet())
         assertTrue(plan.delete.none { it.id in setOf("id1", "id2", "id3", "id4") })
-        // At most 30 result: four retained configs take places first.
-        assertEquals(26, plan.insert.size)
-        assertEquals(30, plan.resultingCount)
+        // At most 50 result: four retained configs take places first.
+        assertEquals(46, plan.insert.size)
+        assertEquals(50, plan.resultingCount)
     }
 
     @Test fun configsInBothListsKeepTheirSavedRowsAndResults() {
@@ -75,33 +75,33 @@ class LastKnownGoodTest {
         assertEquals(3, plan.delete.size)
     }
 
-    @Test fun theResultIsCappedAtThirty() {
+    @Test fun theResultIsCappedAtFifty() {
         val plan = FreeListSwap.plan(emptyList(), (1..80).map { p(it) }, emptySet(), null)
-        assertEquals(30, plan.insert.size)
-        assertEquals((1..30).map { "id$it" }, plan.insert.map { it.id })
+        assertEquals(50, plan.insert.size)
+        assertEquals((1..50).map { "id$it" }, plan.insert.map { it.id })
     }
 
-    @Test fun manyFavouritesNeverPushTheListPastThirty() {
-        val saved = (1..40).map { p(it).copy(isFavorite = true) }
-        val fresh = (41..80).map { p(it) }
-        val plan = FreeListSwap.plan(saved, fresh, protectedIds = setOf("id40"), activeId = "id39")
-        assertEquals(30, plan.resultingCount)
+    @Test fun manyFavouritesNeverPushTheListPastFifty() {
+        val saved = (1..60).map { p(it).copy(isFavorite = true) }
+        val fresh = (61..100).map { p(it) }
+        val plan = FreeListSwap.plan(saved, fresh, protectedIds = setOf("id60"), activeId = "id59")
+        assertEquals(50, plan.resultingCount)
         // The one in use and the protected one always stay; favourites fill what room is left, new ones none.
-        assertTrue(plan.retained.map { it.id }.containsAll(listOf("id39", "id40")))
+        assertTrue(plan.retained.map { it.id }.containsAll(listOf("id59", "id60")))
         assertTrue(plan.insert.isEmpty())
         assertEquals(10, plan.delete.size)
-        assertTrue(plan.delete.none { it.id == "id39" || it.id == "id40" })
+        assertTrue(plan.delete.none { it.id == "id59" || it.id == "id60" })
     }
 
     @Test fun keptConfigsBeyondTheLimitMakeWayInTheNewListsOrder() {
-        val saved = (1..30).map { p(it) }
-        val fresh = (30 downTo 1).map { p(it) } + (31..40).map { p(it) }
+        val saved = (1..50).map { p(it) }
+        val fresh = (50 downTo 1).map { p(it) } + (51..60).map { p(it) }
         val plan = FreeListSwap.plan(saved, fresh, protectedIds = setOf("id1"), activeId = null)
-        assertEquals(30, plan.resultingCount)
+        assertEquals(50, plan.resultingCount)
         assertTrue(plan.insert.isEmpty())
         assertTrue(plan.delete.isEmpty())
         assertEquals("id1", plan.kept.first().id)
-        assertEquals("id30", plan.kept[1].id)
+        assertEquals("id50", plan.kept[1].id)
     }
 
     @Test fun retainedConfigsAreRememberedUntilReleased() {

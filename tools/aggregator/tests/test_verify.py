@@ -76,7 +76,7 @@ class KeepWorkingTests(unittest.TestCase):
         self.assertEqual("DE · VLESS 4 · YT TG X", aggregate.display_name(link, 4, lambda h: "DE", {"X", "YT", "TG"}))
         self.assertEqual("Free VLESS 4 · TG", aggregate.display_name(link, 4, None, {"TG"}))
 
-    def test_the_list_never_exceeds_thirty_and_holds_only_servers_that_worked(self):
+    def test_the_list_never_exceeds_fifty_and_holds_only_servers_that_worked(self):
         link = lambda n: f"vless://{UUID}@203.0.113.{n % 250 + 1}:{1000 + n}?security=tls&sni=a.example&type=tcp#n"
         sources = []
         for s in range(3):
@@ -84,7 +84,7 @@ class KeepWorkingTests(unittest.TestCase):
         texts = {f"https://example.test/{s}": "\n".join(link(s * 100 + n) for n in range(80)) for s in range(3)}
         works = set(l for t in texts.values() for l in t.split("\n")[::2])
         links, report = aggregate.collect(sources, texts.__getitem__, None, lambda ls: {l: (1.0, frozenset({"YT"})) for l in ls if l in works})
-        self.assertEqual(30, len(links))
+        self.assertEqual(50, len(links))
         self.assertTrue(set(links) <= works)
 
 

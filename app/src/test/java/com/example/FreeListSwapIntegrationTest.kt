@@ -102,10 +102,10 @@ class FreeListSwapIntegrationTest {
 
     @Test
     fun `A - a refresh swaps the list atomically and keeps the three last-known-good and the active config`() = runBlocking {
-        publish(1..30)
+        publish(1..50)
         assertTrue(manager().addAndSyncSubscription(FreeConfigList.NAME, FreeConfigList.URL).isSuccess)
         val before = free()
-        assertEquals(30, before.size)
+        assertEquals(50, before.size)
         // Three configs carried verified traffic here; one more is connected right now.
         before.take(3).forEachIndexed { i, p -> pool.recordVerified(p, 200, now = i.toLong()) }
         val active = before[3]
@@ -116,7 +116,7 @@ class FreeListSwapIntegrationTest {
         val watcher = CoroutineScope(Dispatchers.IO).launch {
             servers.getProfilesBySubscription(FreeConfigList.URL).collect { synchronized(sizes) { sizes += it.size } }
         }
-        publish(101..130)
+        publish(101..150)
         val result = manager().syncSubscription(subscriptions.getSubscriptionByUrl(FreeConfigList.URL)!!)
         watcher.cancel()
 
@@ -125,11 +125,11 @@ class FreeListSwapIntegrationTest {
         val ids = after.map { it.id }.toSet()
         assertTrue(before.take(3).all { it.id in ids })
         assertTrue(active.id in ids)
-        assertEquals(30, after.size)
+        assertEquals(50, after.size)
         assertEquals(4, result.retainedCount)
-        assertEquals(26, result.removedCount)
-        assertEquals(26, result.addedCount)
-        assertEquals(30, result.poolBefore)
+        assertEquals(46, result.removedCount)
+        assertEquals(46, result.addedCount)
+        assertEquals(50, result.poolBefore)
         assertTrue(sizes.none { it == 0 })
         assertEquals(setOf(active.id) + before.take(3).map { it.id }, retainedIds)
 
@@ -142,7 +142,7 @@ class FreeListSwapIntegrationTest {
 
     @Test
     fun `B - a failed refresh leaves the list as it was`() = runBlocking {
-        publish(1..30)
+        publish(1..50)
         manager().addAndSyncSubscription(FreeConfigList.NAME, FreeConfigList.URL)
         val before = free().map { it.id }.toSet()
         published = null
@@ -154,7 +154,7 @@ class FreeListSwapIntegrationTest {
     @Test
     fun `B2 - a failed refresh with an offline copy re-adds nothing, and an empty list comes back capped`() = runBlocking {
         snapshots = SubscriptionSnapshots(tmp.root, encrypt = { it.reversed() }, decrypt = { it.reversed() })
-        publish(1..30)
+        publish(1..50)
         manager().addAndSyncSubscription(FreeConfigList.NAME, FreeConfigList.URL)
         val gone = free().first()
         manager().deleteFree(gone)
@@ -164,12 +164,12 @@ class FreeListSwapIntegrationTest {
         assertFalse(failed.isSuccess)
         assertFalse(failed.fromOfflineCopy)
         // Existing verified configurations retained; the one the user deleted does not come back.
-        assertEquals(29, free().size)
+        assertEquals(49, free().size)
         assertTrue(free().none { it.effectiveFingerprint == gone.effectiveFingerprint })
         manager().deleteAllFree()
         val restored = manager().syncSubscription(sub)
         assertTrue(restored.fromOfflineCopy)
-        assertEquals(30, free().size)
+        assertEquals(50, free().size)
     }
 
     @Test

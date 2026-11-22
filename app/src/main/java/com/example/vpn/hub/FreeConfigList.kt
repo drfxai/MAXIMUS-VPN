@@ -95,11 +95,11 @@ object FreeConfigList {
     }
 
     /**
-     * The most servers the app takes from the list. The published list is already limited to 30 servers
+     * The most servers the app takes from the list. The published list is already limited to 50 servers
      * that carried a real request; this holds even when a list from elsewhere is longer, so hundreds of
      * servers can never be saved, tested and drawn at once.
      */
-    const val MAX_CONFIGS = 30
+    const val MAX_CONFIGS = 50
 
     /** A config from the list, ready to save: the first [MAX_CONFIGS] usable ones, with their country recorded. */
     fun prepare(profiles: List<VlessProfile>): List<VlessProfile> =

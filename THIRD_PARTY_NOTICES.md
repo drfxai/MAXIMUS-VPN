@@ -785,6 +785,22 @@ under GPL-3.0. Network availability depends on the upstream service.
 The Android release builds [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go/tree/735cffbcb3030644c519b2934bf2e199f19bbc98) from the pinned upstream revision.
 The executable retains upstream's MIT license. The corresponding copyright and permission notice is included in this repository at `app/src/main/assets/licenses/amneziawg-go.LICENSE`.
 
+## Free config list sources (tools/aggregator/sources/sources.json, 2026-11-22)
+
+The free config list workflow (`.github/workflows/free-configs.yml`) reads published subscription files from
+these public repositories at run time. No code from them is copied into this repository or the app; their
+entries are treated as untrusted input, filtered and tested before anything is published. Each is
+distributed under the MIT License (copyright its respective authors; the MIT text is reproduced above
+under "MIT License (libXray)"):
+
+- patterniha/Free-Configs — https://github.com/patterniha/Free-Configs (`configs.txt`)
+- 0xRadikal/Free-v2ray-Configs — https://github.com/0xRadikal/Free-v2ray-Configs (`verified/configs.txt`)
+- itsyebekhe/PSG — https://github.com/itsyebekhe/PSG (`subscriptions/xray/mix`)
+- 4n0nymou3/multi-proxy-config-fetcher — https://github.com/4n0nymou3/multi-proxy-config-fetcher (`configs/proxy_configs_tested.txt`)
+- luxxuria/harvester — https://github.com/luxxuria/harvester (`ping_tested.txt`)
+
+The Epodonios and ebrasha lists were removed on 2026-11-22 because their files no longer exist (HTTP 404).
+
 ## Iran GeoFiles — Chocolate4U/Iran-v2ray-rules (2026-11-22)
 
 The APK bundles three unmodified data files from the Chocolate4U/Iran-v2ray-rules release

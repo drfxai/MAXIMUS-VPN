@@ -6,7 +6,11 @@ name: Free config list
 # The runner is outside Iran: its results are GLOBAL evidence only (GLOBAL_VERIFIED), never Iran proof.
 on:
   schedule:
-    - cron: '17 */6 * * *'
+    # Minute 41, away from the busy start of the hour. With '17 */6' (runs 101-140, 4-22 Nov 2026) GitHub
+    # ran about two a day, mostly the 06 and 18 UTC slots and 40 min to 4 h late; the 00 UTC slot never ran
+    # and the 12 UTC slot only twice. Scheduled runs are best effort and GitHub sheds them under load,
+    # which is heaviest near the start of the hour and around 00 UTC.
+    - cron: '41 */6 * * *'
   workflow_dispatch:
 
 permissions:

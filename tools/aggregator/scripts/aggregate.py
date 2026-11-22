@@ -25,7 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MAX_BYTES = 5 * 1024 * 1024
 TIMEOUT_SEC = 30
 MAX_PER_SOURCE = 500
-MAX_TOTAL = 30
+MAX_TOTAL = 50
+MAX_LINK_CHARS = 4096
 # Candidates per source that get a real request; the rest of a large source is not tried.
 VERIFY_PER_SOURCE = 150
 ALIVE_TIMEOUT_SEC = 3
@@ -114,9 +115,8 @@ def problem(link: str) -> str | None:
     """Why this link must not be published, or None. The display name after # is not checked: it is replaced."""
     if not link.startswith(SCHEMES):
         return "unknown scheme"
-    if len(link) > 2048 and not link.startswith("vmess://"):
-        return "too long"
-    if len(link) > 4096:
+    # REALITY/XHTTP links with long paths, padding and ECH settings run past 2 KB; 4 KB is still bounded.
+    if len(link) > MAX_LINK_CHARS:
         return "too long"
     body = link if link.startswith("vmess://") else link.split("#", 1)[0]
     if any(c.isspace() for c in body.strip()) or any(ord(c) < 32 or ord(c) == 127 for c in link):
@@ -160,7 +160,9 @@ def problem(link: str) -> str | None:
         return "no encryption"
     if e["type"] and e["type"] not in TRANSPORTS:
         return "unsupported transport"
-    if e.get("fp") == "unsafe" or e.get("pcs_bypass"):
+    # fp=unsafe is Xray's name for Go's own TLS stack (no browser imitation): the certificate is still
+    # checked, so it is fine over plain TLS. REALITY needs a browser fingerprint and stays refused.
+    if (e.get("fp") == "unsafe" and e["security"] != "tls") or e.get("pcs_bypass"):
         return "insecure TLS settings"
     if e["scheme"] == "ss":
         method = e.get("method", "")
@@ -306,7 +308,7 @@ def _now_iso() -> str:
 def collect(sources: list[dict], fetcher=fetch, check=None, verify=None, reach: dict | None = None,
             state: dict | None = None) -> tuple[list[str], dict]:
     """Fetch → validate → normalize → security-check → de-duplicate → (TCP) → real requests → score →
-    pick at most 30, diverse. [state] receives the pipeline's records: "candidates" (fingerprint →
+    pick at most MAX_TOTAL (50), diverse. [state] receives the pipeline's records: "candidates" (fingerprint →
     pipeline.Candidate), "quarantine" (rejected entries with the reason, no credentials) and reads
     "history" (earlier runs, by fingerprint) and "iran" (phone evidence, by fingerprint) when present."""
     import pipeline
@@ -335,7 +337,7 @@ def collect(sources: list[dict], fetcher=fetch, check=None, verify=None, reach: 
         links: list[str] = []
         for raw in text.splitlines():
             link = raw.strip()
-            if not link or link.startswith("#"):
+            if not link or link.startswith(("#", "//")):  # "//profile-title: ..." headers in some lists
                 continue
             meta["candidate_count"] += 1
             reason = problem(link)
