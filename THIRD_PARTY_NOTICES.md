@@ -764,6 +764,16 @@ The application's license does not restrict recipients' rights in this separate 
   AGPL-3.0; the widget, `QuickConnect`, `BootPolicy` and `BackgroundRunning` code is Maximus's own.
 - No affiliation or endorsement is implied.
 
+## ZedSecure — per-network DNS resolver scanner (2026-11-22)
+
+- `app/src/main/java/com/example/vpn/dns/ResolverScanner.kt` re-writes in Kotlin the probe set (UDP/53, TCP/53,
+  DoT/853), the hijack and interception checks and the capped 0–100 resolver score of ZedSecure's resolver scanner
+  (https://github.com/CluvexStudio/ZedSecure, `shared/src/commonMain/kotlin/dev/cluvex/zedsecure/scan/DnsScan.kt`,
+  `DnsPack.kt`) and ZedSecure-Cores `zedscan/src/score.rs` (https://github.com/CluvexStudio/ZedSecure-Cores, tag
+  `zedscan-r2`), GNU Affero General Public License v3.0 (or later). The weights, candidate lists, the per-network
+  pool (`VerifiedResolverPool.kt`) and how DNS-tunnel profiles use it (`DnsTunnelResolverOrder`) are Maximus's own.
+- No affiliation or endorsement is implied.
+
 ## Lantern Radiance
 
 The Android release build script fetches [Radiance](https://github.com/getlantern/radiance) at
