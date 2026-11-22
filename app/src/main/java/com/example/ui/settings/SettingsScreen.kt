@@ -62,6 +62,7 @@ import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.SettingsViewModel
 import com.example.update.AppUpdateChecker
 import com.example.update.CleanIpMaintenance
+import com.example.update.GeoFilesUpdater
 import com.example.update.InAppUpdater
 import com.example.update.ResolverPackUpdater
 import com.example.update.UpdateNetworkPolicy
@@ -145,6 +146,10 @@ fun SettingsScreen(
     var cleanIpStatus by remember { mutableStateOf<String?>(null) }
     var resolverStatus by remember { mutableStateOf<String?>(null) }
     var vpnOnlyUpdates by remember { mutableStateOf(UpdateNetworkPolicy.vpnOnly(context)) }
+    var geoTag by remember { mutableStateOf(GeoFilesUpdater.currentTag(context)) }
+    var geoBusy by remember { mutableStateOf(false) }
+    var geoStatus by remember { mutableStateOf<String?>(null) }
+    var geoViaVpn by remember { mutableStateOf(GeoFilesUpdater.viaVpn(context)) }
     var pageName by rememberSaveable(openCoreInventory) {
         mutableStateOf(if (openCoreInventory) SettingsPage.ENGINES.name else null)
     }
@@ -464,7 +469,11 @@ fun SettingsScreen(
                     resolverStatus = resolverStatus,
                     cleanIpBusy = cleanIpBusy,
                     cleanIpStatus = cleanIpStatus,
-                    vpnOnlyUpdates = vpnOnlyUpdates
+                    vpnOnlyUpdates = vpnOnlyUpdates,
+                    geoTag = geoTag,
+                    geoBusy = geoBusy,
+                    geoStatus = geoStatus,
+                    geoViaVpn = geoViaVpn
                 ),
                 installedBuild = BuildConfig.RELEASE_BUILD,
                 onCheckForUpdates = reviewUpdate,
@@ -512,7 +521,30 @@ fun SettingsScreen(
                     vpnOnlyUpdates = value
                 },
                 onChangelog = { uriHandler.openUri(AppUpdateChecker.RELEASES_URL) },
-                onBack = back
+                onBack = back,
+                onUpdateGeoFiles = {
+                    if (!geoBusy) {
+                        geoBusy = true
+                        geoStatus = null
+                        scope.launch {
+                            runCatching { GeoFilesUpdater.update(context, geoViaVpn) }
+                                .onSuccess { outcome ->
+                                    geoTag = outcome.tag
+                                    geoStatus = when (outcome) {
+                                        is GeoFilesUpdater.Outcome.UpToDate -> "GeoFiles are up to date (${outcome.tag})."
+                                        is GeoFilesUpdater.Outcome.Updated ->
+                                            "Updated GeoFiles ${outcome.previous} → ${outcome.tag}; checksums verified. Applied on the next connect."
+                                    }
+                                }
+                                .onFailure { geoStatus = "GeoFiles not updated: ${it.message ?: "download failed"}" }
+                            geoBusy = false
+                        }
+                    }
+                },
+                onGeoViaVpn = { value ->
+                    GeoFilesUpdater.setViaVpn(context, value)
+                    geoViaVpn = value
+                }
             )
 
             SettingsPage.ENGINES -> EngineUpdatesSettingsPage(

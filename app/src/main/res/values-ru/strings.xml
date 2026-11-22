@@ -1428,6 +1428,13 @@
     <string name="ui_changelog">Список изменений</string>
     <string name="ui_what_s_new_in_recent">Что нового в последних версиях</string>
     <string name="ui_network_data">Сетевые данные</string>
+    <string name="ui_geofiles">GeoFiles</string>
+    <string name="ui_update_geofiles">Обновить GeoFiles</string>
+    <string name="ui_geofiles_current_tag">Текущая версия %1$s · проверка SHA-256 перед установкой</string>
+    <string name="ui_geofiles_iran_rules">Правила geoip/geosite для Ирана от Chocolate4U</string>
+    <string name="ui_geofiles_downloading">Загрузка и проверка GeoFiles…</string>
+    <string name="ui_geofiles_via_proxy">Обновлять через прокси</string>
+    <string name="ui_geofiles_via_proxy_sub">Загрузка через активный VPN, без прямого подключения</string>
     <string name="ui_update_resolver_databases">Обновить базы резолверов</string>
     <string name="ui_downloading_verified_data_pct">Загрузка проверенных данных… %1$s%%</string>
     <string name="ui_verified_update_installed_rollback_avail">Проверенное обновление установлено · доступен откат</string>

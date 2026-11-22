@@ -1425,6 +1425,13 @@
     <string name="ui_changelog">Changelog</string>
     <string name="ui_what_s_new_in_recent">What\'s new in recent versions</string>
     <string name="ui_network_data">Network data</string>
+    <string name="ui_geofiles">GeoFiles</string>
+    <string name="ui_update_geofiles">Update GeoFiles</string>
+    <string name="ui_geofiles_current_tag">Current version %1$s · checks SHA-256 before installing</string>
+    <string name="ui_geofiles_iran_rules">Iran geoip/geosite rules from Chocolate4U</string>
+    <string name="ui_geofiles_downloading">Downloading and verifying GeoFiles…</string>
+    <string name="ui_geofiles_via_proxy">Update via proxy</string>
+    <string name="ui_geofiles_via_proxy_sub">Download through the active VPN; no direct fallback</string>
     <string name="ui_update_resolver_databases">Update resolver databases</string>
     <string name="ui_downloading_verified_data_pct">Downloading verified data… %1$s%%</string>
     <string name="ui_verified_update_installed_rollback_avail">Verified update installed · rollback available</string>
