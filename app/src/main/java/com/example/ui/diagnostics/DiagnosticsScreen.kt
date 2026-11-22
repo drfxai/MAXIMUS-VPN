@@ -301,6 +301,41 @@ fun DiagnosticsScreen(
             }
         }
 
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Copy Full Report: every section, engine and the JSON report, redacted, to the clipboard.
+        OutlinedButton(
+            onClick = {
+                viewModel.buildFullReport { text ->
+                    clipboardManager.setText(AnnotatedString(text))
+                    Toast.makeText(context, context.getString(R.string.ui_full_report_copied_to_clipboard), Toast.LENGTH_SHORT).show()
+                }
+            },
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = AppTheme.colors.primary),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(42.dp)
+                .testTag("copy_full_report_button")
+        ) {
+            Icon(
+                imageVector = Icons.Default.ContentCopy,
+                contentDescription = null,
+                tint = AppTheme.colors.primary,
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = stringResource(R.string.ui_copy_full_report),
+                color = AppTheme.colors.primary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+
         Spacer(modifier = Modifier.height(10.dp))
 
         // System Telemetry Grid Card (Refactored to prevent horizontal text overflow)

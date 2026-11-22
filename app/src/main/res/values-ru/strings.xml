@@ -264,6 +264,8 @@
     <string name="ui_report_error">Сообщить об ошибке</string>
     <string name="ui_sanitized_report_copied_to_clipboard">Обезличенный отчёт скопирован в буфер обмена</string>
     <string name="ui_export_report">Экспорт отчёта</string>
+    <string name="ui_copy_full_report">Копировать полный отчёт</string>
+    <string name="ui_full_report_copied_to_clipboard">Полный отчёт скопирован в буфер обмена (секреты скрыты)</string>
     <string name="ui_core_engine">Основной движок</string>
     <string name="ui_tunnel_ip">IP туннеля</string>
     <string name="ui_active_node">Активный узел</string>
