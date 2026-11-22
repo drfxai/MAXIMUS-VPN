@@ -1,89 +1,106 @@
 <div align="center">
 
-<img src="docs/media/persian.webp" alt="ماکسیموس VPN — شبکهٔ شما، کنترل شما" width="100%">
+[English](README.md) | [Русский](README.ru.md) | **فارسی**
 
-# ماکسیموس VPN
-
-**ابزار اتصال، بررسی شبکه و بازیابی مسیر روی اندروید**
-
-[English](README.md) · [فارسی](README.fa.md)
-
-### [دانلود آخرین نسخهٔ اندروید ↗](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+<img src="docs/media/persian.webp" alt="MAXIMUS VPN — شبکهٔ شما، کنترل شما" width="100%">
 
 </div>
 
-<div dir="rtl" align="right">
+<div dir="rtl">
+
+<div align="center">
+
+# MAXIMUS VPN
+
+**جعبه‌ابزار شبکه برای اندروید؛ اتصال، بررسی و بازیابی مسیر، همه در یک جا.**
+
+[![Release](https://img.shields.io/github/v/release/drfxai/MAXIMUS-VPN?style=flat-square&color=d4a843)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+[![Android 7+](https://img.shields.io/badge/Android-7.0%2B-38bdb0?style=flat-square)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+[![Checks](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml/badge.svg)](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml)
+[![License](https://img.shields.io/badge/License-Source--available-d4a843?style=flat-square)](LICENSE)
+
+### [دانلود برای اندروید ↗](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+
+Smart Connect · Network LAB · یافتن IP تمیز · ابزارهای سرور اختصاصی
+
+</div>
+
+## انتخاب زبان
+
+MAXIMUS در اولین اجرا، پیش از هر مرحلهٔ دیگری از آشنایی با برنامه، زبان رابط را می‌پرسد: **English** یا **Русский**. هر زمان بخواهید می‌توانید زبان را از **Settings › Appearance** (تنظیمات › ظاهر) تغییر دهید؛ در اندروید ۱۳ و بالاتر، MAXIMUS در تنظیم زبان برنامه‌های خود سیستم هم فهرست می‌شود.
+
+<p align="center"><img src="docs/assets/language-picker-demo.gif" width="320" alt="پیش‌نمایش متحرک صفحهٔ انتخاب زبان MAXIMUS VPN در اولین اجرا، با جابه‌جایی میان انگلیسی و روسی"></p>
+
+<p align="center"><sub>پیش‌نمایش متحرک صفحهٔ اولین اجرا · <a href="docs/assets/language-picker-demo.mp4">مشاهدهٔ فایل MP4</a></sub></p>
 
 ## برنامه را ببینید
 
-تصاویر زیر از اجرای واقعی نسخهٔ **V1.0.2** روی اندروید ۱۵ گرفته شده‌اند. برنامه تازه نصب شده و فهرست عمومی کانفیگ‌های خود برنامه در آن نمایش داده می‌شود. حساب خصوصی، کانفیگ شخصی یا نتیجهٔ اتصال ساختگی به تصاویر اضافه نشده است و تونل فعالی وجود ندارد.
-
-</div>
+تصاویر زیر نماگرفت‌های واقعی از APK منتشرشدهٔ **V1.0.2** روی اندروید ۱۵ هستند. برنامه تازه نصب شده، فهرست عمومی نودهایی که خود برنامه ارائه می‌کند نمایش داده می‌شود و هیچ تونلی فعال نیست. هیچ حساب خصوصی، پروفایل کاربر یا نتیجهٔ اتصال ساختگی به تصاویر اضافه نشده است.
 
 <table>
 <tr>
-<td align="center" width="25%"><img src="docs/media/screenshots/tunnel.png" alt="صفحهٔ واقعی اتصال ماکسیموس" width="240"><br><b>اتصال</b></td>
-<td align="center" width="25%"><img src="docs/media/screenshots/nodes.png" alt="صفحهٔ واقعی کانفیگ‌ها" width="240"><br><b>کانفیگ‌ها</b></td>
-<td align="center" width="25%"><img src="docs/media/screenshots/lab.png" alt="صفحهٔ واقعی آزمایشگاه شبکه" width="240"><br><b>آزمایشگاه شبکه</b></td>
-<td align="center" width="25%"><img src="docs/media/screenshots/panels.png" alt="صفحهٔ واقعی مدیریت زیرساخت" width="240"><br><b>زیرساخت و پنل‌ها</b></td>
+<td align="center" width="25%"><img src="docs/media/screenshots/tunnel.png" alt="صفحهٔ واقعی Tunnel در MAXIMUS VPN" width="240"><br><b>Tunnel</b><br>فضای کار اتصال شما</td>
+<td align="center" width="25%"><img src="docs/media/screenshots/nodes.png" alt="صفحهٔ واقعی Nodes در MAXIMUS VPN" width="240"><br><b>Nodes</b><br>پروفایل‌ها و اشتراک‌ها</td>
+<td align="center" width="25%"><img src="docs/media/screenshots/lab.png" alt="صفحهٔ واقعی LAB در MAXIMUS VPN" width="240"><br><b>Network LAB</b><br>اول بسنجید، بعد انتخاب کنید</td>
+<td align="center" width="25%"><img src="docs/media/screenshots/panels.png" alt="صفحهٔ واقعی Panels در MAXIMUS VPN" width="240"><br><b>Panels</b><br>ابزارهای زیرساخت شما</td>
 </tr>
 </table>
 
-<div dir="rtl" align="right">
+[جزئیات تصویربرداری](docs/media/screenshots/capture.json) · [گالری رسانه](docs/media/README.md)
 
-## برای شبکه‌های متغیر
+## ساخته‌شده برای شبکه‌های متغیر
 
-| قابلیت | کاربرد |
+| بخش | آنچه MAXIMUS ارائه می‌دهد |
 | :--- | :--- |
-| **اسمارت کانکت** | بررسی مسیرهای مجاز با درخواست واقعی و آزمایش مجدد، متناسب با وضعیت اندازه‌گیری‌شدهٔ شبکه. |
-| **آزمایشگاه شبکه** | تشخیص اختلال، آزمایش کانفیگ‌ها، بررسی سرویس‌ها و ارائهٔ شواهد برای انتخاب مسیر. |
-| **اسکن IP تمیز** | انتخاب اولیه با زمان پاسخ TCP و سپس بررسی با کانفیگ واقعی. |
-| **موتورهای مختلف** | پشتیبانی از آداپتورهای Xray، Mihomo، سایفون، تور، WARP/MASQUE، Matrix Transport، dnstt و Slipstream. |
-| **زیرساخت اختصاصی** | ابزارهای نصب 3X-UI، گردش‌کار Cloudflare و BPB، ورود کانفیگ و مدیریت سرور. |
-| **کنترل اتصال** | تنظیمات DNS و مسیریابی، گزارش خطا، کنترل تغییر مسیر و قابلیت VPN دائمی اندروید. |
+| **Smart Connect** | مسیرهای مجاز را با درخواست واقعی و بررسی دوباره امتحان می‌کند و روش بازیابی را با وضعیت اندازه‌گیری‌شدهٔ شبکه تطبیق می‌دهد. |
+| **Network LAB** | عیب‌یابی شبکه، آزمایش کانفیگ‌ها، بررسی سرویس‌ها و شواهد لازم برای انتخاب مسیر. |
+| **یافتن IP تمیز** | با زمان پاسخ TCP فهرست کوتاهی از نشانی‌ها می‌سازد و سپس نامزدها را با کانفیگ واقعی می‌سنجد. |
+| **موتورهای متعدد** | آداپتورهای Xray، Mihomo، Psiphon، Tor، WARP/MASQUE، Matrix Transport، dnstt و Slipstream. |
+| **زیرساخت شما** | نصب 3X-UI، گردش‌کارهای Cloudflare/BPB، ورود کانفیگ و مدیریت سرور. |
+| **کنترل اتصال** | تنظیمات DNS و مسیریابی، عیب‌یابی، کنترل تغییر مسیر (failover) و یکپارچگی با Always-on VPN اندروید. |
 
-</div>
+### مسیر بهتری پیدا کنید
 
-<img src="docs/media/smart-connect.webp" alt="طرح تبلیغاتی اسمارت کانکت و آزمایشگاه شبکهٔ ماکسیموس" width="100%">
+<img src="docs/media/smart-connect.webp" alt="طرح تبلیغاتی — Find a better path. Smart Connect + Network LAB." width="100%">
 
-<div dir="rtl" align="right">
+پشتیبانی از هر ترنسپورت به موتور و کانفیگ بستگی دارد. **WARP روی TCP از HTTP/2 در Matrix Transport استفاده می‌کند؛ WireGuard روی UDP کار می‌کند.** Psiphon به تنظیمات شبکهٔ معتبر نیاز دارد و پل‌های Tor و تونل‌های DNS به زیرساخت در دسترس نیاز دارند. وجود یک موتور در برنامه یا موفقیت دست‌دهی (handshake) به‌تنهایی ثابت نمی‌کند که روی شبکهٔ شما به اینترنت دسترسی دارید. [راهنمای موتورها](docs/SMART_CONNECT_ENGINE_RECOVERY.md) را ببینید.
 
-وارپ روی TCP از طریق **HTTP/2 موتور Matrix Transport** ارائه می‌شود؛ WireGuard روی UDP است. سایفون به تنظیمات معتبر نیاز دارد و پل‌های تور و تونل‌های DNS باید قابل دسترس باشند. وجود یک موتور در برنامه یا موفقیت دست‌دهی، به‌تنهایی اتصال اینترنت را اثبات نمی‌کند. جزئیات در [راهنمای موتورها](docs/SMART_CONNECT_ENGINE_RECOVERY.md) آمده است.
+## شروع کار
 
-## شروع استفاده
+1. فایل APK را از [صفحهٔ رسمی Releases](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) دانلود کنید.
+2. در بخش **Nodes** یک پروفایل یا اشتراک وارد کنید، یا زیرساخت خودتان را در بخش **Panels** پیکربندی کنید.
+3. بخش **Tunnel** را باز کنید، پروفایل را انتخاب کنید و متصل شوید. هر وقت مسیری نیاز به بررسی داشت، از **LAB** استفاده کنید.
 
-۱. فایل APK را از [صفحهٔ رسمی انتشار](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) دانلود کنید.
-
-۲. در بخش **Nodes** کانفیگ یا اشتراک خود را وارد کنید، یا از بخش **Panels** زیرساخت اختصاصی بسازید.
-
-۳. در بخش **Tunnel** کانفیگ را انتخاب و متصل شوید. برای بررسی مسیرهای مشکل‌دار، از **LAB** استفاده کنید.
-
-| فایل | مناسب برای |
+| دانلود | این را انتخاب کنید اگر… |
 | :--- | :--- |
-| **ARM64** | بیشتر گوشی‌های جدید اندروید؛ انتخاب پیشنهادی. |
-| **Universal** | دستگاه‌های ARM32 یا x86_64، یا زمانی که معماری گوشی مشخص نیست. |
-| **SHA256SUMS** | بررسی صحت فایل‌های دانلودشده. |
+| [ARM64 APK](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) | گوشی اندرویدی جدید با پردازندهٔ ARM64 دارید. برای بیشتر کاربران پیشنهاد می‌شود. |
+| [Universal APK](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) | به پشتیبانی ARM32 یا x86_64 نیاز دارید، یا از نوع دستگاه خود مطمئن نیستید. |
+| `SHA256SUMS` | می‌خواهید صحت فایل‌های دانلودشده را بررسی کنید. |
 
-حداقل نسخهٔ لازم **اندروید ۷** است. برای به‌روزرسانی، APK رسمی را روی نسخهٔ فعلی نصب کنید و از کانفیگ‌های خود نسخهٔ پشتیبان داشته باشید. برای جلوگیری از اتصال خارج از VPN هنگام بسته بودن برنامه، گزینه‌های **Always-on VPN** و **Block connections without VPN** اندروید را فعال کنید.
+حداقل **اندروید ۷٫۰** لازم است. برای به‌روزرسانی، APK رسمی را روی نسخهٔ فعلی نصب کنید و از پروفایل‌های خود نسخهٔ پشتیبان نگه دارید. برای محافظت در زمانی که برنامه اجرا نیست، گزینه‌های **Always-on VPN** و **Block connections without VPN** اندروید را فعال کنید.
 
-## راهنما و پشتیبانی
+## مستندات
 
-- [مرکز مستندات](docs/README.md)
-- [راهنمای ساخت برنامه](docs/BUILDING.md)
-- [مشارکت و گزارش خطا](CONTRIBUTING.md)
-- [سیاست امنیتی و محدودیت‌ها](SECURITY.md)
-- [مجوز اجزای جانبی](THIRD_PARTY_NOTICES.md)
+- [مرکز مستندات](docs/README.md) — راهنماهای کاربر، موتورها و زیرساخت (به انگلیسی).
+- [ساخت از سورس](docs/BUILDING.md) — ابزارهای ساخت، runtimeهای نیتیو و اعتبارسنجی.
+- [مشارکت](CONTRIBUTING.md) — گزارش خطا (Issues)، تغییرات متمرکز و بررسی‌ها.
+- [سیاست امنیتی](SECURITY.md) — محدودیت‌ها و گزارش خصوصی آسیب‌پذیری.
+- [اعلان‌های اجزای جانبی](THIRD_PARTY_NOTICES.md) — اجزای upstream و الزامات سورس.
 
-کد متعلق به DrFX در برنامهٔ ماکسیموس تحت [مجوز GNU AGPL نسخهٔ ۳](LICENSE) منتشر می‌شود. مجوزهای اجزای جانبی در [اعلان‌های مجوز](THIRD_PARTY_NOTICES.md) آمده‌اند.
+## مجوز و پشتیبانی
 
-خطاهای قابل بازتولید را در [Issues](https://github.com/drfxai/MAXIMUS-VPN/issues) گزارش کنید. توکن، کلید خصوصی، نشانی اشتراک یا اطلاعات ورود سرور را در گزارش قرار ندهید. آسیب‌پذیری امنیتی را مطابق [سیاست امنیتی](SECURITY.md) به‌صورت خصوصی گزارش کنید.
+کد برنامهٔ MAXIMUS VPN که متعلق به DrFX است تحت [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only) ارائه می‌شود. اجزای جانبی مجوزهای خود را که در [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) فهرست شده‌اند حفظ می‌کنند.
 
-</div>
+خطاهای قابل بازتولید را از طریق [Issues](https://github.com/drfxai/MAXIMUS-VPN/issues) گزارش کنید. توکن‌ها، کلیدهای خصوصی، نشانی‌های اشتراک و اطلاعات ورود سرور را از گزارش حذف کنید. برای آسیب‌پذیری‌ها مطابق [SECURITY.md](SECURITY.md) عمل کنید.
 
 <div align="center">
 
 **MAXIMUS VPN · DrFXAi**
 
-شبکهٔ شما، کنترل شما
+شبکهٔ شما، کنترل شما.
+
+[دانلود](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) · [English](README.md) · [Русский](README.ru.md) · [مستندات](docs/README.md)
+
+</div>
 
 </div>
