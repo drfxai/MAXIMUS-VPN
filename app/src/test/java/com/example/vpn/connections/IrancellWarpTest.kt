@@ -94,6 +94,17 @@ class IrancellWarpTest {
         assertFalse(ProfileExtras.read(IrancellWarp.forAttempt(pinnedSplit, manual = true)).optBoolean("rescan"))
     }
 
+    @Test fun irancellAttemptsPreferTheFirefoxFingerprint() {
+        for (manual in listOf(false, true)) {
+            assertEquals("firefox", ProfileExtras.read(IrancellWarp.forAttempt(AetherSidecar.profile("h2"), manual)).optString("fingerprint"))
+            val pinned = AetherSidecar.profile("h2", advanced = AetherSettings(endpoint = "192.0.2.1:443"))
+            assertEquals("firefox", ProfileExtras.read(IrancellWarp.forAttempt(pinned, manual)).optString("fingerprint"))
+            val go = AetherSidecar.profile("h2", advanced = AetherSettings(fingerprint = "go"))
+            assertEquals("go", ProfileExtras.read(IrancellWarp.forAttempt(go, manual)).optString("fingerprint"))
+        }
+        assertEquals("chrome", ProfileExtras.read(AetherSidecar.profile("h2")).optString("fingerprint", "chrome"))
+    }
+
     @Test fun aRouteTheUserChoseIsKept() {
         val oob = AetherSidecar.profile("h2", advanced = AetherSettings(apiRoute = "oob"))
         assertEquals("oob", ProfileExtras.read(IrancellWarp.withNativeApi(oob)).optString("apiRoute"))
