@@ -94,29 +94,57 @@ class PsiphonSidecarTest {
         assertEquals(120_000L, PsiphonSidecar.readyTimeoutMs("wifi:abcdef123456", metered = false, chained = true))
     }
 
-    @Test fun reportsAndroidClientPlatformAndFasterEstablishment() {
-        assertEquals("Android_14_com.drfxai.maximusvpn", PsiphonSidecar.clientPlatform("14", "com.drfxai.maximusvpn"))
-        assertEquals("Android", PsiphonSidecar.clientPlatform(null, "com.drfxai.maximusvpn"))
-        assertEquals("Android_15QPR1_x", PsiphonSidecar.clientPlatform("15 QPR1", "x"))
-        val dir = Files.createTempDirectory("psiphon-fast").toFile()
+    @Test fun keepsLibraryEstablishmentDefaultsAndPlainAndroidPlatform() {
+        val dir = Files.createTempDirectory("psiphon-defaults").toFile()
         try {
-            val direct = PsiphonSidecar.buildConfig(JSONObject(settings).put("ClientAPILevel", 1), "", 40123, dir,
-                clientPlatform = "Android_14_com.drfxai.maximusvpn", clientApiLevel = 34)
-            assertEquals("Android_14_com.drfxai.maximusvpn", direct.getString("ClientPlatform"))
-            assertEquals(34, direct.getInt("ClientAPILevel"))
-            assertEquals(PsiphonSidecar.FAST_WORKER_POOL, direct.getInt("ConnectionWorkerPoolSize"))
-            assertEquals(PsiphonSidecar.FAST_PAUSE_SECONDS, direct.getInt("EstablishTunnelPausePeriodSeconds"))
+            val direct = PsiphonSidecar.buildConfig(JSONObject(settings).put("ClientAPILevel", 1), "", 40123, dir)
+            assertEquals("Android", direct.getString("ClientPlatform"))
+            assertFalse(direct.has("ClientAPILevel"))
+            // #258 forced 16/12 workers and a 1 s pause; build 170 on Irancell never got a direct tunnel.
+            assertFalse(direct.has("ConnectionWorkerPoolSize"))
+            assertFalse(direct.has("EstablishTunnelPausePeriodSeconds"))
+            assertTrue(direct.getBoolean("EmitDiagnosticNotices"))
             assertFalse(direct.has("LimitTunnelProtocols"))
             val chained = PsiphonSidecar.buildConfig(JSONObject(settings), "", 40123, dir, upstreamSocks = 40124)
-            assertEquals(PsiphonSidecar.CHAIN_WORKER_POOL, chained.getInt("ConnectionWorkerPoolSize"))
-            // The build's own choices win.
+            assertFalse(chained.has("ConnectionWorkerPoolSize"))
+            // The build's own choices still win.
             val own = PsiphonSidecar.buildConfig(JSONObject(settings).put("ConnectionWorkerPoolSize", 4)
-                .put("EstablishTunnelPausePeriodSeconds", 5), "", 40123, dir)
+                .put("EstablishTunnelPausePeriodSeconds", 5).put("EmitDiagnosticNotices", false), "", 40123, dir)
             assertEquals(4, own.getInt("ConnectionWorkerPoolSize"))
             assertEquals(5, own.getInt("EstablishTunnelPausePeriodSeconds"))
+            assertFalse(own.getBoolean("EmitDiagnosticNotices"))
         } finally {
             dir.deleteRecursively()
         }
+    }
+
+    @Test fun recentNoticesAreBoundedSanitizedAndCollapseNetworkIdRepeats() {
+        val progress = PsiphonSidecar.StartupProgress()
+        assertNull(progress.recentNotices())
+        progress.observe("""Sun 2026-11-22 08:44 PM AvailableEgressRegions {"regions":["US","DE"]}""")
+        repeat(5) { progress.observe("""Sun 2026-11-22 08:44 PM NetworkID {"ID":"MOBILE-43235-direct"}""") }
+        progress.observe("""{"noticeType":"ConnectingServer","data":{"diagnosticID":"secretdiag","region":"NL","protocol":"OSSH","candidateNumber":3,"ipAddress":"198.51.100.7"}}""")
+        progress.observe("""{"noticeType":"Warning","data":{"message":"psiphon.(*Controller).establishTunnelWorker#1234: dial tcp 198.51.100.7:443: i/o timeout via https://cdn.example.com/x/y and front.example.net, key AAAABBBBCCCCDDDDEEEEFFFF1234"}}""")
+        val text = progress.recentNotices()!!
+        assertTrue(text, text.contains("AvailableEgressRegions regions=2"))
+        assertTrue(text, text.contains("NetworkID ×5"))
+        assertTrue(text, text.contains("ConnectingServer protocol=OSSH region=NL candidateNumber=3"))
+        assertTrue(text, text.contains("i/o timeout"))
+        listOf("198.51.100.7", "cdn.example.com", "front.example.net", "secretdiag", "AAAABBBB", "MOBILE-43235", "establishTunnelWorker")
+            .forEach { assertFalse("$it leaked: $text", text.contains(it)) }
+        // NetworkID never becomes "the last notice"; the dial stage is now visible.
+        val failure = progress.failureAfter(120_000)
+        assertTrue(failure, failure.contains("server dialing did not establish a tunnel"))
+        assertTrue(failure, failure.contains("last notice: Warning"))
+        repeat(40) { progress.observe("""{"noticeType":"ConnectingServer","data":{"protocol":"P$it"}}""") }
+        assertEquals(PsiphonSidecar.StartupProgress.RECENT_NOTICES, progress.recentNotices()!!.split(" | ").size)
+    }
+
+    @Test fun networkIdAloneIsNotReportedAsTheLastNotice() {
+        val progress = PsiphonSidecar.StartupProgress()
+        progress.observe("""Sun 2026-11-22 08:44 PM AvailableEgressRegions {"regions":["US"]}""")
+        progress.observe("""Sun 2026-11-22 08:44 PM NetworkID {"ID":"MOBILE-1-direct"}""")
+        assertFalse(progress.failureAfter(120_000).contains("last notice: NetworkID"))
     }
 
     private val settings = JSONObject()

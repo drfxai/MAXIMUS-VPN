@@ -28,6 +28,9 @@ class SidecarProcess(
     @Volatile override var startupFailure: String? = null
         private set
 
+    /** Psiphon only: the last notices before readiness (type + sanitized fields), for the startup-failure event. */
+    fun psiphonNotices(): String? = psiphonStartup.recentNotices()
+
     private val logThread = Thread({
         try {
             process.inputStream.bufferedReader().useLines { lines ->

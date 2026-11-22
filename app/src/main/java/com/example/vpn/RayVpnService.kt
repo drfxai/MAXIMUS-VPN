@@ -830,6 +830,7 @@ class RayVpnService : VpnService() {
         }
         fun recentlyFailed(p: VlessProfile) = !force &&
             book.eligibility(com.example.vpn.connectivity.PathRef.of(p)) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED
+        psiphonDirectStartFailed = false
         try {
             supervisor.requestProtection()
             ensureBlockingInterface()
@@ -928,6 +929,25 @@ class RayVpnService : VpnService() {
                     aetherHeldBack = true
                     XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0) and no saved server is available: " +
                         "recovery engines go first, Aether (WARP) last.")
+                }
+            }
+
+            // Direct Psiphon failed to start on this network in the last 6 h: an automatic connect starts with Psiphon
+            // over Lantern instead of spending another 2 x 120 s on direct (PsiphonChainMemory). Never when pinned.
+            if (com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile) &&
+                com.example.vpn.connections.PsiphonChainMemory.preferChain(routeNetwork)) {
+                val chain = com.example.vpn.connections.PsiphonChainMemory.chainProfile()
+                if (com.example.vpn.connections.PsiphonChainMemory.mayUseChain(direct = true, smart = smart,
+                        autoFailover = settings.autoFailoverEnabled, fallback = settings.powerButtonFallback,
+                        exact = exact, exitLocked = lockExit, force = force, chainAlreadyTried = chain.id in exclude,
+                        chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null)) {
+                    com.example.vpn.diagnostics.events.EventLog.event("psiphon.chain_first", attributes = mapOf(
+                        "reason" to com.example.vpn.connections.PsiphonChainMemory.describe(routeNetwork)))
+                    XrayLogManager.i("SMART", "Psiphon: " + com.example.vpn.connections.PsiphonChainMemory.describe(routeNetwork) + ".")
+                    requestedProfile = chain
+                    profile = chain
+                    activeProfile = chain
+                    mutateState { if (it.attemptId == attemptId) it.copy(activeProfile = chain, attemptedProfileId = chain.id) else it }
                 }
             }
 
@@ -2058,6 +2078,26 @@ class RayVpnService : VpnService() {
                     exclude = exclude + requestedProfile.id + ENGINE_FAILED_MARKER)
                 return@withContext
             }
+            // Direct Psiphon never brought a tunnel up here: try Psiphon chained over Lantern before giving up
+            // (build 170 Irancell: direct timed out twice while the chain connected at once).
+            if (psiphonDirectStartFailed && configured != null) {
+                psiphonDirectStartFailed = false
+                val chain = com.example.vpn.connections.PsiphonChainMemory.chainProfile()
+                if (com.example.vpn.connections.PsiphonChainMemory.mayUseChain(
+                        direct = com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile),
+                        smart = smart, autoFailover = configured.autoFailoverEnabled,
+                        fallback = configured.powerButtonFallback, exact = exactSession,
+                        exitLocked = com.example.vpn.safety.OperatingModePolicy.of(configured.operationalMode).lockExit,
+                        force = force, chainAlreadyTried = chain.id in exclude,
+                        chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null)) {
+                    com.example.vpn.diagnostics.events.EventLog.event("psiphon.chain_fallback", attributes = mapOf(
+                        "reason" to "direct Psiphon start failed", "next" to "psiphon over lantern"))
+                    XrayLogManager.w("SMART", "Direct Psiphon did not start on this network; trying Psiphon over Lantern.")
+                    showForegroundNotification("Psiphon failed; trying Psiphon over Lantern...")
+                    connectLocked(chain, smart = smart, exclude = exclude + requestedProfile.id)
+                    return@withContext
+                }
+            }
             if (fallbackFromDirect(requestedProfile)) return@withContext
             if (protectionRequested) showForegroundNotification("Traffic blocked: connection failed")
             if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
@@ -2066,6 +2106,8 @@ class RayVpnService : VpnService() {
     }
 
     @Volatile private var directFallbackAttempt: String? = null
+    /** Direct Psiphon failed its start in the current connect attempt (set in [startSidecar], read by its catch). */
+    @Volatile private var psiphonDirectStartFailed = false
 
     /** Aether that stopped because WARP data is blocked here, waiting for a verified saved server to relay through. */
     private data class AetherRelayPending(val aether: VlessProfile, val smart: Boolean, val network: String, val at: Long)
@@ -2470,6 +2512,8 @@ class RayVpnService : VpnService() {
             var ready = started != null || process.awaitReady(launch.readyTimeoutMs)
             val retry = if (!ready && engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
                 connectionOwner?.isActive != false) com.example.vpn.sidecar.PsiphonSidecar.tcpStartupRetry(profile) else null
+            // What the first (UDP+TCP) Psiphon start saw, before the TCP-only retry replaces the process.
+            val firstNotices = if (retry != null) (process as? com.example.vpn.sidecar.SidecarProcess)?.psiphonNotices() else null
             if (retry != null) {
                 process.stop()
                 sidecar = null
@@ -2488,13 +2532,29 @@ class RayVpnService : VpnService() {
                 sidecar = null
                 val hint = process.startupFailure ?: "No readiness signal; inspect redacted engine logs"
                 com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "startup failed: $hint")
+                val psiphonDirect = engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
+                    com.example.vpn.connections.PsiphonChainMemory.isDirect(profile)
+                // Next automatic connect on this network starts with Psiphon over Lantern (PsiphonChainMemory).
+                if (psiphonDirect) {
+                    com.example.vpn.connections.PsiphonChainMemory.recordDirectFailure(ledgerNetwork())
+                    psiphonDirectStartFailed = true
+                }
+                val notices = (process as? com.example.vpn.sidecar.SidecarProcess)?.psiphonNotices()
                 com.example.vpn.diagnostics.events.EventLog.event("engine.startup.failure",
                     com.example.vpn.diagnostics.events.Severity.ERROR,
-                    attributes = mapOf("engine.name" to engine.id, "reason" to hint),
+                    attributes = buildMap {
+                        put("engine.name", engine.id)
+                        put("reason", hint)
+                        // The last ~20 Psiphon notices (type + whitelisted fields), so a report shows why.
+                        notices?.let { put("psiphon.notices", it) }
+                        firstNotices?.let { put("psiphon.notices.first_try", it) }
+                    },
                     stage = com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED, result = "FAIL")
                 error("The ${engine.id} engine did not start: $hint")
             }
             com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
+            if (engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID && com.example.vpn.connections.PsiphonChainMemory.isDirect(profile))
+                com.example.vpn.connections.PsiphonChainMemory.clear(ledgerNetwork())
             XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
             watchSidecar(engine, process)
             registerWarpThroughCarrier(engine.id, process, engineContext, launch, settings)
