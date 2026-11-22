@@ -253,6 +253,10 @@ class RayApplication : Application() {
         com.example.vpn.sidecar.MatrixTransportSidecar.identityDirectory = { java.io.File(noBackupFilesDir, "engines/matrix-transport") }
         com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
         com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
+        // Bundled Iran GeoFiles for Xray's geoip:/geosite: rules; copied off the main thread, and again on
+        // demand by XrayEngine if the VPN starts first.
+        com.example.xray.GeoAssets.install(this)
+        CoroutineScope(Dispatchers.IO).launch { com.example.xray.GeoAssets.ensureReady() }
         com.example.vpn.BundledResolvers.updatedAsset = { part -> com.example.update.ResolverPackUpdater.open(this, part) }
         com.example.vpn.sidecar.Sidecars.torStarter = { torrc, port -> com.example.vpn.sidecar.TorInApp.start(this, torrc, port) }
         com.example.vpn.sidecar.Sidecars.privatePsiphonSettings = { id ->
