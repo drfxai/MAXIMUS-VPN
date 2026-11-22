@@ -78,25 +78,26 @@ class FreeConfigListTest {
         assertEquals("NL", FreeConfigList.prepare(listOf(profile("NL \u00B7 VLESS 3", "104.21.10.3"))).single().countryCode)
     }
 
-    @Test fun neverMoreThanThirtyServersAreTakenFromAList() {
+    @Test fun neverMoreThanFiftyServersAreTakenFromAList() {
+        assertEquals(50, FreeConfigList.MAX_CONFIGS)
         val long = (1..300).map { profile("Free VLESS $it", "104.21.10.${it % 250 + 1}").copy(id = "p$it") }
         val taken = FreeConfigList.prepare(long)
-        assertEquals(30, taken.size)
-        assertEquals((1..30).map { "p$it" }, taken.map { it.id })
+        assertEquals(50, taken.size)
+        assertEquals((1..50).map { "p$it" }, taken.map { it.id })
     }
 
-    @Test fun anInstallHoldingHundredsKeepsTheFastestThirtyAndWhatTheUserChose() {
+    @Test fun anInstallHoldingHundredsKeepsTheFastestFiftyAndWhatTheUserChose() {
         val saved = (1..300).map { profile("Free VLESS $it", "104.21.10.${it % 250 + 1}").copy(id = "p$it", lastLatencyMs = if (it % 2 == 0) it * 10L else null) }
         val favourite = saved[298].copy(isFavorite = true)       // slow and untested, but the user's
         val inUse = saved[299]
         val all = saved.take(298) + favourite + inUse
         val dropped = FreeConfigList.surplus(all, keepId = inUse.id)
-        assertEquals(300 - 30, dropped.size)
+        assertEquals(300 - 50, dropped.size)
         assertFalse(dropped.any { it.id == favourite.id || it.id == inUse.id })
         val kept = all - dropped.toSet()
-        assertEquals(30, kept.size)
+        assertEquals(50, kept.size)
         // The rest of the kept servers are the fastest tested ones.
-        assertTrue(kept.filter { it.id != favourite.id && it.id != inUse.id }.all { it.lastLatencyMs != null && it.lastLatencyMs!! <= 560 })
+        assertTrue(kept.filter { it.id != favourite.id && it.id != inUse.id }.all { it.lastLatencyMs != null && it.lastLatencyMs!! <= 960 })
     }
 
     @Test fun serversDroppedFromTheListGoExceptFavouritesAndTheOneInUse() {

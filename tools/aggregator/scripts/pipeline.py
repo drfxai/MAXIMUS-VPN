@@ -26,7 +26,7 @@ LIFECYCLE_NEW = "NEW"
 LIFECYCLE_GLOBAL_VERIFIED = "GLOBAL_VERIFIED"
 LIFECYCLE_QUARANTINED = "QUARANTINED"
 
-MAX_PUBLISHED = 30
+MAX_PUBLISHED = 50
 
 # Score weights (sum 100). Latency is deliberately small: a stable 250 ms server must beat an
 # unstable 80 ms one.
@@ -217,13 +217,14 @@ def score(c: Candidate, history: dict | None = None, iran: dict | None = None) -
 # Diversity: how many published servers may share one failure domain or one kind, and how much of the
 # list one side of CDN / non-CDN may take while the other side has candidates.
 MAX_PER_DOMAIN = 3
-MAX_PER_KIND = 10
-MAX_PER_SOURCE = 12
+# Kind and source caps scale with the list (a third and about 0.36 of it): 15 and 18 of 50.
+MAX_PER_KIND = 15
+MAX_PER_SOURCE = 18
 MAX_CDN_SHARE = 0.7
 
 
 def select_diverse(candidates: list[Candidate], limit: int = MAX_PUBLISHED) -> list[Candidate]:
-    """Best score first, but never 30 servers that one filtering change could take down together.
+    """Best score first, but never a list of servers that one filtering change could take down together.
 
     Greedy over the score order with hard caps per failure domain, kind (protocol/transport/security)
     and source, and a cap on the CDN or non-CDN share while the other side has candidates. When the

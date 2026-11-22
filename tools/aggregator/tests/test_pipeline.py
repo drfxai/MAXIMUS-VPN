@@ -1,3 +1,4 @@
+import base64
 import json
 import sys
 import tempfile
@@ -33,7 +34,10 @@ class SecurityFilterTests(unittest.TestCase):
     def test_new_rejection_reasons(self):
         cases = {
             vless("203.0.113.7", transport="kcp"): "unsupported transport",
-            vless("203.0.113.7", extra="&fp=unsafe"): "insecure TLS settings",
+            vless("203.0.113.7", extra="&fp=unsafe"): "insecure TLS settings",  # REALITY needs a browser fingerprint
+            vless("203.0.113.7", extra="&pcs=ab&verify=0"): "insecure TLS settings",
+            vless("203.0.113.7", security="tls", extra="&fp=unsafe&allowInsecure=1"): "certificate checks disabled",
+            vless("203.0.113.7", extra="&path=/" + "a" * 4100): "too long",
             vless("2130706433"): "obfuscated address",
             vless("0x7f.0.0.1"): "obfuscated address",
             vless("[fd00::1]"): "private or reserved address",
@@ -42,6 +46,27 @@ class SecurityFilterTests(unittest.TestCase):
         }
         for link, reason in cases.items():
             self.assertEqual(reason, aggregate.problem(link), link)
+
+    def test_go_tls_fingerprint_passes_over_tls(self):
+        # fp=unsafe is Go's own TLS stack; the certificate is still checked, so plain TLS may use it.
+        self.assertIsNone(aggregate.problem(vless("203.0.113.7", security="tls", extra="&fp=unsafe")))
+        vm = {"v": "2", "add": "203.0.113.20", "port": "443", "id": UUID, "net": "ws", "tls": "tls",
+              "sni": "v.example", "path": "/", "fp": "unsafe"}
+        self.assertIsNone(aggregate.problem("vmess://" + base64.b64encode(json.dumps(vm).encode()).decode()))
+
+    def test_slash_slash_header_lines_are_skipped_not_quarantined(self):
+        state = {}
+        text = "//profile-title: base64:QQ==\n" + vless("203.0.113.7")
+        links, report = aggregate.collect([{"id": "one", "name": "one", "url": "https://a.example/s"}],
+                                          lambda url: text, state=state)
+        self.assertEqual(1, len(links))
+        self.assertEqual({}, report["rejected"])
+        self.assertEqual([], state["quarantine"])
+
+    def test_links_up_to_four_kilobytes_pass(self):
+        long_link = vless("203.0.113.7", extra="&path=/" + "a" * 3000)
+        self.assertGreater(len(long_link), 2048)
+        self.assertIsNone(aggregate.problem(long_link))
 
     def test_an_aead_shadowsocks_and_a_public_ipv6_pass(self):
         self.assertIsNone(aggregate.problem("ss://YWVzLTI1Ni1nY206cGFzcw@203.0.113.5:8388#S"))
@@ -114,23 +139,24 @@ class ScoringTests(unittest.TestCase):
 
 
 class SelectionTests(unittest.TestCase):
-    def test_never_more_than_thirty(self):
+    def test_never_more_than_fifty(self):
         many = [candidate(f"198.{18 + i // 250 + 30}.{i % 250}.7") for i in range(80)]
-        self.assertEqual(30, len(pipeline.select_diverse(many)))
+        self.assertEqual(50, pipeline.MAX_PUBLISHED)
+        self.assertEqual(50, len(pipeline.select_diverse(many)))
 
     def test_one_failure_domain_cannot_fill_the_list_while_others_exist(self):
-        # 40 fast Cloudflare servers and 10 slower direct ones on different networks.
-        cdn = [candidate(f"104.16.{i}.1", (100, 101, 100), transport="ws", security="tls") for i in range(40)]
+        # 60 fast Cloudflare servers and 10 slower direct ones on different networks.
+        cdn = [candidate(f"104.16.{i}.1", (100, 101, 100), transport="ws", security="tls") for i in range(60)]
         direct = [candidate(f"{20 + i}.0.0.1", (400, 410, 405)) for i in range(10)]
         picked = pipeline.select_diverse(cdn + direct)
-        self.assertEqual(30, len(picked))
+        self.assertEqual(50, len(picked))
         self.assertEqual(10, sum(1 for c in picked if not c.cdn))
-        # When the caps cannot fill 30, the rest is filled from the best remaining.
-        self.assertEqual(20, sum(1 for c in picked if c.cdn))
+        # When the caps cannot fill 50, the rest is filled from the best remaining.
+        self.assertEqual(40, sum(1 for c in picked if c.cdn))
 
     def test_caps_hold_when_enough_alternatives_exist(self):
         same = [candidate(f"203.0.{i}.7", (90, 90, 90)) for i in range(20)]
-        others = [candidate(f"{30 + i}.1.0.1", (300, 300, 300), source=f"s{i % 5}") for i in range(40)]
+        others = [candidate(f"{30 + i}.1.0.1", (300, 300, 300), source=f"s{i % 5}") for i in range(60)]
         picked = pipeline.select_diverse(same + others)
         report = pipeline.diversity_report(picked)
         self.assertLessEqual(report["largest_failure_domain"], pipeline.MAX_PER_DOMAIN)
