@@ -9,7 +9,7 @@ import java.io.File
 /** Direct anti-DPI access. Never claims a foreign exit or silently enables a VPN fallback. */
 object ServerlessSidecar : SidecarEngine {
     const val ID = "serverless"
-    const val CONFIG_REVISION = "946ed8945c9202217376818db061bcb2e204a9e1"
+    const val CONFIG_REVISION = "4f45a7645fe9771bc550f93923262143da744706"
     override val id = ID
     override val binary = ID
     val resolvers = listOf("auto", "cloudflare", "google")
