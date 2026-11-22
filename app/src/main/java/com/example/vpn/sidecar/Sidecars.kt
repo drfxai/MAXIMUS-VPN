@@ -33,6 +33,10 @@ object Sidecars {
     /** This app uses the same local physical network identity as LAB for Psiphon tactics. */
     @Volatile var psiphonNetworkIdentity: (() -> String)? = null
     @Volatile var psiphonLinkDns: (() -> List<String>)? = null
+    /** True when the physical link is metered (cellular, hotspot); Psiphon then gets a longer start budget. */
+    @Volatile var psiphonLinkMetered: (() -> Boolean)? = null
+    /** (Android release, SDK level, package name) for Psiphon's ClientPlatform / ClientAPILevel. */
+    @Volatile var psiphonClientPlatform: (() -> Triple<String, Int, String>)? = null
     /** Optional per-install settings, encrypted by the application; never written to an APK. */
     @Volatile var psiphonSettings: (() -> String?)? = null
     /** Only encrypted per-user private server profiles; never falls back to public settings. */
