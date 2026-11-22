@@ -68,9 +68,11 @@ enum class Cdn(val label: String, val ranges: List<String>, val speedHost: Strin
  * address swapped (SNI, Host, path and credentials unchanged) before anything is used.
  */
 class CdnEdgeScanner(
-    private val handshake: (ip: String, port: Int, sni: String, timeoutMs: Int) -> Handshake = ::liveHandshake,
+    private val handshake: (ip: String, port: Int, sni: String, timeoutMs: Int) -> Handshake =
+        { ip, port, sni, timeoutMs -> liveHandshake(ip, port, sni, timeoutMs) },
     /** KB/s of a small download from [ip] with [host] as the TLS name, or null when it failed. */
-    private val download: (ip: String, host: String, bytes: Int, timeoutMs: Int) -> Long? = ::liveDownload,
+    private val download: (ip: String, host: String, bytes: Int, timeoutMs: Int) -> Long? =
+        { ip, host, bytes, timeoutMs -> liveDownload(ip, host, bytes, timeoutMs) },
     private val random: Random = Random.Default,
     val concurrency: Int = 16,
     val timeoutMs: Int = 1_800

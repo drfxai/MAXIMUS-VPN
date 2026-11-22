@@ -99,8 +99,9 @@ object SniProxyDetector {
     /** Gathers [Evidence] on the phone's network: 6 Cloudflare edges, a decoy per other CDN, and one trace. */
     fun probe(
         expectedCountry: String?,
-        handshake: (ip: String, port: Int, sni: String, timeoutMs: Int) -> Handshake = CdnEdgeScanner::liveHandshake,
-        trace: (ip: String) -> String? = ::liveTrace,
+        handshake: (ip: String, port: Int, sni: String, timeoutMs: Int) -> Handshake =
+            { ip, port, sni, t -> CdnEdgeScanner.liveHandshake(ip, port, sni, t) },
+        trace: (ip: String) -> String? = { liveTrace(it) },
         random: Random = Random.Default,
         timeoutMs: Int = 2_000
     ): Evidence {
