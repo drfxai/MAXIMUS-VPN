@@ -1,6 +1,6 @@
 name: Signed Android release
 
-# Refresh V1.0.4 only after the reviewed release manifest reaches main.
+# Refresh V1.0.5 only after the reviewed release manifest reaches main.
 on:
   push:
     branches: [main]

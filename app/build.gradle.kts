@@ -27,7 +27,7 @@ android {
     // Android requires monotonic versionCode; use the actual release workflow build number.
     // 61 remains the local/debug baseline and the floor for older public builds.
     versionCode = maxOf(61, System.getenv("MAXIMUS_RELEASE_BUILD").orEmpty().trim().toIntOrNull() ?: 0)
-    versionName = "1.0.4"
+    versionName = "1.0.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
