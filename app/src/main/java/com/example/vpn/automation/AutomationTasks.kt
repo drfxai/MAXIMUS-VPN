@@ -89,7 +89,8 @@ class AutomationTasks(private val context: Context, private val stopped: () -> B
                 .filter(BundledResolvers::publicIpv4).distinct().take(MAX_RESOLVERS)
             val udp = TunnelResolverProbe.scan(ips, domain) { ip -> TunnelResolverProbe.probe(ip, domain, TunnelResolverProbe.Udp(ip)) }
             val doh = if (group.none { it.kind == EngineKind.DNSTT }) emptyList() else {
-                val urls = (TunnelResolverProbe.DOMESTIC_DOH + group.flatMap { it.configured }.filter { it.startsWith("https://") }).distinct()
+                // dnstt accepts only IP-literal DoH URLs, so only the profiles' own DoH resolvers are candidates.
+                val urls = group.flatMap { it.configured }.filter { it.startsWith("https://") }.distinct()
                 TunnelResolverProbe.scan(urls, domain, parallelism = 3) { url ->
                     TunnelResolverProbe.probe(url, domain, TunnelResolverProbe.Doh(url), kind = "doh")
                 }

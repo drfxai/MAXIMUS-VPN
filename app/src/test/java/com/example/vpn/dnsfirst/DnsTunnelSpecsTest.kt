@@ -44,8 +44,10 @@ class DnsTunnelSpecsTest {
         assertTrue(s.resolvers.all { it.kind == DnsttSidecar.ResolverKind.UDP })
         assertEquals(2, s.qps); assertTrue(s.perResolver); assertEquals(4, s.totalQps)
         assertEquals(dnstt.id, stripe.id)
-        val doh = DnsTunnelSpecs.apply(dnstt, Rung(dnstt.id, EngineKind.DNSTT, "doh", Via.DOH, listOf("https://free.shecan.ir/dns-query"), 1))!!
+        val doh = DnsTunnelSpecs.apply(dnstt, Rung(dnstt.id, EngineKind.DNSTT, "doh", Via.DOH, listOf("https://9.9.9.9/dns-query"), 1))!!
         assertEquals(DnsttSidecar.ResolverKind.DOH, DnsttSidecar.settings(doh).kind)
+        assertNull("dnstt refuses host-name DoH URLs", DnsTunnelSpecs.apply(dnstt,
+            Rung(dnstt.id, EngineKind.DNSTT, "doh", Via.DOH, listOf("https://doh.invalid.example/dns-query"), 1)))
         assertNull("dnstt has no plain TCP mode", DnsTunnelSpecs.apply(dnstt, Rung(dnstt.id, EngineKind.DNSTT, "tcp", Via.TCP, listOf("5.5.5.5"))))
     }
 

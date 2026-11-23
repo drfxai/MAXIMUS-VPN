@@ -84,13 +84,6 @@ data class TunnelCaps(
 }
 
 object TunnelResolverProbe {
-    /**
-     * Domestic DNS-over-HTTPS endpoints published by their operators (Shecan, 403.online). They are tried as
-     * dnstt DoH resolvers when foreign UDP/53 is gone; whether they recurse for a tunnel domain is measured,
-     * never assumed.
-     */
-    val DOMESTIC_DOH = listOf("https://free.shecan.ir/dns-query", "https://dns.403.online/dns-query")
-
     data class Timeouts(val queryMs: Int = 1_500, val burstMs: Int = 1_800, val tcpMs: Int = 2_000)
 
     /** How the probe reaches one resolver; the real ones are [Udp] and [Doh], tests use fakes. */

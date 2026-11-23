@@ -37,7 +37,7 @@ The resolver scanner answers "does this resolver tell the truth about a public n
 Transports:
 
 - **UDP/TCP 53** from the app's own sockets.
-- **DoH (RFC 8484 POST)**. This includes two domestic endpoints published by their operators: `https://free.shecan.ir/dns-query` and `https://dns.403.online/dns-query`. They are only *candidates*. Whether they recurse for a tunnel domain is measured, never assumed.
+- **DoH (RFC 8484 POST)** for the DoH resolvers a dnstt profile already carries. dnstt accepts only IP-literal DoH URLs, so the app never resolves a resolver's own name; domestic DoH endpoints are therefore not candidates (see the deferred items below).
 
 A reply from an address other than the one asked is treated as interception and ignored.
 
@@ -49,7 +49,7 @@ For every saved dnstt, Slipstream and CottenDNS/MasterDNS profile, the ladder pl
 2. **stripe-udp**: the best 3 suitable resolvers at once, so the engine spreads its load over them. For dnstt this sets `-qps-per-resolver` to the slowest member's measured rate.
 3. **single-udp**: only the best resolver.
 4. **tcp**: CottenDNS only, through resolvers that answered over TCP/53.
-5. **doh**: dnstt only, through a DoH endpoint that recursed for the tunnel domain (domestic ones included).
+5. **doh**: dnstt only, through one of the profile's own DoH resolvers that recursed for the tunnel domain.
 6. **as-configured**: the profile as saved.
 
 Rules the ladder follows:
@@ -111,6 +111,7 @@ A config that answers once is cleared from the list.
 - **XDNS (Xray finalmask) as a ladder engine.** There is no first-class XDNS profile type yet (`docs` survey, 2026-11-23). Once there is, it plugs in as a fourth `EngineKind`.
 - **QPS/rate-limit detection over time.** The burst gives a first rate. Changing the rate while a tunnel runs needs engine feedback that dnstt/Slipstream/CottenDNS don't expose.
 - **A DNS-reachable mirror for GeoFiles.** In a DNS-only shutdown, nothing but DNS reaches outside. The only "mirror" then is the DNS tunnel itself, so the task downloads through the tunnel once one is up. jsDelivr mirrors of the `release` branch carry the same files and `.sha256sum`s but no release tag to compare. They are left out so the updater keeps a single version source.
+- **Domestic DoH endpoints (Shecan `free.shecan.ir/dns-query`, 403.online `dns.403.online/dns-query`) as dnstt resolvers.** These are host names, but dnstt accepts only IP-literal DoH URLs, so that no lookup can leak or loop, and their certificates don't cover IP addresses. Using them needs a sidecar change that pins host to IP while keeping the TLS name. That change is left to its own review.
 - **DoT/DoH variants for Slipstream and CottenDNS.** Slipstream takes only UDP resolvers. CottenDNS DoT/DoH needs per-resolver TLS names that the probe does not learn.
 
 ## Tests

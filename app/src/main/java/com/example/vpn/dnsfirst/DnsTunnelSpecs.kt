@@ -60,6 +60,8 @@ object DnsTunnelSpecs {
                     }.take(DnsttSidecar.MAX_RESOLVERS)
                     val qps = (rung.qpsPerResolver ?: s.qps).coerceIn(1, DnsttSidecar.MAX_QPS)
                     DnsttSidecar.withSettings(profile, s.copy(resolvers = resolvers, qps = qps, perResolver = resolvers.size > 1 && rung.qpsPerResolver != null))
+                        // dnstt takes only IP-literal DoH URLs (no lookup that could leak or loop): refuse what it would refuse.
+                        .also { DnsttSidecar.settings(it) }
                 }
                 EngineKind.SLIPSTREAM -> {
                     if (rung.via != DnsTunnelLadder.Via.UDP) return null

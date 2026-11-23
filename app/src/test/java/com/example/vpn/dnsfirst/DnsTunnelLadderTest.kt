@@ -23,7 +23,7 @@ class DnsTunnelLadderTest {
     @Test
     fun dnsttRungsStripeThenSingleThenDohThenAsConfigured() {
         val c = listOf(caps("5.5.5.5", "t.a.com", 40), caps("6.6.6.6", "t.a.com", 80, burst = 7), caps("7.7.7.7", "t.a.com", 120),
-            caps("8.8.4.4", "t.a.com", 900), caps("https://free.shecan.ir/dns-query", "t.a.com", 300, transport = "doh"))
+            caps("8.8.4.4", "t.a.com", 900), caps("https://9.9.9.9/dns-query", "t.a.com", 300, transport = "doh"))
         val rungs = DnsTunnelLadder.rungsFor(dnstt, c, memory(), net)
         assertEquals(listOf("stripe-udp", "single-udp", "doh", "as-configured"), rungs.map { it.variant })
         assertEquals(listOf("5.5.5.5", "6.6.6.6", "7.7.7.7"), rungs[0].resolvers)
