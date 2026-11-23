@@ -86,6 +86,8 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
     private var scannedProfile: com.example.data.model.VlessProfile? = null
     private var scannedPort: Int? = null
     private var scannedAt = 0L
+    /** Seconds for the real request through a config on each handshake-scanned CDN edge. */
+    private val cdnEdgeProbeSec = 8
     private var scannedNetwork: android.net.Network? = null
     private val connectivity =
         requireNotNull(app.getSystemService(android.net.ConnectivityManager::class.java))
@@ -300,6 +302,24 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
         val chosen = profiles.firstOrNull { it.id == targetId }
         // A config that cannot take a clean IP (Reality, raw TCP, DNS tunnels) is not scanned through: every
         // edge would fail its checks. Without a usable choice, the first config that can take one is used.
+        // The chosen config's front decides the scan (CleanEdgePlan, as Smart Connect's stage E): Cloudflare
+        // WebSocket/HTTPUpgrade takes the origin-checked WebSocket scan below; XHTTP, gRPC, H2 and Fastly,
+        // CloudFront or Gcore fronts take a handshake scan of their own CDN, each edge then checked with a real
+        // request; on a network that proxies Cloudflare TLS by name, Cloudflare is not scanned at all.
+        if (chosen != null && customSubnet.isNullOrBlank() && _state.value.customSubnet.isBlank() &&
+            com.example.vpn.cleanip.CdnEdgeScanner.fronted(chosen)) {
+            val network = com.example.vpn.smart.NetworkIdentity.current(getApplication<android.app.Application>())
+            val cdn = app.cdnCleanIps.cdnOf(chosen)
+            val proxied = if (cdn == com.example.vpn.cleanip.Cdn.CLOUDFLARE) app.cdnCleanIps.cloudflareProxied(network, app.networkCountry()) else false
+            val decision = com.example.vpn.cleanip.CleanEdgePlan.decide(chosen, cdn, proxied)
+            if (!decision.runs) {
+                resetLogs("[CDN_SCANNER_SKIP] target=${chosen.name} ${decision.skipped}")
+                app.cleanIpCache.proxyReasons(network).forEach { appendLog("[SNI_PROXY] $it") }
+                scannedProfile = null
+                return@runJob _state.value.copy(edges = emptyList(), status = "No scan: ${decision.skipped}.", scanPaused = false)
+            }
+            if (!decision.websocketScan) return@runJob scanCdnEdges(chosen, decision.cdn!!, network, speedTest)
+        }
         val profile = chosen?.takeIf { CleanIpOptimizer.canRevive(it) }
             ?: profiles.firstOrNull { CleanIpOptimizer.canRevive(it) }?.takeIf { chosen == null }
 
@@ -378,6 +398,54 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
             edges = edges,
             status = if (profile != null) "Found ${edges.size} clean Cloudflare IPs that reach '${profile.name}'."
                 else "Found ${edges.size} Cloudflare IPs that answer from this network.",
+            scanPaused = false
+        )
+    }
+
+    /**
+     * Handshake scan of [cdn]'s edges with [profile]'s own TLS name (cached per network), then one real request
+     * through the config on each edge; only edges that carried it are listed, so they can be saved like a
+     * WebSocket-checked Cloudflare edge.
+     */
+    private suspend fun scanCdnEdges(
+        profile: com.example.data.model.VlessProfile,
+        cdn: com.example.vpn.cleanip.Cdn,
+        network: String,
+        speedTest: Boolean
+    ): PanelManagerUiState {
+        val app = RayApplication.instance
+        scannedNetwork = connectivity.activeNetwork
+        scannedProfile = null
+        scannedPort = profile.port
+        resetLogs("[CDN_SCANNER_START] cdn=${cdn.label} transport=${profile.transport} target=${profile.name}")
+        _state.update {
+            it.copy(edges = emptyList(), tested = 0, reachable = 0, scanTotal = 48, scanProfileName = profile.name,
+                currentScanIp = "", scanPaused = false, scanStartedAt = android.os.SystemClock.elapsedRealtime())
+        }
+        val scope = com.example.vpn.connectivity.EndpointScoringEngine.destinationScope(network, profile, profile.port)
+        val found = app.cdnCleanIps.find(profile, network, app.networkCountry(),
+            preferred = runCatching { app.endpointScores.remembered(scope, limit = 4) }.getOrDefault(emptyList()),
+            speedTop = if (speedTest) 2 else 0, checkProxy = false, knownCdn = cdn)
+        appendLog("[CDN_SCANNER] ${found.ips.size} edges completed TLS for the config's name${if (found.fromCache) " (remembered on this network)" else ""}")
+        scanCheckpoint()
+        _state.update { it.copy(tested = found.ips.size, scanTotal = found.ips.size.coerceAtLeast(1) ) }
+        val outcomes = if (found.ips.isEmpty()) emptyList() else com.example.xray.RealDelayProbe.measure(
+            found.ips.map { com.example.vpn.smart.RouteRecipe.pinEndpoint(profile, it) }, cdnEdgeProbeSec)
+        scanCheckpoint()
+        val edges = found.ips.zip(outcomes).mapNotNull { (ip, o) ->
+            (o as? com.example.xray.RealDelayProbe.Outcome.Delay)?.let { CleanIpOptimizer.verifiedCdnEdge(ip, cdn, it.latencyMs, profile.name) }
+        }.sortedBy { it.medianMs }
+        val now = System.currentTimeMillis()
+        runCatching {
+            app.endpointScores.record(edges.map { com.example.vpn.connectivity.EndpointScoringEngine.Measurement(it.ip, scope, now, true, it.medianMs) })
+        }
+        scannedProfile = profile
+        scannedAt = android.os.SystemClock.elapsedRealtime()
+        appendLog("[CDN_SCANNER_DONE] edges that carried a real request=${edges.size}")
+        return _state.value.copy(
+            edges = edges,
+            reachable = edges.size,
+            status = "Found ${edges.size} clean ${cdn.label} edges that reach '${profile.name}'.",
             scanPaused = false
         )
     }

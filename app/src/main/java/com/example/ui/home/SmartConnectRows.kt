@@ -42,7 +42,7 @@ object SmartConnectRows {
         SearchStage.SELECTED -> "The server you chose"
         SearchStage.SAME_SERVER -> "Recovered settings, fragment, fingerprint, ECH"
         SearchStage.OTHER_SERVERS -> "Your other servers, in rounds of ${limits.roundSize}"
-        SearchStage.EMERGENCY -> "Clean Cloudflare address · WARP and Tor in GOD MODE only"
+        SearchStage.EMERGENCY -> "Clean CDN address · WARP and Tor in GOD MODE only"
         SearchStage.RECOVERY -> "Other families and built-in engines, up to ${limits.recoverySec} s"
         SearchStage.REVIVAL -> "Dead Cloudflare configs, up to ${limits.revivalSec} s"
     }

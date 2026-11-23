@@ -9,10 +9,10 @@ object DnsServerScripts {
         "arm64" to "19d7dad466835b1dff6f73ed44c2588b7fba137b7d5d8c731e7e0c05fbb96c80"
     )
     /** MasterDnsVPN by Amin Mahmoudi (masterking32), MIT. Release archives pinned by SHA-256. */
-    const val MASTERDNS_VERSION = "v2026.10.26.100415-5f83ee9"
+    const val MASTERDNS_VERSION = "v2026.11.18.210322-7198b45"
     internal val MASTERDNS_SHA = mapOf(
-        "amd64" to "3f5c1ae974dcecb1b0536c0e60ac2711da42eb066d3b8470c641e498825aa0d8",
-        "arm64" to "d6dbfe018a447f15a81f6cd4911488bc39cf0002b2314b0b12b368464ce50b07"
+        "amd64" to "d0f455ac87afb31010dbc9203d74c3ca24eed52b728873694d10d04b4fd24b06",
+        "arm64" to "5f284644af2b2b3a747473a1a9df694fced10592ced0e5847fb77226fbb73895"
     )
     const val MASTERDNS_DIR = "/etc/maximus/masterdns"
     /** MasterDNS AES-256-GCM; the phone's MasterDNS client accepts methods 3 to 5. */

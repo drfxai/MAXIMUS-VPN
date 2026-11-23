@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 
@@ -88,6 +89,8 @@ class RayVpnService : VpnService() {
         private const val PING_HEALTHY_MS = 30_000L
         /** How long a clean-address scan may take before the connect goes on without one. */
         private const val CLEAN_IP_SCAN_LIMIT_MS = 15_000L
+        /** How long stage E waits for the CDN lookup and the SNI-proxy check before scanning without them. */
+        private const val CLEAN_IP_LOOKUP_MS = 4_000L
         /** Requests through a new tunnel before it counts as unverified, and the pause between them. */
         private const val VERIFY_ATTEMPTS = 3
         private const val VERIFY_RETRY_MS = 1_500L
@@ -698,23 +701,43 @@ class RayVpnService : VpnService() {
     }
 
     /**
-     * A Cloudflare-fronted server whose address is blocked usually still answers on another Cloudflare
-     * address: this scans for one and returns the same server reached through it, if it carries traffic.
+     * A CDN-fronted server (WebSocket, HTTPUpgrade, XHTTP, gRPC or H2 over TLS; Cloudflare, Fastly, CloudFront
+     * or Gcore) whose address is blocked usually still answers on another edge of the same CDN: this looks for
+     * one ([com.example.vpn.cleanip.CleanEdgePlan]) and returns the same server reached through it, if it
+     * carries two real requests. Cloudflare is not scanned on a network that proxies Cloudflare TLS by name.
      */
-    private suspend fun cleanIpPath(profile: VlessProfile, timeoutSec: Int): com.example.vpn.smart.ServerRace.Winner? {
-        val fronted = profile.transport.lowercase() in setOf("ws", "xhttp", "splithttp", "httpupgrade", "grpc", "h2") &&
-            profile.security.equals("tls", true) && !profile.allowInsecure
-        if (!fronted) return null
-        showForegroundNotification("Looking for a verified clean path...")
+    private suspend fun cleanIpPath(
+        profile: VlessProfile,
+        timeoutSec: Int,
+        /** The config's CDN when the caller already looked it up; null looks it up here. */
+        knownCdn: com.example.vpn.cleanip.Cdn? = null
+    ): com.example.vpn.smart.ServerRace.Winner? {
+        if (!com.example.vpn.cleanip.CdnEdgeScanner.fronted(profile)) return null
+        val started = System.currentTimeMillis()
+        val app = com.example.RayApplication.instance
+        val finder = app.cdnCleanIps
         val scanNetwork = ledgerNetwork()
+        // The CDN lookup (a DNS answer for a domain address) and the SNI-proxy check do blocking network I/O:
+        // each runs in the service scope and is only waited on briefly. A check that finishes later is still
+        // remembered for this network, so the next connect here knows.
+        val cdn = knownCdn ?: bounded(CLEAN_IP_LOOKUP_MS) { finder.cdnOf(profile) }
+        val proxied = if ((cdn ?: com.example.vpn.cleanip.Cdn.CLOUDFLARE) != com.example.vpn.cleanip.Cdn.CLOUDFLARE) false
+            else app.cleanIpCache.sniProxied(scanNetwork)
+                ?: bounded(CLEAN_IP_LOOKUP_MS) { finder.cloudflareProxied(scanNetwork, app.networkCountry()) }
+        val decision = com.example.vpn.cleanip.CleanEdgePlan.decide(profile, cdn, proxied)
+        if (!decision.runs) {
+            XrayLogManager.i("SMART", "Clean-edge scan skipped: ${decision.skipped}.")
+            return null
+        }
+        showForegroundNotification("Looking for a verified clean path...")
         val scope = com.example.vpn.connectivity.EndpointScoringEngine.destinationScope(scanNetwork, profile)
-        val endpointScores = com.example.RayApplication.instance.endpointScores
+        val endpointScores = app.endpointScores
         val cached = endpointScores.validated(scope)
-        // Candidates must pass TLS with this server's own name and its WebSocket/HTTP exchange, not just a TCP
-        // connect: on a filtered network nearly every Cloudflare address accepts TCP and then drops TLS.
-        // Addresses that worked here before are tested first; what passes before the time limit is kept.
+        // Candidates must pass TLS with this server's own name (and, for Cloudflare WebSocket, its WebSocket/HTTP
+        // exchange), not just a TCP connect: on a filtered network nearly every CDN address accepts TCP and then
+        // drops TLS. Addresses that worked here before are tested first; what passes before the time limit is kept.
         val found = java.util.Collections.synchronizedList(mutableListOf<String>())
-        withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
+        if (decision.websocketScan) withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
             try {
                 com.example.panels.CleanIpOptimizer().scan(profile, targetPort = profile.port, enableSpeedTest = false,
                     candidateCount = 48, preferred = endpointScores.remembered(scope, limit = 4),
@@ -728,17 +751,38 @@ class RayVpnService : VpnService() {
                 XrayLogManager.w("SMART", "Clean-IP scan stopped: ${e.message}")
             }
         }
-        val candidates = synchronized(found) { found.toList() }
+        val websocket = synchronized(found) { found.toList() }
+        val remaining = CLEAN_IP_SCAN_LIMIT_MS - (System.currentTimeMillis() - started)
+        // XHTTP, gRPC and H2 configs, Fastly/CloudFront/Gcore fronts, and too few WebSocket edges: handshake-ranked
+        // edges of the config's own CDN with its own TLS name, cached per network (fresh cache answers at once).
+        val handshake = if (!com.example.vpn.cleanip.CleanEdgePlan.topUp(decision, websocket.size, remaining)) emptyList() else
+            withTimeoutOrNull(remaining) {
+                runCatching {
+                    finder.find(profile, scanNetwork, app.networkCountry(), preferred = websocket, speedTop = 0, checkProxy = false,
+                        knownCdn = decision.cdn)
+                }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                    .onSuccess { f -> XrayLogManager.i("SMART", "${f.cdn?.label ?: "CDN"} edges for ${profile.transport}: ${f.ips.size}${if (f.fromCache) " (remembered here)" else ""}.") }
+                    .getOrNull()?.ips
+            }.orEmpty()
+        if (ledgerNetwork() != scanNetwork) return null
+        val candidates = com.example.vpn.cleanip.CleanEdgePlan.candidates(cached, websocket, handshake)
+        if (candidates.isEmpty()) return null
         val attempt = kotlinx.coroutines.currentCoroutineContext()[Job]
         return com.example.vpn.Abandonable.run {
-            com.example.vpn.smart.CleanPathRace.select(profile, (cached + candidates).distinct(),
+            com.example.vpn.smart.CleanPathRace.select(profile, candidates,
                 probe = { paths -> probeAll(paths, timeoutSec) },
                 cancelled = { attempt?.isActive == false || ledgerNetwork() != scanNetwork })
         }?.also {
-            com.example.RayApplication.instance.endpointScores.record(listOf(com.example.vpn.connectivity.EndpointScoringEngine.Measurement(
+            endpointScores.record(listOf(com.example.vpn.connectivity.EndpointScoringEngine.Measurement(
                 it.profile.address, scope, System.currentTimeMillis(), true, it.latencyMs)))
-            XrayLogManager.i("SMART", "A clean path carried two real requests (${it.latencyMs} ms).")
+            XrayLogManager.i("SMART", "A clean ${decision.cdn?.label ?: "CDN"} path carried two real requests (${it.latencyMs} ms).")
         }
+    }
+
+    /** [block] on the service scope, waited on for at most [ms]; null when it took longer or failed. It keeps running. */
+    private suspend fun <T> bounded(ms: Long, block: () -> T): T? {
+        val job = serviceScope.async(Dispatchers.IO) { runCatching(block).getOrNull() }
+        return withTimeoutOrNull(ms) { job.await() }
     }
 
     /**
@@ -830,6 +874,8 @@ class RayVpnService : VpnService() {
         }
         fun recentlyFailed(p: VlessProfile) = !force &&
             book.eligibility(com.example.vpn.connectivity.PathRef.of(p)) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED
+        psiphonDirectStartFailed = false
+        psiphonChainAllowed = false
         try {
             supervisor.requestProtection()
             ensureBlockingInterface()
@@ -930,6 +976,34 @@ class RayVpnService : VpnService() {
                         "recovery engines go first, Aether (WARP) last.")
                 }
             }
+
+            // Direct Psiphon failed to start on this network in the last 6 h: an automatic connect starts with Psiphon
+            // over Lantern instead of spending another 2 x 120 s on direct (PsiphonChainMemory). Never when pinned.
+            if (com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile) &&
+                com.example.vpn.connections.PsiphonChainMemory.preferChain(routeNetwork)) {
+                val chain = com.example.vpn.connections.PsiphonChainMemory.chainProfile()
+                if (com.example.vpn.connections.PsiphonChainMemory.mayUseChain(direct = true, smart = smart,
+                        autoFailover = settings.autoFailoverEnabled, fallback = settings.powerButtonFallback,
+                        exact = exact, exitLocked = lockExit, force = force, chainAlreadyTried = chain.id in exclude,
+                        chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null)) {
+                    com.example.vpn.diagnostics.events.EventLog.event("psiphon.chain_first", attributes = mapOf(
+                        "reason" to com.example.vpn.connections.PsiphonChainMemory.describe(routeNetwork)))
+                    XrayLogManager.i("SMART", "Psiphon: " + com.example.vpn.connections.PsiphonChainMemory.describe(routeNetwork) + ".")
+                    requestedProfile = chain
+                    profile = chain
+                    activeProfile = chain
+                    mutateState { if (it.attemptId == attemptId) it.copy(activeProfile = chain, attemptedProfileId = chain.id) else it }
+                }
+            }
+            // Whether a failed direct Psiphon start may hand over to Psiphon over Lantern in this connect (the failure
+            // handler's own check). startSidecar reads it to skip a TCP-only retry the first start already disproved.
+            psiphonChainAllowed = com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile) &&
+                com.example.vpn.connections.PsiphonChainMemory.chainProfile().let { chain ->
+                    com.example.vpn.connections.PsiphonChainMemory.mayUseChain(direct = true, smart = smart,
+                        autoFailover = settings.autoFailoverEnabled, fallback = settings.powerButtonFallback,
+                        exact = exact, exitLocked = lockExit, force = force, chainAlreadyTried = chain.id in exclude,
+                        chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null)
+                }
 
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
             var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
@@ -1057,7 +1131,7 @@ class RayVpnService : VpnService() {
             search = tracker
             plan.reading?.let { XrayLogManager.i("SMART", "Measured network: ${it.summary()}.") }
             plan.transportsSkipped.forEach { (t, why) -> XrayLogManager.i("SMART", "${t.title} not tried directly: $why.") }
-            if (plan.cloudflareLast) XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0): clean IP, WARP, MASQUE " +
+            if (plan.cloudflareLast) XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0): clean IP for Cloudflare fronts, WARP, MASQUE " +
                 "and Matrix move to the end of the search.")
             var raced = false
             // What the pre-flight proved (PathGate): a real request failed on the selected path, or an
@@ -1346,13 +1420,25 @@ class RayVpnService : VpnService() {
                     tracker.finish(com.example.vpn.smart.SearchStage.OTHER_SERVERS, verified = raced)
                 }
                 if (choice.nothingWorked && !raced) tracker.start(com.example.vpn.smart.SearchStage.EMERGENCY)
-                // Nothing worked, and the server sits behind Cloudflare: its address may be blocked
-                // while other Cloudflare addresses are not. Scan for one and try the same server there.
-                if (choice.nothingWorked && !raced && plan.early(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) {
-                    cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
+                // Nothing worked, and the server sits behind a CDN: its address may be blocked while other
+                // edges of the same CDN are not. Scan for one and try the same server there.
+                // cf=0: the clean-address scan waits for the end of the search (after the recovery engines), unless the
+                // config sits on Fastly, CloudFront or Gcore, which a Cloudflare block does not touch (CleanEdgePlan.timing).
+                if (choice.nothingWorked && !raced) {
+                    val early = plan.early(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)
+                    val deferred = plan.deferred(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)
+                    val front = if (!early && deferred && com.example.vpn.cleanip.CdnEdgeScanner.fronted(requestedProfile))
+                        bounded(CLEAN_IP_LOOKUP_MS) { com.example.RayApplication.instance.cdnCleanIps.frontOf(requestedProfile) } else null
+                    when (com.example.vpn.cleanip.CleanEdgePlan.timing(early, deferred, front)) {
+                        com.example.vpn.cleanip.CleanEdgePlan.Timing.EARLY -> {
+                            if (!early) XrayLogManager.i("SMART", "Cloudflare is blocked here, but this config is fronted by " +
+                                "${front?.label}: its clean edges are tried now, not at the end.")
+                            cleanIpPath(requestedProfile, timeouts.alternateSec, knownCdn = front)?.let { adopt(it) }
+                        }
+                        com.example.vpn.cleanip.CleanEdgePlan.Timing.DEFERRED -> cleanIpDeferred = true
+                        com.example.vpn.cleanip.CleanEdgePlan.Timing.NONE -> Unit
+                    }
                 }
-                // cf=0: the clean-address scan waits for the end of the search (after the recovery engines).
-                if (choice.nothingWorked && !raced && plan.deferred(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) cleanIpDeferred = true
                 // Sidecar engines must carry requests before selection. The shared recovery pool below
                 // tests MASQUE, Psiphon, saved Tor bridges and chains serially in DAILY and GOD MODE;
                 // choosing several untested engines here used to overwrite the earlier choices with Tor.
@@ -2088,6 +2174,26 @@ class RayVpnService : VpnService() {
                     exclude = exclude + requestedProfile.id + ENGINE_FAILED_MARKER)
                 return@withContext
             }
+            // Direct Psiphon never brought a tunnel up here: try Psiphon chained over Lantern before giving up
+            // (build 170 Irancell: direct timed out twice while the chain connected at once).
+            if (psiphonDirectStartFailed && configured != null) {
+                psiphonDirectStartFailed = false
+                val chain = com.example.vpn.connections.PsiphonChainMemory.chainProfile()
+                if (com.example.vpn.connections.PsiphonChainMemory.mayUseChain(
+                        direct = com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile),
+                        smart = smart, autoFailover = configured.autoFailoverEnabled,
+                        fallback = configured.powerButtonFallback, exact = exactSession,
+                        exitLocked = com.example.vpn.safety.OperatingModePolicy.of(configured.operationalMode).lockExit,
+                        force = force, chainAlreadyTried = chain.id in exclude,
+                        chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null)) {
+                    com.example.vpn.diagnostics.events.EventLog.event("psiphon.chain_fallback", attributes = mapOf(
+                        "reason" to "direct Psiphon start failed", "next" to "psiphon over lantern"))
+                    XrayLogManager.w("SMART", "Direct Psiphon did not start on this network; trying Psiphon over Lantern.")
+                    showForegroundNotification("Psiphon failed; trying Psiphon over Lantern...")
+                    connectLocked(chain, smart = smart, exclude = exclude + requestedProfile.id)
+                    return@withContext
+                }
+            }
             if (fallbackFromDirect(requestedProfile)) return@withContext
             if (protectionRequested) showForegroundNotification("Traffic blocked: connection failed")
             if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
@@ -2096,6 +2202,10 @@ class RayVpnService : VpnService() {
     }
 
     @Volatile private var directFallbackAttempt: String? = null
+    /** Direct Psiphon failed its start in the current connect attempt (set in [startSidecar], read by its catch). */
+    @Volatile private var psiphonDirectStartFailed = false
+    /** The current connect may hand a failed direct Psiphon start over to Psiphon over Lantern (set in connectLocked). */
+    @Volatile private var psiphonChainAllowed = false
 
     /** Aether that stopped because WARP data is blocked here, waiting for a verified saved server to relay through. */
     private data class AetherRelayPending(val aether: VlessProfile, val smart: Boolean, val network: String, val at: Long)
@@ -2479,6 +2589,8 @@ class RayVpnService : VpnService() {
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,
                 relayExitRoute = relayExitRoute, metered = metered, manual = exactSession, cloudflareBlocked = cfBlocked,
+                lanternAvailable = engine.id == com.example.vpn.sidecar.AetherSidecar.ID &&
+                    runCatching { com.example.vpn.sidecar.LanternRelayHop.available() }.getOrDefault(false),
                 cancelled = { connectionOwner?.isActive == false }) else null
             var runningProfile = started?.profile ?: profile
             var engineContext = started?.context ?: context
@@ -2498,8 +2610,23 @@ class RayVpnService : VpnService() {
             var process = started?.running ?: launchProcess()
             sidecar = process
             var ready = started != null || process.awaitReady(launch.readyTimeoutMs)
-            val retry = if (!ready && engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
+            val tcpRetry = if (!ready && engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
                 connectionOwner?.isActive != false) com.example.vpn.sidecar.PsiphonSidecar.tcpStartupRetry(profile) else null
+            // What the first (UDP+TCP) start dialed. When it already dialed enough TCP servers with none connecting and
+            // the chain over Lantern may take over, the TCP-only retry would repeat those protocols for another 120 s.
+            val firstDials = if (tcpRetry != null) (process as? com.example.vpn.sidecar.SidecarProcess)?.psiphonDials() else null
+            val retry = tcpRetry?.takeUnless {
+                firstDials != null && com.example.vpn.sidecar.PsiphonSidecar.skipTcpRetry(firstDials,
+                    chainAllowed = psiphonChainAllowed && com.example.vpn.connections.PsiphonChainMemory.isDirect(profile))
+            }
+            if (tcpRetry != null && retry == null) {
+                XrayLogManager.w("VPN", "Psiphon: the first start already dialed ${firstDials?.tcp} TCP servers without a " +
+                    "connection; skipping the TCP-only retry for Psiphon over Lantern.")
+                com.example.vpn.diagnostics.events.EventLog.event("psiphon.tcp_retry_skipped", attributes = mapOf(
+                    "dials" to firstDials?.summary().orEmpty(), "next" to "psiphon over lantern"))
+            }
+            // What the first (UDP+TCP) Psiphon start saw, before the TCP-only retry replaces the process.
+            val firstNotices = if (retry != null) (process as? com.example.vpn.sidecar.SidecarProcess)?.psiphonNotices() else null
             if (retry != null) {
                 process.stop()
                 sidecar = null
@@ -2518,13 +2645,37 @@ class RayVpnService : VpnService() {
                 sidecar = null
                 val hint = process.startupFailure ?: "No readiness signal; inspect redacted engine logs"
                 com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "startup failed: $hint")
+                val psiphonDirect = engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
+                    com.example.vpn.connections.PsiphonChainMemory.isDirect(profile)
+                // Next automatic connect on this network starts with Psiphon over Lantern (PsiphonChainMemory).
+                if (psiphonDirect) {
+                    com.example.vpn.connections.PsiphonChainMemory.recordDirectFailure(ledgerNetwork())
+                    psiphonDirectStartFailed = true
+                }
+                val notices = (process as? com.example.vpn.sidecar.SidecarProcess)?.psiphonNotices()
                 com.example.vpn.diagnostics.events.EventLog.event("engine.startup.failure",
                     com.example.vpn.diagnostics.events.Severity.ERROR,
-                    attributes = mapOf("engine.name" to engine.id, "reason" to hint),
+                    attributes = buildMap {
+                        put("engine.name", engine.id)
+                        put("reason", hint)
+                        // The last ~20 Psiphon notices (type + whitelisted fields), so a report shows why.
+                        notices?.let { put("psiphon.notices", it) }
+                        firstNotices?.let { put("psiphon.notices.first_try", it) }
+                        // Counts and protocol names only: what was dialed and how far it got (StartupDials.verdict).
+                        if (engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID) {
+                            (process as? com.example.vpn.sidecar.SidecarProcess)?.psiphonDials()?.let {
+                                put("psiphon.dials", it.summary())
+                                put("psiphon.verdict", it.verdict)
+                            }
+                            if (retry != null) firstDials?.let { put("psiphon.dials.first_try", it.summary()) }
+                        }
+                    },
                     stage = com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED, result = "FAIL")
                 error("The ${engine.id} engine did not start: $hint")
             }
             com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
+            if (engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID && com.example.vpn.connections.PsiphonChainMemory.isDirect(profile))
+                com.example.vpn.connections.PsiphonChainMemory.clear(ledgerNetwork())
             XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
             watchSidecar(engine, process)
             registerWarpThroughCarrier(engine.id, process, engineContext, launch, settings)

@@ -95,6 +95,13 @@ class RayApplication : Application() {
         )
     }
 
+    /** Which config and recipe won config revival per network; cleared with the learned network data. */
+    val revivalWinners: com.example.vpn.lab.RevivalWinnerMemory by lazy {
+        val prefs = getSharedPreferences("revival_winners", MODE_PRIVATE)
+        com.example.vpn.lab.RevivalWinnerMemory(load = { prefs.getString("v1", null) },
+            save = { prefs.edit().putString("v1", it).apply() })
+    }
+
     /** Recovers degraded BPB / Cloudflare-fronted configs with derived copies; originals are never changed. */
     val bpbRecovery: com.example.vpn.connectivity.BpbRecoveryEngine by lazy {
         com.example.vpn.connectivity.BpbRecoveryEngine(ledger = recoveryLedger, fragmentReverted = { key, network ->
@@ -124,10 +131,7 @@ class RayApplication : Application() {
                 }
             },
             endpoints = { network -> endpointScores.validated(network) },
-            winners = getSharedPreferences("revival_winners", MODE_PRIVATE).let { prefs ->
-                com.example.vpn.lab.RevivalWinnerMemory(load = { prefs.getString("v1", null) },
-                    save = { prefs.edit().putString("v1", it).apply() })
-            },
+            winners = revivalWinners,
             echCheck = {
                 com.example.vpn.connectivity.EchKeyCheck.check(com.example.vpn.connectivity.RecoveryProfiles.CLOUDFLARE_ECH_DOH) { url ->
                     // On the phone's own network: during a connect this app's traffic is held in the blocking interface.
@@ -198,7 +202,7 @@ class RayApplication : Application() {
     }
 
     /** The mobile network's country (ISO alpha-2, upper case), or null when unknown. */
-    private fun networkCountry(): String? = runCatching {
+    fun networkCountry(): String? = runCatching {
         getSystemService(android.telephony.TelephonyManager::class.java)?.networkCountryIso?.trim()?.uppercase(java.util.Locale.US)
     }.getOrNull()?.ifBlank { null }
 
@@ -319,9 +323,6 @@ class RayApplication : Application() {
             manager?.let { cm ->
                 com.example.vpn.smart.NetworkCapabilityDetector.physical(cm)?.let(cm::getNetworkCapabilities)
             }?.let { !it.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) } == true
-        }
-        com.example.vpn.sidecar.Sidecars.psiphonClientPlatform = {
-            Triple(android.os.Build.VERSION.RELEASE.orEmpty(), android.os.Build.VERSION.SDK_INT, packageName)
         }
         com.example.vpn.sidecar.Sidecars.psiphonLinkDns = {
             val manager = getSystemService(android.net.ConnectivityManager::class.java)
