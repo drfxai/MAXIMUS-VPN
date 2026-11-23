@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DNS-first automatic upkeep (vpn/automation). Kept in its own file so it never collides with strings.xml edits. -->
+<resources>
+    <string name="automation_title">Automatic upkeep</string>
+    <string name="automation_task_resolver_scan">DNS resolver scan</string>
+    <string name="automation_task_dns_ladder">DNS tunnel ladder</string>
+    <string name="automation_task_clean_ip">Clean CDN IP scan</string>
+    <string name="automation_task_revival">Config revival</string>
+    <string name="automation_task_geo">Iran GeoFiles</string>
+    <string name="automation_never">Not run yet</string>
+    <string name="automation_found">%1$s · %2$d found</string>
+    <string name="automation_failed">%1$s · failed: %2$s</string>
+    <string name="automation_skip_vpn">Waits until the VPN is off</string>
+    <string name="automation_skip_fresh">Up to date for this network</string>
+    <string name="automation_skip_nothing">No configs need this</string>
+    <string name="automation_skip_metered">Waits for Wi-Fi or the tunnel</string>
+    <string name="automation_skip_tunnel">Waits for the tunnel (GeoFiles via proxy)</string>
+    <string name="automation_run_now">Run all now</string>
+    <string name="automation_run_now_sub">Tap a row to run only that task</string>
+    <string name="automation_auto_drop">Remove dead subscription configs</string>
+    <string name="automation_auto_drop_sub">Only after 3 failed revivals over 2+ days; favourites and your own configs are never removed</string>
+    <string name="automation_footnote">Runs on network change, daily and after a failed connect. Measurements wait while a VPN is up; results are kept per network.</string>
+</resources>
