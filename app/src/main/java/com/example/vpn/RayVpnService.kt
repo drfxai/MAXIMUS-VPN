@@ -2696,15 +2696,15 @@ class RayVpnService : VpnService() {
                 com.example.vpn.sidecar.PsiphonSidecar.privateId(profile).isEmpty()
             val regionNetwork = if (psiphonRegional) runCatching { com.example.vpn.smart.NetworkIdentity.current(this@RayVpnService) }.getOrNull() else null
             val userRegion = if (psiphonRegional) com.example.vpn.sidecar.PsiphonSidecar.region(profile) else ""
-            class RegionStart(val engine: com.example.vpn.sidecar.RunningEngine) : com.example.vpn.sidecar.PsiphonRegionRun.Start {
-                private val notices get() = com.example.vpn.sidecar.EngineReaper.underlying(engine) as? com.example.vpn.sidecar.SidecarProcess
-                override fun await(timeoutMs: Long, giveUp: () -> Boolean) = engine.awaitReadyUnless(timeoutMs, giveUp)
+            class RegionStart(val running: com.example.vpn.sidecar.RunningEngine) : com.example.vpn.sidecar.PsiphonRegionRun.Start {
+                private val notices get() = com.example.vpn.sidecar.EngineReaper.underlying(running) as? com.example.vpn.sidecar.SidecarProcess
+                override fun await(timeoutMs: Long, giveUp: () -> Boolean) = running.awaitReadyUnless(timeoutMs, giveUp)
                 override fun available() = notices?.psiphonAvailableRegions()
                 override fun stage() = notices?.psiphonStage() ?: 0
                 override fun connectedRegion() = notices?.psiphonConnectedRegion()
                 override fun stop() {
-                    engine.stop()
-                    if (sidecar === engine) sidecar = null
+                    running.stop()
+                    if (sidecar === running) sidecar = null
                 }
             }
             var regionOutcome: com.example.vpn.sidecar.PsiphonRegionRun.Outcome<RegionStart>? = null
@@ -2729,10 +2729,10 @@ class RayVpnService : VpnService() {
                     com.example.vpn.diagnostics.events.EventLog.event("psiphon.region", attributes = mapOf(
                         "region" to label, "budget.s" to (step.budgetMs / 1000).toString(), "why" to step.why), result = "START")
                     if (!step.any) showForegroundNotification("Psiphon: trying region $label…")
-                    RegionStart(launchProcess()).also { sidecar = it.engine }
+                    RegionStart(launchProcess()).also { sidecar = it.running }
                 }, cancelled = { connectionOwner?.isActive == false || !StopFence.admits() })
                 regionOutcome = outcome
-                process = requireNotNull(outcome.ready ?: outcome.last).engine
+                process = requireNotNull(outcome.ready ?: outcome.last).running
                 ready = outcome.ready != null
                 // What each concrete region did here steers the next start (PsiphonRegionBook).
                 if (regionNetwork != null) outcome.attempts.filter { !it.ready && it.step.region.isNotEmpty() }.forEach {
