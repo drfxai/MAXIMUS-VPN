@@ -20,6 +20,7 @@ object Sidecars {
                 configProvider = ::psiphonNetworkSettings,
                 privateConfigProvider = { id -> privatePsiphonSettings?.invoke(id) }
             ),
+            ShirokhorshidSidecar(configProvider = ::psiphonNetworkSettings, rejectCidrs = ::iranCidrs),
             DnsttSidecar(),
             CottenDnsSidecar(),
             SoarSidecar(),
@@ -53,6 +54,13 @@ object Sidecars {
         psiphonSettings?.invoke()?.takeIf { it.isNotBlank() } ?: PsiphonSidecar.assetProvider { name ->
             openAsset?.invoke(name) ?: throw java.io.FileNotFoundException(name)
         }.invoke()
+
+    /** IPv4 ranges of Iran from the bundled GeoIP list (assets/geo/geoip-lite.dat), read once it is readable. */
+    @Volatile private var iranRanges: List<String>? = null
+
+    internal fun iranCidrs(): List<String> = iranRanges ?: runCatching {
+        openAsset?.invoke("geo/geoip-lite.dat")?.use { GeoIpCidrs.ipv4(it.readBytes(), "IR") }
+    }.getOrNull()?.takeIf { it.isNotEmpty() }?.also { iranRanges = it }.orEmpty()
 
     fun psiphon(): PsiphonSidecar = ENGINES.filterIsInstance<PsiphonSidecar>().single()
 

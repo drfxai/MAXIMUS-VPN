@@ -37,6 +37,8 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -1332,6 +1334,8 @@ private fun ConfigFreeMethodPicker(
     val context = LocalContext.current
     var transports by rememberSaveable { mutableStateOf(false) }
     var availability by remember { mutableStateOf<Map<ConfigFreeMethod, String?>?>(null) }
+    var shirokhorshidSettings by remember { mutableStateOf(false) }
+    if (shirokhorshidSettings) com.example.ui.connections.ShirokhorshidSettingsDialog(onDismiss = { shirokhorshidSettings = false })
     LaunchedEffect(Unit) {
         availability = withContext(Dispatchers.IO) {
             ConfigFreeMethod.entries.associateWith { method ->
@@ -1374,12 +1378,18 @@ private fun ConfigFreeMethodPicker(
                                     ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Filled.Public
                                     ConfigFreeMethod.SERVERLESS -> Icons.Filled.Bolt
                                     ConfigFreeMethod.PSIPHON, ConfigFreeMethod.PSIPHON_RADIANCE, ConfigFreeMethod.AETHER_PSIPHON -> Icons.Filled.Shield
+                                    ConfigFreeMethod.SHIROKHORSHID -> Icons.Filled.WbSunny
                                     ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
                                     ConfigFreeMethod.AETHER_TOR -> Icons.Filled.Link
                                     else -> Icons.Filled.Cloud
                                 }
                                 ConfigMethodRow(method.title, problem ?: method.description, icon, accent,
                                     if (problem == null) ({ onSelect(method) }) else null)
+                                if (method == ConfigFreeMethod.SHIROKHORSHID && problem == null) {
+                                    ConfigMethodRow(stringResource(R.string.ui_shirokhorshid_settings),
+                                        stringResource(R.string.ui_shirokhorshid_settings_detail), Icons.Filled.Tune, accent
+                                    ) { shirokhorshidSettings = true }
+                                }
                             }
                         }
                     }

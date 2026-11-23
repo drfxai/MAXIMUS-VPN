@@ -47,10 +47,10 @@ object EngineUdp {
     }
 
     /** Engines whose local proxy is known (from their source) to accept SOCKS CONNECT only. */
-    private val TCP_ONLY_ENGINES = setOf(PsiphonSidecar.ID, TorSidecar.ID)
+    private val TCP_ONLY_ENGINES = setOf(PsiphonSidecar.ID, ShirokhorshidSidecar.ID, TorSidecar.ID)
 
     /** Engines that resolve a host name on their own servers when Xray hands it to them. */
-    private val REMOTE_DNS_ENGINES = setOf(PsiphonSidecar.ID)
+    private val REMOTE_DNS_ENGINES = setOf(PsiphonSidecar.ID, ShirokhorshidSidecar.ID)
 
     /** Aether carriers that run MASQUE (or WARP-in-WARP) over HTTP/2, i.e. over one TCP connection. */
     val AETHER_TCP_CARRIERS = setOf("h2", "gool", "mim")

@@ -41,6 +41,9 @@ object EngineRegistry {
         bundled = true, runtime = null)
     val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core (separate program)", "4d6eb0e8a7e9", "GPL-3.0",
         bundled = true, runtime = null)
+    /** Shir o Khorshid, the community Psiphon fork for Iran (separate program, scripts/engines/shirokhorshid.sh). */
+    val SHIROKHORSHID = EngineDescriptor("shirokhorshid", "Shir o Khorshid tunnel-core (Psiphon fork, separate program)",
+        com.example.vpn.sidecar.ShirokhorshidSidecar.REVISION, "GPL-3.0", bundled = true, runtime = null)
     val RADIANCE = EngineDescriptor("radiance", "Lantern / Radiance",
         com.example.vpn.sidecar.RadianceSidecar.REVISION, "GPL-3.0-only", bundled = true, runtime = null)
     val TOR = EngineDescriptor("tor", "Tor (in app) with lyrebird bridges (separate program)",
@@ -67,7 +70,7 @@ object EngineRegistry {
 
     val AETHER = EngineDescriptor("aether", "Aether / WARP", "2.4.0 / authenticated", "AGPL-3.0-only", true, null)
     val SERVERLESS = EngineDescriptor("serverless", "Direct Serverless (Patterniha Xray)", "v65 / 26.11.23", "MPL-2.0", true, null)
-    val ENGINES = listOf(AETHER, SERVERLESS, XRAY, KOTLIN_TUNNEL, BYEDPI, MIHOMO, SING_BOX, AMNEZIAWG, WARP, PSIPHON, RADIANCE, TOR, NAIVE, DNS_TUNNEL, COTTEN_DNS, SOAR, SLIPSTREAM, MASQUE, MATRIX_TRANSPORT)
+    val ENGINES = listOf(AETHER, SERVERLESS, XRAY, KOTLIN_TUNNEL, BYEDPI, MIHOMO, SING_BOX, AMNEZIAWG, WARP, PSIPHON, SHIROKHORSHID, RADIANCE, TOR, NAIVE, DNS_TUNNEL, COTTEN_DNS, SOAR, SLIPSTREAM, MASQUE, MATRIX_TRANSPORT)
 
     fun descriptorFor(runtime: EngineSelectionPolicy.Runtime): EngineDescriptor =
         ENGINES.first { it.runtime == runtime }
@@ -95,6 +98,7 @@ object EngineRegistry {
         "Cloudflare WARP" to CapabilityState.ENGINE_SUPPORTED,
         "HTTP proxy with login" to CapabilityState.PARSE_SUPPORTED,
         "Psiphon (needs this build's Psiphon settings)" to CapabilityState.ENGINE_SUPPORTED,
+        "Shir o Khorshid (Psiphon fork: Conduit, CDN fronting)" to CapabilityState.ENGINE_SUPPORTED,
         "Tor (Snowflake, obfs4, WebTunnel bridges)" to CapabilityState.ENGINE_SUPPORTED,
         "NaiveProxy" to CapabilityState.NONE,
         "DNS tunnel (dnstt)" to CapabilityState.ENGINE_SUPPORTED,
@@ -131,6 +135,8 @@ object EngineRegistry {
                 com.example.vpn.sidecar.MatrixTransportSidecar.configurationProblem(
                     java.io.File(com.example.RayApplication.instance.noBackupFilesDir, "engines/matrix-transport"))
             }.getOrNull()
+        } else if (engine is com.example.vpn.sidecar.ShirokhorshidSidecar) {
+            runCatching { engine.problem(com.example.vpn.sidecar.ShirokhorshidSidecar.profile()) }.getOrElse { it.message ?: "settings could not be read" }
         } else (engine as? com.example.vpn.sidecar.PsiphonSidecar)?.let { p ->
             runCatching { p.problem(com.example.vpn.sidecar.PsiphonSidecar.profile()) }.getOrElse { it.message ?: "settings could not be read" }
         }

@@ -134,6 +134,10 @@ object CapabilityMatrix {
             P, Y, Y, Y, P, N, P, N, N, U, U),
         row("psiphon", "Psiphon", "scripts/engines psiphon build; needs the PSIPHON_CONFIG secret from Psiphon Inc. at release time",
             N, Y, Y, P, U, U, P, N, N, U, U),
+        row("shirokhorshid", "Shir o Khorshid (Psiphon fork)", "scripts/engines/shirokhorshid.sh (git pin 520f37c9), ShirokhorshidSidecar; " +
+            "a Linux build of the same commit accepted the generated config and carried a tunnel over FRONTED-MEEK-CDN-HTTP-OSSH " +
+            "with the bundled public profile (not on a phone, not from Iran)",
+            N, Y, Y, P, P, P, Y, N, N, U, U),
         row("tor", "Tor + lyrebird (obfs4, WebTunnel, Snowflake, meek)", "TorSidecar (bridges, torrc), lyrebird",
             Y, Y, Y, Y, U, U, Y, N, N, U, U),
         row("dnstt", "DNS tunnel (dnstt)", "DnsttSidecar; lifecycle in EngineProbe; needs the user's own dnstt server",

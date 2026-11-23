@@ -32,6 +32,11 @@ object ConnectionRoute {
             }
             "tor" -> "Tor"
             "psiphon" -> "Psiphon"
+            "shirokhorshid" -> "Shir o Khorshid · " + when (e.optString("sokMode")) {
+                "conduit" -> "Conduit"
+                "direct" -> if (e.optBoolean("sokCdn", true)) "Direct + CDN fronting" else "Direct"
+                else -> if (e.optBoolean("sokCdn", true)) "Auto + CDN fronting" else "Auto"
+            }
             "sing-box" -> "sing-box · ${profile.protocolType}"
             "" -> "${profile.protocolType} · ${profile.transport}"
             else -> e.optString("engine")

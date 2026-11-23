@@ -864,6 +864,7 @@ private val managedEngineNames = mapOf(
     "mihomo" to "Mihomo",
     "aether" to "Aether / WARP",
     "psiphon" to "Psiphon",
+    "shirokhorshid" to "Shir o Khorshid",
     "tor" to "Tor",
     "radiance" to "Lantern / Radiance"
 )
