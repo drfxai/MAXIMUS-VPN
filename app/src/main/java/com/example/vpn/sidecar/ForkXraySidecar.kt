@@ -3,6 +3,7 @@ package com.example.vpn.sidecar
 import com.example.data.model.AppSettings
 import com.example.data.model.ProfileType
 import com.example.data.model.VlessProfile
+import com.example.vpn.engine.PatternihaFields
 import com.example.vpn.engine.ProfileExtras
 import com.example.vpn.safety.DnsResolvers
 import com.example.vpn.tunnel.ProxyDnsTransport
@@ -13,18 +14,22 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Runs a saved server whose share link carries patterniha-fork-only fields (`dialMode`, `tut`, `esr`, `cp`, or an
- * `fm` with fork-only mask types) on patterniha/Xray-core v26.11.22: the same native program as the Serverless engine
- * (`libserverless.so`, scripts/engines/serverless.sh). Stock libXray ignores those fields (or rejects the masks), so
- * the fork runs the server's one outbound behind an authenticated loopback SOCKS port and the app's Xray routes the
- * TUN through it, like every other sidecar.
+ * Runs a saved server whose share link carries patterniha-fork-only fields (a valid `dialMode`, or an `fm` with
+ * fork-only mask types or family lists) on patterniha/Xray-core v26.11.22: the same native program as the Serverless
+ * engine (`libserverless.so`, scripts/engines/serverless.sh). Stock libXray has no `dialMode` and rejects the masks,
+ * so the fork runs the server's one outbound behind an authenticated loopback SOCKS port and the app's Xray routes the
+ * TUN through it, like every other sidecar. `tut`, `esr` and `cp` are not fork-only: stock Xray v26.11.9 has
+ * `tcpUserTimeout`, `enableSessionResumption` and `curvePreferences`, and the app's builder writes them on every core
+ * ([com.example.vpn.engine.PatternihaFields.applyStock]).
  *
  * Not in [Sidecars.ENGINES]: the profile stays an ordinary saved server everywhere else (tests, Smart Connect, LAB).
  * Only the connect path picks it ([applies]) and falls back to [stockProfile] when the fork does not start.
  *
- * JSON names were checked in the fork's infra/conf at 41a9fa6: sockopt `dialMode` (string), sockopt
- * `tcpUserTimeout` (ms), tlsSettings `enableSessionResumption` (bool), tlsSettings `curvePreferences` (StringList),
- * finalmask `merge` / `borrow` masks and `tcp4` / `tcp6` / `udp4` / `udp6` family lists.
+ * JSON names were checked in the fork's infra/conf at 41a9fa6 against XTLS/Xray-core v26.11.9: fork-only are sockopt
+ * `dialMode` (string, parsed before every dial: an invalid one fails the dial, so it is checked first), the TCP masks
+ * `merge`, `borrow` and `proxy-protocol` (the last is upstream only after v26.11.9), and the `tcp4` / `tcp6` / `udp4` /
+ * `udp6` family lists, which replace `tcp` / `udp` for a remote of that IP family.
+ * The link's `echOutbound` (PattN) becomes a second outbound that carries the ECH config lookup (`echSockopt.dialerProxy`).
  */
 object ForkXraySidecar : SidecarEngine {
     const val ID = "fork-xray"
@@ -33,21 +38,19 @@ object ForkXraySidecar : SidecarEngine {
     override val binary = ServerlessSidecar.ID
 
     const val TAG = "fork-proxy"
+    const val ECH_TAG = "fork-ech"
 
-    /** finalmask mask types only the fork knows. */
-    val FORK_MASK_TYPES = setOf("merge", "borrow")
+    /** finalmask mask types the fork knows and stock Xray v26.11.9 does not (all TCP masks). */
+    val FORK_MASK_TYPES = setOf("merge", "borrow", "proxy-protocol")
     /** finalmask lists only the fork knows (chosen after the dial by the remote's IP family). */
     val FORK_MASK_LISTS = listOf("tcp4", "tcp6", "udp4", "udp6")
 
     /** The fork-only link keys [profile] carries, in a stable order; empty when stock Xray can run it as it is. */
     fun forkFields(profile: VlessProfile): List<String> {
-        val extras = ProfileExtras.read(profile)
         val out = mutableListOf<String>()
         if (forkOnlyMask(profile.finalMask)) out += "fm"
-        if (extras.optString(ProfileExtras.PATT_DIAL_MODE).isNotBlank()) out += "dialMode"
-        if (extras.optInt(ProfileExtras.PATT_TCP_USER_TIMEOUT, 0) > 0) out += "tut"
-        if (extras.optBoolean(ProfileExtras.PATT_SESSION_RESUMPTION, false)) out += "esr"
-        if (extras.optString(ProfileExtras.PATT_CURVE_PREFERENCES).isNotBlank()) out += "cp"
+        // An invalid dialMode would fail every dial of the fork, so it does not count (stock Xray runs without it).
+        if (PatternihaFields.dialMode(profile) != null) out += "dialMode"
         return out
     }
 
@@ -71,22 +74,29 @@ object ForkXraySidecar : SidecarEngine {
     override fun handles(profile: VlessProfile) = applies(profile)
 
     /**
-     * [profile] for stock Xray: the fork-only extras removed and the fork-only parts of its finalmask dropped
-     * (stock libXray rejects an unknown mask type, which would fail the whole connect). Unchanged otherwise.
+     * [profile] for stock Xray: `dialMode` removed and the fork-only parts of its finalmask dropped (stock libXray
+     * rejects an unknown mask type, which would fail the whole connect). `tut`, `esr` and `cp` stay: stock Xray has
+     * them. Unchanged otherwise.
      */
     fun stockProfile(profile: VlessProfile): VlessProfile {
         if (forkFields(profile).isEmpty()) return profile
-        var p = profile.copy(finalMask = stockMask(profile.finalMask))
-        for (key in listOf(ProfileExtras.PATT_DIAL_MODE, ProfileExtras.PATT_TCP_USER_TIMEOUT,
-                ProfileExtras.PATT_SESSION_RESUMPTION, ProfileExtras.PATT_CURVE_PREFERENCES)) {
-            p = ProfileExtras.with(p, key, null)
-        }
-        return p
+        val host = profile.address.trim().removePrefix("[").removeSuffix("]")
+        val ipv6 = ProxyDnsTransport.isLiteralAddress(host) && host.contains(':')
+        return ProfileExtras.with(profile.copy(finalMask = stockMask(profile.finalMask, ipv6)), ProfileExtras.PATT_DIAL_MODE, null)
     }
 
-    internal fun stockMask(mask: String): String {
+    /**
+     * [mask] without what stock Xray cannot run. A family list (`tcp4`/`tcp6`, `udp4`/`udp6`) replaces the generic
+     * list on the fork (the two are exclusive there), so on stock Xray the list for the server's family ([ipv6]; the
+     * fork also takes the v4 list for anything that is not IPv6) becomes the generic one, fork-only mask types removed.
+     */
+    internal fun stockMask(mask: String, ipv6: Boolean = false): String {
         if (!forkOnlyMask(mask)) return mask
         val root = JSONObject(mask)
+        for (list in listOf("tcp", "udp")) {
+            val family = root.optJSONArray(list + if (ipv6) "6" else "4")
+            if (family != null && !root.has(list)) root.put(list, family)
+        }
         FORK_MASK_LISTS.forEach { root.remove(it) }
         for (list in listOf("tcp", "udp")) {
             val masks = root.optJSONArray(list) ?: continue
@@ -100,21 +110,35 @@ object ForkXraySidecar : SidecarEngine {
         return if (root.length() == 0) "" else root.toString()
     }
 
-    /** Puts the fork-only fields of [profile] into [outbound] (built by the app's own Xray builder) under the fork's keys. */
+    /**
+     * Puts the fork-only fields of [profile] into [outbound] (built by the app's own Xray builder, which already wrote
+     * `tut`, `esr`, `cp` and the finalmask as it is, fork masks included) under the fork's keys.
+     */
     fun applyForkFields(outbound: JSONObject, profile: VlessProfile): JSONObject {
-        val extras = ProfileExtras.read(profile)
         val stream = outbound.optJSONObject("streamSettings") ?: JSONObject().also { outbound.put("streamSettings", it) }
-        fun sockopt() = stream.optJSONObject("sockopt") ?: JSONObject().also { stream.put("sockopt", it) }
-        extras.optString(ProfileExtras.PATT_DIAL_MODE).trim().takeIf { it.isNotEmpty() }?.let { sockopt().put("dialMode", it) }
-        extras.optInt(ProfileExtras.PATT_TCP_USER_TIMEOUT, 0).takeIf { it > 0 }?.let { sockopt().put("tcpUserTimeout", it) }
-        // Session resumption and curve preferences are TLS settings; REALITY has neither.
-        stream.optJSONObject("tlsSettings")?.let { tls ->
-            if (extras.optBoolean(ProfileExtras.PATT_SESSION_RESUMPTION, false)) tls.put("enableSessionResumption", true)
-            extras.optString(ProfileExtras.PATT_CURVE_PREFERENCES).split(',', ':').map { it.trim() }.filter { it.isNotEmpty() }
-                .takeIf { it.isNotEmpty() }?.let { tls.put("curvePreferences", JSONArray(it)) }
+        PatternihaFields.dialMode(profile)?.let { mode ->
+            (stream.optJSONObject("sockopt") ?: JSONObject().also { stream.put("sockopt", it) }).put("dialMode", mode)
         }
-        // The builder already wrote the profile's finalmask as it is (fork masks included).
+        // PattN's echOutbound: the ECH config lookup goes out through it, unless the link set its own echSockopt.
+        stream.optJSONObject("tlsSettings")?.let { tls ->
+            if (echOutbound(profile) != null && !tls.has("echSockopt")) {
+                tls.put("echSockopt", JSONObject().put("dialerProxy", ECH_TAG))
+            }
+        }
         return outbound
+    }
+
+    /**
+     * The link's `echOutbound` tagged [ECH_TAG], when it can be used: a JSON outbound with a protocol, on a TLS server
+     * whose ECH config is looked up (`echConfigList` set) and that has no `echSockopt` of its own. Null otherwise.
+     */
+    fun echOutbound(profile: VlessProfile): JSONObject? {
+        if (!profile.security.equals("tls", ignoreCase = true) || profile.echConfigList.isBlank() || profile.echSockopt.isNotBlank()) {
+            return null
+        }
+        val raw = ProfileExtras.read(profile).optJSONObject(ProfileExtras.PATT_ECH_OUTBOUND) ?: return null
+        if (raw.optString("protocol").isBlank()) return null
+        return JSONObject(raw.toString()).put("tag", ECH_TAG)
     }
 
     /** The server's single outbound for the fork. Its address must already be literal (the fork runs outside the VPN). */
@@ -126,13 +150,15 @@ object ForkXraySidecar : SidecarEngine {
     }
 
     /** The whole fork config: one authenticated SOCKS inlet on loopback, everything to [outbound]. */
-    fun config(outbound: JSONObject, port: Int, user: String, password: String, dnsServer: String): JSONObject {
+    fun config(outbound: JSONObject, port: Int, user: String, password: String, dnsServer: String,
+               echOutbound: JSONObject? = null): JSONObject {
         require(port in 1..65535 && user.isNotBlank() && password.isNotBlank())
         val inlet = JSONObject().put("listen", "127.0.0.1").put("port", port).put("protocol", "socks")
             .put("settings", JSONObject().put("auth", "password").put("udp", true).put("accounts",
                 JSONArray().put(JSONObject().put("user", user).put("pass", password))))
         val root = JSONObject().put("log", JSONObject().put("loglevel", "warning"))
-            .put("inbounds", JSONArray().put(inlet)).put("outbounds", JSONArray().put(outbound.put("tag", TAG)))
+            .put("inbounds", JSONArray().put(inlet))
+            .put("outbounds", JSONArray().put(outbound.put("tag", TAG)).apply { echOutbound?.let { put(it.put("tag", ECH_TAG)) } })
             .put("dns", JSONObject().put("servers", JSONArray().put(DnsResolvers.literal(dnsServer)))
                 .put("tag", "fork-dns-query").put("disableFallback", true))
             .put("routing", JSONObject().put("domainStrategy", "AsIs").put("rules", JSONArray().put(
@@ -151,7 +177,8 @@ object ForkXraySidecar : SidecarEngine {
 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
         require(context.upstreamSocks == null) { "fork-xray is not a chain hop" }
-        val root = config(outbound(literal(profile), settings), context.socksPort, context.socksUser, context.socksPass, settings.dnsServer)
+        val root = config(outbound(literal(profile), settings), context.socksPort, context.socksUser, context.socksPass,
+            settings.dnsServer, echOutbound(profile))
         val file = File(context.workDir, "fork-xray.json").apply {
             parentFile?.mkdirs(); writeText(root.toString())
             setReadable(false, false); setReadable(true, true); setWritable(false, false); setWritable(true, true)

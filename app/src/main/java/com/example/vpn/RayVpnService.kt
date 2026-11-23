@@ -1634,6 +1634,9 @@ class RayVpnService : VpnService() {
             val engineChain = com.example.vpn.sidecar.ChainRunner.readChain(profile)
             // A saved server whose link carries patterniha-fork-only fields runs on the fork (the Serverless program) as a
             // local SOCKS sidecar; without that program it runs on stock Xray with those fields dropped (ForkXraySidecar).
+            com.example.vpn.engine.ProfileExtras.read(profile).optString(com.example.vpn.engine.ProfileExtras.PATT_DIAL_MODE)
+                .takeIf { it.isNotBlank() && com.example.vpn.engine.PatternihaFields.dialMode(profile) == null }
+                ?.let { XrayLogManager.w("VPN", "fork-xray · dialMode \"${it.take(64)}\" is not valid for the fork (oob./oob4./oob6. byte lists); ignored.") }
             if (amnezia == null && sidecarEngine == null && engineChain == null && reuseSidecar == null &&
                 com.example.vpn.sidecar.ForkXraySidecar.applies(profile)) {
                 val fields = com.example.vpn.sidecar.ForkXraySidecar.forkFields(profile).joinToString(",")
