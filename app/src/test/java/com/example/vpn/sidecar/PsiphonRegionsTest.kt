@@ -188,4 +188,63 @@ class PsiphonRegionsTest {
         b.clear()
         assertTrue(book().ranked(net).isEmpty())
     }
+
+    // --- Build 173 report (Irancell cell:43235, 01:35:20–01:39:21 +0330): direct Psiphon on any region listed 27
+    // regions within 0.6 s, then nothing for 120 s, then a TCP-only retry for another 120 s: 240 s before failing. ---
+
+    private val reportRegions = listOf("AT", "BE", "BG", "CA", "CH", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GB", "HU",
+        "IE", "IN", "IT", "JP", "LV", "NL", "NO", "PL", "RO", "RS", "SE", "SG", "US")
+
+    @Test fun theReportsSilenceAfterTheRegionListEndsInsideTheCapWithTheTcpStepInsideIt() {
+        assertEquals(27, reportRegions.size)
+        val starts = mutableListOf<PsiphonRegionPlan.Step>()
+        val out = run.run("", emptyList(), PsiphonRegionPlan.TOTAL_AUTO_MS, launch = { step ->
+            starts += step
+            FakeStart(step.region, available = reportRegions, availableAtMs = 600)
+        })
+        assertNull(out.ready)
+        assertTrue("took $now ms", now <= PsiphonRegionPlan.TOTAL_AUTO_MS)
+        assertEquals(listOf("", "DE", "NL"), starts.map { it.region })
+        // The old TCP-only retry now runs as the last rotation step, inside the same budget.
+        assertEquals(listOf(false, false, true), starts.map { it.tcpOnly })
+        // And no second full window follows an automatic region run.
+        assertTrue(!PsiphonRegionPlan.tcpRetryAllowed(regionRun = true, userRegion = "", failure = null))
+        assertTrue(PsiphonRegionPlan.tcpRetryAllowed(regionRun = false, userRegion = "", failure = null))
+        assertTrue(PsiphonRegionPlan.tcpRetryAllowed(regionRun = true, userRegion = "DE", failure = null))
+        assertTrue(!PsiphonRegionPlan.tcpRetryAllowed(regionRun = true, userRegion = "JP", failure = "unavailable"))
+    }
+
+    @Test fun theUsersDirectPickOnANetworkWhereOnlyTheChainWorksFailsFast() {
+        assertEquals(PsiphonRegionPlan.TOTAL_AUTO_MS, PsiphonRegionPlan.totalBudget("", 120_000, manual = true, knownBlocked = false))
+        assertEquals(PsiphonRegionPlan.TOTAL_AUTO_MS, PsiphonRegionPlan.totalBudget("", 120_000, manual = false, knownBlocked = true))
+        assertEquals(PsiphonRegionPlan.KNOWN_BLOCKED_MS, PsiphonRegionPlan.totalBudget("", 120_000, manual = true, knownBlocked = true))
+        assertEquals(PsiphonRegionPlan.KNOWN_BLOCKED_MS, PsiphonRegionPlan.totalBudget("DE", 120_000, manual = true, knownBlocked = true))
+        assertEquals(120_000L, PsiphonRegionPlan.totalBudget("DE", 120_000, manual = true, knownBlocked = false))
+        val out = run.run("", emptyList(), PsiphonRegionPlan.KNOWN_BLOCKED_MS, launch = { step ->
+            FakeStart(step.region, available = reportRegions, availableAtMs = 600)
+        })
+        assertNull(out.ready)
+        assertTrue("took $now ms", now <= PsiphonRegionPlan.KNOWN_BLOCKED_MS)
+    }
+
+    @Test fun aPinnedRestartLeavesTheRegionThatWentDead() {
+        // Nothing remembered: the first other listed region in the usual order goes first, then any.
+        val steps = PsiphonRegionPlan.initial("", emptyList(), avoid = setOf("de"), knownAvailable = reportRegions)
+        assertEquals(listOf("NL", ""), steps.map { it.region })
+        assertEquals(PsiphonRegionPlan.TOTAL_AUTO_MS, steps.sumOf { it.budgetMs })
+        // A remembered region that went dead is skipped, the others keep their order.
+        assertEquals(listOf("FR", ""), PsiphonRegionPlan.initial("", listOf("DE", "FR"), avoid = setOf("DE")).map { it.region })
+        // A fixed region is the user's: never changed.
+        assertEquals(listOf("DE"), PsiphonRegionPlan.initial("DE", emptyList(), avoid = setOf("DE"), knownAvailable = reportRegions).map { it.region })
+        // Without a known list nothing is invented.
+        assertEquals(listOf(""), PsiphonRegionPlan.initial("", emptyList(), avoid = setOf("DE")).map { it.region })
+        // The rotation after a silent any never goes back to it either.
+        val starts = mutableListOf<String>()
+        run.run("", emptyList(), PsiphonRegionPlan.TOTAL_AUTO_MS, avoid = setOf("DE"), launch = { step ->
+            starts += step.region
+            FakeStart(step.region, available = listOf("DE", "NL", "FR"), availableAtMs = 600)
+        })
+        assertTrue("$starts", "DE" !in starts)
+        assertTrue("took $now ms", now <= PsiphonRegionPlan.TOTAL_AUTO_MS)
+    }
 }

@@ -51,4 +51,28 @@ class PsiphonChainMemoryTest {
         assertFalse(may(available = false))
         assertFalse(may(direct = false))
     }
+
+    @Test fun aVerifiedChainOverLanternGoesFirstOnItsNetworkUntilDirectCarriesTrafficAgain() {
+        // Build 173: direct Psiphon silent for 240 s, Psiphon over Lantern verified in 18 s on cell:43235.
+        val net = "cell:43235"
+        PsiphonChainMemory.recordChainVerified(net, now = 10_000)
+        assertTrue(PsiphonChainMemory.preferChain(net, now = 20_000))
+        assertTrue(PsiphonChainMemory.describe(net, now = 70_000).contains("Psiphon over Lantern"))
+        assertFalse(PsiphonChainMemory.preferChain("wifi:abcdef123456", now = 20_000))
+        assertFalse(PsiphonChainMemory.preferChain(net, now = 10_000 + PsiphonChainMemory.HOLD_MS))
+        PsiphonChainMemory.recordChainVerified(net, now = 30_000)
+        PsiphonChainMemory.recordDirectFailure(net, now = 30_000)
+        PsiphonChainMemory.clear(net)
+        assertNull(PsiphonChainMemory.chainVerifiedAt(net, now = 40_000))
+        assertFalse(PsiphonChainMemory.preferChain(net, now = 40_000))
+    }
+
+    @Test fun onlyTheUsersOwnDirectPickIsOfferedTheChainWithOneTap() {
+        assertTrue(PsiphonChainMemory.suggestChain(direct = true, exact = true, chainAvailable = true, chainAlreadyTried = false))
+        assertFalse("automatic sessions hand over instead",
+            PsiphonChainMemory.suggestChain(direct = true, exact = false, chainAvailable = true, chainAlreadyTried = false))
+        assertFalse(PsiphonChainMemory.suggestChain(direct = false, exact = true, chainAvailable = true, chainAlreadyTried = false))
+        assertFalse(PsiphonChainMemory.suggestChain(direct = true, exact = true, chainAvailable = false, chainAlreadyTried = false))
+        assertFalse(PsiphonChainMemory.suggestChain(direct = true, exact = true, chainAvailable = true, chainAlreadyTried = true))
+    }
 }

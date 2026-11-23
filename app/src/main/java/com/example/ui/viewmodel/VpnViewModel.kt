@@ -236,14 +236,14 @@ class VpnViewModel(
     }
 
     /**
-     * The user tapped "Connect with ..." on a failed Aether pick: start the connection verified on this network, as
+     * The user tapped "Connect with ..." on a failed Aether or direct Psiphon pick (or a pinned restart): start the connection verified on this network, as
      * chosen (exact), so it is the user's own choice rather than an automatic switch.
      */
     fun connectSuggested(context: Context, profileId: String, onRequestPermission: ((Intent) -> Unit)? = null) {
         viewModelScope.launch {
             val profile = com.example.vpn.connections.BuiltinConnections.resolve(context, profileId)
                 ?: serverRepository.getProfileById(profileId) ?: return@launch
-            XrayLogManager.i("VPN", "User chose the connection verified on this network instead of Aether.")
+            XrayLogManager.i("VPN", "User chose the suggested connection (verified on this network) instead of the failing one.")
             startOrRequestPermission(context, profile, exact = true) { intent -> onRequestPermission?.invoke(intent) }
         }
     }

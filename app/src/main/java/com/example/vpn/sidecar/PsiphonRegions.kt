@@ -31,6 +31,12 @@ object PsiphonRegionPlan {
     const val MIN_STEP_MS = 12_000L
     const val MAX_REMEMBERED = 2
     const val MAX_ROTATION = 2
+    /**
+     * The user's own direct-Psiphon pick on a network where direct Psiphon failed recently and Psiphon over Lantern is
+     * the remembered working path ([com.example.vpn.connections.PsiphonChainMemory]): one bounded try, then a fast
+     * failure that offers the chain with one tap (build 173 Irancell: direct 240 s → fail; the chain connected in 18 s).
+     */
+    const val KNOWN_BLOCKED_MS = 45_000L
 
     /**
      * Regions tried when nothing is remembered on this network, in this order, if Psiphon lists them: European exits
@@ -38,19 +44,56 @@ object PsiphonRegionPlan {
      */
     val PRIOR = listOf("DE", "NL", "FR", "GB", "FI", "SE", "AT", "CH", "CA", "US")
 
-    data class Step(val region: String, val budgetMs: Long, val why: String) {
+    /**
+     * One Psiphon start. [tcpOnly]: TCP transports only (the old 120 s TCP-only retry, now one step inside the run's
+     * budget instead of a second full window after it).
+     */
+    data class Step(val region: String, val budgetMs: Long, val why: String, val tcpOnly: Boolean = false) {
         val any: Boolean get() = region.isEmpty()
     }
 
-    /** The starts to try, in order. [remembered] is [PsiphonRegionBook.ranked] for this network. Pure. */
-    fun initial(userRegion: String, remembered: List<String>, totalMs: Long = TOTAL_AUTO_MS): List<Step> {
+    /**
+     * The starts to try, in order. [remembered] is [PsiphonRegionBook.ranked] for this network. [avoid]: regions just
+     * left because their tunnel stopped carrying traffic (a pinned restart, see
+     * [com.example.vpn.smart.PinnedRecovery]); never led with, and when nothing else is remembered the first other
+     * region from [knownAvailable] (Psiphon's last AvailableEgressRegions here) goes first. Pure.
+     */
+    fun initial(userRegion: String, remembered: List<String>, totalMs: Long = TOTAL_AUTO_MS,
+                avoid: Set<String> = emptySet(), knownAvailable: List<String> = emptyList()): List<Step> {
         val fixed = userRegion.trim().uppercase()
         if (fixed.isNotEmpty()) return listOf(Step(fixed, totalMs, "region chosen in the profile"))
+        val avoided = avoid.map { it.trim().uppercase() }.toSet()
         val room = maxOf(0L, totalMs - ANY_MIN_MS)
-        val regions = remembered.map { it.trim().uppercase() }.filter { REGION.matches(it) }.distinct()
-            .take(minOf(MAX_REMEMBERED, (room / REGION_STEP_MS).toInt()))
-        val steps = regions.map { Step(it, REGION_STEP_MS, "fastest region measured on this network") }
+        val slots = minOf(MAX_REMEMBERED, (room / REGION_STEP_MS).toInt())
+        val regions = remembered.map { it.trim().uppercase() }.filter { REGION.matches(it) && it !in avoided }.distinct()
+            .take(slots)
+        var steps = regions.map { Step(it, REGION_STEP_MS, "fastest region measured on this network") }
+        if (steps.isEmpty() && avoided.isNotEmpty() && slots > 0) {
+            val listed = knownAvailable.map { it.trim().uppercase() }.filter { REGION.matches(it) }.toSet()
+            (PRIOR + listed.sorted()).firstOrNull { it in listed && it !in avoided }?.let {
+                steps = listOf(Step(it, REGION_STEP_MS, "another region: ${avoided.sorted().joinToString(",")} stopped carrying traffic"))
+            }
+        }
         return steps + Step("", totalMs - steps.sumOf { it.budgetMs }, "any region")
+    }
+
+    /**
+     * Whether the old TCP-only retry (a second full start window) may follow the region run. Never after an automatic
+     * region run: it already used its whole [TOTAL_AUTO_MS] budget and carries its own TCP-only step ([rotation]), so
+     * the total stays inside the cap (build 173: 120 s silence + 120 s TCP retry = 240 s). A fixed region that Psiphon
+     * lists as unavailable will not appear over TCP either. Pure.
+     */
+    fun tcpRetryAllowed(regionRun: Boolean, userRegion: String, failure: String?): Boolean =
+        !regionRun || (userRegion.isNotBlank() && failure == null)
+
+    /**
+     * The whole budget of one direct Psiphon start: [TOTAL_AUTO_MS] on any region, the engine's own window for a fixed
+     * region, and [KNOWN_BLOCKED_MS] at most for the user's own pick ([manual]) on a network where direct Psiphon
+     * failed recently and the chain over Lantern is the remembered path ([knownBlocked]). Pure.
+     */
+    fun totalBudget(userRegion: String, readyTimeoutMs: Long, manual: Boolean, knownBlocked: Boolean): Long {
+        val base = if (userRegion.isBlank()) TOTAL_AUTO_MS else readyTimeoutMs
+        return if (manual && knownBlocked) minOf(base, KNOWN_BLOCKED_MS) else base
     }
 
     /**
@@ -65,7 +108,11 @@ object PsiphonRegionPlan {
         val count = minOf(MAX_ROTATION, order.size, (leftMs / MIN_STEP_MS).toInt())
         if (count <= 0) return emptyList()
         val each = minOf(REGION_STEP_MS, leftMs / count)
-        return order.take(count).map { Step(it, each, "available region; any region stayed silent") }
+        // The second rotated region runs TCP transports only: the old TCP-only retry, inside the same budget.
+        return order.take(count).mapIndexed { i, r ->
+            if (i == 0) Step(r, each, "available region; any region stayed silent")
+            else Step(r, each, "available region over TCP only; any region stayed silent", tcpOnly = true)
+        }
     }
 
     /** Psiphon listed its available regions and [region] is not one of them: that start can never complete. Pure. */
@@ -112,11 +159,13 @@ class PsiphonRegionRun(private val clock: () -> Long = System::currentTimeMillis
     }
 
     fun <S : Start> run(userRegion: String, remembered: List<String>, totalMs: Long, launch: (PsiphonRegionPlan.Step) -> S,
-                        cancelled: () -> Boolean = { false }): Outcome<S> {
+                        cancelled: () -> Boolean = { false }, avoid: Set<String> = emptySet(),
+                        knownAvailable: List<String> = emptyList()): Outcome<S> {
         val fixed = userRegion.trim().uppercase()
-        val steps = ArrayDeque(PsiphonRegionPlan.initial(fixed, remembered, totalMs))
+        val steps = ArrayDeque(PsiphonRegionPlan.initial(fixed, remembered, totalMs, avoid, knownAvailable))
         val startedAt = clock()
-        val tried = mutableSetOf<String>()
+        // A region just left because it stopped carrying traffic is not rotated back to.
+        val tried = avoid.map { it.trim().uppercase() }.toMutableSet()
         val attempts = mutableListOf<Attempt>()
         var rotated = false
         var last: S? = null

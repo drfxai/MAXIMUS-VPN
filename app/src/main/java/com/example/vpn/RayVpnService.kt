@@ -889,11 +889,20 @@ class RayVpnService : VpnService() {
             else previous.sessionId
         val attemptId = newId()
         val selectedId = if (startedByUser || previous.selectedProfileId == null) userProfile.id else previous.selectedProfileId
+        // A user's Connect ends a pinned restart that was under way; nothing of it carries over.
+        if (startedByUser) {
+            pinnedRestartNote = null
+            psiphonAvoid = null
+            com.example.vpn.smart.FailoverManager.resetPinnedRecovery()
+        }
+        val restartNote = pinnedRestartNote
         fun fresh(status: ConnectionStatus, error: String? = null, stage: com.example.vpn.diagnostics.FailureStage? = null) = ConnectionState(
             status = status, activeProfile = requestedProfile, errorMessage = error, failureStage = stage,
             sessionId = sessionId, attemptId = attemptId, selectedProfileId = selectedId,
             attemptedProfileId = requestedProfile.id, networkGeneration = previous.networkGeneration,
-            search = search?.progress()?.takeIf { it.attemptId == attemptId }
+            search = search?.progress()?.takeIf { it.attemptId == attemptId },
+            pinnedRestartOf = restartNote?.name, suggestedProfileId = restartNote?.suggestedId,
+            suggestedProfileName = restartNote?.suggestedName
         )
         // A new connect the user asked for supersedes a background WARP-relay retry from an earlier one, and gets
         // its own (single) background relay switch.
@@ -2082,6 +2091,20 @@ class RayVpnService : VpnService() {
                 com.example.vpn.diagnostics.ConnectionMetrics.recordConnectTime(connectMs)
                 XrayLogManager.i("VPN", "Time from connect to verified traffic: $connectMs ms.")
                 onTrafficVerified(requestedProfile, check.first)
+                // A pinned restart that brings traffic back ends its notice (PinnedRecovery).
+                if (pinnedRestartNote != null) {
+                    pinnedRestartNote = null
+                    mutateState { if (it.attemptId == attemptId) it.copy(pinnedRestartOf = null, suggestedProfileId = null,
+                        suggestedProfileName = null) else it }
+                }
+                // Psiphon over Lantern carried traffic here: it goes first on this network next time; direct Psiphon
+                // carrying traffic clears that (PsiphonChainMemory). Only verified traffic counts, not a started engine.
+                if (currentNetwork) runCatching {
+                    if (requestedProfile.id == com.example.vpn.connections.PsiphonChainMemory.chainProfile().id)
+                        com.example.vpn.connections.PsiphonChainMemory.recordChainVerified(routeNetwork)
+                    else if (com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile))
+                        com.example.vpn.connections.PsiphonChainMemory.clear(routeNetwork)
+                }
                 // A fallback for automatic Aether on this network when Cloudflare is filtered (VerifiedWinnerBook).
                 if (!com.example.vpn.sidecar.AetherSidecar.handles(requestedProfile)) runCatching {
                     networkMemory.winners.recordVerified(routeNetwork, requestedProfile.id,
@@ -2101,6 +2124,10 @@ class RayVpnService : VpnService() {
                 XrayLogManager.w("VPN", "[DIAGNOSTICS] 10. Tunnel started but no request went through it (${stage.name}). " +
                     "State: TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED; checks continue and failover may switch servers.")
                 if (currentNetwork) recordFreeOutcome(requestedProfile, success = false, rttMs = null, stage = stage)
+                // Build 173: direct Psiphon "started" yet carried nothing (SOCKS reply 1 for minutes) while the chain over
+                // Lantern worked: remembered like a failed start, so the next automatic connect here uses the chain.
+                if (currentNetwork && com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile))
+                    com.example.vpn.connections.PsiphonChainMemory.recordDirectFailure(routeNetwork)
             }
 
             // Refresh due subscriptions through the new tunnel: their addresses may be blocked outside it.
@@ -2131,6 +2158,20 @@ class RayVpnService : VpnService() {
                 staysOnSelected = { exactSession },
                 savedProfile = { requestedProfile },
                 frozenOn = { net -> networkMemory.freezes.frozen(net) },
+                onRestartPinned = { _, reason, restartNo -> restartPinned(requestedProfile, reason, restartNo) },
+                engineFallback = engineFallback@{ degraded ->
+                    if (exactSession || !com.example.vpn.connections.PsiphonChainMemory.isDirect(degraded)) return@engineFallback null
+                    val net = ledgerNetwork()
+                    // Direct Psiphon carried nothing at runtime here: remembered, and the chain over Lantern goes next.
+                    com.example.vpn.connections.PsiphonChainMemory.recordDirectFailure(net)
+                    val chain = com.example.vpn.connections.PsiphonChainMemory.chainProfile()
+                    chain.takeIf {
+                        com.example.vpn.connections.PsiphonChainMemory.mayUseChain(direct = true, smart = smart,
+                            autoFailover = settings.autoFailoverEnabled, fallback = settings.powerButtonFallback,
+                            exact = false, exitLocked = policy.lockExit, force = false, chainAlreadyTried = false,
+                            chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null)
+                    }?.let { com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, it.id) ?: it }
+                },
                 onTriggerSwitch = onTriggerSwitch@{ newProfile, reason, excluded ->
                     if (exactSession) {
                         // Failover checks staysOnSelected first; this only catches a switch already under way.
@@ -2188,13 +2229,22 @@ class RayVpnService : VpnService() {
             val suggestion = if (e is com.example.vpn.connections.ConnectionEngineRunner.NoVerifiedPath && failedNetwork != null &&
                 com.example.vpn.sidecar.AetherSidecar.handles(requestedProfile)) verifiedFallback(failedNetwork, exclude + requestedProfile.id)
                 else null
+            // The user's own direct Psiphon pick failed to start (build 173: silent after AvailableEgressRegions while the
+            // chain over Lantern connected in 18 s): never switched silently, offered with one tap instead.
+            val chainSuggestion = if (suggestion == null && psiphonDirectStartFailed) com.example.vpn.connections.PsiphonChainMemory.chainProfile()
+                .takeIf { chain -> com.example.vpn.connections.PsiphonChainMemory.suggestChain(
+                    direct = com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile), exact = exactSession,
+                    chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null,
+                    chainAlreadyTried = chain.id in exclude) } else null
+            pinnedRestartNote = null
             updateState(_vpnState.value.copy(
                 status = ConnectionStatus.FAILED,
                 errorMessage = e.localizedMessage ?: "Unknown connection failure",
                 failureStage = if (e is EngineStartException) com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED
                     else com.example.vpn.diagnostics.FailureStage.of(e),
-                suggestedProfileId = suggestion?.first?.id,
-                suggestedProfileName = suggestion?.second?.label()
+                suggestedProfileId = suggestion?.first?.id ?: chainSuggestion?.id,
+                suggestedProfileName = suggestion?.second?.label() ?: chainSuggestion?.name,
+                pinnedRestartOf = null
             ))
             disconnectResources()
             // Aether's selected engine is only verified *after* startup. If every built-in
@@ -2300,6 +2350,18 @@ class RayVpnService : VpnService() {
 
     /** Network, Psiphon egress region and profile of the running direct Psiphon tunnel (PsiphonRegionBook). */
     @Volatile private var psiphonRegionInUse: Triple<String, String, String>? = null
+    /** Psiphon's last AvailableEgressRegions list per network, for a pinned restart's next region (PsiphonRegionPlan). */
+    @Volatile private var psiphonLastAvailable: Pair<String, List<String>>? = null
+    /** Regions a pinned restart leaves on its network (their tunnel stopped carrying traffic); used by the next start. */
+    @Volatile private var psiphonAvoid: Pair<String, Set<String>>? = null
+
+    /**
+     * A pinned config is being restarted because its tunnel stopped carrying traffic (PinnedRecovery): its display name
+     * and the one-tap suggestion shown meanwhile. Every attempt of the restart carries it in its state until traffic
+     * is verified, the restart fails, or the user connects or stops.
+     */
+    private data class PinnedRestartNote(val name: String, val suggestedId: String?, val suggestedName: String?)
+    @Volatile private var pinnedRestartNote: PinnedRestartNote? = null
 
     @Volatile private var directFallbackAttempt: String? = null
     /** Direct Psiphon failed its start in the current connect attempt (set in [startSidecar], read by its catch). */
@@ -2745,11 +2807,25 @@ class RayVpnService : VpnService() {
             var ready: Boolean
             if (psiphonRegional) {
                 val remembered = regionNetwork?.let { net -> runCatching { networkMemory.psiphonRegions.ranked(net) }.getOrNull() }.orEmpty()
-                val total = if (userRegion.isEmpty()) com.example.vpn.sidecar.PsiphonRegionPlan.TOTAL_AUTO_MS else launch.readyTimeoutMs
+                // The user's own direct pick on a network where the chain over Lantern is the remembered path: one bounded
+                // try, then a fast failure offering the chain (build 173: 240 s before failing).
+                val knownBlocked = exactSession && com.example.vpn.connections.PsiphonChainMemory.isDirect(profile) &&
+                    com.example.vpn.connections.PsiphonChainMemory.preferChain(regionNetwork)
+                val total = com.example.vpn.sidecar.PsiphonRegionPlan.totalBudget(userRegion, launch.readyTimeoutMs,
+                    manual = exactSession, knownBlocked = knownBlocked)
+                if (knownBlocked) XrayLogManager.i("VPN", "Psiphon: " + com.example.vpn.connections.PsiphonChainMemory.describe(regionNetwork) +
+                    "; your direct Psiphon pick gets ${total / 1000}s before Psiphon over Lantern is offered.")
+                // A pinned restart leaves the region whose tunnel stopped carrying traffic (PinnedRecovery).
+                val avoid = psiphonAvoid?.takeIf { it.first == regionNetwork }?.second.orEmpty()
+                psiphonAvoid = null
+                val knownAvailable = psiphonLastAvailable?.takeIf { it.first == regionNetwork }?.second.orEmpty()
                 var firstStep = true
-                val outcome = com.example.vpn.sidecar.PsiphonRegionRun().run(userRegion, remembered, total, launch = { step ->
-                    val stepProfile = if (step.region == userRegion) profile
+                val outcome = com.example.vpn.sidecar.PsiphonRegionRun().run(userRegion, remembered, total, avoid = avoid,
+                    knownAvailable = knownAvailable, launch = { step ->
+                    val regional = if (step.region == userRegion) profile
                         else com.example.vpn.engine.ProfileExtras.with(profile, com.example.vpn.sidecar.PsiphonSidecar.KEY_REGION, step.region)
+                    // The TCP-only step of the rotation: the old 120 s TCP retry, now inside the run's budget.
+                    val stepProfile = if (step.tcpOnly) com.example.vpn.sidecar.PsiphonSidecar.tcpStartupRetry(regional) ?: regional else regional
                     if (!firstStep || stepProfile !== profile) {
                         runningProfile = stepProfile
                         // A stopped process can still be releasing its listener. Never reuse its port.
@@ -2757,7 +2833,7 @@ class RayVpnService : VpnService() {
                         launch = engine.prepare(runningProfile, settings, engineContext)
                     }
                     firstStep = false
-                    val label = step.region.ifEmpty { "any" }
+                    val label = step.region.ifEmpty { "any" } + if (step.tcpOnly) " (TCP only)" else ""
                     XrayLogManager.i("VPN", "Psiphon: region $label for up to ${step.budgetMs / 1000}s (${step.why}).")
                     com.example.vpn.diagnostics.events.EventLog.event("psiphon.region", attributes = mapOf(
                         "region" to label, "budget.s" to (step.budgetMs / 1000).toString(), "why" to step.why), result = "START")
@@ -2765,6 +2841,9 @@ class RayVpnService : VpnService() {
                     RegionStart(launchProcess()).also { sidecar = it.running }
                 }, cancelled = { connectionOwner?.isActive == false || !StopFence.admits() })
                 regionOutcome = outcome
+                if (regionNetwork != null) outcome.attempts.lastOrNull { !it.available.isNullOrEmpty() }?.available?.let {
+                    psiphonLastAvailable = regionNetwork to it
+                }
                 process = requireNotNull(outcome.ready ?: outcome.last).running
                 ready = outcome.ready != null
                 // What each concrete region did here steers the next start (PsiphonRegionBook).
@@ -2794,7 +2873,7 @@ class RayVpnService : VpnService() {
             // The automatic-region run already used its whole budget (and the chain over Lantern may follow); a region
             // Psiphon lists as unavailable will not appear over TCP either. A fixed, available region keeps its retry.
             val regionRun = regionOutcome
-            val regionAllowsRetry = regionRun == null || (userRegion.isNotEmpty() && regionRun.failure == null)
+            val regionAllowsRetry = com.example.vpn.sidecar.PsiphonRegionPlan.tcpRetryAllowed(regionRun != null, userRegion, regionRun?.failure)
             val tcpRetry = if (!ready && engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID && regionAllowsRetry &&
                 connectionOwner?.isActive != false) com.example.vpn.sidecar.PsiphonSidecar.tcpStartupRetry(profile) else null
             // What the first (UDP+TCP) start dialed. When it already dialed enough TCP servers with none connecting and
@@ -2868,8 +2947,8 @@ class RayVpnService : VpnService() {
                 error("The ${engine.id} engine did not start: $hint")
             }
             com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
-            if (engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID && com.example.vpn.connections.PsiphonChainMemory.isDirect(profile))
-                com.example.vpn.connections.PsiphonChainMemory.clear(ledgerNetwork())
+            // Direct Psiphon clears PsiphonChainMemory only once traffic is verified through it (build 173: a direct
+            // start came up and then carried nothing for five minutes).
             XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
             watchSidecar(engine, process)
             registerWarpThroughCarrier(engine.id, process, engineContext, launch, settings)
@@ -3842,6 +3921,44 @@ class RayVpnService : VpnService() {
     }.getOrDefault(false)
 
     /**
+     * A pinned session's tunnel ([running], the power button's own config) stopped carrying traffic for
+     * [com.example.vpn.smart.PinnedRecovery.WINDOWS_BEFORE_RESTART] windows (build 173: Psiphon "connected", every check
+     * "SOCKS reply 1" for five minutes, never recovered). The SAME config is restarted, never another one: Psiphon on
+     * any region leaves the region that went dead. Meanwhile the state, the notification and the Home card say so and
+     * offer Smart Connect and the path verified on this network (Psiphon over Lantern for direct Psiphon) with one tap.
+     */
+    private fun restartPinned(running: VlessProfile, reason: String, restartNo: Int) {
+        if (!exactSession) return
+        val network = ledgerNetwork()
+        val name = com.example.core.SecretRedactor.redact(running.name)
+        val direct = com.example.vpn.connections.PsiphonChainMemory.isDirect(running)
+        psiphonRegionInUse?.takeIf { it.third == running.id && it.first == network }?.let { (net, region, _) ->
+            runCatching { networkMemory.psiphonRegions.recordFailure(net, region) }
+            psiphonAvoid = net to setOf(region)
+        }
+        if (direct) com.example.vpn.connections.PsiphonChainMemory.recordDirectFailure(network)
+        val chain = com.example.vpn.connections.PsiphonChainMemory.chainProfile()
+        val suggestion: Pair<String, String>? = if (direct && com.example.vpn.connections.PsiphonChainMemory.suggestChain(
+                direct = true, exact = true,
+                chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null,
+                chainAlreadyTried = false)) chain.id to chain.name
+            else runCatching { networkMemory.winners.best(network, setOf(running.id)) }.getOrNull()?.let { it.profileId to it.label() }
+        pinnedRestartNote = PinnedRestartNote(name, suggestion?.first, suggestion?.second)
+        mutateState { it.copy(pinnedRestartOf = name, suggestedProfileId = suggestion?.first, suggestedProfileName = suggestion?.second) }
+        showForegroundNotification("$name stopped carrying traffic — reconnecting…")
+        com.example.vpn.diagnostics.events.EventLog.event("pinned.restart", com.example.vpn.diagnostics.events.Severity.WARN,
+            attributes = mapOf(
+                "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(running.id) ?: "none"),
+                "restart" to restartNo.toString(),
+                "avoid.region" to (psiphonAvoid?.second?.joinToString(",") ?: "none"),
+                "suggested" to (suggestion?.first?.let { com.example.vpn.diagnostics.events.DiagEvent.profileRef(it) } ?: "none")))
+        launchSwitch("pinned restart $restartNo · $name") { ticket ->
+            XrayLogManager.w("FAILOVER", "Restarting $name (the power button's config): $reason")
+            connect(running, smart = false, ticket = ticket)
+        }
+    }
+
+    /**
      * Starts an automatic move of the running session ([block] gets the intent ticket), unless another switch
      * is already under way. Through connectJob, so a Connect or Disconnect cancels it.
      */
@@ -4289,6 +4406,7 @@ class RayVpnService : VpnService() {
         lifecycle.newIntent()
         exactSession = false
         smartStarted = false
+        pinnedRestartNote = null
         connectJob?.cancel()
         com.example.vpn.sidecar.EngineReaper.stopAll()
         com.example.vpn.sidecar.EngineHandoff.clear()
@@ -4444,6 +4562,8 @@ class RayVpnService : VpnService() {
 
     private suspend fun disconnectLocked() = withContext(Dispatchers.IO) {
         XrayLogManager.appendLog("Initiating clean VPN disconnection...", "VPN")
+        pinnedRestartNote = null
+        psiphonAvoid = null
         updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING))
 
         supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.USER_DISCONNECT)

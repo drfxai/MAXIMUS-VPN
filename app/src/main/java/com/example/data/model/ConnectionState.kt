@@ -81,6 +81,11 @@ data class ConnectionState(
      */
     val suggestedProfileId: String? = null,
     val suggestedProfileName: String? = null,
+    /**
+     * A pinned session's tunnel stopped carrying traffic and the same config is being restarted (PinnedRecovery): the
+     * config's display name, for "<name> stopped carrying traffic — reconnecting". Null otherwise.
+     */
+    val pinnedRestartOf: String? = null,
     /** Where the connect's recovery escalation stands (RecoveryStage title), for display only. */
     val recoveryStage: String? = null,
     /** Config revival is running for this attempt. */
