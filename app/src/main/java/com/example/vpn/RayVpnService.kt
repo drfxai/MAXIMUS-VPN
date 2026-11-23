@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 
@@ -88,6 +89,8 @@ class RayVpnService : VpnService() {
         private const val PING_HEALTHY_MS = 30_000L
         /** How long a clean-address scan may take before the connect goes on without one. */
         private const val CLEAN_IP_SCAN_LIMIT_MS = 15_000L
+        /** How long stage E waits for the CDN lookup and the SNI-proxy check before scanning without them. */
+        private const val CLEAN_IP_LOOKUP_MS = 4_000L
         /** Requests through a new tunnel before it counts as unverified, and the pause between them. */
         private const val VERIFY_ATTEMPTS = 3
         private const val VERIFY_RETRY_MS = 1_500L
@@ -698,23 +701,43 @@ class RayVpnService : VpnService() {
     }
 
     /**
-     * A Cloudflare-fronted server whose address is blocked usually still answers on another Cloudflare
-     * address: this scans for one and returns the same server reached through it, if it carries traffic.
+     * A CDN-fronted server (WebSocket, HTTPUpgrade, XHTTP, gRPC or H2 over TLS; Cloudflare, Fastly, CloudFront
+     * or Gcore) whose address is blocked usually still answers on another edge of the same CDN: this looks for
+     * one ([com.example.vpn.cleanip.CleanEdgePlan]) and returns the same server reached through it, if it
+     * carries two real requests. Cloudflare is not scanned on a network that proxies Cloudflare TLS by name.
      */
-    private suspend fun cleanIpPath(profile: VlessProfile, timeoutSec: Int): com.example.vpn.smart.ServerRace.Winner? {
-        val fronted = profile.transport.lowercase() in setOf("ws", "xhttp", "splithttp", "httpupgrade", "grpc", "h2") &&
-            profile.security.equals("tls", true) && !profile.allowInsecure
-        if (!fronted) return null
-        showForegroundNotification("Looking for a verified clean path...")
+    private suspend fun cleanIpPath(
+        profile: VlessProfile,
+        timeoutSec: Int,
+        /** The config's CDN when the caller already looked it up; null looks it up here. */
+        knownCdn: com.example.vpn.cleanip.Cdn? = null
+    ): com.example.vpn.smart.ServerRace.Winner? {
+        if (!com.example.vpn.cleanip.CdnEdgeScanner.fronted(profile)) return null
+        val started = System.currentTimeMillis()
+        val app = com.example.RayApplication.instance
+        val finder = app.cdnCleanIps
         val scanNetwork = ledgerNetwork()
+        // The CDN lookup (a DNS answer for a domain address) and the SNI-proxy check do blocking network I/O:
+        // each runs in the service scope and is only waited on briefly. A check that finishes later is still
+        // remembered for this network, so the next connect here knows.
+        val cdn = knownCdn ?: bounded(CLEAN_IP_LOOKUP_MS) { finder.cdnOf(profile) }
+        val proxied = if ((cdn ?: com.example.vpn.cleanip.Cdn.CLOUDFLARE) != com.example.vpn.cleanip.Cdn.CLOUDFLARE) false
+            else app.cleanIpCache.sniProxied(scanNetwork)
+                ?: bounded(CLEAN_IP_LOOKUP_MS) { finder.cloudflareProxied(scanNetwork, app.networkCountry()) }
+        val decision = com.example.vpn.cleanip.CleanEdgePlan.decide(profile, cdn, proxied)
+        if (!decision.runs) {
+            XrayLogManager.i("SMART", "Clean-edge scan skipped: ${decision.skipped}.")
+            return null
+        }
+        showForegroundNotification("Looking for a verified clean path...")
         val scope = com.example.vpn.connectivity.EndpointScoringEngine.destinationScope(scanNetwork, profile)
-        val endpointScores = com.example.RayApplication.instance.endpointScores
+        val endpointScores = app.endpointScores
         val cached = endpointScores.validated(scope)
-        // Candidates must pass TLS with this server's own name and its WebSocket/HTTP exchange, not just a TCP
-        // connect: on a filtered network nearly every Cloudflare address accepts TCP and then drops TLS.
-        // Addresses that worked here before are tested first; what passes before the time limit is kept.
+        // Candidates must pass TLS with this server's own name (and, for Cloudflare WebSocket, its WebSocket/HTTP
+        // exchange), not just a TCP connect: on a filtered network nearly every CDN address accepts TCP and then
+        // drops TLS. Addresses that worked here before are tested first; what passes before the time limit is kept.
         val found = java.util.Collections.synchronizedList(mutableListOf<String>())
-        withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
+        if (decision.websocketScan) withTimeoutOrNull(CLEAN_IP_SCAN_LIMIT_MS) {
             try {
                 com.example.panels.CleanIpOptimizer().scan(profile, targetPort = profile.port, enableSpeedTest = false,
                     candidateCount = 48, preferred = endpointScores.remembered(scope, limit = 4),
@@ -728,17 +751,38 @@ class RayVpnService : VpnService() {
                 XrayLogManager.w("SMART", "Clean-IP scan stopped: ${e.message}")
             }
         }
-        val candidates = synchronized(found) { found.toList() }
+        val websocket = synchronized(found) { found.toList() }
+        val remaining = CLEAN_IP_SCAN_LIMIT_MS - (System.currentTimeMillis() - started)
+        // XHTTP, gRPC and H2 configs, Fastly/CloudFront/Gcore fronts, and too few WebSocket edges: handshake-ranked
+        // edges of the config's own CDN with its own TLS name, cached per network (fresh cache answers at once).
+        val handshake = if (!com.example.vpn.cleanip.CleanEdgePlan.topUp(decision, websocket.size, remaining)) emptyList() else
+            withTimeoutOrNull(remaining) {
+                runCatching {
+                    finder.find(profile, scanNetwork, app.networkCountry(), preferred = websocket, speedTop = 0, checkProxy = false,
+                        knownCdn = decision.cdn)
+                }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                    .onSuccess { f -> XrayLogManager.i("SMART", "${f.cdn?.label ?: "CDN"} edges for ${profile.transport}: ${f.ips.size}${if (f.fromCache) " (remembered here)" else ""}.") }
+                    .getOrNull()?.ips
+            }.orEmpty()
+        if (ledgerNetwork() != scanNetwork) return null
+        val candidates = com.example.vpn.cleanip.CleanEdgePlan.candidates(cached, websocket, handshake)
+        if (candidates.isEmpty()) return null
         val attempt = kotlinx.coroutines.currentCoroutineContext()[Job]
         return com.example.vpn.Abandonable.run {
-            com.example.vpn.smart.CleanPathRace.select(profile, (cached + candidates).distinct(),
+            com.example.vpn.smart.CleanPathRace.select(profile, candidates,
                 probe = { paths -> probeAll(paths, timeoutSec) },
                 cancelled = { attempt?.isActive == false || ledgerNetwork() != scanNetwork })
         }?.also {
-            com.example.RayApplication.instance.endpointScores.record(listOf(com.example.vpn.connectivity.EndpointScoringEngine.Measurement(
+            endpointScores.record(listOf(com.example.vpn.connectivity.EndpointScoringEngine.Measurement(
                 it.profile.address, scope, System.currentTimeMillis(), true, it.latencyMs)))
-            XrayLogManager.i("SMART", "A clean path carried two real requests (${it.latencyMs} ms).")
+            XrayLogManager.i("SMART", "A clean ${decision.cdn?.label ?: "CDN"} path carried two real requests (${it.latencyMs} ms).")
         }
+    }
+
+    /** [block] on the service scope, waited on for at most [ms]; null when it took longer or failed. It keeps running. */
+    private suspend fun <T> bounded(ms: Long, block: () -> T): T? {
+        val job = serviceScope.async(Dispatchers.IO) { runCatching(block).getOrNull() }
+        return withTimeoutOrNull(ms) { job.await() }
     }
 
     /**
@@ -1087,7 +1131,7 @@ class RayVpnService : VpnService() {
             search = tracker
             plan.reading?.let { XrayLogManager.i("SMART", "Measured network: ${it.summary()}.") }
             plan.transportsSkipped.forEach { (t, why) -> XrayLogManager.i("SMART", "${t.title} not tried directly: $why.") }
-            if (plan.cloudflareLast) XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0): clean IP, WARP, MASQUE " +
+            if (plan.cloudflareLast) XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0): clean IP for Cloudflare fronts, WARP, MASQUE " +
                 "and Matrix move to the end of the search.")
             var raced = false
             // What the pre-flight proved (PathGate): a real request failed on the selected path, or an
@@ -1376,13 +1420,25 @@ class RayVpnService : VpnService() {
                     tracker.finish(com.example.vpn.smart.SearchStage.OTHER_SERVERS, verified = raced)
                 }
                 if (choice.nothingWorked && !raced) tracker.start(com.example.vpn.smart.SearchStage.EMERGENCY)
-                // Nothing worked, and the server sits behind Cloudflare: its address may be blocked
-                // while other Cloudflare addresses are not. Scan for one and try the same server there.
-                if (choice.nothingWorked && !raced && plan.early(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) {
-                    cleanIpPath(requestedProfile, timeouts.alternateSec)?.let { adopt(it) }
+                // Nothing worked, and the server sits behind a CDN: its address may be blocked while other
+                // edges of the same CDN are not. Scan for one and try the same server there.
+                // cf=0: the clean-address scan waits for the end of the search (after the recovery engines), unless the
+                // config sits on Fastly, CloudFront or Gcore, which a Cloudflare block does not touch (CleanEdgePlan.timing).
+                if (choice.nothingWorked && !raced) {
+                    val early = plan.early(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)
+                    val deferred = plan.deferred(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)
+                    val front = if (!early && deferred && com.example.vpn.cleanip.CdnEdgeScanner.fronted(requestedProfile))
+                        bounded(CLEAN_IP_LOOKUP_MS) { com.example.RayApplication.instance.cdnCleanIps.frontOf(requestedProfile) } else null
+                    when (com.example.vpn.cleanip.CleanEdgePlan.timing(early, deferred, front)) {
+                        com.example.vpn.cleanip.CleanEdgePlan.Timing.EARLY -> {
+                            if (!early) XrayLogManager.i("SMART", "Cloudflare is blocked here, but this config is fronted by " +
+                                "${front?.label}: its clean edges are tried now, not at the end.")
+                            cleanIpPath(requestedProfile, timeouts.alternateSec, knownCdn = front)?.let { adopt(it) }
+                        }
+                        com.example.vpn.cleanip.CleanEdgePlan.Timing.DEFERRED -> cleanIpDeferred = true
+                        com.example.vpn.cleanip.CleanEdgePlan.Timing.NONE -> Unit
+                    }
                 }
-                // cf=0: the clean-address scan waits for the end of the search (after the recovery engines).
-                if (choice.nothingWorked && !raced && plan.deferred(com.example.vpn.smart.EmergencyTransport.CLEAN_IP)) cleanIpDeferred = true
                 // Sidecar engines must carry requests before selection. The shared recovery pool below
                 // tests MASQUE, Psiphon, saved Tor bridges and chains serially in DAILY and GOD MODE;
                 // choosing several untested engines here used to overwrite the earlier choices with Tor.
