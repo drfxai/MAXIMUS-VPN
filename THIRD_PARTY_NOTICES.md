@@ -675,7 +675,8 @@ carrier verification; see docs/UPSTREAM_INTEGRATION_2026-10-22.fa.md.
 ## MasterDnsVPN server installer (2026-11-15)
 
 The Install Center's "MasterDNS Server" tool downloads the unmodified official
-MasterDnsVPN Linux server release `v2026.10.26.100415-5f83ee9` from
+MasterDnsVPN Linux server release `v2026.11.18.210322-7198b45` (bumped from
+`v2026.10.26.100415-5f83ee9` on 2026-11-23; upstream commit 7198b45b86c7) from
 https://github.com/masterking32/MasterDnsVPN/releases onto the user's own server
 and refuses it unless its SHA-256 matches the value pinned in
 `DnsServerScripts.kt`. The binary is not bundled in the app. The installer
@@ -683,6 +684,13 @@ script, configuration edits, systemd unit and profile/link generation are
 original MAXIMUS code; upstream `server_linux_install.sh` is not used. The
 phone connects with the CottenDNS client in its MasterDNS mode (see the
 CottenDNS section above).
+
+Pinned SHA-256 (from the upstream release asset digests, re-verified by download):
+`MasterDnsVPN_Server_Linux_AMD64.zip` d0f455ac87afb31010dbc9203d74c3ca24eed52b728873694d10d04b4fd24b06,
+`MasterDnsVPN_Server_Linux_ARM64.zip` 5f284644af2b2b3a747473a1a9df694fced10592ced0e5847fb77226fbb73895.
+Only amd64 and arm64 servers are supported by the installer. Upstream's new
+FastStart mode is a MasterDnsVPN *client* feature; the server has no matching
+option, and the phone side uses the CottenDNS client, so nothing changes there.
 
 MasterDnsVPN is distributed under the MIT License:
 
