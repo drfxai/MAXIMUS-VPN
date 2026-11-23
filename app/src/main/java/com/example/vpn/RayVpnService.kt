@@ -4160,11 +4160,12 @@ class RayVpnService : VpnService() {
         disconnectResources()
         com.example.vpn.unlock.UnlockDns.load(this@RayVpnService)
         val choice = com.example.vpn.unlock.UnlockDns.state.value
-        val checks = com.example.vpn.unlock.UnlockDnsHealth.checkAll(choice.servers, com.example.vpn.unlock.UnlockDns.probe())
+        val checks = com.example.vpn.unlock.UnlockDns.checkServers(choice.servers)
         com.example.vpn.unlock.UnlockDns.publishChecks(checks)
         checks.forEach { c ->
             XrayLogManager.i("UNLOCK", "${c.ip}: ${c.health.name.lowercase()}" + (c.latencyMs?.let { " $it ms" } ?: "") +
-                (c.reason?.let { " (${it.name.lowercase().replace('_', ' ')})" } ?: ""))
+                (c.reason?.let { " (${it.name.lowercase().replace('_', ' ')})" } ?: "") +
+                (c.shape?.let { " [query shape ${it.key}]" } ?: ""))
         }
         val server = com.example.vpn.unlock.UnlockDnsHealth.pick(checks, choice.autoPick, choice.manual)
             ?: return@withContext failed(text.getString(R.string.unlock_error_no_server))

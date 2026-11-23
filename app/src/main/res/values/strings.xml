@@ -1567,6 +1567,10 @@
     <string name="unlock_auto_pick">Auto-pick fastest server</string>
     <string name="unlock_auto_pick_hint">Skips servers that fail the health check</string>
     <string name="unlock_manual_hint">Tap a server to use it</string>
+    <string name="unlock_shaping">Anti-censorship query shaping</string>
+    <string name="unlock_shaping_hint_off">Off: DNS questions are sent as usual</string>
+    <string name="unlock_shaping_hint_on">When a server\'s answers are filtered on this network, retries with reshaped DNS questions (CircumVolve, lab-tested in Iran) and remembers what works</string>
+    <string name="unlock_shaped_badge">Shaped</string>
     <string name="unlock_auto_short">Auto-pick</string>
     <string name="unlock_manual_short">Manual</string>
     <string name="unlock_health_healthy">Healthy</string>

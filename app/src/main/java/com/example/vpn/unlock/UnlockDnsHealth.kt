@@ -39,7 +39,9 @@ data class ServerCheck(
     /** DNS round trip (the faster of the two questions); null when the server never answered. */
     val latencyMs: Long? = null,
     val reason: BlockReason? = null,
-    val checkedAt: Long = 0L
+    val checkedAt: Long = 0L,
+    /** The query shape this server passed with (its plain questions failed); null for plain. */
+    val shape: QueryShape? = null
 ) {
     val usable: Boolean get() = health == ServerHealth.HEALTHY || health == ServerHealth.SLOW
 }
@@ -86,6 +88,39 @@ object UnlockDnsHealth {
         return ServerCheck(ip, if (latency > SLOW_MS) ServerHealth.SLOW else ServerHealth.HEALTHY, latency, null, now)
     }
 
+    /** Block reasons a query shape can change: something on the path answered the plain question. */
+    val SHAPEABLE = setOf(BlockReason.HIJACKED, BlockReason.INTERCEPTED, BlockReason.NO_UNLOCK_ANSWER)
+
+    /**
+     * [check] with query shaping: the [remembered] shape first (it passed on this network before), then plain;
+     * when plain fails for a [SHAPEABLE] reason, each [QueryShape] in turn within [UnlockDnsShaping.CHECK_BUDGET_MS].
+     * A server with no answer at all (dead, or UDP and TCP blocked) gets no shaped attempts. The result carries
+     * the shape that passed; otherwise the plain result.
+     */
+    fun checkShaped(
+        ip: String,
+        plain: UnlockProbe,
+        shaped: (QueryShape) -> UnlockProbe,
+        remembered: QueryShape?,
+        now: Long = System.currentTimeMillis(),
+        clock: () -> Long = System::currentTimeMillis
+    ): ServerCheck {
+        if (remembered != null) {
+            val again = check(ip, shaped(remembered), now)
+            if (again.usable) return again.copy(shape = remembered)
+        }
+        val first = check(ip, plain, now)
+        if (first.usable || first.reason !in SHAPEABLE) return first
+        val started = clock()
+        for (shape in QueryShape.entries) {
+            if (shape == remembered) continue
+            if (clock() - started >= UnlockDnsShaping.CHECK_BUDGET_MS) break
+            val result = check(ip, shaped(shape), now)
+            if (result.usable) return result.copy(shape = shape)
+        }
+        return first
+    }
+
     /** Healthy first, then Slow, then not yet checked, then Blocked; fastest first within each. */
     fun rank(checks: List<ServerCheck>): List<ServerCheck> = checks.sortedWith(
         compareBy<ServerCheck> { order(it.health) }.thenBy { it.latencyMs ?: Long.MAX_VALUE }.thenBy { it.ip }
@@ -118,13 +153,14 @@ object UnlockDnsHealth {
         probe: UnlockProbe,
         parallelism: Int = PARALLELISM,
         deadlineMs: Long = DEADLINE_MS,
-        now: Long = System.currentTimeMillis()
+        now: Long = System.currentTimeMillis(),
+        checker: (String) -> ServerCheck = { check(it, probe, now) }
     ): List<ServerCheck> {
         if (servers.isEmpty()) return emptyList()
         val list = servers.distinct()
         val pool = Executors.newFixedThreadPool(parallelism.coerceIn(1, list.size))
         return try {
-            val futures = pool.invokeAll(list.map { ip -> Callable { runCatching { check(ip, probe, now) }.getOrNull() } },
+            val futures = pool.invokeAll(list.map { ip -> Callable { runCatching { checker(ip) }.getOrNull() } },
                 deadlineMs, TimeUnit.MILLISECONDS)
             rank(list.mapIndexed { i, ip ->
                 val f = futures[i]

@@ -1570,6 +1570,10 @@
     <string name="unlock_auto_pick">Выбирать самый быстрый сервер</string>
     <string name="unlock_auto_pick_hint">Серверы, не прошедшие проверку, пропускаются</string>
     <string name="unlock_manual_hint">Нажмите на сервер, чтобы выбрать его</string>
+    <string name="unlock_shaping">Обход цензуры DNS-запросов</string>
+    <string name="unlock_shaping_hint_off">Выключено: DNS-запросы отправляются как обычно</string>
+    <string name="unlock_shaping_hint_on">Если ответы сервера в этой сети фильтруются, повторяет запрос в изменённом виде (CircumVolve, проверено в лаборатории в Иране) и запоминает, что сработало</string>
+    <string name="unlock_shaped_badge">Обход</string>
     <string name="unlock_auto_short">Автовыбор</string>
     <string name="unlock_manual_short">Вручную</string>
     <string name="unlock_health_healthy">Работает</string>

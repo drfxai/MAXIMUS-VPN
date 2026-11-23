@@ -44,12 +44,28 @@ object UnlockDnsWire {
      */
     fun exchange(server: String, query: ByteArray, timeoutMs: Int, protector: Protector): Exchange? {
         val address = runCatching { InetAddress.getByName(server) }.getOrNull() ?: return null
-        val udp = udp(address, query, timeoutMs, protector)
+        val accept = { reply: ByteArray -> reply.takeIf { DnsResponse.isResponseTo(query, it) } }
+        val udp = udp(address, query, timeoutMs, protector, accept)
         if (udp != null && !truncated(udp.response)) return udp
-        return tcp(address, query, timeoutMs, protector) ?: udp
+        return tcp(address, query, timeoutMs, protector, accept) ?: udp
     }
 
-    private fun udp(server: InetAddress, query: ByteArray, timeoutMs: Int, protector: Protector): Exchange? {
+    /**
+     * Sends [original] reshaped with [shape] ([UnlockDnsShaping.shape]) over UDP; over TCP only when the UDP answer
+     * is truncated (a silent UDP means this shape does not work here, and the caller moves on quickly). The reply
+     * comes back as an answer to [original] ([UnlockDnsShaping.restore]), so the app sees its own question and ID.
+     */
+    fun exchangeShaped(server: String, original: ByteArray, shape: QueryShape, timeoutMs: Int, protector: Protector): Exchange? {
+        val shaped = UnlockDnsShaping.shape(original, shape) ?: return null
+        val address = runCatching { InetAddress.getByName(server) }.getOrNull() ?: return null
+        val accept = { reply: ByteArray -> UnlockDnsShaping.restore(original, reply) }
+        val udp = udp(address, shaped, timeoutMs, protector, accept)
+        if (udp == null || !truncated(udp.response)) return udp
+        return tcp(address, shaped, timeoutMs, protector, accept) ?: udp
+    }
+
+    private fun udp(server: InetAddress, query: ByteArray, timeoutMs: Int, protector: Protector,
+                    accept: (ByteArray) -> ByteArray?): Exchange? {
         try {
             DatagramSocket().use { socket ->
                 if (!protector.udp(socket)) return null
@@ -62,8 +78,8 @@ object UnlockDnsWire {
                 while (System.nanoTime() < deadline) {
                     val packet = DatagramPacket(buffer, buffer.size)
                     socket.receive(packet)
-                    val reply = buffer.copyOf(packet.length)
-                    if (DnsResponse.isResponseTo(query, reply)) {
+                    val reply = accept(buffer.copyOf(packet.length))
+                    if (reply != null) {
                         val ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
                         return Exchange(reply, ms, intercepted = packet.address != server, tcp = false)
                     }
@@ -75,7 +91,8 @@ object UnlockDnsWire {
         return null
     }
 
-    private fun tcp(server: InetAddress, query: ByteArray, timeoutMs: Int, protector: Protector): Exchange? {
+    private fun tcp(server: InetAddress, query: ByteArray, timeoutMs: Int, protector: Protector,
+                    accept: (ByteArray) -> ByteArray?): Exchange? {
         try {
             Socket().use { socket ->
                 if (!protector.tcp(socket)) return null
@@ -89,8 +106,7 @@ object UnlockDnsWire {
                 val input = DataInputStream(socket.getInputStream())
                 val length = input.readUnsignedShort()
                 if (length !in 12..MAX_MESSAGE) return null
-                val reply = ByteArray(length).also { input.readFully(it) }
-                if (!DnsResponse.isResponseTo(query, reply)) return null
+                val reply = accept(ByteArray(length).also { input.readFully(it) }) ?: return null
                 return Exchange(reply, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started), intercepted = false, tcp = true)
             }
         } catch (_: IOException) {
@@ -99,11 +115,12 @@ object UnlockDnsWire {
         return null
     }
 
-    /** The real probe used by health checks and the Home badges. */
-    class Probe(private val protector: Protector = Protector()) : UnlockProbe {
+    /** The real probe used by health checks and the Home badges; with [shape], every question is reshaped. */
+    class Probe(private val protector: Protector = Protector(), private val shape: QueryShape? = null) : UnlockProbe {
         override fun lookup(server: String, name: String, timeoutMs: Int): Lookup? {
             val query = ResolverReach.query(random.nextInt(0x10000), name)
-            val answer = exchange(server, query, timeoutMs, protector) ?: return null
+            val answer = (if (shape == null) exchange(server, query, timeoutMs, protector)
+                else exchangeShaped(server, query, shape, minOf(timeoutMs, UnlockDnsShaping.ATTEMPT_TIMEOUT_MS), protector)) ?: return null
             val ips = ResolverScanner.aRecords(query, answer.response, answer.response.size) ?: return null
             return Lookup(ips, answer.ms, answer.intercepted)
         }

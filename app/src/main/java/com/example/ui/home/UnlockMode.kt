@@ -304,6 +304,7 @@ private fun PrivateDnsWarning() {
 /** What the sheet can ask for; [UnlockDnsSheet] wires it to [UnlockDns], screenshot tests to nothing. */
 internal interface UnlockSheetActions {
     fun setAutoPick(on: Boolean) {}
+    fun setShaping(on: Boolean) {}
     fun select(ip: String) {}
     fun addCustom(input: String): UnlockDnsList.CustomResult = UnlockDnsList.CustomResult.Invalid
     fun removeCustom(ip: String) {}
@@ -326,6 +327,10 @@ internal fun UnlockDnsSheet(onDismiss: () -> Unit) {
     val actions = remember(context) {
         object : UnlockSheetActions {
             override fun setAutoPick(on: Boolean) = UnlockDns.setAutoPick(context, on)
+            override fun setShaping(on: Boolean) {
+                UnlockDns.setShaping(context, on)
+                scope.launch { UnlockDns.recheck(context) }
+            }
             override fun select(ip: String) = UnlockDns.select(context, ip)
             override fun addCustom(input: String): UnlockDnsList.CustomResult {
                 val result = UnlockDns.addCustom(context, input)
@@ -385,6 +390,29 @@ internal fun UnlockDnsSheetContent(state: UnlockDns.State, actions: UnlockSheetA
                     checked = state.autoPick,
                     onCheckedChange = { actions.setAutoPick(it) },
                     modifier = Modifier.testTag("unlock_auto_pick"),
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = c.onPrimary, checkedTrackColor = c.primary, checkedBorderColor = c.primary,
+                        uncheckedThumbColor = c.textMuted, uncheckedTrackColor = c.surfaceElevated, uncheckedBorderColor = c.borderMedium
+                    )
+                )
+            }
+        }
+
+        // Anti-censorship query shaping (CircumVolve, CCS 2026)
+        Surface(shape = RoundedCornerShape(16.dp), color = c.surfaceCard, border = BorderStroke(1.dp, c.borderSubtle),
+            modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.clickable { actions.setShaping(!state.shaping) }.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.unlock_shaping), color = c.textPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(if (state.shaping) R.string.unlock_shaping_hint_on else R.string.unlock_shaping_hint_off),
+                        color = c.textMuted, fontSize = 11.5.sp, lineHeight = 15.sp)
+                }
+                Spacer(Modifier.width(8.dp))
+                Switch(
+                    checked = state.shaping,
+                    onCheckedChange = { actions.setShaping(it) },
+                    modifier = Modifier.testTag("unlock_query_shaping"),
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = c.onPrimary, checkedTrackColor = c.primary, checkedBorderColor = c.primary,
                         uncheckedThumbColor = c.textMuted, uncheckedTrackColor = c.surfaceElevated, uncheckedBorderColor = c.borderMedium
@@ -478,6 +506,12 @@ private fun ServerRow(
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.unlock_custom_badge), color = c.primary, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(c.primary.copy(alpha = 0.14f))
+                                .padding(horizontal = 5.dp, vertical = 1.dp))
+                    }
+                    if (row.check?.shape != null && !blocked) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.unlock_shaped_badge), color = c.statusWarning, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(c.statusWarning.copy(alpha = 0.14f))
                                 .padding(horizontal = 5.dp, vertical = 1.dp))
                     }
                     if (active) {

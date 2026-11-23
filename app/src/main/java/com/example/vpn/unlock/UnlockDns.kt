@@ -34,6 +34,8 @@ object UnlockDns {
         val listBusy: Boolean = false,
         val listResult: ListResult? = null,
         val privateDnsStrict: Boolean = false,
+        /** Anti-censorship query shaping ([QueryShape]); off unless the user turns it on. */
+        val shaping: Boolean = false,
         /** Home badges: null while not yet verified for the active server. */
         val services: Map<UnlockDnsHealth.Service, Boolean?> = emptyMap()
     ) {
@@ -46,6 +48,8 @@ object UnlockDns {
     private const val KEY_AUTO = "auto_pick"
     private const val KEY_MANUAL = "manual"
     private const val KEY_CUSTOM = "custom"
+    private const val KEY_SHAPING = "query_shaping"
+    private const val KEY_SHAPES = "query_shapes"
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -56,10 +60,30 @@ object UnlockDns {
     @Volatile var protector: UnlockDnsWire.Protector = UnlockDnsWire.Protector()
     /** The probe used by [recheck] and [verifyServices]; tests replace it. */
     @Volatile var probe: () -> UnlockProbe = { UnlockDnsWire.Probe(protector) }
+    /** The probe that reshapes every question with a [QueryShape]; tests replace it. */
+    @Volatile var shapedProbe: (QueryShape) -> UnlockProbe = { UnlockDnsWire.Probe(protector, it) }
+    /** The phone's current network, coarse and salted (set by RayApplication to NetworkIdentity). */
+    @Volatile var networkKey: () -> String? = { null }
+    /** Which query shape worked for which server on which network (persisted with the choices). */
+    val shapes = ShapeBook()
+    @Volatile private var cachedNetwork: Pair<Long, String>? = null
+    private const val NETWORK_CACHE_NS = 10_000_000_000L
+
+    /** [networkKey], read at most every 10 s (the session asks per question). */
+    fun currentNetwork(): String {
+        val now = System.nanoTime()
+        cachedNetwork?.let { (at, key) -> if (now - at < NETWORK_CACHE_NS) return key }
+        val key = runCatching { networkKey() }.getOrNull()?.takeIf { it.isNotBlank() } ?: "unknown"
+        cachedNetwork = now to key
+        return key
+    }
 
     /** Tests only: forget every check and choice held in memory. */
     internal fun resetForTest() {
         _state.value = State()
+        shapes.onChange = null
+        shapes.decode(null)
+        cachedNetwork = null
     }
 
     private fun prefs(context: Context): SharedPreferences =
@@ -76,6 +100,8 @@ object UnlockDns {
         val custom = customOf(p).filter { it !in loaded.servers }
         val updatedAt = if (loaded.fromPack) com.example.update.ResolverPackUpdater.unlockUpdatedAt(context) else null
         val strict = PrivateDnsCheck.strict(context)
+        shapes.decode(p.getString(KEY_SHAPES, null))
+        shapes.onChange = { encoded -> p.edit().putString(KEY_SHAPES, encoded).apply() }
         _state.update { s ->
             val known = s.checks.associateBy { it.ip }
             s.copy(
@@ -84,7 +110,8 @@ object UnlockDns {
                 manual = p.getString(KEY_MANUAL, null),
                 listFromPack = loaded.fromPack,
                 listUpdatedAt = updatedAt,
-                privateDnsStrict = strict
+                privateDnsStrict = strict,
+                shaping = p.getBoolean(KEY_SHAPING, false)
             )
         }
     }
@@ -107,7 +134,7 @@ object UnlockDns {
         load(context)
         _state.update { it.copy(checking = true) }
         try {
-            val checks = UnlockDnsHealth.checkAll(_state.value.servers, probe())
+            val checks = checkServers(_state.value.servers)
             publishChecks(checks)
             onChoiceChanged?.invoke()
             checks
@@ -115,6 +142,40 @@ object UnlockDns {
             _state.update { it.copy(checking = false) }
         }
     }
+
+    /**
+     * Health-checks [servers]. With query shaping on, a server whose plain answers are filtered on this network
+     * is retried with each shape ([UnlockDnsHealth.checkShaped]); a shape that passes is remembered for this
+     * network + server and used first for that server, and a server that passes plain again forgets it.
+     */
+    fun checkServers(servers: List<String>): List<ServerCheck> {
+        val plain = probe()
+        if (!_state.value.shaping) return UnlockDnsHealth.checkAll(servers, plain)
+        cachedNetwork = null
+        val net = currentNetwork()
+        val shaped = shapedProbe
+        val checks = UnlockDnsHealth.checkAll(servers, plain,
+            deadlineMs = UnlockDnsHealth.DEADLINE_MS + UnlockDnsShaping.CHECK_BUDGET_MS) { ip ->
+            UnlockDnsHealth.checkShaped(ip, plain, shaped, shapes.get(net, ip)?.takeIf { it.always }?.shape)
+        }
+        checks.forEach { c ->
+            val shape = c.shape
+            if (shape != null) shapes.put(net, c.ip, ShapeBook.Entry(shape, always = true))
+            else if (c.usable && shapes.get(net, c.ip)?.always == true) shapes.remove(net, c.ip)
+        }
+        return checks
+    }
+
+    /** Turns anti-censorship query shaping on or off (kept across launches); the caller re-checks. */
+    fun setShaping(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SHAPING, on).apply()
+        _state.update { it.copy(shaping = on) }
+        onChoiceChanged?.invoke()
+    }
+
+    /** The shape every question to [server] starts with on this network (from a health check), if shaping is on. */
+    fun leadingShape(server: String): QueryShape? =
+        if (!_state.value.shaping) null else shapes.get(currentNetwork(), server)?.takeIf { it.always }?.shape
 
     fun publishChecks(checks: List<ServerCheck>) {
         val byIp = checks.associateBy { it.ip }
@@ -196,7 +257,7 @@ object UnlockDns {
 
     /** Home badges: each service resolved through [server] and answered on 443. */
     suspend fun verifyServices(server: String) = withContext(Dispatchers.IO) {
-        val p = probe()
+        val p = leadingShape(server)?.let(shapedProbe) ?: probe()
         UnlockDnsHealth.Service.entries.forEach { service ->
             val ok = runCatching { UnlockDnsHealth.verify(server, service, p) }.getOrDefault(false)
             _state.update { s -> if (s.active != server) s else s.copy(services = s.services + (service to ok)) }

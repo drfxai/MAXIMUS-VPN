@@ -61,11 +61,13 @@ class UnlockModeScreenshotTest {
     private val state = UnlockDns.State(
         rows = listOf(
             UnlockDns.Row("143.20.64.55", false, ServerCheck("143.20.64.55", ServerHealth.HEALTHY, 38, checkedAt = now)),
-            UnlockDns.Row("193.233.112.67", false, ServerCheck("193.233.112.67", ServerHealth.HEALTHY, 52, checkedAt = now)),
+            UnlockDns.Row("193.233.112.67", false, ServerCheck("193.233.112.67", ServerHealth.HEALTHY, 52, checkedAt = now,
+                shape = com.example.vpn.unlock.QueryShape.TC_Z)),
             UnlockDns.Row("45.13.237.213", false, ServerCheck("45.13.237.213", ServerHealth.HEALTHY, 61, checkedAt = now)),
             UnlockDns.Row("5.175.161.3", false, ServerCheck("5.175.161.3", ServerHealth.BLOCKED, null, BlockReason.NO_ANSWER, now))
         ),
         autoPick = true,
+        shaping = true,
         active = "143.20.64.55",
         activeMs = 38,
         listFromPack = true,
@@ -81,6 +83,7 @@ class UnlockModeScreenshotTest {
                 }
             }
         }
+        compose.onNodeWithTag("unlock_query_shaping").assertIsDisplayed()
         compose.onNodeWithTag("unlock_server_5.175.161.3").assertIsDisplayed()
         compose.onRoot().captureRoboImage("build/reports/tests/unlock-screens/unlock_dns_sheet.png", roborazziOptions = record)
     }

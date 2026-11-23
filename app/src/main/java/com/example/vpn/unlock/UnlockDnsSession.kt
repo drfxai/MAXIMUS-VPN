@@ -19,7 +19,8 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * One reader thread takes the DNS questions apps send to the TUN's DNS address; a small bounded pool asks the
  * current Unlock server ([UnlockDnsWire.exchange]: protected UDP/53, TCP/53 when UDP is silent or truncated) and
- * writes each answer back as an IPv4/UDP packet. Nothing else ever enters this TUN. After [FAILOVER_AFTER]
+ * writes each answer back as an IPv4/UDP packet. With query shaping on, a filtered answer is retried with the
+ * CircumVolve query shapes ([ShapedForwarder]). Nothing else ever enters this TUN. After [FAILOVER_AFTER]
  * unanswered questions in a row, an auto-picked session moves to the next usable server of the last check.
  */
 class UnlockDnsSession(
@@ -30,7 +31,10 @@ class UnlockDnsSession(
     private val protector: UnlockDnsWire.Protector,
     private val log: (String) -> Unit,
     /** The session moved to another server (failover); the service updates its state and notification. */
-    private val onSwitch: (server: String, latencyMs: Long?) -> Unit
+    private val onSwitch: (server: String, latencyMs: Long?) -> Unit,
+    /** Whether anti-censorship query shaping is on (read per question, so the sheet's toggle applies at once). */
+    private val shaping: () -> Boolean = { UnlockDns.state.value.shaping },
+    private val forwarder: ShapedForwarder = ShapedForwarder(WireTransport(protector), UnlockDns.shapes, { UnlockDns.currentNetwork() })
 ) {
     @Volatile var server: String = initialServer
         private set
@@ -110,8 +114,7 @@ class UnlockDnsSession(
 
     private fun answer(query: UnlockDnsWire.Query) {
         val asked = server
-        val exchange = UnlockDnsWire.exchange(asked, query.payload, UPSTREAM_TIMEOUT_MS, protector)
-            ?.takeIf { !it.intercepted }
+        val exchange = forwarder.resolve(asked, query.payload, shaping(), UPSTREAM_TIMEOUT_MS)
         if (exchange == null) {
             onUnanswered(asked)
             UnlockDnsWire.servfail(query.payload)?.let { write(UnlockDnsWire.reply(query, it)) }
