@@ -21,6 +21,10 @@ import com.example.data.model.RoutingMode
  * until the user changes it by hand. (An Android app VPN cannot read or change the device MAC, so that
  * is unaffected either way.)
  *
+ * UNLOCK is not a tunnel mode: RayVpnService runs it as a DNS-only session (UnlockDnsRoutePolicy) and never
+ * reaches the tunnel connect path with it. Its policy is DAILY's, so anything that reads a policy for it
+ * sees the user's own settings unchanged.
+ *
  * GHOST RIDER is for maximum privacy above GOD MODE: all of GOD MODE's hostile-network hardening
  * (everything proxied, IPv6 blocked, DNS-over-HTTPS-only server lookup, nothing releases the block but
  * Disconnect), plus [torMultiHop] — the connect path prefers a multi-hop chain that exits through Tor,
@@ -54,7 +58,7 @@ data class OperatingModePolicy(
 
     /** [settings] as this mode runs them. */
     fun apply(settings: AppSettings): AppSettings = when (mode) {
-        OperationalMode.DAILY -> settings
+        OperationalMode.DAILY, OperationalMode.UNLOCK -> settings
         OperationalMode.TRADE -> settings.copy(
             // A fixed exit means nothing may switch the node out from under the user.
             autoFailoverEnabled = false,
@@ -76,6 +80,7 @@ data class OperatingModePolicy(
             alwaysSmartConnect = true, userIpv6 = false, privateServerLookup = true)
         val TRADE = OperatingModePolicy(OperationalMode.TRADE, userRouting = true, importedDirectRules = true,
             alwaysSmartConnect = false, userIpv6 = true, privateServerLookup = false, lockExit = true)
+        val UNLOCK = DAILY.copy(mode = OperationalMode.UNLOCK)
         // GHOST RIDER is GOD MODE's hardening plus the Tor multi-hop preference.
         val GHOST_RIDER = OperatingModePolicy(OperationalMode.GHOST_RIDER, userRouting = false, importedDirectRules = false,
             alwaysSmartConnect = true, userIpv6 = false, privateServerLookup = true, torMultiHop = true)
@@ -84,6 +89,7 @@ data class OperatingModePolicy(
             OperationalMode.GOD_MODE -> GOD_MODE
             OperationalMode.TRADE -> TRADE
             OperationalMode.DAILY -> DAILY
+            OperationalMode.UNLOCK -> UNLOCK
             OperationalMode.GHOST_RIDER -> GHOST_RIDER
         }
     }

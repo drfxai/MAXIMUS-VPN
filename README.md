@@ -47,6 +47,7 @@ Actual captures of the published **V1.0.2** APK on Android 15. These show a clea
 | Explore | What MAXIMUS provides |
 | :--- | :--- |
 | **Smart Connect** | Tries eligible paths with real requests and rechecks; adapts recovery choices to measured network conditions. |
+| **Unlock mode** | Anti-sanction DNS with no config: health-checked servers make services that block Iranian users (Gemini, AI Studio, OpenAI APIs) reachable; only DNS changes, so filtered sites still need a tunnel. [Details](docs/UNLOCK_DNS.md) |
 | **Network LAB** | Network diagnosis, configuration experiments, service checks and evidence for choosing a route. |
 | **Clean IP discovery** | Uses TCP timing to shortlist addresses, then validates candidates with the actual configuration. |
 | **Multiple engines** | Xray, Mihomo, Psiphon, Tor, WARP/MASQUE, Matrix Transport, dnstt and Slipstream adapters. |

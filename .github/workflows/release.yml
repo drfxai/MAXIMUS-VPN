@@ -182,8 +182,9 @@ jobs:
             "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "$apk"
             "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
           done
-          # Only six plain-text resolver data files, no code, executables or symlinks.
-          python3 -c 'import zipfile,os; from pathlib import Path; v=os.environ["APP_VERSION"]; root=Path("app/src/main/assets/resolvers"); out=f"MaximusResolverPack-{v}.zip"; z=zipfile.ZipFile(out,"w",compression=zipfile.ZIP_DEFLATED); [z.write(root/f"part_{i}.txt",f"part_{i}.txt") for i in range(1,7)]; z.close(); assert Path(out).stat().st_size < 2*1024*1024'
+          # Only plain-text data files, no code, executables or symlinks: the six resolver lists and the
+          # Unlock mode server list (unlock_dns.txt, at most 4 KiB).
+          python3 -c 'import zipfile,os; from pathlib import Path; v=os.environ["APP_VERSION"]; assets=Path("app/src/main/assets"); root=assets/"resolvers"; unlock=assets/"unlock/dns.txt"; assert 0 < unlock.stat().st_size <= 4096; out=f"MaximusResolverPack-{v}.zip"; z=zipfile.ZipFile(out,"w",compression=zipfile.ZIP_DEFLATED); [z.write(root/f"part_{i}.txt",f"part_{i}.txt") for i in range(1,7)]; z.write(unlock,"unlock_dns.txt"); z.close(); names=sorted(zipfile.ZipFile(out).namelist()); assert names == sorted([f"part_{i}.txt" for i in range(1,7)] + ["unlock_dns.txt"]), names; assert Path(out).stat().st_size < 2*1024*1024'
           sha256sum MAXIMUSVPN-${APP_VERSION}-arm64-v8a.apk MAXIMUSVPN-${APP_VERSION}-universal.apk MaximusResolverPack-${APP_VERSION}.zip > SHA256SUMS
           cp build/transport-offer/MatrixTransport-source.tar.gz MatrixTransport-source.tar.gz
           sha256sum MatrixTransport-source.tar.gz >> SHA256SUMS

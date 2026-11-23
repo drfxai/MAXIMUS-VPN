@@ -118,6 +118,10 @@ fun HomeScreen(
     val smartRecommendation by vpnViewModel.smartRecommendation.collectAsStateWithLifecycle()
     val topNodes by vpnViewModel.topNodes.collectAsStateWithLifecycle()
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
+    val unlockMode = settings.operationalMode == com.example.data.model.OperationalMode.UNLOCK
+    val unlock by com.example.vpn.unlock.UnlockDns.state.collectAsStateWithLifecycle()
+    var showUnlockSheet by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(unlockMode) { if (unlockMode) withContext(Dispatchers.IO) { com.example.vpn.unlock.UnlockDns.load(context) } }
 
     Column(
         modifier = modifier
@@ -220,6 +224,7 @@ fun HomeScreen(
                 val isGodMode = settings.operationalMode == com.example.data.model.OperationalMode.GOD_MODE
                 val isTrade = settings.operationalMode == com.example.data.model.OperationalMode.TRADE
                 val isGhost = settings.operationalMode == com.example.data.model.OperationalMode.GHOST_RIDER
+                val isUnlock = settings.operationalMode == com.example.data.model.OperationalMode.UNLOCK
                 val accent = when {
                     isGodMode -> Color(0xFFFF5252)
                     isGhost -> Color(0xFF7C5CFF)
@@ -236,7 +241,12 @@ fun HomeScreen(
                     }
                 }
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        // Unlock mode: the card opens the Unlock DNS sheet.
+                        .clickable(enabled = isUnlock, onClickLabel = stringResource(R.string.unlock_sheet_title)) { showUnlockSheet = true }
+                        .testTag("mode_card_header"),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
@@ -246,7 +256,9 @@ fun HomeScreen(
                             .background(accent.copy(alpha = 0.16f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
+                        if (isUnlock) {
+                            UnlockKeyShieldIcon(tint = accent, size = 19.dp)
+                        } else Icon(
                             imageVector = when {
                                 isGodMode -> Icons.Default.Shield
                                 isGhost -> Icons.Default.Shield
@@ -267,17 +279,20 @@ fun HomeScreen(
                             color = AppTheme.colors.textPrimary
                         )
                         Text(
-                            text = settings.operationalMode.subtitle,
+                            text = if (isUnlock) stringResource(R.string.unlock_mode_subtitle) else settings.operationalMode.subtitle,
                             fontSize = 10.5.sp,
                             color = AppTheme.colors.textMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    if (isUnlock) {
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = AppTheme.colors.textMuted, modifier = Modifier.size(18.dp))
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                // Three-way mode selector, segmented control: Daily / GOD / Trade.
+                // Mode selector, segmented control: Daily / Unlock / GOD / Trade / Ghost.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -289,6 +304,7 @@ fun HomeScreen(
                 ) {
                     val modes = listOf(
                         com.example.data.model.OperationalMode.DAILY to "Daily",
+                        com.example.data.model.OperationalMode.UNLOCK to "Unlock",
                         com.example.data.model.OperationalMode.GOD_MODE to "GOD",
                         com.example.data.model.OperationalMode.TRADE to "Trade",
                         com.example.data.model.OperationalMode.GHOST_RIDER to "Ghost"
@@ -301,7 +317,8 @@ fun HomeScreen(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (selected) AppTheme.colors.surfaceCardHighlight else Color.Transparent)
                                 .clickable(enabled = !selected) { setMode(chipMode) }
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = 8.dp)
+                                .testTag("mode_chip_${chipMode.name.lowercase()}"),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -415,7 +432,8 @@ fun HomeScreen(
             toTitle = exitCode?.let { "${ActiveCardModel.flag(it)} ${ActiveCardModel.countryName(it)}" } ?: "",
             toSub = connectionState.pingMs?.takeIf { it > 0 }?.let { "Exit · $it ms" } ?: "Exit"
         )
-        EarthHero(mode = earthMode, route = route) {
+        EarthHero(mode = earthMode, route = if (unlockMode) route.copy(to = null, toTitle = "", toSub = "") else route) {
+            if (unlockMode && connectionState.isConnected) UnlockServiceOrbit(unlock.services)
             GlassPowerButton(
                 accent = earthAccent,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 6.dp),
@@ -424,8 +442,8 @@ fun HomeScreen(
         }
         Text(
             text = when (earthMode) {
-                EarthMode.ON -> stringResource(R.string.ui_connected_2)
-                EarthMode.CONNECTING -> stringResource(R.string.ui_finding_a_path)
+                EarthMode.ON -> stringResource(if (unlockMode) R.string.unlock_state_unlocked else R.string.ui_connected_2)
+                EarthMode.CONNECTING -> stringResource(if (unlockMode) R.string.unlock_state_checking else R.string.ui_finding_a_path)
                 EarthMode.OFF -> stringResource(R.string.ui_not_connected)
             },
             color = if (earthMode == EarthMode.OFF) AppTheme.colors.textPrimary else earthAccent,
@@ -433,7 +451,16 @@ fun HomeScreen(
             fontWeight = FontWeight.SemiBold
         )
         Spacer(modifier = Modifier.height(4.dp))
-        if (earthMode == EarthMode.ON) {
+        if (earthMode == EarthMode.ON && unlockMode) {
+            val server = unlock.active
+            if (server != null) UnlockStatusPill(server, unlock.activeMs ?: connectionState.pingMs)
+        } else if (earthMode == EarthMode.OFF && unlockMode) {
+            Text(
+                text = stringResource(R.string.unlock_tap_to_connect),
+                color = AppTheme.colors.textSecondary,
+                fontSize = 13.sp
+            )
+        } else if (earthMode == EarthMode.ON) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = formatDuration(connectionState.connectedDurationSeconds),
@@ -456,7 +483,7 @@ fun HomeScreen(
         val connectedProfile = connectionState.activeProfile ?: activeProfile
         val directRoute = connectedProfile?.let { com.example.vpn.sidecar.ServerlessSidecar.handles(it) &&
             com.example.vpn.engine.ProfileExtras.read(it).optString("exitNode").isBlank() } == true
-        if (connectionState.isConnected) {
+        if (connectionState.isConnected && !unlockMode) {
             Card(
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 shape = RoundedCornerShape(14.dp),
@@ -501,7 +528,8 @@ fun HomeScreen(
             Icon(Icons.Filled.ChevronRight, null, modifier = Modifier.size(16.dp))
         }
         // Android's own kill switch: suggested only while connected and only when it is measured off.
-        LeakProtectionCard(connected = connectionState.isConnected)
+        // Not in Unlock mode: it needs "Block connections without VPN" off, and has no tunnel to leak from.
+        LeakProtectionCard(connected = connectionState.isConnected && !unlockMode)
         if (connectionState.isConnected && (directRoute || (connectedProfile?.let {
             !com.example.vpn.sidecar.Sidecars.isEngineProfile(it) &&
                 (it.security.isBlank() || it.security.equals("none", ignoreCase = true)) } == true))) {
@@ -553,7 +581,10 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Smart Connect Hero Card — or, in Trade mode, the fixed-exit card, or the Ghost Rider dashboard.
-        if (settings.operationalMode == com.example.data.model.OperationalMode.GHOST_RIDER) {
+        if (unlockMode) {
+            UnlockDnsCard(state = unlock, onOpen = { showUnlockSheet = true })
+            Spacer(modifier = Modifier.height(16.dp))
+        } else if (settings.operationalMode == com.example.data.model.OperationalMode.GHOST_RIDER) {
             val chainIds = connectionState.activeProfile?.let { com.example.vpn.sidecar.ChainRunner.readChain(it) }?.hops?.map { it.engineId }
             com.example.ui.ghost.GhostRiderDashboard(
                 model = com.example.vpn.safety.GhostRiderView.of(connectionState, chainIds),
@@ -590,7 +621,7 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        if (settings.operationalMode != com.example.data.model.OperationalMode.TRADE) {
+        if (settings.operationalMode != com.example.data.model.OperationalMode.TRADE && !unlockMode) {
             ConfigFreeConnectButton(
                 state = connectionState,
                 onAutoConnect = {
@@ -657,8 +688,12 @@ fun HomeScreen(
             }
         }
 
-        // Active Server Card (exit country and ping are shown inside it while connected)
-        ServerSelectorCard(
+        if (showUnlockSheet) {
+            UnlockDnsSheet(onDismiss = { showUnlockSheet = false })
+        }
+
+        // Active Server Card (exit country and ping are shown inside it while connected); Unlock uses none.
+        if (!unlockMode) ServerSelectorCard(
             profile = activeProfile,
             pingMs = connectionState.pingMs,
             exitCountryCode = connectionState.exitCountryCode

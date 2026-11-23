@@ -1556,4 +1556,59 @@
     <string name="ui_excellent">Excellent</string>
     <string name="ui_queued">Queued</string>
     <string name="ui_connect_vip">Connect VIP</string>
+    <!-- Unlock mode (anti-sanction DNS) -->
+    <string name="unlock_mode_subtitle">Anti-sanction DNS • No config needed</string>
+    <string name="unlock_state_unlocked">Unlocked</string>
+    <string name="unlock_state_checking">Checking Unlock DNS…</string>
+    <string name="unlock_tap_to_connect">Tap the button to use anti-sanction DNS</string>
+    <string name="unlock_pill">DNS %1$s • %2$d ms</string>
+    <string name="unlock_pill_no_ms">DNS %1$s</string>
+    <string name="unlock_sheet_title">Unlock DNS</string>
+    <string name="unlock_auto_pick">Auto-pick fastest server</string>
+    <string name="unlock_auto_pick_hint">Skips servers that fail the health check</string>
+    <string name="unlock_manual_hint">Tap a server to use it</string>
+    <string name="unlock_shaping">Anti-censorship query shaping</string>
+    <string name="unlock_shaping_hint_off">Off: DNS questions are sent as usual</string>
+    <string name="unlock_shaping_hint_on">When a server\'s answers are filtered on this network, retries with reshaped DNS questions (CircumVolve, lab-tested in Iran) and remembers what works</string>
+    <string name="unlock_shaped_badge">Shaped</string>
+    <string name="unlock_auto_short">Auto-pick</string>
+    <string name="unlock_manual_short">Manual</string>
+    <string name="unlock_health_healthy">Healthy</string>
+    <string name="unlock_health_slow">Slow</string>
+    <string name="unlock_health_blocked">Blocked</string>
+    <string name="unlock_health_unknown">Not checked</string>
+    <string name="unlock_health_checking">Checking…</string>
+    <string name="unlock_status_summary">%1$d of %2$d servers healthy</string>
+    <string name="unlock_servers_count">%1$d servers</string>
+    <string name="unlock_latency_ms">%1$d ms</string>
+    <string name="unlock_in_use">In use</string>
+    <string name="unlock_custom_badge">Custom</string>
+    <string name="unlock_add_custom">Add custom DNS</string>
+    <string name="unlock_custom_hint">IPv4 address, e.g. 1.2.3.4</string>
+    <string name="unlock_custom_add">Add</string>
+    <string name="unlock_cancel">Cancel</string>
+    <string name="unlock_custom_invalid">Enter a public IPv4 address.</string>
+    <string name="unlock_custom_duplicate">That server is already in the list.</string>
+    <string name="unlock_custom_full">You can add up to %1$d custom servers.</string>
+    <string name="unlock_remove">Remove %1$s</string>
+    <string name="unlock_recheck">Re-check servers</string>
+    <string name="unlock_list_title">Server list from GitHub</string>
+    <string name="unlock_list_updated">Updated %1$s • verified</string>
+    <string name="unlock_list_builtin">Built-in list • verified with the app</string>
+    <string name="unlock_list_refreshing">Checking GitHub…</string>
+    <string name="unlock_list_refresh">Refresh server list</string>
+    <string name="unlock_list_not_published">No newer verified list is published yet.</string>
+    <string name="unlock_list_failed">Could not update the list. The current one stays in use.</string>
+    <string name="unlock_info_only_dns">Only DNS changes. Filtered sites still need a tunnel.</string>
+    <string name="unlock_private_dns_warning">Android Private DNS is set to a provider hostname, so it overrides Unlock DNS. Set Private DNS to Automatic or Off.</string>
+    <string name="unlock_private_dns_open">Open network settings</string>
+    <string name="unlock_service_gemini" translatable="false">Gemini</string>
+    <string name="unlock_service_chatgpt" translatable="false">ChatGPT</string>
+    <string name="unlock_service_ai_studio" translatable="false">AI Studio</string>
+    <string name="unlock_service_android_dev" translatable="false">Android Dev</string>
+    <string name="unlock_notification_title">Unlock mode</string>
+    <string name="unlock_notification_starting">Checking Unlock DNS servers…</string>
+    <string name="unlock_error_lockdown">Unlock mode changes only DNS, so it can\'t run while Android\'s \u201cBlock connections without VPN\u201d is on: every other connection would be blocked. Turn that option off for Maximus, or use a tunnel mode.</string>
+    <string name="unlock_error_no_server">No Unlock DNS server answered correctly on this network. Re-check the servers or add a custom DNS.</string>
+    <string name="unlock_error_interface">Android refused the Unlock DNS interface. Another VPN may be active.</string>
 </resources>

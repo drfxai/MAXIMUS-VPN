@@ -2,6 +2,7 @@ package com.example.update
 
 import android.content.Context
 import com.example.vpn.BundledResolvers
+import com.example.vpn.unlock.UnlockDnsList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -16,11 +17,16 @@ import java.util.zip.ZipInputStream
 /**
  * Only six validated text resolver lists may change, never executable files or untrusted DNS defaults.
  * Official APK assets remain the fallback. The previous verified pack is retained for rollback.
+ *
+ * A pack may also carry the Unlock mode server list ([UnlockDnsList.PACK_ENTRY]), validated just as strictly;
+ * packs published before Unlock mode do not, and the bundled list stays in use with them.
  */
 object ResolverPackUpdater {
     private const val MAX_ZIP_BYTES = 2L * 1024 * 1024
     private const val MAX_PART_BYTES = 128 * 1024
     private val names = (1..6).map { "part_$it.txt" }.toSet()
+    /** Optional entries: a pack is complete without them. */
+    private val optional = setOf(UnlockDnsList.PACK_ENTRY)
     private val client by lazy { OkHttpClient.Builder().followRedirects(true).build() }
 
     private fun base(context: Context) = File(context.noBackupFilesDir, "resolver-pack")
@@ -36,6 +42,39 @@ object ResolverPackUpdater {
         val file = File(dir, "part_$part.txt")
         return file.takeIf { it.isFile && it.length() in 1..MAX_PART_BYTES.toLong() }?.inputStream()
     }
+
+    /** The Unlock mode list of the installed pack, when it carries one (UnlockDnsList.updated). */
+    fun openUnlock(context: Context): InputStream? {
+        val file = File(current(context), UnlockDnsList.PACK_ENTRY)
+        return file.takeIf { it.isFile && it.length() in 1..UnlockDnsList.MAX_BYTES.toLong() }?.inputStream()
+    }
+
+    /** When the installed pack's Unlock list was written, or null when the bundled list is in use. */
+    fun unlockUpdatedAt(context: Context): Long? =
+        File(current(context), UnlockDnsList.PACK_ENTRY).takeIf { it.isFile }?.lastModified()?.takeIf { it > 0 }
+
+    /**
+     * Checks one pack entry and returns the text to store: a resolver part needs 50..10000 public IPv4
+     * lines; the Unlock list 1..[UnlockDnsList.MAX_SERVERS]. Throws when the entry must be refused.
+     */
+    internal fun validatedEntry(name: String, text: String): String {
+        if (name == UnlockDnsList.PACK_ENTRY) {
+            val servers = UnlockDnsList.validatePack(text)
+            check(servers != null) { "Unlock DNS list contains invalid or restricted addresses" }
+            return servers.joinToString("\n", postfix = "\n")
+        }
+        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.toList()
+        check(lines.size in 50..10000 && lines.all(BundledResolvers::publicIpv4)) {
+            "Resolver list contains invalid or restricted addresses"
+        }
+        return lines.distinct().joinToString("\n", postfix = "\n")
+    }
+
+    /** True when [found] entries make a complete pack: all six parts, optional entries allowed. */
+    internal fun complete(found: Set<String>): Boolean = found.containsAll(names) && (found - names - optional).isEmpty()
+
+    /** True for a ZIP entry name a pack may contain. */
+    internal fun allowedEntry(name: String): Boolean = name in names || name in optional
 
     suspend fun refresh(context: Context, pack: AppUpdateChecker.ResolverPack, progress: (Int) -> Unit = {}): Int =
         withContext(Dispatchers.IO) {
@@ -80,27 +119,24 @@ object ResolverPackUpdater {
                     while (true) {
                         currentCoroutineContext().ensureActive()
                         val entry = zip.nextEntry ?: break
-                        check(!entry.isDirectory && entry.name in names && found.add(entry.name)) {
+                        check(!entry.isDirectory && allowedEntry(entry.name) && found.add(entry.name)) {
                             "Unexpected, repeated or unsafe resolver pack entry"
                         }
+                        val limit = if (entry.name == UnlockDnsList.PACK_ENTRY) UnlockDnsList.MAX_BYTES else MAX_PART_BYTES
                         val bytes = java.io.ByteArrayOutputStream()
                         val buffer = ByteArray(4096)
                         while (true) {
                             val n = zip.read(buffer)
                             if (n < 0) break
-                            check(bytes.size() + n <= MAX_PART_BYTES) { "Resolver list too large" }
+                            check(bytes.size() + n <= limit) { "Resolver list too large" }
                             bytes.write(buffer, 0, n)
                         }
                         val text = bytes.toString(Charsets.UTF_8.name())
-                        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.toList()
-                        check(lines.size in 50..10000 && lines.all(BundledResolvers::publicIpv4)) {
-                            "Resolver list contains invalid or restricted addresses"
-                        }
-                        File(staging, entry.name).writeText(lines.distinct().joinToString("\n", postfix = "\n"))
+                        File(staging, entry.name).writeText(validatedEntry(entry.name, text))
                         zip.closeEntry()
                     }
                 }
-                check(found == names) { "Resolver pack must have all six lists" }
+                check(complete(found)) { "Resolver pack must have all six lists" }
                 synchronized(this@ResolverPackUpdater) {
                     val active = current(context)
                     val backup = previous(context)

@@ -17,7 +17,9 @@ class MaximusVpnSupervisor(private val log: (String) -> Unit = {}) {
         /** The service is being destroyed. */
         SERVICE_DESTROYED,
         /** See FailClosedPolicy: an unusable profile the user picked in DAILY mode. */
-        INVALID_PROFILE_BY_USER
+        INVALID_PROFILE_BY_USER,
+        /** Unlock mode: only the resolver changes, there is no tunnel whose absence would leak. */
+        UNLOCK_MODE
     }
 
     /** What Android does with traffic when this app's process dies. */
