@@ -95,6 +95,36 @@ class PsiphonSidecar(
         )
     }
 
+    /**
+     * How many servers a Psiphon start dialed, by TCP and other (QUIC, in-proxy, refraction) protocols, how many
+     * it connected to, the last CandidateServers count and the UpstreamProxyError notices. Counts and protocol
+     * names only. Needs EmitDiagnosticNotices (ConnectingServer, ConnectedServer and CandidateServers are
+     * diagnostic notices in psiphon-tunnel-core's notice.go).
+     */
+    data class StartupDials(
+        val tcp: Int = 0, val other: Int = 0, val connected: Int = 0, val candidates: Int? = null,
+        val upstreamErrors: Int = 0, val byProtocol: Map<String, Int> = emptyMap()
+    ) {
+        /** One word for a report: why no tunnel came up, as far as the notices tell. */
+        val verdict: String get() = when {
+            upstreamErrors > 0 -> "upstream_proxy_error"
+            connected > 0 -> "connected_no_tunnel"
+            tcp + other > 0 -> "dials_failed"
+            candidates == 0 -> "no_candidates"
+            else -> "no_dials"
+        }
+
+        /** "dials_failed: candidates=37; dialed OSSH×12 TLS-OSSH×5; connected 0". */
+        fun summary(): String = buildString {
+            append(verdict).append(':')
+            candidates?.let { append(" candidates=").append(it).append(';') }
+            append(" dialed ")
+            append(if (byProtocol.isEmpty()) "none" else byProtocol.entries.joinToString(" ") { "${it.key}×${it.value}" })
+            append("; connected ").append(connected)
+            if (upstreamErrors > 0) append("; upstream proxy errors ").append(upstreamErrors)
+        }
+    }
+
     /** Only structured, known notices can move diagnostics beyond server discovery. */
     internal class StartupProgress {
         @Volatile private var stage = 0
@@ -105,6 +135,11 @@ class PsiphonSidecar(
         @Volatile private var lastNotice: String? = null
         /** The last [RECENT_NOTICES] notices, as type plus whitelisted, sanitized data ([summarize]). */
         private val recent = ArrayDeque<String>()
+        /** ConnectingServer notices per tunnel protocol (protocol names only, never addresses). */
+        private val dialed = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        @Volatile private var connected = 0
+        @Volatile private var candidates: Int? = null
+        @Volatile private var upstreamErrors = 0
 
         fun observe(line: String) {
             if (line.length > 32_768) return
@@ -121,6 +156,14 @@ class PsiphonSidecar(
             // nothing about why no tunnel came up, so it never becomes "the last notice" (build 170 report).
             if (kind !in NOISE) lastNotice = kind
             remember(summarize(kind, data))
+            when (kind) {
+                "ConnectingServer" -> data.optString("protocol").takeIf { PROTOCOL_NAME.matches(it) }
+                    ?.let { dialed.merge(it, 1) { a, b -> a + b } }
+                "ConnectedServer" -> connected++
+                // CandidateServers (diagnostic) reports how many server entries the current limits allow.
+                "CandidateServers" -> if (data.has("count")) candidates = data.optInt("count")
+                "UpstreamProxyError" -> upstreamErrors++
+            }
             if (kind == "SkipServerEntry") {
                 skips++
                 skipReason(data.optString("reason"))?.let { lastSkip = it }
@@ -146,6 +189,16 @@ class PsiphonSidecar(
                 recent.addLast(entry)
                 while (recent.size > RECENT_NOTICES) recent.removeFirst()
             }
+        }
+
+        /** What this start dialed, from its notices ([StartupDials]). */
+        fun dials(): PsiphonSidecar.StartupDials {
+            val counts = HashMap(dialed)
+            return PsiphonSidecar.StartupDials(
+                tcp = counts.filterKeys { it in PsiphonSidecar.TCP_PROTOCOLS }.values.sum(),
+                other = counts.filterKeys { it !in PsiphonSidecar.TCP_PROTOCOLS }.values.sum(),
+                connected = connected, candidates = candidates, upstreamErrors = upstreamErrors,
+                byProtocol = counts.toSortedMap())
         }
 
         /** The last notices, oldest first, joined for a diagnostics event; null when none were seen. */
@@ -215,6 +268,7 @@ class PsiphonSidecar(
                 return if (parts.isEmpty()) kind else "$kind " + parts.joinToString(" ")
             }
             private val SAFE_VALUE = Regex("^[A-Za-z0-9_.:-]+$")
+            private val PROTOCOL_NAME = Regex("^[A-Z0-9-]{2,48}$")
 
             val NOTICE_NAME = Regex("^[A-Za-z][A-Za-z0-9]{0,47}$")
             val SKIP_TEXT = Regex("^[A-Za-z][A-Za-z ]{2,79}$")
@@ -269,6 +323,21 @@ class PsiphonSidecar(
         /** [link] is [Sidecars.psiphonNetworkIdentity]'s "wifi:…" / "cell:…" key. Pure. */
         internal fun readyTimeoutMs(link: String?, metered: Boolean, chained: Boolean): Long =
             if (chained || metered || link?.substringBefore(':') == "cell") SLOW_READY_TIMEOUT_MS else READY_TIMEOUT_MS
+
+        /**
+         * TCP dials the first (UDP+TCP) start must have made, none connecting, before the TCP-only retry is skipped in
+         * favour of Psiphon over Lantern.
+         */
+        const val TCP_DIALS_BEFORE_CHAIN = 6
+
+        /**
+         * Whether direct Psiphon's TCP-only retry is skipped after the first start: the chain over Lantern is allowed for
+         * this connect ([chainAllowed]) and the first start already dialed at least [TCP_DIALS_BEFORE_CHAIN] TCP
+         * servers with none connecting and no upstream error. The retry would only repeat those protocols for another
+         * 120 s; build 170 on Irancell failed both starts (4 min) while the chain connected at once. Pure.
+         */
+        internal fun skipTcpRetry(first: StartupDials, chainAllowed: Boolean): Boolean =
+            chainAllowed && first.connected == 0 && first.upstreamErrors == 0 && first.tcp >= TCP_DIALS_BEFORE_CHAIN
 
         /** The notice Psiphon prints when it has at least one tunnel. */
         val TUNNEL_UP = Regex("Tunnels.*\"count\":\\s*[1-9]")

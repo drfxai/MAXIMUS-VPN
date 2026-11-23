@@ -831,6 +831,7 @@ class RayVpnService : VpnService() {
         fun recentlyFailed(p: VlessProfile) = !force &&
             book.eligibility(com.example.vpn.connectivity.PathRef.of(p)) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED
         psiphonDirectStartFailed = false
+        psiphonChainAllowed = false
         try {
             supervisor.requestProtection()
             ensureBlockingInterface()
@@ -950,6 +951,15 @@ class RayVpnService : VpnService() {
                     mutateState { if (it.attemptId == attemptId) it.copy(activeProfile = chain, attemptedProfileId = chain.id) else it }
                 }
             }
+            // Whether a failed direct Psiphon start may hand over to Psiphon over Lantern in this connect (the failure
+            // handler's own check). startSidecar reads it to skip a TCP-only retry the first start already disproved.
+            psiphonChainAllowed = com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile) &&
+                com.example.vpn.connections.PsiphonChainMemory.chainProfile().let { chain ->
+                    com.example.vpn.connections.PsiphonChainMemory.mayUseChain(direct = true, smart = smart,
+                        autoFailover = settings.autoFailoverEnabled, fallback = settings.powerButtonFallback,
+                        exact = exact, exitLocked = lockExit, force = force, chainAlreadyTried = chain.id in exclude,
+                        chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null)
+                }
 
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
             var failure = com.example.vpn.safety.FailClosedPolicy.Failure.INVALID_PROFILE
@@ -2108,6 +2118,8 @@ class RayVpnService : VpnService() {
     @Volatile private var directFallbackAttempt: String? = null
     /** Direct Psiphon failed its start in the current connect attempt (set in [startSidecar], read by its catch). */
     @Volatile private var psiphonDirectStartFailed = false
+    /** The current connect may hand a failed direct Psiphon start over to Psiphon over Lantern (set in connectLocked). */
+    @Volatile private var psiphonChainAllowed = false
 
     /** Aether that stopped because WARP data is blocked here, waiting for a verified saved server to relay through. */
     private data class AetherRelayPending(val aether: VlessProfile, val smart: Boolean, val network: String, val at: Long)
@@ -2510,8 +2522,21 @@ class RayVpnService : VpnService() {
             var process = started?.running ?: launchProcess()
             sidecar = process
             var ready = started != null || process.awaitReady(launch.readyTimeoutMs)
-            val retry = if (!ready && engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
+            val tcpRetry = if (!ready && engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
                 connectionOwner?.isActive != false) com.example.vpn.sidecar.PsiphonSidecar.tcpStartupRetry(profile) else null
+            // What the first (UDP+TCP) start dialed. When it already dialed enough TCP servers with none connecting and
+            // the chain over Lantern may take over, the TCP-only retry would repeat those protocols for another 120 s.
+            val firstDials = if (tcpRetry != null) (process as? com.example.vpn.sidecar.SidecarProcess)?.psiphonDials() else null
+            val retry = tcpRetry?.takeUnless {
+                firstDials != null && com.example.vpn.sidecar.PsiphonSidecar.skipTcpRetry(firstDials,
+                    chainAllowed = psiphonChainAllowed && com.example.vpn.connections.PsiphonChainMemory.isDirect(profile))
+            }
+            if (tcpRetry != null && retry == null) {
+                XrayLogManager.w("VPN", "Psiphon: the first start already dialed ${firstDials?.tcp} TCP servers without a " +
+                    "connection; skipping the TCP-only retry for Psiphon over Lantern.")
+                com.example.vpn.diagnostics.events.EventLog.event("psiphon.tcp_retry_skipped", attributes = mapOf(
+                    "dials" to firstDials?.summary().orEmpty(), "next" to "psiphon over lantern"))
+            }
             // What the first (UDP+TCP) Psiphon start saw, before the TCP-only retry replaces the process.
             val firstNotices = if (retry != null) (process as? com.example.vpn.sidecar.SidecarProcess)?.psiphonNotices() else null
             if (retry != null) {
@@ -2548,6 +2573,14 @@ class RayVpnService : VpnService() {
                         // The last ~20 Psiphon notices (type + whitelisted fields), so a report shows why.
                         notices?.let { put("psiphon.notices", it) }
                         firstNotices?.let { put("psiphon.notices.first_try", it) }
+                        // Counts and protocol names only: what was dialed and how far it got (StartupDials.verdict).
+                        if (engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID) {
+                            (process as? com.example.vpn.sidecar.SidecarProcess)?.psiphonDials()?.let {
+                                put("psiphon.dials", it.summary())
+                                put("psiphon.verdict", it.verdict)
+                            }
+                            if (retry != null) firstDials?.let { put("psiphon.dials.first_try", it.summary()) }
+                        }
                     },
                     stage = com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED, result = "FAIL")
                 error("The ${engine.id} engine did not start: $hint")

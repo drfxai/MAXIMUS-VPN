@@ -31,6 +31,9 @@ class SidecarProcess(
     /** Psiphon only: the last notices before readiness (type + sanitized fields), for the startup-failure event. */
     fun psiphonNotices(): String? = psiphonStartup.recentNotices()
 
+    /** Psiphon only: what this start dialed (counts and protocol names), for the TCP retry decision and diagnostics. */
+    fun psiphonDials(): PsiphonSidecar.StartupDials = psiphonStartup.dials()
+
     private val logThread = Thread({
         try {
             process.inputStream.bufferedReader().useLines { lines ->

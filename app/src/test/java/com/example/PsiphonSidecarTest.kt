@@ -147,6 +147,53 @@ class PsiphonSidecarTest {
         assertFalse(progress.failureAfter(120_000).contains("last notice: NetworkID"))
     }
 
+    // --- Update from the reference review: dial accounting and the TCP-only retry ---
+
+    @Test fun dialsAreCountedByProtocolFromDiagnosticNotices() {
+        val progress = PsiphonSidecar.StartupProgress()
+        assertEquals("no_dials", progress.dials().verdict)
+        progress.observe("""{"noticeType":"CandidateServers","data":{"region":"","count":37,"initialCount":12,"duration":"1s"}}""")
+        repeat(4) { progress.observe("""{"noticeType":"ConnectingServer","data":{"protocol":"OSSH","diagnosticID":"x","region":"NL"}}""") }
+        repeat(3) { progress.observe("""{"noticeType":"ConnectingServer","data":{"protocol":"TLS-OSSH"}}""") }
+        repeat(5) { progress.observe("""{"noticeType":"ConnectingServer","data":{"protocol":"QUIC-OSSH"}}""") }
+        // Not a protocol name: never counted, never reported.
+        progress.observe("""{"noticeType":"ConnectingServer","data":{"protocol":"198.51.100.7:443"}}""")
+        val dials = progress.dials()
+        assertEquals(7, dials.tcp)
+        assertEquals(5, dials.other)
+        assertEquals(0, dials.connected)
+        assertEquals(37, dials.candidates)
+        assertEquals("dials_failed", dials.verdict)
+        assertEquals("dials_failed: candidates=37; dialed OSSH×4 QUIC-OSSH×5 TLS-OSSH×3; connected 0", dials.summary())
+        assertFalse(dials.summary().contains("198.51.100.7"))
+        progress.observe("""{"noticeType":"ConnectedServer","data":{"protocol":"OSSH"}}""")
+        assertEquals("connected_no_tunnel", progress.dials().verdict)
+    }
+
+    @Test fun verdictsForNoCandidatesAndUpstreamErrors() {
+        assertEquals("no_candidates", PsiphonSidecar.StartupDials(candidates = 0).verdict)
+        assertEquals("no_dials", PsiphonSidecar.StartupDials(candidates = 12).verdict)
+        val upstream = PsiphonSidecar.StartupProgress()
+        upstream.observe("""{"noticeType":"UpstreamProxyError","data":{"message":"socks connect failed"}}""")
+        assertEquals("upstream_proxy_error", upstream.dials().verdict)
+        assertTrue(upstream.dials().summary().endsWith("upstream proxy errors 1"))
+    }
+
+    @Test fun theTcpOnlyRetryIsSkippedOnlyWhenTcpWasAlreadyDisprovedAndTheChainMayTakeOver() {
+        val disproved = PsiphonSidecar.StartupDials(tcp = PsiphonSidecar.TCP_DIALS_BEFORE_CHAIN, other = 9)
+        assertTrue(PsiphonSidecar.skipTcpRetry(disproved, chainAllowed = true))
+        // No chain to hand over to (pinned, exit-locked, forced, no Radiance...): the retry is the only next step.
+        assertFalse(PsiphonSidecar.skipTcpRetry(disproved, chainAllowed = false))
+        // Too few TCP dials to say anything (the first start mostly tried QUIC).
+        assertFalse(PsiphonSidecar.skipTcpRetry(PsiphonSidecar.StartupDials(tcp = PsiphonSidecar.TCP_DIALS_BEFORE_CHAIN - 1,
+            other = 40), chainAllowed = true))
+        // A server answered: the handshake, not the transport, is the problem; keep the retry.
+        assertFalse(PsiphonSidecar.skipTcpRetry(disproved.copy(connected = 1), chainAllowed = true))
+        assertFalse(PsiphonSidecar.skipTcpRetry(disproved.copy(upstreamErrors = 1), chainAllowed = true))
+        // Without diagnostic notices nothing is counted, so nothing is skipped.
+        assertFalse(PsiphonSidecar.skipTcpRetry(PsiphonSidecar.StartupDials(), chainAllowed = true))
+    }
+
     private val settings = JSONObject()
         .put("PropagationChannelId", "TEST-CHANNEL")
         .put("SponsorId", "TEST-SPONSOR")
