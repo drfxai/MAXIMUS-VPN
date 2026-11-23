@@ -652,6 +652,17 @@ fun HomeScreen(
                                 Text(stringResource(R.string.ui_connect_anyway), color = AppTheme.colors.statusError, fontSize = 12.sp)
                             }
                         }
+                        // The user's own Aether pick failed fast here: one tap to the connection verified on this network.
+                        val suggestedId = connectionState.suggestedProfileId
+                        val suggestedName = connectionState.suggestedProfileName
+                        if (suggestedId != null && suggestedName != null) {
+                            TextButton(
+                                onClick = { vpnViewModel.connectSuggested(context, suggestedId) { onRequestVpnPermission() } }
+                            ) {
+                                Text(stringResource(R.string.ui_connect_with_verified, suggestedName),
+                                    color = AppTheme.colors.statusError, fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }

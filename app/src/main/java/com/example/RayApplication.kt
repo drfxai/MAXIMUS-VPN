@@ -82,7 +82,11 @@ class RayApplication : Application() {
             loadFreezes = { prefs.getString("freezes", null) },
             saveFreezes = { prefs.edit().putString("freezes", it).apply() },
             loadShield = { prefs.getString("uplink_shield", null) },
-            saveShield = { prefs.edit().putString("uplink_shield", it).apply() }
+            saveShield = { prefs.edit().putString("uplink_shield", it).apply() },
+            loadWinners = { prefs.getString("verified_winners", null) },
+            saveWinners = { prefs.edit().putString("verified_winners", it).apply() },
+            loadPsiphonRegions = { prefs.getString("psiphon_regions", null) },
+            savePsiphonRegions = { prefs.edit().putString("psiphon_regions", it).apply() }
         )
     }
 

@@ -21,12 +21,19 @@ object QuickConnect {
     suspend fun toggle(context: Context): Outcome {
         val state = RayVpnService.vpnState.value
         return when {
-            state.isTunnelUp -> { VpnController.stopVpn(context); Outcome.STOPPED }
-            // Never start a second operation while a connect, reconnect or teardown owns the service.
+            tapStops(state) -> { VpnController.stopVpn(context); Outcome.STOPPED }
+            // Never start a second operation while a teardown owns the service.
             state.isBusy -> Outcome.BUSY
             else -> startSelected(context, reason = "widget")
         }
     }
+
+    /**
+     * A tap stops any tunnel and any connect still in progress (Smart Connect's search, an engine starting): only a
+     * teardown already under way is left alone. Build 171: a tap during PREPARING was ignored as "busy".
+     */
+    fun tapStops(state: com.example.data.model.ConnectionState): Boolean =
+        state.status != com.example.data.model.ConnectionStatus.DISCONNECTING && (state.isTunnelUp || state.isBusy)
 
     suspend fun startSelected(context: Context, reason: String): Outcome {
         if (!VpnController.isPermissionGranted(context)) return Outcome.NEEDS_PERMISSION

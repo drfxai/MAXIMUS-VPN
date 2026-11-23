@@ -68,7 +68,9 @@ object WarpDataPlaneHold {
      * Lantern hop to carry WARP (build 170: three manual runs each spent two 45 s scans and ended TLS_HANDSHAKE_FAILED
      * while Lantern, Serverless and Tor carried traffic on the same network).
      */
-    fun fastFailMessage(network: String?, now: Long = System.currentTimeMillis(), lanternFailedAt: Long? = null): String {
+    fun fastFailMessage(network: String?, now: Long = System.currentTimeMillis(), lanternFailedAt: Long? = null,
+                        /** A connection verified on this network recently ("Serverless (41 KB/s)"): suggested by name. */
+                        verified: String? = null): String {
         val at = heldAt(network, now)
         val ago = at?.let { " ${(now - it) / 60_000} min ago" }.orEmpty()
         val left = at?.let { " for about ${minutesLeft(HOLD_MS, now - it)} more min" }.orEmpty()
@@ -76,9 +78,10 @@ object WarpDataPlaneHold {
         // next press to try it again. Lantern on its own is a different path and still the first suggestion.
         val lantern = lanternFailedAt?.let { "; WARP through Lantern also failed here ${(now - it) / 60_000} min ago " +
             "and is not retried for about ${minutesLeft(LanternRelayMemory.HOLD_MS, now - it)} more min" }.orEmpty()
+        val suggestion = if (verified != null) "$verified carried verified traffic on this network recently: connect with it instead"
+            else "Connect with Lantern or Serverless instead; they do not depend on Cloudflare's TLS"
         return "Aether skipped: Cloudflare is filtered on this network and WARP's gateway scan found no serving tunnel " +
-            "here$ago, so Aether's direct scans are paused$left$lantern. Connect with Lantern or Serverless instead; " +
-            "they do not depend on Cloudflare's TLS"
+            "here$ago, so Aether's direct scans are paused$left$lantern. $suggestion"
     }
 
     private fun minutesLeft(holdMs: Long, elapsedMs: Long): Long = maxOf(1L, (holdMs - elapsedMs + 59_999) / 60_000)
