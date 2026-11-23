@@ -7,6 +7,7 @@ import com.example.data.model.VlessProfile
 import com.example.vless.VlessParser
 import com.example.vpn.engine.PatternihaFields
 import com.example.vpn.engine.ProfileExtras
+import com.example.vpn.engine.UniversalImportEngine
 import com.example.xray.XrayConfigBuilder
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -80,5 +81,27 @@ class PatternihaFieldsTest {
         }
         assertNull(PatternihaFields.dialMode(parse("$base&dialMode=oob.999#bad")))
         assertEquals("oob.0", PatternihaFields.dialMode(parse("$base&dialMode=oob.0#ok")))
+    }
+
+    @Test fun vmessJsonKeepsPattnKeys() {
+        val json = JSONObject().put("v", "2").put("ps", "pattn").put("add", "1.2.3.4").put("port", 443)
+            .put("id", "11111111-2222-3333-4444-555555555555").put("net", "ws").put("host", "a.example.com")
+            .put("path", "/ws").put("tls", "tls").put("sni", "a.example.com").put("fp", "chrome").put("alpn", "h2,http/1.1")
+            .put("cs", "TLS_AES_128_GCM_SHA256").put("cp", "X25519").put("esr", "1").put("dialMode", "oob.0")
+            .put("tut", "15000").put("vcn", "a.example.com").put("pcs", JSONObject.NULL)
+        // parseVmessUri decodes with android.util.Base64, so the JSON step is checked on its own here.
+        val p = UniversalImportEngine.vmessExtras(VlessProfile(name = "pattn", address = "1.2.3.4", port = 443,
+            uuid = "11111111-2222-3333-4444-555555555555", transport = "ws", security = "tls",
+            protocolType = ProtocolType.VMESS), json)
+        assertEquals("chrome", p.fingerprint)
+        assertEquals("h2,http/1.1", p.alpn)
+        assertEquals("TLS_AES_128_GCM_SHA256", p.cipherSuites)
+        assertEquals("a.example.com", p.verifyPeerCertByName)
+        assertEquals("", p.pinnedPeerCertSha256)
+        val extras = ProfileExtras.read(p)
+        assertEquals("oob.0", extras.getString(ProfileExtras.PATT_DIAL_MODE))
+        assertEquals(15000, extras.getInt(ProfileExtras.PATT_TCP_USER_TIMEOUT))
+        assertTrue(extras.getBoolean(ProfileExtras.PATT_SESSION_RESUMPTION))
+        assertEquals("X25519", extras.getString(ProfileExtras.PATT_CURVE_PREFERENCES))
     }
 }
