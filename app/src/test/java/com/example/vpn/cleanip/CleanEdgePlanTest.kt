@@ -120,4 +120,85 @@ class CleanEdgePlanTest {
         assertTrue(cf.name.startsWith("⚡ [CF-Optimized] "))
         assertNotNull(runCatching { CleanIpOptimizer.variant(cfg("tcp"), edge) }.exceptionOrNull())
     }
+
+    @Test fun cloudflareBlockDefersOnlyCloudflareFronts() {
+        // cf=0: the plan defers clean IP; a config known to sit on another CDN keeps its early place.
+        listOf(Cdn.FASTLY, Cdn.CLOUDFRONT, Cdn.GCORE).forEach { cdn ->
+            assertEquals("$cdn", CleanEdgePlan.Timing.EARLY, CleanEdgePlan.timing(early = false, deferred = true, front = cdn))
+        }
+        assertEquals(CleanEdgePlan.Timing.DEFERRED, CleanEdgePlan.timing(early = false, deferred = true, front = Cdn.CLOUDFLARE))
+        // Unknown front is taken as Cloudflare.
+        assertEquals(CleanEdgePlan.Timing.DEFERRED, CleanEdgePlan.timing(early = false, deferred = true, front = null))
+        // Not cf=0: unchanged; not allowed at all: nothing, whatever the front.
+        assertEquals(CleanEdgePlan.Timing.EARLY, CleanEdgePlan.timing(early = true, deferred = false, front = null))
+        assertEquals(CleanEdgePlan.Timing.NONE, CleanEdgePlan.timing(early = false, deferred = false, front = Cdn.FASTLY))
+    }
+
+    @Test fun candidatesSpreadOverSubnetsAfterTheRememberedOnes() {
+        val c = CleanEdgePlan.candidates(
+            remembered = listOf("104.16.9.9", "104.16.9.8"),
+            websocket = listOf("104.17.1.1", "104.17.1.2", "104.17.1.3"),
+            handshake = listOf("104.17.1.4", "104.18.2.1", "104.16.9.9", "104.19.3.1", "104.18.2.2")
+        )
+        // Remembered stay first and in order, even in one /24; the rest lead with one address per /24, best first.
+        assertEquals(listOf("104.16.9.9", "104.16.9.8", "104.17.1.1", "104.18.2.1", "104.19.3.1"), c.take(5))
+        assertEquals(listOf("104.17.1.2", "104.18.2.2", "104.17.1.3", "104.17.1.4"), c.drop(5))
+        // The first race batch of four now spans three /24s instead of one.
+        assertEquals(3, c.drop(2).take(4).mapNotNull { CdnRanges.prefix24(it) }.distinct().size)
+    }
+
+    @Test fun diverseKeepsEveryAddressAndRankWithinASubnet() {
+        val ips = listOf("1.1.1.1", "1.1.1.2", "2.2.2.1", "1.1.1.3", "3.3.3.1", "2.2.2.2", "1.1.1.1")
+        val d = CdnRanges.diverse(ips)
+        assertEquals(listOf("1.1.1.1", "2.2.2.1", "3.3.3.1", "1.1.1.2", "2.2.2.2", "1.1.1.3"), d)
+        assertEquals("1.1.1", CdnRanges.prefix24("1.1.1.200"))
+        assertNull(CdnRanges.prefix24("example.com"))
+        assertTrue(CdnRanges.diverse(emptyList()).isEmpty())
+    }
+
+    @Test fun cdnComesFromTheTlsNameWhenTheAddressIsNotOnAList() {
+        val lookups = mutableListOf<String>()
+        // A literal address on no list (a user-picked edge, an unlisted PoP): the SNI's own answer names the CDN.
+        val literal = cfg("xhttp", address = "45.12.1.1").copy(sni = "front.example.com", host = "origin.example.com")
+        assertEquals(Cdn.FASTLY, CdnEdgeScanner.cdnFor(literal) { n ->
+            lookups += n; if (n == "front.example.com") listOf("151.101.1.1") else emptyList()
+        })
+        assertEquals(listOf("front.example.com"), lookups)
+        // A poisoned answer for the address (10.10.34.x): the Host header is the last evidence.
+        lookups.clear()
+        val poisoned = cfg("ws").copy(sni = "edge.example.com", host = "cdn.example.net")
+        assertEquals(Cdn.CLOUDFRONT, CdnEdgeScanner.cdnFor(poisoned) { n ->
+            lookups += n; if (n == "cdn.example.net") listOf("13.224.1.2") else listOf("10.10.34.36")
+        })
+        // The address and the SNI are the same name: looked up once, then the Host.
+        assertEquals(listOf("edge.example.com", "cdn.example.net"), lookups)
+        // An address on a list wins without any further lookup.
+        lookups.clear()
+        assertEquals(Cdn.GCORE, CdnEdgeScanner.cdnFor(literal.copy(address = "92.223.124.10")) { lookups += it; listOf("151.101.1.1") })
+        assertTrue(lookups.isEmpty())
+        // Nothing on a list anywhere: unknown, which the finder takes as Cloudflare.
+        assertNull(CdnEdgeScanner.cdnFor(literal) { listOf("8.8.8.8") })
+        val finder = CdnCleanIpFinder(CleanIpCache({ null }, { }), resolve = { listOf("8.8.8.8") })
+        assertNull(finder.frontOf(literal))
+        assertEquals(Cdn.CLOUDFLARE, finder.cdnOf(literal))
+    }
+
+    @Test fun finderCachesEdgesSpreadOverSubnets() = runBlocking {
+        var saved: String? = null
+        val cache = CleanIpCache({ saved }, { saved = it })
+        // Three remembered edges in one /24 are the fastest; ranked as is they would fill the head of the list.
+        val sameBlock = listOf("151.101.1.1", "151.101.1.2", "151.101.1.3")
+        val scanner = CdnEdgeScanner(handshake = { ip, _, _, _ ->
+            if (ip in sameBlock) CdnEdgeScanner.Handshake(5, 5, true) else CdnEdgeScanner.Handshake(50, 50, true)
+        }, download = { _, _, _, _ -> null }, random = Random(11), concurrency = 1)
+        val finder = CdnCleanIpFinder(cache, scanner, detect = { SniProxyDetector.Verdict(false, true, emptyList()) })
+        val found = finder.find(cfg("grpc", address = "151.101.65.1"), "cell:43235", "IR", preferred = sameBlock, speedTop = 0)
+        assertEquals("151.101.1.1", found.ips.first())
+        assertTrue(found.ips[1] !in sameBlock)
+        val prefixes = found.ips.map { CdnRanges.prefix24(it) }
+        // Leaders first: no /24 repeats before every /24 found has had its turn.
+        val firstRepeat = prefixes.withIndex().firstOrNull { (i, p) -> p in prefixes.take(i) }?.index ?: prefixes.size
+        assertEquals(prefixes.distinct().size, firstRepeat)
+        assertEquals(found.ips, cache.best("cell:43235", Cdn.FASTLY, "edge.example.com"))
+    }
 }

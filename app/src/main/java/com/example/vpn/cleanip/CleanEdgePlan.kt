@@ -49,9 +49,33 @@ object CleanEdgePlan {
     fun topUp(decision: Decision, websocketFound: Int, remainingMs: Long): Boolean =
         decision.cdnScan && (!decision.websocketScan || websocketFound < MIN_WEBSOCKET_EDGES) && remainingMs >= MIN_TOP_UP_MS
 
-    /** Addresses for the real-request race: remembered validated ones first, then WebSocket-checked, then handshake-ranked. */
-    fun candidates(remembered: List<String>, websocket: List<String>, handshake: List<String>, limit: Int = MAX_CANDIDATES): List<String> =
-        (remembered + websocket + handshake).map { it.trim() }.filter { CdnRanges.ipv4(it) != null }.distinct().take(limit)
+    /**
+     * Addresses for the real-request race: remembered validated ones first, as remembered; then WebSocket-checked,
+     * then handshake-ranked, spread over /24s ([CdnRanges.diverse]) so each batch of four the race sends is not
+     * spent on one /24 that the filter may drop as a whole.
+     */
+    fun candidates(remembered: List<String>, websocket: List<String>, handshake: List<String>, limit: Int = MAX_CANDIDATES): List<String> {
+        val clean = { l: List<String> -> l.map { it.trim() }.filter { CdnRanges.ipv4(it) != null } }
+        val first = clean(remembered).distinct()
+        return (first + CdnRanges.diverse(clean(websocket + handshake).filter { it !in first })).take(limit)
+    }
+
+    /** When stage E runs the clean-edge search for a config, given the plan's place for it and the config's front. */
+    enum class Timing { EARLY, DEFERRED, NONE }
+
+    /**
+     * [early]/[deferred]: the plan's place for [com.example.vpn.smart.EmergencyTransport.CLEAN_IP]. On a network where
+     * Cloudflare was measured blocked (cf=0) the plan moves it to the end of the search for every config, since it
+     * cannot see the config. A config whose front is known ([front], from the bundled lists) to be Fastly,
+     * CloudFront or Gcore does not need Cloudflare at all, so it keeps its early place; an unknown front is taken
+     * as Cloudflare and stays deferred.
+     */
+    fun timing(early: Boolean, deferred: Boolean, front: Cdn?): Timing = when {
+        early -> Timing.EARLY
+        deferred && front != null && front != Cdn.CLOUDFLARE -> Timing.EARLY
+        deferred -> Timing.DEFERRED
+        else -> Timing.NONE
+    }
 
     const val MIN_WEBSOCKET_EDGES = 3
     const val MIN_TOP_UP_MS = 4_000L

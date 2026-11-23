@@ -577,6 +577,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     the same-server retry after the ~16 KB freeze (ideas re-implemented; no upstream code copied verbatim).
 - No affiliation or endorsement is implied.
 
+### Clean CDN edges: subnet spread and name evidence (2026-11-23)
+
+- Source ideas: UAC SNI Spoofer `app/src/main/java/com/uacspoofer/mobile/vpn/CloudflareEdgeDiscovery.kt`
+  (commit `07ca5e1`): backups chosen from other subnets than the best edge (`selectSubnetDiverseEdges`), and the
+  addresses the TLS name and Host header resolve to counted as CDN evidence (`DNS_SNI`/`DNS_HOST`).
+- Re-implemented in Kotlin, no upstream code copied: `CdnRanges.diverse` (round-robin over /24s) used by
+  `CdnCleanIpFinder` and `CleanEdgePlan.candidates`, and the SNI/Host fallback in `CdnEdgeScanner.cdnFor`
+  (`app/src/main/java/com/example/vpn/cleanip/`).
+
 ### WARP account API lanes in the Aether executable (2026-11-15)
 
 - Source: UAC SNI Spoofer `core/aether/src/oob.rs` (2.0.9: OOB/urgent-byte ClientHello desync methods
