@@ -66,7 +66,7 @@ class ShirokhorshidSidecarTest {
         assertNull(engine.problem(ShirokhorshidSidecar.profile()))
         assertEquals(ShirokhorshidSidecar.MISSING_SETTINGS, ShirokhorshidSidecar({ null }).problem(ShirokhorshidSidecar.profile()))
         assertTrue(engine.problem(ShirokhorshidSidecar.profile(Options(region = "Germany")))!!.contains("two-letter"))
-        assertTrue(engine.problem(ShirokhorshidSidecar.profile(Options(edges = listOf("cdn.example")))))!!.contains("cdn.example"))
+        assertTrue(engine.problem(ShirokhorshidSidecar.profile(Options(edges = listOf("cdn.example"))))!!.contains("cdn.example"))
         val noSponsor = JSONObject(settings).apply { remove("SponsorId") }.toString()
         assertTrue(ShirokhorshidSidecar({ noSponsor }).problem(ShirokhorshidSidecar.profile())!!.contains("SponsorId"))
     }
