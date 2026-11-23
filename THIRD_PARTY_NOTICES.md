@@ -735,6 +735,11 @@ The application's license does not restrict recipients' rights in this separate 
 
 * RegionHop 1.27.0, freeb5d/regionhop revision `d5798d80f77fa6f40406ba30886d810c3c462147`, MIT. The optional VPS installer downloads checksum-pinned upstream components. The upstream Psiphon and Xray binaries retain their respective upstream licenses; release and source provenance remain available from that upstream release. No user deployment config or API token is bundled.
 
+## patterniha link fields and the fork Xray sidecar (2026-11-23)
+
+- The fork Xray sidecar (vpn/sidecar/ForkXraySidecar) runs the same patterniha/Xray-core executable as Direct Serverless (revision `41a9fa677a45caca7a1c2c7fc18519ef658be89b`, MPL-2.0, see above). The `dialMode` check in vpn/engine/PatternihaFields is written from the grammar documented in its transport/internet/dialmode_oob.go; no code is copied.
+- [patterniha/PattN at 4a3369a](https://github.com/patterniha/PattN/tree/4a3369a) (GPL-3.0, a v2rayN fork) was read as a reference only, no code copied: its share-link keys (`dialMode`, `tut`, `esr`, `cp`, `cs`, `vcn`, `pcs`, `fm`, `echOutbound`, also inside VMess JSON), its rule that `tcpUserTimeout` is written only where the outbound connects over TCP, and its use of `echOutbound` as the `echSockopt.dialerProxy` of the ECH config lookup.
+
 ## Aether gateway discovery and retry references
 
 - [patterniha/PattNG at b968895](https://github.com/patterniha/PattNG/blob/b968895101455e2866be3994b3e4cb5265895972/V2rayNG/app/src/main/java/com/v2ray/ang/core/AetherCoreManager.kt) uses fresh discovery with quick reconnect disabled. MAXIMUS applies that behavior to the HTTP/2 split attempt with an unpinned gateway.
