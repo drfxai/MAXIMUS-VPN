@@ -221,6 +221,9 @@ class RayVpnService : VpnService() {
     /** The YouTube path check of the current Psiphon attempt ([launchVideoPathProbe]). */
     private var videoProbeJob: Job? = null
 
+    /** Unlock mode's DNS-only session, when that mode is connected (never alongside a tunnel). */
+    @Volatile private var unlockSession: com.example.vpn.unlock.UnlockDnsSession? = null
+
     /** The remembered route (network, recipe id) the current session runs on, once verified. */
     @Volatile private var activeRoute: Pair<String, String>? = null
 
@@ -321,6 +324,12 @@ class RayVpnService : VpnService() {
         com.example.vpn.stealth.recordslice.RecordSliceBridges.resolve = { host -> bridgeResolve(host) }
         com.example.vpn.stealth.recordslice.RecordSliceBridges.setMss = { socket, mss -> setSocketMss(socket, mss) }
         com.example.vpn.stealth.recordslice.RecordSliceBridges.log = { line -> XrayLogManager.i("STEALTH", line) }
+        // Unlock DNS checks and upstream questions leave beside whichever interface this service holds.
+        com.example.vpn.unlock.UnlockDns.protector = com.example.vpn.unlock.UnlockDnsWire.Protector(
+            udp = { socket -> vpnInterface == null || safeProtectDatagram(socket) },
+            tcp = { socket -> vpnInterface == null || safeProtectSocket(socket) }
+        )
+        com.example.vpn.unlock.UnlockDns.onChoiceChanged = { onUnlockChoiceChanged() }
     }
 
     private fun observeSettingsFlow() {
@@ -342,6 +351,26 @@ class RayVpnService : VpnService() {
         newMode: com.example.data.model.OperationalMode
     ) {
         val ticket = lifecycle.current()
+        val unlock = com.example.data.model.OperationalMode.UNLOCK
+        if (newMode == unlock || oldMode == unlock) {
+            connectionMutex.withLock {
+                if (!lifecycle.isCurrent(ticket) || !_vpnState.value.isTunnelUp ||
+                    settingsRepository.getSettings().operationalMode != newMode) return@withLock
+                lifecycle.newIntent()
+                if (newMode == unlock) {
+                    // A tunnel becomes the DNS-only session; the engines stop with it.
+                    XrayLogManager.i("VPN", "Mode switched to Unlock: replacing the tunnel with the DNS-only session.")
+                    com.example.vpn.sidecar.EngineReaper.stopAll()
+                    com.example.vpn.sidecar.EngineHandoff.clear()
+                    connectUnlockLocked()
+                } else {
+                    // Unlock has no server to carry into a tunnel mode: stop, and Connect starts the new mode.
+                    XrayLogManager.i("VPN", "Mode switched from Unlock to ${newMode.name}: Unlock DNS stopped; Connect starts the new mode.")
+                    disconnectLocked()
+                }
+            }
+            return
+        }
         connectionMutex.withLock {
             if (!lifecycle.isCurrent(ticket) || !_vpnState.value.isTunnelUp ||
                 settingsRepository.getSettings().operationalMode != newMode) return@withLock
@@ -388,6 +417,10 @@ class RayVpnService : VpnService() {
             stopService(Intent(this, com.example.vpn.share.LocalProxyService::class.java))
         }
         val action = intent?.action
+        if ((action == null || action == ACTION_CONNECT || action == ACTION_RECONNECT) &&
+            settingsRepository.getSettings().operationalMode == com.example.data.model.OperationalMode.UNLOCK) {
+            return startUnlock(action)
+        }
         if (action == ACTION_CONNECT && !_vpnState.value.isTunnelUp &&
             (!_vpnState.value.isBusy || _vpnState.value.status == ConnectionStatus.PREPARING)) {
             // Show "connecting" the moment the button is tapped. The protective interface, the stop of
@@ -4236,6 +4269,162 @@ class RayVpnService : VpnService() {
     /** The engine reported a failed start: the stage is ENGINE_START_FAILED whatever the message says. */
     private class EngineStartException(cause: Throwable) : RuntimeException(cause.message, cause)
 
+    // ---- Unlock mode: DNS only ----
+
+    private var unlockVerifyJob: Job? = null
+
+    /**
+     * Connect, Reconnect or an Always-on start while the mode is Unlock. No profile, no engine and no traffic
+     * block: the service only swaps the resolver (see [connectUnlockLocked]).
+     */
+    private fun startUnlock(action: String?): Int {
+        if (!showForegroundNotification(com.example.ui.language.LanguageStore.localized(this).getString(R.string.unlock_notification_starting))) {
+            updateState(_vpnState.value.copy(status = ConnectionStatus.FAILED, errorMessage = "Foreground notification could not be started."))
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (action != ACTION_RECONNECT || !_vpnState.value.isTunnelUp) {
+            updateState(_vpnState.value.copy(status = ConnectionStatus.PREPARING, errorMessage = null))
+        }
+        lifecycle.newIntent()
+        exactSession = false
+        smartStarted = false
+        connectJob?.cancel()
+        com.example.vpn.sidecar.EngineReaper.stopAll()
+        com.example.vpn.sidecar.EngineHandoff.clear()
+        connectJob = serviceScope.launch(AttemptTicket(lifecycle.current())) { connectionMutex.withLock { connectUnlockLocked() } }
+        return START_STICKY
+    }
+
+    /**
+     * Unlock mode: check the Unlock DNS servers from the phone's own network, pick one (fastest usable, or the
+     * user's choice), and bring up the DNS-only TUN ([com.example.vpn.safety.UnlockDnsRoutePolicy]) whose only
+     * route is the in-tunnel DNS address. Every other packet keeps using the phone's network directly.
+     */
+    private suspend fun connectUnlockLocked(): Unit = withContext(Dispatchers.IO) {
+        val text = com.example.ui.language.LanguageStore.localized(this@RayVpnService)
+        val previous = _vpnState.value
+        val sessionId = newId()
+        val attemptId = newId()
+        fun failed(message: String) {
+            XrayLogManager.w("UNLOCK", message)
+            disconnectResources()
+            updateState(ConnectionState(status = ConnectionStatus.FAILED, errorMessage = message,
+                sessionId = sessionId, attemptId = attemptId, networkGeneration = previous.networkGeneration))
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+        updateState(ConnectionState(status = ConnectionStatus.CONNECTING, sessionId = sessionId, attemptId = attemptId,
+            activeRoute = "Unlock DNS", networkGeneration = previous.networkGeneration))
+        // Unlock never holds the traffic block: there is no tunnel to leak from, only a resolver to swap.
+        supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.UNLOCK_MODE)
+        checkLockdown()
+        if (_lockdown.value == com.example.vpn.safety.MaximusVpnSupervisor.Lockdown.ON) {
+            // With "Block connections without VPN", Android drops every packet outside the TUN, i.e. all of them.
+            return@withContext failed(text.getString(R.string.unlock_error_lockdown))
+        }
+        // Stop whatever ran before (a tunnel and its engines) and release its interface.
+        disconnectResources()
+        com.example.vpn.unlock.UnlockDns.load(this@RayVpnService)
+        val choice = com.example.vpn.unlock.UnlockDns.state.value
+        val checks = com.example.vpn.unlock.UnlockDns.checkServers(choice.servers)
+        com.example.vpn.unlock.UnlockDns.publishChecks(checks)
+        checks.forEach { c ->
+            XrayLogManager.i("UNLOCK", "${c.ip}: ${c.health.name.lowercase()}" + (c.latencyMs?.let { " $it ms" } ?: "") +
+                (c.reason?.let { " (${it.name.lowercase().replace('_', ' ')})" } ?: "") +
+                (c.shape?.let { " [query shape ${it.key}]" } ?: ""))
+        }
+        val server = com.example.vpn.unlock.UnlockDnsHealth.pick(checks, choice.autoPick, choice.manual)
+            ?: return@withContext failed(text.getString(R.string.unlock_error_no_server))
+        val latency = checks.firstOrNull { it.ip == server }?.latencyMs
+        val tun = try {
+            Builder().setSession("Maximus Unlock DNS")
+                .setMtu(com.example.vpn.safety.UnlockDnsRoutePolicy.MTU)
+                .apply {
+                    com.example.vpn.routing.SplitTunnelStore.apply(this@RayVpnService, this, excludeSelf = false, interfaceName = "unlock-dns")
+                    val a = com.example.vpn.safety.UnlockDnsRoutePolicy.ADDRESS
+                    addAddress(a.address, a.prefix)
+                    com.example.vpn.safety.UnlockDnsRoutePolicy.ROUTES.forEach { addRoute(it.address, it.prefix) }
+                    addDnsServer(com.example.vpn.safety.UnlockDnsRoutePolicy.DNS_SERVER)
+                    // No IPv6 address: without this Android would block IPv6 for every app on the VPN.
+                    allowFamily(android.system.OsConstants.AF_INET6)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) setMetered(false)
+                }
+                .establish()
+        } catch (e: Exception) {
+            XrayLogManager.e("UNLOCK", "Builder.establish() failed: ${e.javaClass.simpleName}: ${e.message}", e)
+            null
+        } ?: return@withContext failed(text.getString(R.string.unlock_error_interface))
+        vpnInterface = tun
+        appOutsideVpn = false
+        val session = com.example.vpn.unlock.UnlockDnsSession(
+            tun = tun, initialServer = server, initialChecks = checks, autoPick = choice.autoPick,
+            protector = com.example.vpn.unlock.UnlockDns.protector,
+            log = { XrayLogManager.i("UNLOCK", it) },
+            onSwitch = { ip, ms -> onUnlockServerChanged(ip, ms) }
+        )
+        unlockSession = session
+        session.start()
+        val now = System.currentTimeMillis()
+        updateState(ConnectionState(status = ConnectionStatus.CONNECTED, sessionId = sessionId, attemptId = attemptId,
+            activeRoute = "Unlock DNS • $server", pingMs = latency, pingCheckedAt = now, lastConnectedTime = now,
+            networkGeneration = previous.networkGeneration))
+        notificationSince = now
+        com.example.vpn.unlock.UnlockDns.refreshPrivateDns(this@RayVpnService)
+        onUnlockServerChanged(server, latency)
+        XrayLogManager.i("UNLOCK", "Unlock mode on: DNS goes to $server" + (latency?.let { " ($it ms)" } ?: "") +
+            "; all other traffic stays on the phone's network.")
+    }
+
+    /** The session uses [ip] now: Home, the notification and the service badges follow. */
+    private fun onUnlockServerChanged(ip: String, latencyMs: Long?) {
+        com.example.vpn.unlock.UnlockDns.setActive(ip, latencyMs)
+        mutateState { if (it.isConnected && unlockSession != null) it.copy(activeRoute = "Unlock DNS • $ip", pingMs = latencyMs) else it }
+        startForegroundWith(unlockNotification(ip, latencyMs))
+        unlockVerifyJob?.cancel()
+        unlockVerifyJob = serviceScope.launch { com.example.vpn.unlock.UnlockDns.verifyServices(ip) }
+    }
+
+    /** Auto-pick, the manual server or the list changed in the sheet. */
+    private fun onUnlockChoiceChanged() {
+        val session = unlockSession ?: return
+        val choice = com.example.vpn.unlock.UnlockDns.state.value
+        session.autoPick = choice.autoPick
+        val checks = choice.checks.ifEmpty { session.checks }
+        session.updateChecks(checks.filter { it.ip in choice.servers }, choice.manual)
+    }
+
+    /** Re-checks every Unlock server (network change); a dead current server is replaced when auto-picking. */
+    private fun recheckUnlock(why: String) {
+        val ticket = lifecycle.current()
+        serviceScope.launch {
+            val session = unlockSession ?: return@launch
+            XrayLogManager.i("UNLOCK", "Re-checking Unlock DNS servers: $why.")
+            com.example.vpn.unlock.UnlockDns.refreshPrivateDns(this@RayVpnService)
+            val checks = runCatching { com.example.vpn.unlock.UnlockDns.recheck(this@RayVpnService) }.getOrNull() ?: return@launch
+            if (!lifecycle.isCurrent(ticket) || unlockSession !== session) return@launch
+            val choice = com.example.vpn.unlock.UnlockDns.state.value
+            session.autoPick = choice.autoPick
+            session.updateChecks(checks, choice.manual)
+        }
+    }
+
+    private fun unlockNotification(server: String, latencyMs: Long?): Notification {
+        val text = com.example.ui.language.LanguageStore.localized(this)
+        val line = latencyMs?.let { text.getString(R.string.unlock_pill, server, it) } ?: text.getString(R.string.unlock_pill_no_ms, server)
+        return baseNotification()
+            .setContentTitle(text.getString(R.string.unlock_notification_title))
+            .setContentText(line)
+            .setStyle(NotificationCompat.BigTextStyle()
+                .setBigContentTitle(text.getString(R.string.unlock_notification_title))
+                .bigText(line + "\n" + text.getString(R.string.unlock_info_only_dns)))
+            .setWhen(notificationSince.takeIf { it > 0 } ?: System.currentTimeMillis())
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .addAction(0, text.getString(R.string.notification_disconnect), disconnectPendingIntent())
+            .build()
+    }
+
     /**
      * The user's Stop. The cancelled attempt normally gives the connect lock back at once; when one of its blocking
      * steps does not answer the cancel (socket I/O ignores Thread.interrupt), the teardown does not wait out that
@@ -4284,6 +4473,12 @@ class RayVpnService : VpnService() {
         // A background WARP-relay test belongs to the connection being torn down.
         aetherRelayJob?.cancel()
         aetherRelayJob = null
+        // Unlock mode's DNS-only session ends with any teardown (Disconnect, a tunnel connect, revoke).
+        unlockSession?.stop()
+        unlockSession = null
+        unlockVerifyJob?.cancel()
+        unlockVerifyJob = null
+        com.example.vpn.unlock.UnlockDns.setActive(null, null)
         // Establish the replacement blackhole before stopping either engine. Native
         // startup failures may close their fd, so retaining only that fd is insufficient.
         val previousInterface = vpnInterface
@@ -4389,6 +4584,13 @@ class RayVpnService : VpnService() {
                 .firstOrNull()?.first
             val signature = next?.let { n -> n.toString() + ":" + cm.getLinkProperties(n)?.linkAddresses.orEmpty().map { it.toString() }.sorted().joinToString(",") }
             if (!handoffPolicy.observe(signature)) return@launch
+            if (unlockSession != null) {
+                // Unlock mode: no tunnel to rebuild or re-verify; re-check the servers on the new network instead.
+                mutateState { it.copy(networkGeneration = it.networkGeneration + 1) }
+                runCatching { setUnderlyingNetworks(next?.let { arrayOf(it) } ?: emptyArray()) }
+                if (next != null) recheckUnlock("network changed")
+                return@launch
+            }
             mutateState { com.example.data.model.ConnectionVerification.onNetworkChanged(it) }
             com.example.vpn.connectivity.ConnectivityBrain.refreshSession()
             runCatching { setUnderlyingNetworks(next?.let { arrayOf(it) } ?: emptyArray()) }
@@ -4561,6 +4763,8 @@ class RayVpnService : VpnService() {
         com.example.vpn.stealth.recordslice.RecordSliceBridges.closeAll()
         com.example.vpn.stealth.recordslice.UplinkShield.networkMss = null
         com.example.xray.XhttpProfiles.networkKey = null
+        com.example.vpn.unlock.UnlockDns.protector = com.example.vpn.unlock.UnlockDnsWire.Protector()
+        com.example.vpn.unlock.UnlockDns.onChoiceChanged = null
         supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.SERVICE_DESTROYED)
         connectJob?.cancel()
         serviceScope.coroutineContext[Job]?.cancel()

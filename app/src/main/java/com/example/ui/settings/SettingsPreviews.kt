@@ -13,7 +13,7 @@ import com.example.ui.theme.MyApplicationTheme
 internal object SettingsSamples {
     val settings = AppSettings()
     val update = UpdateUi(checked = true)
-    const val VERSION = "1.0.4"
+    const val VERSION = "1.0.5"
 }
 
 @Composable

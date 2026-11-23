@@ -38,6 +38,8 @@ class VpnViewModel(
     /** How the connect waiting for the VPN permission was asked for: Smart Connect, or the power button. */
     private var pendingSmart = false
     private var pendingExact = false
+    /** The connect waiting for the VPN permission is Unlock mode's (no profile). */
+    private var pendingUnlock = false
 
     val selectedProfile: StateFlow<VlessProfile?> = combine(
         serverRepository.allProfiles,
@@ -132,6 +134,13 @@ class VpnViewModel(
     }
 
     fun onPermissionGranted(context: Context) {
+        if (pendingUnlock || settingsRepository.getSettings().operationalMode == com.example.data.model.OperationalMode.UNLOCK) {
+            pendingUnlock = false
+            _pendingProfile.value = null
+            XrayLogManager.i("VPN", "Permission granted by user. Starting Unlock mode.")
+            VpnController.startUnlock(context)
+            return
+        }
         viewModelScope.launch {
             val profileToConnect = _pendingProfile.value
                 ?: selectedProfile.value
@@ -161,6 +170,7 @@ class VpnViewModel(
 
     fun onPermissionDenied() {
         _pendingProfile.value = null
+        pendingUnlock = false
         XrayLogManager.w("VPN", "User denied VPN permission dialog.")
         RayVpnService.updateState(
             VpnController.connectionState.value.copy(
@@ -181,6 +191,10 @@ class VpnViewModel(
             }
             VpnController.stopVpn(context)
         } else {
+            if (settingsRepository.getSettings().operationalMode == com.example.data.model.OperationalMode.UNLOCK) {
+                connectUnlock(context) { intent -> onRequestPermission?.invoke(intent) }
+                return
+            }
             // The power button connects the config selected in Nodes first. With "Power button fallback" on
             // (default) a config that carries no real traffic hands over to failover and the recovery engines;
             // off, only that config is started. Smart Connect stays the separate button that compares paths.
@@ -190,6 +204,19 @@ class VpnViewModel(
                 onRequestPermission?.invoke(intent)
             }
         }
+    }
+
+    /** Unlock mode's Connect: no server profile, only the VPN permission is needed. */
+    fun connectUnlock(context: Context, onRequestPermission: (Intent) -> Unit) {
+        val prepareIntent = VpnController.prepareVpn(context)
+        if (prepareIntent != null) {
+            pendingUnlock = true
+            RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null) }
+            onRequestPermission(prepareIntent)
+            return
+        }
+        RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null) }
+        VpnController.startUnlock(context)
     }
 
     /**
