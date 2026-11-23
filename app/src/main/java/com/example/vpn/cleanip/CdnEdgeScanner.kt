@@ -2,11 +2,8 @@ package com.example.vpn.cleanip
 
 import com.example.data.model.VlessProfile
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -131,13 +128,18 @@ class CdnEdgeScanner(
         speedBytes: Int = 64_000
     ): List<Edge> = withContext(Dispatchers.IO) {
         val candidates = (preferred.filter { CdnRanges.ipv4(it) != null } + CdnRanges.sample(cdn, samples, random)).distinct()
-        val gate = Semaphore(concurrency.coerceIn(1, 64))
         val passed = java.util.concurrent.atomic.AtomicInteger()
-        val edges = coroutineScope {
-            candidates.map { ip ->
-                async {
-                    gate.withPermit {
-                        if (passed.get() >= enough) return@withPermit null
+        // Workers take candidates strictly in list order, so [preferred] addresses are always tried before
+        // fresh samples (a coroutine per address on the IO pool would start them in whatever order threads pick).
+        val next = java.util.concurrent.atomic.AtomicInteger()
+        val results = arrayOfNulls<Edge>(candidates.size)
+        coroutineScope {
+            repeat(concurrency.coerceIn(1, 64).coerceAtMost(candidates.size.coerceAtLeast(1))) {
+                launch {
+                    while (passed.get() < enough) {
+                        val index = next.getAndIncrement()
+                        if (index >= candidates.size) break
+                        val ip = candidates[index]
                         val attempts = mutableListOf<Handshake>()
                         for (i in 0 until tries.coerceAtLeast(1)) {
                             val h = runCatching { handshake(ip, port, sni, timeoutMs) }.getOrElse { Handshake(null, null) }
@@ -145,11 +147,12 @@ class CdnEdgeScanner(
                             // A dead or intercepted address needs no second try.
                             if (!h.ok) break
                         }
-                        Edge(ip, cdn, attempts).also { if (it.successes > 0 && !it.certMismatch) passed.incrementAndGet() }
+                        results[index] = Edge(ip, cdn, attempts).also { if (it.successes > 0 && !it.certMismatch) passed.incrementAndGet() }
                     }
                 }
-            }.awaitAll().filterNotNull()
+            }
         }
+        val edges = results.filterNotNull()
         val ranked = rank(edges)
         val host = cdn.speedHost
         if (speedTop <= 0 || host == null) return@withContext ranked
