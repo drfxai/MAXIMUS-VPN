@@ -1,8 +1,13 @@
 package com.example.vpn.sidecar
 
 import com.example.data.model.AppSettings
+import com.example.vpn.verify.Socks5
 import org.json.JSONObject
 import java.io.File
+import java.net.Socket
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 /**
  * Lantern (Radiance) as the relay hop under Aether: WARP's MASQUE HTTP/2 tunnel is dialled through Radiance's local
@@ -25,8 +30,51 @@ object LanternRelayHop {
     const val RUNTIME_MISSING = "Lantern relay hop is not part of this build"
     const val NOT_READY = "Lantern relay hop did not become ready"
     const val PROCESS_FAILED = "Lantern relay hop could not start"
+    const val CLOUDFLARE_UNREACHABLE = "Lantern relay hop could not reach Cloudflare"
     /** Fixed, non-secret reasons: safe to show and log verbatim. */
-    val REASONS = setOf(RUNTIME_MISSING, NOT_READY, PROCESS_FAILED)
+    val REASONS = setOf(RUNTIME_MISSING, NOT_READY, PROCESS_FAILED, CLOUDFLARE_UNREACHABLE)
+
+    /**
+     * The host the preflight completes a TLS handshake with through Radiance: WARP's account API
+     * ([com.example.vpn.warp.WarpRegistration.API_URL]), on Cloudflare's network like the MASQUE gateways. Aether's
+     * registration calls, gateway scan and tunnel all go through the upstream, so an exit that cannot finish a Cloudflare
+     * handshake cannot carry WARP either.
+     */
+    const val PREFLIGHT_HOST = "api.cloudflareclient.com"
+    const val PREFLIGHT_TIMEOUT_MS = 12_000
+
+    /**
+     * Whether Radiance's exit completes a TLS handshake with Cloudflare ([reachesCloudflare]); replaced in tests.
+     * Checked once Radiance is ready and before Aether starts, so a Lantern exit that cannot reach Cloudflare costs
+     * at most [PREFLIGHT_TIMEOUT_MS] instead of Aether's whole readiness window
+     * ([com.example.vpn.connections.ConnectionEngineRunner.LANTERN_ATTEMPT_MS]).
+     */
+    @Volatile var cloudflareCheck: (Socks5.Endpoint) -> Boolean = { reachesCloudflare(it) }
+
+    /**
+     * SOCKS5 CONNECT to [host]:443 through [endpoint] (the name is resolved on Lantern's side, never on the filtered
+     * network), then a verified TLS handshake with SNI [host]. Any failure is false; nothing is sent after the
+     * handshake. [tls] is replaced in tests.
+     */
+    fun reachesCloudflare(endpoint: Socks5.Endpoint, host: String = PREFLIGHT_HOST, timeoutMs: Int = PREFLIGHT_TIMEOUT_MS,
+                          tls: (Socket, String, Int) -> Unit = ::tlsHandshake): Boolean = try {
+        Socks5.connect(endpoint, host, 443, timeoutMs).use { tls(it, host, timeoutMs); true }
+    } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        false
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun tlsHandshake(raw: Socket, host: String, timeoutMs: Int) {
+        val ssl = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, host, 443, false) as SSLSocket
+        ssl.soTimeout = timeoutMs
+        val params = ssl.sslParameters
+        params.serverNames = listOf(SNIHostName(host))
+        params.endpointIdentificationAlgorithm = "HTTPS"
+        ssl.sslParameters = params
+        ssl.startHandshake()
+    }
 
     fun requested(extras: JSONObject): Boolean = extras.optBoolean(EXTRA)
 
@@ -48,6 +96,8 @@ object LanternRelayHop {
         }
         try {
             if (!process.awaitReady(launch.readyTimeoutMs)) throw BuiltinExitNode.ExitNodeFailure(NOT_READY)
+            val endpoint = Socks5.Endpoint("127.0.0.1", context.socksPort, context.socksUser, context.socksPass)
+            if (!cloudflareCheck(endpoint)) throw BuiltinExitNode.ExitNodeFailure(CLOUDFLARE_UNREACHABLE)
             return BuiltinExitNode.Started(process, upstream(context.socksUser, context.socksPass, context.socksPort))
         } catch (e: Throwable) {
             process.stop()

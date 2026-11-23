@@ -19,7 +19,11 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.DataInputStream
 import java.io.File
+import java.net.InetAddress
+import java.net.ServerSocket
+import kotlin.concurrent.thread
 
 /**
  * Build 170 (Irancell, metered, cf_quick = filtered): the user's own Aether run ("Irancell MASQUE HTTP/2: h2-split, h2")
@@ -68,6 +72,7 @@ class LanternRelayFallbackTest {
         WarpDataPlaneHold.resetForTest()
         WarpRegistrationMemory.resetForTest()
         AetherLadderGuard.resetForTest()
+        LanternRelayMemory.resetForTest()
     }
 
     @After fun tearDown() {
@@ -77,6 +82,7 @@ class LanternRelayFallbackTest {
         WarpDataPlaneHold.resetForTest()
         WarpRegistrationMemory.resetForTest()
         AetherLadderGuard.resetForTest()
+        LanternRelayMemory.resetForTest()
     }
 
     private fun run(manual: Boolean, cloudflareBlocked: Boolean, lantern: Boolean, relayExitNode: String? = null) =
@@ -183,5 +189,106 @@ class LanternRelayFallbackTest {
         assertTrue(message, message.contains("10 min ago"))
         assertTrue(message, message.contains("about 20 more min"))
         assertTrue(message, message.contains("Lantern or Serverless"))
+    }
+
+    // --- Update from the reference review: the Lantern hop fails once per network, then fast ---
+
+    @Test fun aFailedLanternHopIsRememberedAndTheNextRunInsideTheHoldStopsAtOnce() {
+        WarpDataPlaneHold.record(network)
+        run(manual = true, cloudflareBlocked = true, lantern = true)
+        assertEquals(listOf("lantern"), attempted)
+        assertTrue(LanternRelayMemory.blocked(network))
+        assertTrue(store.containsKey("lanternHopFailed#$network"))
+
+        attempted.clear()
+        val failure = run(manual = true, cloudflareBlocked = true, lantern = true)
+        assertTrue(attempted.toString(), attempted.isEmpty())
+        val message = failure.message.orEmpty()
+        assertTrue(message, message.startsWith("Aether skipped: Cloudflare is filtered"))
+        assertTrue(message, message.contains("WARP through Lantern also failed here"))
+        assertTrue(message, message.contains("Lantern or Serverless"))
+    }
+
+    @Test fun outsideTheHoldARememberedLanternFailureLeavesOnlyTheDirectCarriers() {
+        LanternRelayMemory.record(network)
+        run(manual = true, cloudflareBlocked = true, lantern = true)
+        assertFalse(attempted.toString(), "lantern" in attempted)
+        assertTrue(attempted.toString(), attempted.containsAll(listOf("h2", "h3", "wireguard")))
+    }
+
+    @Test fun theLanternMemoryIsPerNetworkExpiresAndIgnoresAMissingRuntime() {
+        LanternRelayMemory.record(network, now = 0)
+        assertTrue(LanternRelayMemory.blocked(network, now = LanternRelayMemory.HOLD_MS - 1))
+        assertFalse(LanternRelayMemory.blocked(network, now = LanternRelayMemory.HOLD_MS))
+        assertFalse(LanternRelayMemory.blocked("cell:other", now = 1))
+        // Survives a restart through BuiltinMethodMemory's store.
+        LanternRelayMemory.resetForTest()
+        assertTrue(LanternRelayMemory.blocked(network, now = 1))
+        LanternRelayMemory.clear(network)
+        assertFalse(LanternRelayMemory.blocked(network, now = 1))
+
+        assertFalse(LanternRelayMemory.counts(LanternRelayHop.RUNTIME_MISSING))
+        assertTrue(LanternRelayMemory.counts(LanternRelayHop.NOT_READY))
+        assertTrue(LanternRelayMemory.counts(LanternRelayHop.CLOUDFLARE_UNREACHABLE))
+        assertTrue(LanternRelayMemory.counts("local proxy did not become ready"))
+    }
+
+    @Test fun theFastFailMessageSaysWhenTheLanternHopFailedToo() {
+        WarpDataPlaneHold.record(network, now = 0)
+        val message = WarpDataPlaneHold.fastFailMessage(network, now = 10 * 60_000L, lanternFailedAt = 5 * 60_000L)
+        assertTrue(message, message.contains("WARP through Lantern also failed here 5 min ago"))
+        assertTrue(message, message.contains("not retried for about 25 more min"))
+        assertFalse(WarpDataPlaneHold.fastFailMessage(network, now = 10 * 60_000L).contains("also failed"))
+    }
+
+    /** A loopback SOCKS5 server for the preflight: no auth or user/password, then the given CONNECT reply code. */
+    private fun fakeSocks(reply: Int): ServerSocket {
+        val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
+        thread(isDaemon = true) {
+            runCatching {
+                server.accept().use { s ->
+                    val input = DataInputStream(s.getInputStream())
+                    val out = s.getOutputStream()
+                    input.readUnsignedByte(); val n = input.readUnsignedByte(); input.readFully(ByteArray(n))
+                    out.write(byteArrayOf(5, 2)); out.flush()
+                    input.readUnsignedByte(); input.readFully(ByteArray(input.readUnsignedByte()))
+                    input.readFully(ByteArray(input.readUnsignedByte()))
+                    out.write(byteArrayOf(1, 0)); out.flush()
+                    input.readFully(ByteArray(3))
+                    when (input.readUnsignedByte()) {
+                        1 -> input.readFully(ByteArray(4))
+                        3 -> input.readFully(ByteArray(input.readUnsignedByte()))
+                        4 -> input.readFully(ByteArray(16))
+                    }
+                    input.readFully(ByteArray(2))
+                    out.write(byteArrayOf(5, reply.toByte(), 0, 1, 0, 0, 0, 0, 0, 0)); out.flush()
+                    Thread.sleep(500)
+                }
+            }
+        }
+        return server
+    }
+
+    @Test fun thePreflightNeedsACloudflareHandshakeThroughLantern() {
+        val hosts = mutableListOf<String>()
+        fakeSocks(reply = 0).use { server ->
+            val endpoint = com.example.vpn.verify.Socks5.Endpoint("127.0.0.1", server.localPort, "u", "p")
+            assertTrue(LanternRelayHop.reachesCloudflare(endpoint, timeoutMs = 3_000) { _, host, _ -> hosts += host })
+        }
+        assertEquals(listOf(LanternRelayHop.PREFLIGHT_HOST), hosts)
+        fakeSocks(reply = 0).use { server ->
+            val endpoint = com.example.vpn.verify.Socks5.Endpoint("127.0.0.1", server.localPort, "u", "p")
+            assertFalse(LanternRelayHop.reachesCloudflare(endpoint, timeoutMs = 3_000) { _, _, _ ->
+                throw javax.net.ssl.SSLHandshakeException("reset") })
+        }
+        // Lantern's exit could not open the connection (SOCKS reply 5: refused): the handshake is never attempted.
+        fakeSocks(reply = 5).use { server ->
+            val endpoint = com.example.vpn.verify.Socks5.Endpoint("127.0.0.1", server.localPort, "u", "p")
+            assertFalse(LanternRelayHop.reachesCloudflare(endpoint, timeoutMs = 3_000) { _, _, _ -> error("not reached") })
+        }
+        // Nothing listening.
+        val closed = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+        assertFalse(LanternRelayHop.reachesCloudflare(com.example.vpn.verify.Socks5.Endpoint("127.0.0.1", closed, "u", "p"),
+            timeoutMs = 1_000) { _, _, _ -> })
     }
 }

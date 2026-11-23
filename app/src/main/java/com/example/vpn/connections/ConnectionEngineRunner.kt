@@ -178,6 +178,14 @@ object ConnectionEngineRunner {
                 remove(BuiltinExitNode.EXIT_ENDPOINT); remove(BuiltinExitNode.EXIT_VARIANT)
             }.toString())
 
+    /** A failed [H2_LANTERN] attempt on [network]: remembered ([LanternRelayMemory]) unless it is not about the network. */
+    internal fun rememberLanternFailure(network: String?, reason: String?, record: (String, String, String, String) -> Unit) {
+        if (!LanternRelayMemory.counts(reason)) return
+        LanternRelayMemory.record(network)
+        record(H2_LANTERN, "lantern-hop", "REMEMBER", "WARP through Lantern failed here; not retried on this network " +
+            "for ${LanternRelayMemory.HOLD_MS / 60_000} min")
+    }
+
     /**
      * Whole-ladder budget for automatic Aether on a metered link that is Irancell or measured Cloudflare-filtered:
      * once it is spent no further direct carrier starts (WARP through a verified saved server still may, it is
@@ -546,8 +554,12 @@ object ConnectionEngineRunner {
         // ladder ran here under a minute ago: an automatic run stops at once so the search goes on.
         val ladderKind = if (relayOnly) "relay" else "ladder"
         val guarded = engine.id == AetherSidecar.ID && automatic
-        val lanternChoice = if (lanternRelayEligible(engine.id, automatic, manual, cloudflareBlocked, lanternAvailable,
-                AetherSettings.read(ProfileExtras.read(profile)), relayExitNode, relayOnly))
+        // WARP through Lantern failed on this network recently (LanternRelayMemory): not queued again until it expires.
+        val lanternEligible = lanternRelayEligible(engine.id, automatic, manual, cloudflareBlocked, lanternAvailable,
+            AetherSettings.read(ProfileExtras.read(profile)), relayExitNode, relayOnly)
+        val lanternFailedAt = if (lanternEligible) LanternRelayMemory.failedAt(networkKey) else null
+        if (lanternFailedAt != null) record(H2_LANTERN, "queue", "SKIP", LanternRelayMemory.describe(networkKey))
+        val lanternChoice = if (lanternEligible && lanternFailedAt == null)
             carrierChoices.firstOrNull { ProfileExtras.read(it).let { e -> e.optString("carrier") == "h2" && !e.optBoolean(AetherSidecar.SNI_SPLIT) } }
                 ?.let(::lanternRelayed) else null
         val held = guarded && WarpDataPlaneHold.blocked(networkKey)
@@ -561,7 +573,7 @@ object ConnectionEngineRunner {
         // skipped: WARP goes through Lantern when it can, otherwise the run fails at once and names what works here.
         val lanternOnly = held && manual && cloudflareBlocked && !relayOnly && lanternChoice != null
         if (held && manual && cloudflareBlocked && !relayOnly && lanternChoice == null) {
-            val why = WarpDataPlaneHold.fastFailMessage(networkKey)
+            val why = WarpDataPlaneHold.fastFailMessage(networkKey, lanternFailedAt = lanternFailedAt)
             record(ladderKind, "warp-data", "SKIP", why)
             throw NoVerifiedPath(listOf(why), null)
         }
@@ -977,6 +989,7 @@ object ConnectionEngineRunner {
                     record(name, "startup", "FAIL", reason)
                     attempts += "$name: $reason"
                     failed(name, candidate)
+                    if (lanternHop) rememberLanternFailure(networkKey, reason, ::record)
                     if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
                     // Registration worked (the scan comes after it) but no gateway served a tunnel with Cloudflare
                     // filtered: WARP's data plane is blocked here. Hold automatic Aether; keep the saved identity.
@@ -1008,6 +1021,7 @@ object ConnectionEngineRunner {
                     if (engine.id == AetherSidecar.ID && automatic) rememberCleanH2(name, candidate, networkKey, attemptStartedAt, ::record)
                     if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                     if (engine.id == AetherSidecar.ID && !extras.optBoolean(RELAY_FOLLOW_UP)) WarpDataPlaneHold.clear(networkKey)
+                    if (LanternRelayHop.requested(extras)) LanternRelayMemory.clear(networkKey)
                     if (guarded) AetherLadderGuard.finish(networkKey, ladderKind)
                     if (scope() == cacheScope) {
                         BuiltinMethodMemory.record(cacheScope, name)
@@ -1023,6 +1037,7 @@ object ConnectionEngineRunner {
                 record(name, "https", "FAIL", reason)
                 attempts += "$name: $reason"
                 failed(name, candidate)
+                if (LanternRelayHop.requested(extras)) rememberLanternFailure(networkKey, reason, ::record)
                 if (name == preferred) BuiltinMethodMemory.forget(cacheScope)
                 // A relayed carrier has no direct follow-ups of its own.
                 if (extras.optBoolean(RELAY_FOLLOW_UP)) continue
@@ -1044,6 +1059,7 @@ object ConnectionEngineRunner {
                 record(name, "startup", "FAIL", reason)
                 attempts += "$name: $reason"
                 failed(name, candidate)
+                if (LanternRelayHop.requested(extras)) rememberLanternFailure(networkKey, reason, ::record)
                 // No saved identity and the account API cannot be reached: every other carrier that also
                 // lacks an identity would wait out its whole window for the same registration.
                 if (engine.id == AetherSidecar.ID && reason == AetherApiBridge.UNREACHABLE_WITHOUT_IDENTITY)

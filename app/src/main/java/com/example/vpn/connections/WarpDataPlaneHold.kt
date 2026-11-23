@@ -68,14 +68,20 @@ object WarpDataPlaneHold {
      * Lantern hop to carry WARP (build 170: three manual runs each spent two 45 s scans and ended TLS_HANDSHAKE_FAILED
      * while Lantern, Serverless and Tor carried traffic on the same network).
      */
-    fun fastFailMessage(network: String?, now: Long = System.currentTimeMillis()): String {
+    fun fastFailMessage(network: String?, now: Long = System.currentTimeMillis(), lanternFailedAt: Long? = null): String {
         val at = heldAt(network, now)
         val ago = at?.let { " ${(now - it) / 60_000} min ago" }.orEmpty()
-        val left = at?.let { " for about ${maxOf(1L, (HOLD_MS - (now - it) + 59_999) / 60_000)} more min" }.orEmpty()
+        val left = at?.let { " for about ${minutesLeft(HOLD_MS, now - it)} more min" }.orEmpty()
+        // WARP through the Lantern hop also failed here (LanternRelayMemory): say so, so the user does not expect the
+        // next press to try it again. Lantern on its own is a different path and still the first suggestion.
+        val lantern = lanternFailedAt?.let { "; WARP through Lantern also failed here ${(now - it) / 60_000} min ago " +
+            "and is not retried for about ${minutesLeft(LanternRelayMemory.HOLD_MS, now - it)} more min" }.orEmpty()
         return "Aether skipped: Cloudflare is filtered on this network and WARP's gateway scan found no serving tunnel " +
-            "here$ago, so Aether's direct scans are paused$left. Connect with Lantern or Serverless instead; " +
+            "here$ago, so Aether's direct scans are paused$left$lantern. Connect with Lantern or Serverless instead; " +
             "they do not depend on Cloudflare's TLS"
     }
+
+    private fun minutesLeft(holdMs: Long, elapsedMs: Long): Long = maxOf(1L, (holdMs - elapsedMs + 59_999) / 60_000)
 
     internal fun resetForTest() = inMemory.clear()
 }
