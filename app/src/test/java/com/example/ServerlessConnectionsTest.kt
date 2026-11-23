@@ -132,6 +132,31 @@ class ServerlessConnectionsTest {
             assertFalse(result.toString().contains("challenges.cloudflare.com"))
         }
     }
+    @Test fun v65ProfilesKeepOriginalDestinationsDotAndSendTheCloudflareDomainDirect() {
+        assertEquals("9b62ddf9e8bc83432d4b0bcf8be4c963bc8cb300", ServerlessSidecar.CONFIG_REVISION)
+        for (variant in listOf("fragA", "fragB", "oob")) {
+            val source = File("src/main/assets/serverless/Serverless-$variant.jsonc").readText()
+            assertTrue(source.contains("\"Serverless-v65-$variant\""))
+            assertTrue(source.contains("\"min\": \"26.11.23\""))
+            val result = ServerlessSidecar.config(source, 12345, "u", "p", "auto")
+            val text = result.toString()
+            // The desktop edge redirection (v65 moved it from 104.18.0.8 to 188.114.99.0) is replaced by original destinations.
+            assertFalse(text.contains("188.114.99.0"))
+            assertFalse(text.contains("104.18.0.8"))
+            assertFalse(text.contains(".redirect"))
+            val rules = result.getJSONObject("routing").getJSONArray("rules")
+            val routes = (0 until rules.length()).map { rules.getJSONObject(it) }
+            // DNS-over-TLS stays open for Android Private DNS; the geosite DoH/ads block has no entries left and is dropped.
+            assertTrue(routes.none { it.optString("port") == "853" })
+            assertTrue(routes.none { r -> r.optJSONArray("domain")?.let { d -> (0 until d.length()).any { d.getString(it).startsWith("geosite:") } } == true })
+            val cloudflare = routes.single { r -> r.optString("network") == "tcp" &&
+                r.optJSONArray("domain")?.let { d -> (0 until d.length()).any { d.getString(it) == "domain:cloudflare.com" } } == true }
+            // v65 sends cloudflare.com straight out, as it does the domestic list.
+            assertEquals("tcp-direct", cloudflare.getString("outboundTag"))
+            // v65 asks the core for assurance-first interleaving; the auto family keeps it.
+            assertTrue(text.contains("assuranceFirstInterleave"))
+        }
+    }
     @Test fun automaticSelectionNeverCrossesPrivacyModes() {
         val direct = ConnectionEngineRunner.candidates(ServerlessSidecar.profile())
         assertEquals(3, direct.size)

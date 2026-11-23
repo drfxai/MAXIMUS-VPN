@@ -4,7 +4,7 @@ The Android client keeps its own VPN service and uses its existing native engine
 
 | Reference | Use in MAXIMUS |
 | --- | --- |
-| [Serverless-for-Iran](https://github.com/patterniha/Serverless-for-Iran) | The v64 profiles and the matching Patterniha Xray runtime v26.11.22 are pinned (first added in #237). Direct mode keeps its explicit selection because its exit is the user's ISP. |
+| [Serverless-for-Iran](https://github.com/patterniha/Serverless-for-Iran) | The v65 profiles and the matching Patterniha Xray runtime v26.11.23 are pinned (first added in #237). Direct mode keeps its explicit selection because its exit is the user's ISP. |
 | [PattN](https://github.com/patterniha/PattN) and [PattNG](https://github.com/patterniha/PattNG) | References for per-profile core selection and separating native transport from the client. MAXIMUS retains its existing Xray and sing-box adapters. |
 | [WhiteAestherMobile](https://github.com/WhiteDNS/WhiteAestherMobile), [WhiteAesther](https://github.com/WhiteDNS/WhiteAesther) and [RIX-AETHER](https://github.com/RIX-REZA/RIX-AETHER) | References for adaptive transport selection, remembered routes and managing dependent hops. MAXIMUS reuses fresh verified-engine evidence and retains the chain's requested mode during probes. A result from an old network cannot authorize the early Aether handoff. |
 | [WhiteDNS-Android](https://github.com/WhiteDNS/WhiteDNS-Android) and [CottenDNS](https://github.com/WhiteDNS/CottenDNS) | Android behavior is a reference. The separate CottenDNS CLI moves to `ac8e86ed83a5006ab320468daaebe759d9574da6` for DNS cache and UDP lifecycle fixes. The strict DoH/DoT patch remains in the build. |

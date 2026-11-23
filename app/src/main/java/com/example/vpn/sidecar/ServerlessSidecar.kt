@@ -9,7 +9,7 @@ import java.io.File
 /** Direct anti-DPI access. Never claims a foreign exit or silently enables a VPN fallback. */
 object ServerlessSidecar : SidecarEngine {
     const val ID = "serverless"
-    const val CONFIG_REVISION = "4f45a7645fe9771bc550f93923262143da744706"
+    const val CONFIG_REVISION = "9b62ddf9e8bc83432d4b0bcf8be4c963bc8cb300"
     override val id = ID
     override val binary = ID
     val resolvers = listOf("auto", "cloudflare", "google")
@@ -102,6 +102,9 @@ object ServerlessSidecar : SidecarEngine {
             }
             val tag = r.getString("outboundTag")
             if (tag in removedTags) continue
+            // v65 blocks DNS-over-TLS so desktop apps fall back to the profile's repacked DNS. Android keeps
+            // its own authenticated DoH here instead, and a blocked port 853 would break Private DNS (strict).
+            if (tag == "block" && r.optString("port") == "853" && !r.has("domain") && !r.has("ip")) continue
             // Use the masked path immediately for port-only matches and for selected exits.
             fallbackTags[tag]?.let { fallback ->
                 if (r.optJSONArray("protocol") == null || exitOutbound != null) r.put("outboundTag", fallback)
