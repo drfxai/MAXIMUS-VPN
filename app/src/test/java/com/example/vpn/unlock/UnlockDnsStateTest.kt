@@ -17,7 +17,7 @@ import org.robolectric.annotation.Config
 
 /** The Unlock DNS choices the sheet changes, kept across launches, and the re-check that ranks the rows. */
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [33])
+@Config(application = Application::class, sdk = [34])
 class UnlockDnsStateTest {
     private lateinit var context: Context
 

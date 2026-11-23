@@ -116,7 +116,7 @@ class UnlockDnsHealthTest {
     @Test fun serviceBadgesNeedPublicAnswersThatAcceptTls() {
         val probe = FakeProbe(mapOf(
             ("143.20.64.55" to "gemini.google.com") to Lookup(listOf("143.20.64.10"), 20),
-            ("143.20.64.55" to "api.openai.com") to Lookup(listOf("10.10.34.35"), 20),
+            ("143.20.64.55" to "chatgpt.com") to Lookup(listOf("10.10.34.35"), 20),
             ("143.20.64.55" to "aistudio.google.com") to Lookup(listOf("31.25.239.132"), 20)
         ))
         assertTrue(UnlockDnsHealth.verify("143.20.64.55", UnlockDnsHealth.Service.GEMINI, probe))

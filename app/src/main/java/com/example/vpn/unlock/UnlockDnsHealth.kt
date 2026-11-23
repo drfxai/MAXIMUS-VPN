@@ -139,7 +139,7 @@ object UnlockDnsHealth {
     /** Services the Home badges verify through the active server: label key and the name looked up. */
     enum class Service(val host: String) {
         GEMINI("gemini.google.com"),
-        CHATGPT("api.openai.com"),
+        CHATGPT("chatgpt.com"),
         AI_STUDIO("aistudio.google.com"),
         ANDROID_DEV("developer.android.com")
     }
