@@ -313,6 +313,9 @@ class RayApplication : Application() {
         com.example.xray.GeoAssets.install(this)
         CoroutineScope(Dispatchers.IO).launch { com.example.xray.GeoAssets.ensureReady() }
         com.example.vpn.BundledResolvers.updatedAsset = { part -> com.example.update.ResolverPackUpdater.open(this, part) }
+        // Unlock mode's server list: the verified resolver pack's copy when it has one, else the bundled asset.
+        com.example.vpn.unlock.UnlockDnsList.updated = { com.example.update.ResolverPackUpdater.openUnlock(this) }
+        com.example.vpn.unlock.UnlockDnsList.bundled = { assets.open(com.example.vpn.unlock.UnlockDnsList.ASSET) }
         com.example.vpn.sidecar.Sidecars.torStarter = { torrc, port -> com.example.vpn.sidecar.TorInApp.start(this, torrc, port) }
         com.example.vpn.sidecar.Sidecars.privatePsiphonSettings = { id ->
             com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)

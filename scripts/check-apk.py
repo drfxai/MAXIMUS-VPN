@@ -12,6 +12,8 @@ with zipfile.ZipFile(path) as apk:
         asset = f"assets/resolvers/part_{part}.txt"
         expected = Path(__file__).resolve().parents[1] / "app/src/main" / asset
         assert apk.read(asset) == expected.read_bytes(), f"Resolver asset differs: {asset}"
+    unlock_asset = "assets/unlock/dns.txt"
+    assert apk.read(unlock_asset) == (assets_root / "unlock/dns.txt").read_bytes(), f"Unlock DNS asset differs: {unlock_asset}"
     abis = {name.split("/")[1] for name in apk.namelist() if name.startswith("lib/") and name.endswith(".so")}
     assert abis == {"arm64-v8a"} if requested == "arm64-v8a" else {"arm64-v8a", "armeabi-v7a", "x86_64"} <= abis, abis
     psiphon_asset = "psiphon/public-config.json"

@@ -257,6 +257,8 @@ data class RoutingConfiguration(
 
 enum class OperationalMode(val displayName: String, val subtitle: String, val badge: String) {
     DAILY("Daily Mode", "High Speed • Your routing choices • Smart Connect when you ask", "⚡ DAILY"),
+    /** DNS only: an anti-sanction resolver for the whole phone, no tunnel, no config (see docs/UNLOCK_DNS.md). */
+    UNLOCK("Unlock Mode", "Anti-sanction DNS • No config needed", "🔑 UNLOCK"),
     GOD_MODE("GOD Mode", "Survival • Everything through the proxy • Fails closed • Tests every server", "🛡️ GOD MODE"),
     TRADE("Trade Mode", "Fixed exit • Same IP and config every time • No switching or recovery", "📈 TRADE"),
     GHOST_RIDER("Ghost Rider", "Maximum privacy • Multi-hop through Tor • Leak-blocked • Panic lock • Always fails closed", "👻 GHOST RIDER")

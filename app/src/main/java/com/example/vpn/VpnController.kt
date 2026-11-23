@@ -47,6 +47,16 @@ object VpnController {
     }
 
     /**
+     * Unlock mode: starts the DNS-only session. No profile is involved; the service reads the mode and the
+     * Unlock DNS choices itself (see RayVpnService.connectUnlockLocked).
+     */
+    fun startUnlock(context: Context) {
+        context.stopService(Intent(context, com.example.vpn.share.LocalProxyService::class.java))
+        val intent = Intent(context, RayVpnService::class.java).apply { action = RayVpnService.ACTION_CONNECT }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    /**
      * Stops the running VPN connection and tears down the tunnel cleanly.
      */
     fun stopVpn(context: Context) {
