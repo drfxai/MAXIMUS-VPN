@@ -337,10 +337,29 @@ object UniversalImportEngine {
                 sourceSubscription = subUrl,
                 nodeCount = 1
             )
-            ParsedItem.Success(profile)
+            ParsedItem.Success(vmessExtras(profile, json))
         } catch (e: Exception) {
             ParsedItem.Invalid(uriString.take(60), "Failed to parse VMess JSON: ${e.message}")
         }
+    }
+
+    /**
+     * The TLS and dial keys a VMess JSON link may carry besides the classic ones: `fp`, `alpn` (v2rayN), and the
+     * PattN (patterniha) keys `cs`, `vcn`, `pcs`, `cp`, `esr`, `dialMode`, `tut`, kept as the same fields a
+     * vless:// link with those query keys gets ([ProfileExtras.pattFromQuery]). Blank or JSON-null values are skipped.
+     */
+    internal fun vmessExtras(profile: VlessProfile, json: JSONObject): VlessProfile {
+        fun text(key: String): String =
+            json.opt(key)?.takeIf { it != JSONObject.NULL }?.toString()?.trim().orEmpty()
+        val tls = profile.copy(
+            fingerprint = text("fp").ifEmpty { profile.fingerprint },
+            alpn = text("alpn").ifEmpty { profile.alpn },
+            cipherSuites = text("cs").ifEmpty { profile.cipherSuites },
+            verifyPeerCertByName = text("vcn").ifEmpty { profile.verifyPeerCertByName },
+            pinnedPeerCertSha256 = text("pcs").ifEmpty { profile.pinnedPeerCertSha256 },
+        )
+        val patt = listOf("dialMode", "tut", "esr", "cp").associateWith { text(it) }.filterValues { it.isNotEmpty() }
+        return ProfileExtras.pattFromQuery(tls, patt)
     }
 
     /**
