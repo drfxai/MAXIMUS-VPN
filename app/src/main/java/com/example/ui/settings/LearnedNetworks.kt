@@ -36,6 +36,15 @@ object LearnedNetworks {
     val explanation: String get() =
         "Routes that worked, per carrier or Wi-Fi. Kept for $keptDays ${if (keptDays == 1L) "day" else "days"}, no passwords or keys."
 
-    const val FOOTER = "Clearing forgets every remembered route and what worked on each network. Your saved servers and settings " +
-        "are not touched. The next connect on each network searches from the start."
+    const val FOOTER = "Clearing forgets every remembered route and what worked on each network, including revived configs, " +
+        "verified DNS resolvers and clean CDN addresses. Your saved servers and settings are not touched. The next connect on " +
+        "each network searches from the start."
+
+    /**
+     * Runs every store's clear on its own, so one that fails does not keep the others; returns the names of
+     * those that failed. The stores are the per-network memories: routes and network memory, config-revival
+     * winners, verified DNS resolvers, and clean CDN edges with SNI-proxy verdicts.
+     */
+    fun clearAll(stores: List<Pair<String, () -> Unit>>): List<String> =
+        stores.mapNotNull { (name, clear) -> name.takeIf { runCatching(clear).isFailure } }
 }

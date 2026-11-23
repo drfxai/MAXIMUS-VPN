@@ -645,6 +645,9 @@ object XrayConfigBuilder {
             put("sockopt", JSONObject().apply {
                 put("mark", SO_MARK_VPN)
             })
+
+            // patterniha link fields stock Xray v26.11.9 also has: tut, esr, cp (dialMode needs the fork).
+            com.example.vpn.engine.PatternihaFields.applyStock(this, profile)
         }
 
         proxyOutbound.put("streamSettings", streamSettings)

@@ -199,14 +199,14 @@ object ProfileExtras {
     const val WG_KEEPALIVE = "wgKeepAlive"
 
     // patterniha (PattN / Free-Configs) share-link fields with no column of their own.
-    // TODO: applied by fork sidecar in a later PR. Upstream Xray has no equivalent for these yet, so for now
-    // they are only stored and written back to exported links.
+    // Where each goes in Xray: PatternihaFields. `tut`, `esr`, `cp` run on stock Xray too; `dialMode` (and fork-only
+    // finalmask types) only on the fork Xray sidecar (vpn/sidecar/ForkXraySidecar), stock Xray runs without them.
     const val PATT_DIAL_MODE = "pattDialMode"           // link key `dialMode`, e.g. "oob.0"
     const val PATT_TCP_USER_TIMEOUT = "pattTcpUserTimeout" // link key `tut`, milliseconds > 0
     const val PATT_SESSION_RESUMPTION = "pattSessionResumption" // link key `esr=1`
     const val PATT_CURVE_PREFERENCES = "pattCurvePreferences"   // link key `cp`, comma list
-    // TODO: applied by fork sidecar in a later PR. `echOutbound` is a JSON outbound that would carry the ECH
-    // config lookup (tlsSettings.echSockopt.dialerProxy); stored and round-tripped only for now.
+    // `echOutbound` is a JSON outbound that carries the ECH config lookup (tlsSettings.echSockopt.dialerProxy). Used
+    // when the server runs on the fork sidecar (ForkXraySidecar.echOutbound); otherwise stored and round-tripped only.
     const val PATT_ECH_OUTBOUND = "pattEchOutbound"
     /** Set to [LINK_STYLE_PATTERNIHA] when the link used `fm`/`cs`, so an exported link uses the same keys. */
     const val LINK_STYLE = "linkStyle"

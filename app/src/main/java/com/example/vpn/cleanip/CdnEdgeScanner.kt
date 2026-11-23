@@ -2,11 +2,8 @@ package com.example.vpn.cleanip
 
 import com.example.data.model.VlessProfile
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -131,13 +128,18 @@ class CdnEdgeScanner(
         speedBytes: Int = 64_000
     ): List<Edge> = withContext(Dispatchers.IO) {
         val candidates = (preferred.filter { CdnRanges.ipv4(it) != null } + CdnRanges.sample(cdn, samples, random)).distinct()
-        val gate = Semaphore(concurrency.coerceIn(1, 64))
         val passed = java.util.concurrent.atomic.AtomicInteger()
-        val edges = coroutineScope {
-            candidates.map { ip ->
-                async {
-                    gate.withPermit {
-                        if (passed.get() >= enough) return@withPermit null
+        // Workers take candidates strictly in list order, so [preferred] addresses are always tried before
+        // fresh samples (a coroutine per address on the IO pool would start them in whatever order threads pick).
+        val next = java.util.concurrent.atomic.AtomicInteger()
+        val results = arrayOfNulls<Edge>(candidates.size)
+        coroutineScope {
+            repeat(concurrency.coerceIn(1, 64).coerceAtMost(candidates.size.coerceAtLeast(1))) {
+                launch {
+                    while (passed.get() < enough) {
+                        val index = next.getAndIncrement()
+                        if (index >= candidates.size) break
+                        val ip = candidates[index]
                         val attempts = mutableListOf<Handshake>()
                         for (i in 0 until tries.coerceAtLeast(1)) {
                             val h = runCatching { handshake(ip, port, sni, timeoutMs) }.getOrElse { Handshake(null, null) }
@@ -145,11 +147,12 @@ class CdnEdgeScanner(
                             // A dead or intercepted address needs no second try.
                             if (!h.ok) break
                         }
-                        Edge(ip, cdn, attempts).also { if (it.successes > 0 && !it.certMismatch) passed.incrementAndGet() }
+                        results[index] = Edge(ip, cdn, attempts).also { if (it.successes > 0 && !it.certMismatch) passed.incrementAndGet() }
                     }
                 }
-            }.awaitAll().filterNotNull()
+            }
         }
+        val edges = results.filterNotNull()
         val ranked = rank(edges)
         val host = cdn.speedHost
         if (speedTop <= 0 || host == null) return@withContext ranked
@@ -170,12 +173,24 @@ class CdnEdgeScanner(
             .distinctBy { it.ip }
             .sortedWith(compareBy<Edge>({ it.score }, { it.ip }))
 
-        /** The CDN behind a fronted config's address, from its literal IP or the [resolve]d addresses of its name. */
+        /**
+         * The CDN behind a fronted config: its address (a literal IP, or the [resolve]d addresses of its name) first;
+         * when no bundled list holds those (an unlisted edge, a "clean IP" the user already put in, a poisoned
+         * answer), the addresses of the TLS name and then the Host header, which are what the CDN routes by.
+         * Null when none of them is on a bundled list.
+         */
         fun cdnFor(profile: VlessProfile, resolve: (String) -> List<String> = { emptyList() }): Cdn? {
             val address = profile.address.trim().removePrefix("[").removeSuffix("]")
-            val ips = if (CdnRanges.ipv4(address) != null) listOf(address) else runCatching { resolve(address) }.getOrDefault(emptyList())
-            return ips.firstNotNullOfOrNull { CdnRanges.cdnOf(it) }
+            val ips = if (CdnRanges.ipv4(address) != null) listOf(address) else lookup(address, resolve)
+            ips.firstNotNullOfOrNull { CdnRanges.cdnOf(it) }?.let { return it }
+            return listOf(profile.sni, profile.host).map { it.trim().trimEnd('.').lowercase() }
+                .filter { it.isNotEmpty() && it.contains('.') && CdnRanges.ipv4(it) == null && !it.contains(':') && !it.contains('*') }
+                .distinct().filter { !it.equals(address, ignoreCase = true) }
+                .firstNotNullOfOrNull { name -> lookup(name, resolve).firstNotNullOfOrNull { CdnRanges.cdnOf(it) } }
         }
+
+        private fun lookup(name: String, resolve: (String) -> List<String>): List<String> =
+            if (name.isBlank()) emptyList() else runCatching { resolve(name) }.getOrDefault(emptyList())
 
         /** The TLS name the config sends (its SNI, else its Host, else its domain address). */
         fun tlsName(profile: VlessProfile): String? = profile.sni.ifBlank { profile.host }
@@ -280,6 +295,28 @@ object CdnRanges {
         return (n and mask) == net
     }
 
+    /** The /24 an IPv4 address sits in ("104.16.1"), or null when it is not a dotted IPv4 address. */
+    fun prefix24(ip: String): String? = ipv4(ip)?.let { format(it and 0xffffff00L).substringBeforeLast('.') }
+
+    /**
+     * Best-first [ips] reordered so neighbours sit in different /24s: the best address of each /24 in rank order,
+     * then the second best of each, and so on. Filters in Iran often drop a whole /24 at once; spread this way,
+     * one such block costs one slot of a race batch (or of the cached list) instead of all of it. Order inside a
+     * /24, and between the /24s' leaders, is kept. Anything that is not IPv4 keeps a group of its own.
+     */
+    fun diverse(ips: List<String>): List<String> {
+        val groups = LinkedHashMap<String, MutableList<String>>()
+        ips.distinct().forEach { ip -> groups.getOrPut(prefix24(ip) ?: "=$ip") { mutableListOf() } += ip }
+        val total = groups.values.sumOf { it.size }
+        val out = ArrayList<String>(total)
+        var round = 0
+        while (out.size < total) {
+            groups.values.forEach { g -> g.getOrNull(round)?.let(out::add) }
+            round++
+        }
+        return out
+    }
+
     /** The CDN whose bundled list holds [ip], or null. */
     fun cdnOf(ip: String): Cdn? = Cdn.entries.firstOrNull { cdn -> cdn.ranges.any { contains(it, ip) } }
 
@@ -331,7 +368,10 @@ class CdnCleanIpFinder(
     data class Found(val cdn: Cdn?, val ips: List<String>, val skipped: String? = null, val fromCache: Boolean = false)
 
     /** The CDN a config is fronted by; an address no bundled list holds is taken as Cloudflare, the usual front. */
-    fun cdnOf(profile: VlessProfile): Cdn = CdnEdgeScanner.cdnFor(profile, resolve) ?: Cdn.CLOUDFLARE
+    fun cdnOf(profile: VlessProfile): Cdn = frontOf(profile) ?: Cdn.CLOUDFLARE
+
+    /** The CDN a config is fronted by as far as the bundled lists show, or null when none holds it (unknown). */
+    fun frontOf(profile: VlessProfile): Cdn? = CdnEdgeScanner.cdnFor(profile, resolve)
 
     /** Whether [network] proxies Cloudflare TLS by name: the remembered verdict, or a fresh check. */
     fun cloudflareProxied(network: String, expectedCountry: String?): Boolean =
@@ -343,17 +383,22 @@ class CdnCleanIpFinder(
         network: String,
         expectedCountry: String?,
         preferred: List<String> = emptyList(),
-        speedTop: Int = 2
+        speedTop: Int = 2,
+        /** False when the caller already ruled on the SNI proxy ([CleanEdgePlan]): no blocking check here. */
+        checkProxy: Boolean = true,
+        /** The CDN when the caller already looked it up; null looks it up here (a DNS answer for a domain address). */
+        knownCdn: Cdn? = null
     ): Found {
         if (!CdnEdgeScanner.fronted(profile)) return Found(null, emptyList(), "not a CDN-fronted TLS config")
         val sni = CdnEdgeScanner.tlsName(profile)!!
-        val cdn = cdnOf(profile)
+        val cdn = knownCdn ?: cdnOf(profile)
         cache.best(network, cdn, sni).takeIf { it.isNotEmpty() }?.let { return Found(cdn, it, fromCache = true) }
-        if (cdn == Cdn.CLOUDFLARE && cloudflareProxied(network, expectedCountry)) {
+        if (checkProxy && cdn == Cdn.CLOUDFLARE && cloudflareProxied(network, expectedCountry)) {
             return Found(cdn, emptyList(), "this network proxies Cloudflare TLS by name; a clean Cloudflare IP cannot help here")
         }
         val port = profile.port.takeIf { it in 1..65535 } ?: 443
-        val ips = scanner.scan(cdn, sni, port, preferred, speedTop = speedTop).take(CleanIpCache.MAX_IPS).map { it.ip }
+        // Ranked best first, then spread over /24s so the few kept do not all fall to one blocked block.
+        val ips = CdnRanges.diverse(scanner.scan(cdn, sni, port, preferred, speedTop = speedTop).map { it.ip }).take(CleanIpCache.MAX_IPS)
         cache.put(network, cdn, sni, ips)
         return Found(cdn, ips)
     }

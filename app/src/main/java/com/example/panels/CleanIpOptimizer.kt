@@ -230,10 +230,31 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
         fun baseName(name: String): String = name
             .removePrefix("⚡ [Revived] ")
             .removePrefix("⚡ [CF-Optimized] ")
+            .removePrefix(CDN_COPY_PREFIX)
             .replace(Regex(" \\((?:A\\+|A|B|C)\\)$"), "")
 
         /** True for a copy an earlier clean-IP save or "Optimize all" made. */
-        fun isCleanIpCopy(p: VlessProfile): Boolean = p.name.startsWith("⚡ [CF-Optimized] ")
+        fun isCleanIpCopy(p: VlessProfile): Boolean = p.name.startsWith("⚡ [CF-Optimized] ") || p.name.startsWith(CDN_COPY_PREFIX)
+
+        const val CDN_COPY_PREFIX = "⚡ [CDN-Optimized] "
+
+        /** Copies through a Cloudflare edge keep their old name; other CDNs' edges are named for any CDN. */
+        fun copyPrefix(ip: String): String =
+            when (com.example.vpn.cleanip.CdnRanges.cdnOf(ip)) {
+                null, com.example.vpn.cleanip.Cdn.CLOUDFLARE -> "⚡ [CF-Optimized] "
+                else -> CDN_COPY_PREFIX
+            }
+
+        /**
+         * A handshake-scanned edge of [cdn] that carried a real request through [profileName]'s own config in
+         * [latencyMs]: shown and saved like a WebSocket-checked one (the request is the origin check).
+         */
+        fun verifiedCdnEdge(ip: String, cdn: com.example.vpn.cleanip.Cdn, latencyMs: Long, profileName: String): Result = Result(
+            ip = ip, medianMs = latencyMs.coerceAtLeast(1), jitterMs = 0, successes = 3, totalTries = 3,
+            country = cdn.label, operatorTag = "${cdn.label} CDN",
+            verificationStatus = "Real request through '$profileName' carried traffic",
+            originVerified = true
+        )
 
         fun ranked(results: List<Result>, limit: Int = 15): List<Result> = results
             .filter { it.successes >= 2 }
@@ -267,7 +288,9 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
             cleanIp: Result,
             asClone: Boolean = false
         ): VlessProfile {
-            require(canRevive(original)) {
+            // Cloudflare WebSocket/HTTPUpgrade, or any CDN-fronted TLS transport (XHTTP, gRPC, H2; Fastly, CloudFront,
+            // Gcore) whose edge was verified with a real request through the config.
+            require(canRevive(original) || com.example.vpn.cleanip.CdnEdgeScanner.fronted(original)) {
                 "Clean-IP recovery requires a structured CDN-compatible TLS profile"
             }
             com.example.vpn.experimental.FrontedTunnel.publicAddress(cleanIp.ip)
@@ -282,7 +305,7 @@ class CleanIpOptimizer(private val openSocket: () -> Socket = { directSocket() }
             val effectiveSecurity = original.security
 
             val newName = if (asClone) {
-                "⚡ [CF-Optimized] ${baseName(original.name)} (${cleanIp.qualityGrade})"
+                "${copyPrefix(cleanIp.ip)}${baseName(original.name)} (${cleanIp.qualityGrade})"
             } else {
                 original.name
             }

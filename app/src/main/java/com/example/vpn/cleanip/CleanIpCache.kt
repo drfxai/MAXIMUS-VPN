@@ -52,6 +52,14 @@ class CleanIpCache(
         persist()
     }
 
+    /** Forgets every network's edges and SNI-proxy verdicts (Settings → "Learned network data" → Clear). */
+    @Synchronized
+    fun clear() {
+        edges = LinkedHashMap()
+        proxies = LinkedHashMap()
+        persist()
+    }
+
     private fun key(network: String, cdn: Cdn, sni: String) = "$network|${cdn.name}|${sni.lowercase()}"
 
     private fun edges(): MutableMap<String, Entry> { read(); return edges!! }

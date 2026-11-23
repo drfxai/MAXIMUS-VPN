@@ -20,7 +20,7 @@ enum class SearchStage(val letter: Char, val title: String) {
 
 /** Ways out that need no server of the user's, tried in stage E in this order. */
 enum class EmergencyTransport(val title: String) {
-    CLEAN_IP("Clean Cloudflare address"),
+    CLEAN_IP("Clean CDN address"),
     WARP("Cloudflare WARP (WireGuard)"),
     MASQUE("WARP over MASQUE (HTTP/3)"),
     PSIPHON("Psiphon"),

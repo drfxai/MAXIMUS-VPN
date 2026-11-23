@@ -66,12 +66,9 @@ class PsiphonSidecar(
         val privateId = privateId(profile)
         val source = if (privateId.isNotEmpty()) requireNotNull(privateSettings(privateId))
             else requireNotNull(networkSettings())
-        val platform = runCatching { Sidecars.psiphonClientPlatform?.invoke() }.getOrNull()
         val config = buildConfig(source, if (privateId.isNotEmpty()) "" else region(profile),
             context.socksPort, dataDir, context.upstreamSocks, context.upstreamUser,
-            context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null,
-            clientPlatform = clientPlatform(platform?.first, platform?.third),
-            clientApiLevel = platform?.second ?: 0)
+            context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null)
         // ConsoleClient otherwise shares tactics and dial history under UNKNOWN across
         // unrelated networks. Upstream uses this identifier locally and logs its prefix.
         val link = runCatching { Sidecars.psiphonNetworkIdentity?.invoke() }.getOrNull()
@@ -98,6 +95,36 @@ class PsiphonSidecar(
         )
     }
 
+    /**
+     * How many servers a Psiphon start dialed, by TCP and other (QUIC, in-proxy, refraction) protocols, how many
+     * it connected to, the last CandidateServers count and the UpstreamProxyError notices. Counts and protocol
+     * names only. Needs EmitDiagnosticNotices (ConnectingServer, ConnectedServer and CandidateServers are
+     * diagnostic notices in psiphon-tunnel-core's notice.go).
+     */
+    data class StartupDials(
+        val tcp: Int = 0, val other: Int = 0, val connected: Int = 0, val candidates: Int? = null,
+        val upstreamErrors: Int = 0, val byProtocol: Map<String, Int> = emptyMap()
+    ) {
+        /** One word for a report: why no tunnel came up, as far as the notices tell. */
+        val verdict: String get() = when {
+            upstreamErrors > 0 -> "upstream_proxy_error"
+            connected > 0 -> "connected_no_tunnel"
+            tcp + other > 0 -> "dials_failed"
+            candidates == 0 -> "no_candidates"
+            else -> "no_dials"
+        }
+
+        /** "dials_failed: candidates=37; dialed OSSH×12 TLS-OSSH×5; connected 0". */
+        fun summary(): String = buildString {
+            append(verdict).append(':')
+            candidates?.let { append(" candidates=").append(it).append(';') }
+            append(" dialed ")
+            append(if (byProtocol.isEmpty()) "none" else byProtocol.entries.joinToString(" ") { "${it.key}×${it.value}" })
+            append("; connected ").append(connected)
+            if (upstreamErrors > 0) append("; upstream proxy errors ").append(upstreamErrors)
+        }
+    }
+
     /** Only structured, known notices can move diagnostics beyond server discovery. */
     internal class StartupProgress {
         @Volatile private var stage = 0
@@ -106,6 +133,13 @@ class PsiphonSidecar(
         @Volatile private var skips = 0
         /** The last notice name seen (names only; notice data can hold addresses). */
         @Volatile private var lastNotice: String? = null
+        /** The last [RECENT_NOTICES] notices, as type plus whitelisted, sanitized data ([summarize]). */
+        private val recent = ArrayDeque<String>()
+        /** ConnectingServer notices per tunnel protocol (protocol names only, never addresses). */
+        private val dialed = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        @Volatile private var connected = 0
+        @Volatile private var candidates: Int? = null
+        @Volatile private var upstreamErrors = 0
 
         fun observe(line: String) {
             if (line.length > 32_768) return
@@ -117,7 +151,19 @@ class PsiphonSidecar(
                 line.substring(0, start).trimEnd().substringAfterLast(' ')
             }
             val data = notice.optJSONObject("data") ?: notice
-            if (NOTICE_NAME.matches(kind)) lastNotice = kind
+            if (!NOTICE_NAME.matches(kind)) return
+            // NetworkID is printed every time the core re-reads the network identity (each dial round): it says
+            // nothing about why no tunnel came up, so it never becomes "the last notice" (build 170 report).
+            if (kind !in NOISE) lastNotice = kind
+            remember(summarize(kind, data))
+            when (kind) {
+                "ConnectingServer" -> data.optString("protocol").takeIf { PROTOCOL_NAME.matches(it) }
+                    ?.let { dialed.merge(it, 1) { a, b -> a + b } }
+                "ConnectedServer" -> connected++
+                // CandidateServers (diagnostic) reports how many server entries the current limits allow.
+                "CandidateServers" -> if (data.has("count")) candidates = data.optInt("count")
+                "UpstreamProxyError" -> upstreamErrors++
+            }
             if (kind == "SkipServerEntry") {
                 skips++
                 skipReason(data.optString("reason"))?.let { lastSkip = it }
@@ -129,6 +175,35 @@ class PsiphonSidecar(
                 else -> 0
             }
             stage = maxOf(stage, observed)
+        }
+
+        private fun remember(entry: String) = synchronized(recent) {
+            // Consecutive repeats (NetworkID every round) collapse into one entry with a count.
+            val last = recent.lastOrNull()
+            val base = last?.substringBefore(REPEAT)
+            if (base == entry) {
+                val n = (last!!.substringAfter(REPEAT, "1").toIntOrNull() ?: 1) + 1
+                recent.removeLast()
+                recent.addLast("$entry$REPEAT$n")
+            } else {
+                recent.addLast(entry)
+                while (recent.size > RECENT_NOTICES) recent.removeFirst()
+            }
+        }
+
+        /** What this start dialed, from its notices ([StartupDials]). */
+        fun dials(): PsiphonSidecar.StartupDials {
+            val counts = HashMap(dialed)
+            return PsiphonSidecar.StartupDials(
+                tcp = counts.filterKeys { it in PsiphonSidecar.TCP_PROTOCOLS }.values.sum(),
+                other = counts.filterKeys { it !in PsiphonSidecar.TCP_PROTOCOLS }.values.sum(),
+                connected = connected, candidates = candidates, upstreamErrors = upstreamErrors,
+                byProtocol = counts.toSortedMap())
+        }
+
+        /** The last notices, oldest first, joined for a diagnostics event; null when none were seen. */
+        fun recentNotices(): String? = synchronized(recent) {
+            recent.takeIf { it.isNotEmpty() }?.joinToString(" | ")?.take(MAX_NOTICES_TEXT)
         }
 
         fun failureAfter(timeoutMs: Long): String {
@@ -146,7 +221,55 @@ class PsiphonSidecar(
             return "Psiphon startup timed out after ${timeoutMs / 1000}s: $phase$suffix; traffic is unverified."
         }
 
-        private companion object {
+        internal companion object {
+            const val RECENT_NOTICES = 20
+            const val MAX_NOTICES_TEXT = 2_000
+            private const val REPEAT = " ×"
+            private val NOISE = setOf("NetworkID")
+            /** Notice data fields that hold counts, protocol names or regions, never addresses or keys. */
+            private val SAFE_FIELDS = listOf("protocol", "region", "count", "initialCount", "candidateNumber",
+                "networkType", "isReplay", "establishedTunnelsCount", "port", "duration")
+            private val MESSAGE_FIELDS = listOf("message", "error", "reason")
+            private val GO_TRACE = Regex("[A-Za-z0-9_./()*-]+#\\d+: ")
+            private val URL = Regex("[A-Za-z][A-Za-z0-9+.-]*://\\S+")
+            private val IPV4 = Regex("\\b\\d{1,3}(?:\\.\\d{1,3}){3}(?::\\d+)?\\b")
+            private val IPV6 = Regex("\\[?\\b(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}\\b\\]?(?::\\d+)?")
+            private val HOST = Regex("\\b(?:[a-z0-9-]+\\.)+[a-z]{2,24}\\b(?::\\d+)?")
+            private val LONG_TOKEN = Regex("\\b[A-Za-z0-9+/=_-]{20,}\\b")
+            private val PATH = Regex("(?:/[A-Za-z0-9._-]+){2,}")
+
+            /** Free text from a notice, without addresses, host names, URLs, paths or long tokens. Pure. */
+            fun sanitizeMessage(text: String): String = text.take(400)
+                .replace(GO_TRACE, "")
+                .replace(URL, "<url>")
+                .replace(IPV4, "<ip>")
+                .replace(IPV6) { m -> if (m.value.count { it == ':' } >= 2 && m.value.any { it.isDigit() || it in "abcdefABCDEF" }) "<ip>" else m.value }
+                .replace(HOST, "<host>")
+                .replace(LONG_TOKEN, "<id>")
+                .replace(PATH, "<path>")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+                .take(140)
+
+            /** "Type key=value …" for one notice: whitelisted fields plus a sanitized message. Pure. */
+            fun summarize(kind: String, data: JSONObject): String {
+                val parts = mutableListOf<String>()
+                for (key in SAFE_FIELDS) {
+                    val value = data.opt(key) ?: continue
+                    val text = value.toString()
+                    if (text.isNotEmpty() && text.length <= 32 && SAFE_VALUE.matches(text)) parts += "$key=$text"
+                }
+                (data.optJSONArray("regions"))?.let { parts += "regions=${it.length()}" }
+                if (kind == "SkipServerEntry") skipReason(data.optString("reason"))?.let { parts += "reason=$it" }
+                else for (key in MESSAGE_FIELDS) {
+                    val raw = data.optString(key)
+                    if (raw.isNotBlank()) { parts += sanitizeMessage(raw); break }
+                }
+                return if (parts.isEmpty()) kind else "$kind " + parts.joinToString(" ")
+            }
+            private val SAFE_VALUE = Regex("^[A-Za-z0-9_.:-]+$")
+            private val PROTOCOL_NAME = Regex("^[A-Z0-9-]{2,48}$")
+
             val NOTICE_NAME = Regex("^[A-Za-z][A-Za-z0-9]{0,47}$")
             val SKIP_TEXT = Regex("^[A-Za-z][A-Za-z ]{2,79}$")
             val SKIP_TOKEN = Regex("^[A-Za-z0-9_*.-]{1,48}$")
@@ -197,28 +320,25 @@ class PsiphonSidecar(
          */
         const val SLOW_READY_TIMEOUT_MS = 120_000L
 
-        /** Parallel dials when the build's settings do not choose (the library default is 10). */
-        const val FAST_WORKER_POOL = 16
-        /** Through a chain hop each dial rides the next hop's tunnel, so fewer run at once. */
-        const val CHAIN_WORKER_POOL = 12
-        /** Seconds between establishment rounds when the build's settings do not choose (default 2). */
-        const val FAST_PAUSE_SECONDS = 1
-
         /** [link] is [Sidecars.psiphonNetworkIdentity]'s "wifi:…" / "cell:…" key. Pure. */
         internal fun readyTimeoutMs(link: String?, metered: Boolean, chained: Boolean): Long =
             if (chained || metered || link?.substringBefore(':') == "cell") SLOW_READY_TIMEOUT_MS else READY_TIMEOUT_MS
 
-        private val PLATFORM_PART = Regex("[^A-Za-z0-9._-]")
+        /**
+         * TCP dials the first (UDP+TCP) start must have made, none connecting, before the TCP-only retry is skipped in
+         * favour of Psiphon over Lantern.
+         */
+        const val TCP_DIALS_BEFORE_CHAIN = 6
 
         /**
-         * The Android form psiphon-tunnel-core's own Android library reports, "Android_<release>_<package>"
-         * (MobileLibrary/Android PsiphonTunnel.java); servers match it by containing "Android". Pure.
+         * Whether direct Psiphon's TCP-only retry is skipped after the first start: the chain over Lantern is allowed for
+         * this connect ([chainAllowed]) and the first start already dialed at least [TCP_DIALS_BEFORE_CHAIN] TCP
+         * servers with none connecting and no upstream error. The retry would only repeat those protocols for another
+         * 120 s; build 170 on Irancell failed both starts (4 min) while the chain connected at once. Pure.
          */
-        internal fun clientPlatform(release: String?, packageName: String?): String {
-            val r = release?.replace(PLATFORM_PART, "")?.take(16).orEmpty()
-            val p = packageName?.replace(PLATFORM_PART, "")?.take(64).orEmpty()
-            return if (r.isEmpty() || p.isEmpty()) "Android" else "Android_${r}_$p"
-        }
+        internal fun skipTcpRetry(first: StartupDials, chainAllowed: Boolean): Boolean =
+            chainAllowed && first.connected == 0 && first.upstreamErrors == 0 && first.tcp >= TCP_DIALS_BEFORE_CHAIN
+
         /** The notice Psiphon prints when it has at least one tunnel. */
         val TUNNEL_UP = Regex("Tunnels.*\"count\":\\s*[1-9]")
 
@@ -375,22 +495,24 @@ class PsiphonSidecar(
             (settings.opt(key) as? JSONArray)?.length()?.let { it > 0 } == true
 
         /** The config file ConsoleClient reads: the build's settings plus what this connection needs. */
-        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false, clientPlatform: String = "Android", clientApiLevel: Int = 0): JSONObject {
+        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false): JSONObject {
             val config = JSONObject(networkSettings.toString())
             val owned = (LOCAL_FIELDS + CHAIN_ONLY_FIELDS).map { it.lowercase() }.toSet()
             config.keys().asSequence().filter { it.lowercase() in owned }.toList().forEach { config.remove(it) }
             config.put("LocalSocksProxyPort", socksPort)
             // ConsoleClient defaults to 127.0.0.1 when ListenInterface is absent.
             // Avoid enumerating Android interfaces just to bind that same address.
-            config.put("ClientPlatform", clientPlatform)
-            if (clientApiLevel > 0) config.put("ClientAPILevel", clientApiLevel)
+            // Plain "Android", as before build 168 (#258). Servers normalise any platform string containing
+            // "Android" to the same value (server/api.go normalizeClientPlatform), so the longer
+            // "Android_<release>_<package>" form gained nothing there, and ClientAPILevel only switches anet's
+            // interface enumeration (utils.go applyClientAPILevel), which this SOCKS-only client never needed.
+            config.put("ClientPlatform", "Android")
             config.put("EmitDiagnosticNetworkParameters", false)
-            // Faster establishment (field names checked against config.go at the pinned commit): more
-            // parallel dials and a shorter pause between rounds. A build's own values win.
-            if (!config.has("ConnectionWorkerPoolSize"))
-                config.put("ConnectionWorkerPoolSize", if (upstreamSocks != null) CHAIN_WORKER_POOL else FAST_WORKER_POOL)
-            if (!config.has("EstablishTunnelPausePeriodSeconds"))
-                config.put("EstablishTunnelPausePeriodSeconds", FAST_PAUSE_SECONDS)
+            // Establishment pacing is left to psiphon-tunnel-core's defaults (10 workers, 2 s pause) and the
+            // network's tactics. #258 forced 16 (12 in a chain) workers and a 1 s pause; on Irancell (build 170,
+            // metered) direct Psiphon then never brought a tunnel up within 120 s, twice per connect, while the
+            // same core chained over Lantern connected at once. config.go recommends omitting the pool size.
+            // Nothing here overrides a build's own values for these fields.
             // Xray only needs SOCKS; an HTTP proxy would be one more open local port.
             config.put("DisableLocalHTTPProxy", true)
             config.put("DataRootDirectory", dataDir.absolutePath)
@@ -420,7 +542,10 @@ class PsiphonSidecar(
             }
             if (!config.has("ClientPlatform")) config.put("ClientPlatform", "Android")
             config.put("EmitSensitiveNetworkParameters", false)
-            if (!config.has("EmitDiagnosticNotices")) config.put("EmitDiagnosticNotices", false)
+            // Diagnostic notices (ConnectingServer, Warning, Error…) are what explains a start that never gets a
+            // tunnel; without them only NetworkID repeats. psiphon-tunnel-core redacts IP addresses in every
+            // notice (notice.go outputNotice), and StartupProgress keeps only whitelisted, sanitized fields.
+            if (!config.has("EmitDiagnosticNotices")) config.put("EmitDiagnosticNotices", true)
             if (tcpOnly) {
                 config.remove("InitialLimitTunnelProtocols")
                 config.remove("InitialLimitTunnelProtocolsCandidateCount")

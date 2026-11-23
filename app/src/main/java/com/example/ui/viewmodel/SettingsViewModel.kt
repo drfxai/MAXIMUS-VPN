@@ -219,9 +219,15 @@ class SettingsViewModel(
     /** Forgets what Smart Connect learned on every network; saved servers and settings are untouched. */
     fun clearLearnedNetworks() {
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { RayApplication.instance.networkMemory.clear() }
-                .onSuccess { XrayLogManager.i("SETTINGS", "Learned network data cleared.") }
-                .onFailure { XrayLogManager.w("SETTINGS", "Could not clear learned network data: ${it.javaClass.simpleName}") }
+            val app = RayApplication.instance
+            val failed = com.example.ui.settings.LearnedNetworks.clearAll(listOf(
+                "routes" to { app.networkMemory.clear() },
+                "revival winners" to { app.revivalWinners.clear() },
+                "verified resolvers" to { app.resolverPool.clear() },
+                "clean CDN addresses" to { app.cleanIpCache.clear() }
+            ))
+            if (failed.isEmpty()) XrayLogManager.i("SETTINGS", "Learned network data cleared.")
+            else XrayLogManager.w("SETTINGS", "Could not clear learned network data: ${failed.joinToString()}")
             refreshLearnedNetworks()
         }
     }

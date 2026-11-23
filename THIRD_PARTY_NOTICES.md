@@ -577,6 +577,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     the same-server retry after the ~16 KB freeze (ideas re-implemented; no upstream code copied verbatim).
 - No affiliation or endorsement is implied.
 
+### Clean CDN edges: subnet spread and name evidence (2026-11-23)
+
+- Source ideas: UAC SNI Spoofer `app/src/main/java/com/uacspoofer/mobile/vpn/CloudflareEdgeDiscovery.kt`
+  (commit `07ca5e1`): backups chosen from other subnets than the best edge (`selectSubnetDiverseEdges`), and the
+  addresses the TLS name and Host header resolve to counted as CDN evidence (`DNS_SNI`/`DNS_HOST`).
+- Re-implemented in Kotlin, no upstream code copied: `CdnRanges.diverse` (round-robin over /24s) used by
+  `CdnCleanIpFinder` and `CleanEdgePlan.candidates`, and the SNI/Host fallback in `CdnEdgeScanner.cdnFor`
+  (`app/src/main/java/com/example/vpn/cleanip/`).
+
 ### WARP account API lanes in the Aether executable (2026-11-15)
 
 - Source: UAC SNI Spoofer `core/aether/src/oob.rs` (2.0.9: OOB/urgent-byte ClientHello desync methods
@@ -666,7 +675,8 @@ carrier verification; see docs/UPSTREAM_INTEGRATION_2026-10-22.fa.md.
 ## MasterDnsVPN server installer (2026-11-15)
 
 The Install Center's "MasterDNS Server" tool downloads the unmodified official
-MasterDnsVPN Linux server release `v2026.10.26.100415-5f83ee9` from
+MasterDnsVPN Linux server release `v2026.11.18.210322-7198b45` (bumped from
+`v2026.10.26.100415-5f83ee9` on 2026-11-23; upstream commit 7198b45b86c7) from
 https://github.com/masterking32/MasterDnsVPN/releases onto the user's own server
 and refuses it unless its SHA-256 matches the value pinned in
 `DnsServerScripts.kt`. The binary is not bundled in the app. The installer
@@ -674,6 +684,13 @@ script, configuration edits, systemd unit and profile/link generation are
 original MAXIMUS code; upstream `server_linux_install.sh` is not used. The
 phone connects with the CottenDNS client in its MasterDNS mode (see the
 CottenDNS section above).
+
+Pinned SHA-256 (from the upstream release asset digests, re-verified by download):
+`MasterDnsVPN_Server_Linux_AMD64.zip` d0f455ac87afb31010dbc9203d74c3ca24eed52b728873694d10d04b4fd24b06,
+`MasterDnsVPN_Server_Linux_ARM64.zip` 5f284644af2b2b3a747473a1a9df694fced10592ced0e5847fb77226fbb73895.
+Only amd64 and arm64 servers are supported by the installer. Upstream's new
+FastStart mode is a MasterDnsVPN *client* feature; the server has no matching
+option, and the phone side uses the CottenDNS client, so nothing changes there.
 
 MasterDnsVPN is distributed under the MIT License:
 
@@ -734,6 +751,11 @@ The application's license does not restrict recipients' rights in this separate 
 * Direct Serverless uses the separate patterniha/Xray-core executable, revision `40fd599029e19f439f192b77cf428ac500b3372a` (v26.11.23), MPL-2.0, distributed with `Serverless-source.tar.gz`. Its profiles originate in patterniha/Serverless-for-Iran revision `9b62ddf9e8bc83432d4b0bcf8be4c963bc8cb300` (v65, GPL-3.0), with the original license in assets/serverless/LICENSE.txt. MAXIMUS adapts loopback authentication, retains the TCP masks and OOB profiles, and uses authenticated DoH and original destination addresses in place of the desktop profiles’ DNS repacking and edge redirection (so the v65 edge address change in the `*.redirect` hosts does not apply), and keeps DNS-over-TLS (port 853) open for Android Private DNS.
 
 * RegionHop 1.27.0, freeb5d/regionhop revision `d5798d80f77fa6f40406ba30886d810c3c462147`, MIT. The optional VPS installer downloads checksum-pinned upstream components. The upstream Psiphon and Xray binaries retain their respective upstream licenses; release and source provenance remain available from that upstream release. No user deployment config or API token is bundled.
+
+## patterniha link fields and the fork Xray sidecar (2026-11-23)
+
+- The fork Xray sidecar (vpn/sidecar/ForkXraySidecar) runs the same patterniha/Xray-core executable as Direct Serverless (revision `41a9fa677a45caca7a1c2c7fc18519ef658be89b`, MPL-2.0, see above). The `dialMode` check in vpn/engine/PatternihaFields is written from the grammar documented in its transport/internet/dialmode_oob.go; no code is copied.
+- [patterniha/PattN at 4a3369a](https://github.com/patterniha/PattN/tree/4a3369a) (GPL-3.0, a v2rayN fork) was read as a reference only, no code copied: its share-link keys (`dialMode`, `tut`, `esr`, `cp`, `cs`, `vcn`, `pcs`, `fm`, `echOutbound`, also inside VMess JSON), its rule that `tcpUserTimeout` is written only where the outbound connects over TCP, and its use of `echOutbound` as the `echSockopt.dialerProxy` of the ECH config lookup.
 
 ## Aether gateway discovery and retry references
 
