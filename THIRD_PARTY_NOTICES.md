@@ -754,7 +754,7 @@ The application's license does not restrict recipients' rights in this separate 
 
 ## patterniha link fields and the fork Xray sidecar (2026-11-23)
 
-- The fork Xray sidecar (vpn/sidecar/ForkXraySidecar) runs the same patterniha/Xray-core executable as Direct Serverless (revision `41a9fa677a45caca7a1c2c7fc18519ef658be89b`, MPL-2.0, see above). The `dialMode` check in vpn/engine/PatternihaFields is written from the grammar documented in its transport/internet/dialmode_oob.go; no code is copied.
+- The fork Xray sidecar (vpn/sidecar/ForkXraySidecar) runs the same patterniha/Xray-core executable as Direct Serverless (revision `40fd599029e19f439f192b77cf428ac500b3372a`, v26.11.23, MPL-2.0, see above). The `dialMode` check in vpn/engine/PatternihaFields is written from the grammar documented in its transport/internet/dialmode_oob.go; no code is copied.
 - [patterniha/PattN at 4a3369a](https://github.com/patterniha/PattN/tree/4a3369a) (GPL-3.0, a v2rayN fork) was read as a reference only, no code copied: its share-link keys (`dialMode`, `tut`, `esr`, `cp`, `cs`, `vcn`, `pcs`, `fm`, `echOutbound`, also inside VMess JSON), its rule that `tcpUserTimeout` is written only where the outbound connects over TCP, and its use of `echOutbound` as the `echSockopt.dialerProxy` of the ECH config lookup.
 
 ## Aether gateway discovery and retry references

@@ -9,7 +9,7 @@ import org.json.JSONObject
  * Where the patterniha (PattN / Free-Configs) share-link fields stored in [ProfileExtras] go in an Xray outbound.
  *
  * Checked against the JSON names in infra/conf of XTLS/Xray-core v26.11.9 (the core in the bundled libXray) and of
- * patterniha/Xray-core 41a9fa6 (v26.11.22, the Serverless program):
+ * patterniha/Xray-core 40fd599 (v26.11.23, the Serverless program; unchanged from 41a9fa6 / v26.11.22 for these names):
  * - `tut` → `sockopt.tcpUserTimeout`, `esr` → `tlsSettings.enableSessionResumption`, `cp` → `tlsSettings.curvePreferences`
  *   exist in both cores, so [applyStock] writes them on stock Xray too; they do not need the fork.
  * - `dialMode` → `sockopt.dialMode` exists only in the fork. The fork parses it before every dial and fails the dial

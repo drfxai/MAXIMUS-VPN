@@ -15,7 +15,7 @@ import java.io.File
 
 /**
  * Runs a saved server whose share link carries patterniha-fork-only fields (a valid `dialMode`, or an `fm` with
- * fork-only mask types or family lists) on patterniha/Xray-core v26.11.22: the same native program as the Serverless
+ * fork-only mask types or family lists) on patterniha/Xray-core v26.11.23: the same native program as the Serverless
  * engine (`libserverless.so`, scripts/engines/serverless.sh). Stock libXray has no `dialMode` and rejects the masks,
  * so the fork runs the server's one outbound behind an authenticated loopback SOCKS port and the app's Xray routes the
  * TUN through it, like every other sidecar. `tut`, `esr` and `cp` are not fork-only: stock Xray v26.11.9 has
@@ -25,7 +25,7 @@ import java.io.File
  * Not in [Sidecars.ENGINES]: the profile stays an ordinary saved server everywhere else (tests, Smart Connect, LAB).
  * Only the connect path picks it ([applies]) and falls back to [stockProfile] when the fork does not start.
  *
- * JSON names were checked in the fork's infra/conf at 41a9fa6 against XTLS/Xray-core v26.11.9: fork-only are sockopt
+ * JSON names were checked in the fork's infra/conf at 41a9fa6 and again at 40fd599 (v26.11.23) against XTLS/Xray-core v26.11.9: fork-only are sockopt
  * `dialMode` (string, parsed before every dial: an invalid one fails the dial, so it is checked first), the TCP masks
  * `merge`, `borrow` and `proxy-protocol` (the last is upstream only after v26.11.9), and the `tcp4` / `tcp6` / `udp4` /
  * `udp6` family lists, which replace `tcp` / `udp` for a remote of that IP family.
