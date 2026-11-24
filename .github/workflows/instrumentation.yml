@@ -1,0 +1,113 @@
+name: Instrumented Android tests
+
+# The device suite (app/src/androidTest) never ran in CI: checks.yml only runs
+# :app:testDebugUnitTest on the JVM. This workflow boots an Android 15 emulator
+# and runs the instrumented tests for real, then re-runs the five safety classes
+# named by the Phase 1 audit as their own job so each one has a visible result.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: instrumentation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  instrumented:
+    name: Device tests (API 35 emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Install SDK
+        run: |
+          SDK_ROOT=/usr/local/lib/android/sdk
+          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -print -quit)
+          test -n "$SDKMANAGER"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          "$SDKMANAGER" 'platforms;android-36.1' 'build-tools;36.0.0' 'platform-tools'
+      - name: Restore environment configuration
+        run: |
+          [ -f .env ] || printf 'GEMINI_API_KEY=DEFAULT_API_KEY\n' > .env
+          [ -f .env.example ] || printf 'GEMINI_API_KEY=DEFAULT_API_KEY\n' > .env.example
+      - name: Fetch verified native Xray runtime
+        # app/build.gradle.kts compiles against app/libs/libXray.aar, and
+        # NativeXrayRuntimeTest loads it on the device.
+        run: bash scripts/fetch-libxray-android.sh
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run the instrumented suite
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: bash scripts/ci/run-instrumented-tests.sh
+      - name: Keep device logs and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instrumented-reports
+          path: |
+            app/build/reports/androidTests/**
+            app/build/outputs/androidTest-results/**
+            build/device-logs/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  safety-unit:
+    name: Safety classes (JVM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Install SDK
+        run: |
+          SDK_ROOT=/usr/local/lib/android/sdk
+          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -print -quit)
+          test -n "$SDKMANAGER"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          "$SDKMANAGER" 'platforms;android-36.1' 'build-tools;36.0.0'
+      - name: Restore environment configuration
+        run: |
+          [ -f .env ] || printf 'GEMINI_API_KEY=DEFAULT_API_KEY\n' > .env
+          [ -f .env.example ] || printf 'GEMINI_API_KEY=DEFAULT_API_KEY\n' > .env.example
+      - name: Fetch verified native Xray runtime
+        run: bash scripts/fetch-libxray-android.sh
+      - name: Run the five safety classes named by the audit
+        # These are JVM/Robolectric tests under app/src/test (not instrumented);
+        # checks.yml already runs them, this job pins the names so a rename or a
+        # silent skip shows up as a failure instead of an empty test run.
+        run: |
+          bash gradlew --no-daemon :app:testDebugUnitTest \
+            --tests 'com.example.vpn.safety.DnsKillSwitchRegressionTest' \
+            --tests 'com.example.PrivateDnsAndSecurityTest' \
+            --tests 'com.example.vpn.routing.SplitTunnelTest' \
+            --tests 'com.example.vpn.shadowlink.ShadowLinkTest' \
+            --tests 'com.example.VpnSupervisorTest'
+      - name: Keep the test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safety-unit-reports
+          path: app/build/reports/tests/**
+          if-no-files-found: ignore
+          retention-days: 14
