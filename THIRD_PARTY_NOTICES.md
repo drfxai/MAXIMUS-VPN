@@ -49,6 +49,7 @@ The Android application bundles the official XTLS/libXray release `v26.11.9` and
   (`liblyrebird.so`) started by Tor; built by `scripts/engines/lyrebird.sh`. Its built-in Snowflake bridge
   lines come from Snowflake v2.11.0. The same source offer as for Mihomo applies.
 - QR codes: ZXing core (https://github.com/zxing/zxing), Apache License 2.0. Camera: AndroidX CameraX, Apache License 2.0.
+- Background upkeep: AndroidX WorkManager and App Startup (https://developer.android.com/jetpack/androidx), Apache License 2.0.
 
 ## MIT License (libXray)
 

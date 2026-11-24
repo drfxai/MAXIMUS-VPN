@@ -28,7 +28,11 @@ class NetworkMemory(
     loadFreezes: () -> String? = { null },
     saveFreezes: (String) -> Unit = {},
     loadShield: () -> String? = { null },
-    saveShield: (String) -> Unit = {}
+    saveShield: (String) -> Unit = {},
+    loadWinners: () -> String? = { null },
+    saveWinners: (String) -> Unit = {},
+    loadPsiphonRegions: () -> String? = { null },
+    savePsiphonRegions: (String) -> Unit = {}
 ) {
     /** The exact routes that carried verified traffic, per network (see [RouteRecipe]). */
     val routes = RouteBook(loadRoutes, saveRoutes)
@@ -44,6 +48,12 @@ class NetworkMemory(
 
     /** Whether the Uplink Shield cleared the 16 KB upload stall, per network (see [UplinkShieldBook]). */
     val shield = UplinkShieldBook(loadShield, saveShield)
+
+    /** Every connection verified on each network with its measured rate: automatic Aether's fallback ([VerifiedWinnerBook]). */
+    val winners = VerifiedWinnerBook(loadWinners, saveWinners)
+
+    /** How each Psiphon egress region did on each network ([com.example.vpn.sidecar.PsiphonRegionBook]). */
+    val psiphonRegions = com.example.vpn.sidecar.PsiphonRegionBook(loadPsiphonRegions, savePsiphonRegions)
 
     private class Entry(
         val variants: ConcurrentHashMap<String, String> = ConcurrentHashMap(),
@@ -96,7 +106,7 @@ class NetworkMemory(
         persist()
     }
 
-    /** Forgets everything learned about every network: kinds, alternates, latencies, routes, speeds, freezes and the Uplink Shield results. */
+    /** Forgets everything learned about every network: kinds, alternates, latencies, routes, speeds, freezes, the Uplink Shield results, verified winners and Psiphon regions. */
     @Synchronized
     fun clear() {
         entries.clear()
@@ -106,6 +116,8 @@ class NetworkMemory(
         speeds.clear()
         freezes.clear()
         shield.clear()
+        winners.clear()
+        psiphonRegions.clear()
     }
 
     @Synchronized

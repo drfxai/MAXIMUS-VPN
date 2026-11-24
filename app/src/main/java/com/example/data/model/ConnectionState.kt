@@ -75,6 +75,17 @@ data class ConnectionState(
     val networkGeneration: Int = 0,
     /** The last connect stopped because the server failed its real test; "Connect anyway" may override. */
     val canConnectAnyway: Boolean = false,
+    /**
+     * The user's own Aether pick failed fast on a network where another connection carried verified traffic recently:
+     * that connection's profile id and label, offered as a one-tap "Connect with ..." (never switched to silently).
+     */
+    val suggestedProfileId: String? = null,
+    val suggestedProfileName: String? = null,
+    /**
+     * A pinned session's tunnel stopped carrying traffic and the same config is being restarted (PinnedRecovery): the
+     * config's display name, for "<name> stopped carrying traffic — reconnecting". Null otherwise.
+     */
+    val pinnedRestartOf: String? = null,
     /** Where the connect's recovery escalation stands (RecoveryStage title), for display only. */
     val recoveryStage: String? = null,
     /** Config revival is running for this attempt. */

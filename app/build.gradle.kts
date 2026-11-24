@@ -101,8 +101,18 @@ android {
       }
     }
   }
+  // Engine ABIs come from one file that scripts/build-engines.sh also reads, so a
+  // -PtargetAbi value here always has engine artifacts to go with it.
   providers.gradleProperty("targetAbi").orNull?.let { targetAbi ->
-    require(targetAbi in setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
+    val engineAbis = rootProject.file("scripts/engine-abis.txt").readLines()
+      .map { it.substringBefore('#').trim() }
+      .filter { it.isNotEmpty() }
+    require(targetAbi in engineAbis) {
+      "targetAbi=$targetAbi has no engine build: no script under scripts/engines/ produces an " +
+        "artifact for it. Supported ABIs: ${engineAbis.joinToString(", ")} " +
+        "(scripts/engine-abis.txt). Pick one of those, or add $targetAbi to that file, to the " +
+        "engine scripts and to docs/PINS.md first."
+    }
     defaultConfig.ndk.abiFilters.add(targetAbi)
   }
   packaging { jniLibs { useLegacyPackaging = true } }
@@ -175,6 +185,8 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.startup.runtime)
+  implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   implementation(libs.kotlinx.coroutines.android)
@@ -200,6 +212,7 @@ dependencies {
   testImplementation("com.squareup.okhttp3:mockwebserver:4.10.0")
   testImplementation("com.squareup.okhttp3:okhttp-tls:4.10.0")
   testImplementation(libs.robolectric)
+  testImplementation(libs.androidx.work.testing)
   testImplementation(libs.roborazzi)
   testImplementation(libs.roborazzi.compose)
   testImplementation(libs.roborazzi.junit.rule)

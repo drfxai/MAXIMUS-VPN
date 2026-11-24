@@ -57,6 +57,16 @@ class FailoverManager(
     private val frozenOn: (String) -> Set<String> = { emptySet() },
     /** Strikes inside a sliding window (see [StrikeWindow]); injected for JVM tests. */
     private val strikes: StrikeWindow = StrikeWindow(),
+    /**
+     * A pinned session ([staysOnSelected]) stopped carrying traffic for [PinnedRecovery.WINDOWS_BEFORE_RESTART] windows:
+     * restart the SAME config (never another one). Args: the config, the reason, the restart number. Null: only log.
+     */
+    private val onRestartPinned: ((VlessProfile, String, Int) -> Unit)? = null,
+    /**
+     * An automatic session's engine with a known better form of itself on this network (direct Psiphon → Psiphon over
+     * Lantern, [com.example.vpn.connections.PsiphonChainMemory]): tried before the saved servers. Null: none.
+     */
+    private val engineFallback: ((VlessProfile) -> VlessProfile?)? = null,
     private val onTriggerSwitch: (VlessProfile, String, Set<String>) -> Unit
 ) {
     enum class CascadeTier(val stageNumber: Int, val title: String, val badge: String) {
@@ -151,7 +161,10 @@ class FailoverManager(
                 if (!isActive) break
                 if (!isHealthy) {
                     val n = strikes.fail()
-                    XrayLogManager.w("FAILOVER", "Node $safeName failed a real traffic check (${strikes.describe(n)}).")
+                    // The same line every few seconds for minutes says nothing new (build 173): rate-limited.
+                    checkWarn.admit()?.let { note ->
+                        XrayLogManager.w("FAILOVER", "Node $safeName failed a real traffic check (${strikes.describe(n)}).$note")
+                    }
 
                     // Three failures inside the window, in a row or with passes between them.
                     if (strikes.shouldSwitch()) {
@@ -162,6 +175,9 @@ class FailoverManager(
                     }
                 } else {
                     strikes.pass()
+                    pinnedRecovery.onPass()
+                    checkWarn.reset()
+                    pinnedWarn.reset()
                     if (realPasses.incrementAndGet() == 1) firstRealPassAt = System.currentTimeMillis()
                     if (strikes.count() == 0) failedFamilies.clear()
                 }
@@ -333,8 +349,32 @@ class FailoverManager(
     private suspend fun attemptFailover(degradedProfile: VlessProfile, settings: AppSettings) {
         if (staysOnSelected()) {
             strikes.reset()
-            XrayLogManager.w("FAILOVER", "${SecretRedactor.redact(degradedProfile.name)} stopped carrying traffic. Staying on it: it was " +
-                "connected with the power button. Use Smart Connect to search for another.")
+            val name = SecretRedactor.redact(degradedProfile.name)
+            val restart = onRestartPinned
+            if (restart == null) {
+                pinnedWarn.admit()?.let { note ->
+                    XrayLogManager.w("FAILOVER", "$name stopped carrying traffic. Staying on it: it was " +
+                        "connected with the power button. Use Smart Connect to search for another.$note")
+                }
+                return
+            }
+            // Never another config, but a dead tunnel is restarted (PinnedRecovery; build 173).
+            when (val d = pinnedRecovery.onDeadWindow()) {
+                is PinnedRecovery.Decision.Restart -> {
+                    pinnedWarn.reset()
+                    val reason = "$name stopped carrying traffic; restarting it (restart ${d.attempt}). It was connected " +
+                        "with the power button, so no other config is started."
+                    XrayLogManager.w("FAILOVER", reason)
+                    _failoverEvents.value = reason
+                    restart(degradedProfile, reason, d.attempt)
+                }
+                is PinnedRecovery.Decision.Wait -> pinnedWarn.admit()?.let { note ->
+                    val next = d.nextRestartInMs?.let { "it is restarted again in about ${(it + 999) / 1000} s" }
+                        ?: "it is restarted if the next checks fail too"
+                    XrayLogManager.w("FAILOVER", "$name stopped carrying traffic. Staying on it: it was connected with the " +
+                        "power button; $next. Use Smart Connect to search for another.$note")
+                }
+            }
             return
         }
         val allProfiles = try {
@@ -350,6 +390,19 @@ class FailoverManager(
         // Non-degraded candidates pool (excluding current failing node, bridges, mesh)
         val owner = savedProfile?.invoke() ?: degradedProfile
         val excluded = failedPathIds(allProfiles, degradedProfile, owner, policy::isPenalized)
+        // An engine with a known better form of itself here (direct Psiphon → Psiphon over Lantern) goes first.
+        engineFallback?.let { fallbackOf ->
+            runCatching { fallbackOf(degradedProfile) }.getOrNull()?.takeIf { it.id != degradedProfile.id }?.let { next ->
+                strikes.reset()
+                val reason = "$safeDegraded stopped carrying traffic; trying ${SecretRedactor.redact(next.name)}, verified on " +
+                    "this network as the working form of it; traffic verification is required."
+                _failoverEvents.value = reason
+                XrayLogManager.i("FAILOVER", reason)
+                policy.recordSwitch(owner)
+                onTriggerSwitch(next, reason, excluded)
+                return
+            }
+        }
         // Servers frozen on this network (and their /16) go last: used only when nothing else is left (FrozenGuard).
         val frozenIds = runCatching { frozenOn(currentNetworkKey()) }.getOrDefault(emptySet())
         val nonDegraded = vetted(eligibleFallbacks(allProfiles.filterNot { it.id in excluded }, degradedProfile)).let { pool ->
@@ -438,6 +491,20 @@ class FailoverManager(
 
         /** Backoff, penalties and switch-back hysteresis; shared because a switch creates a new manager. */
         internal val policy = SmartFailoverPolicy()
+
+        /** Restarts of a pinned config that stopped carrying traffic; shared because a restart creates a new manager. */
+        val pinnedRecovery = PinnedRecovery()
+
+        /** Repeated WARN lines while a tunnel stays dead (build 173: the same two lines every few seconds). */
+        private val checkWarn = WarnThrottle(everyMs = 60_000L, burst = 3)
+        private val pinnedWarn = WarnThrottle(everyMs = 120_000L, burst = 1)
+
+        /** A new session the user started: nothing carried over from the previous one. */
+        fun resetPinnedRecovery() {
+            pinnedRecovery.reset()
+            checkWarn.reset()
+            pinnedWarn.reset()
+        }
 
         private fun acquireFailoverCooldown(intervalMs: Long): Boolean {
             val now = System.nanoTime() / 1_000_000

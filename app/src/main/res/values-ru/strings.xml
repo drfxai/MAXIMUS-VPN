@@ -358,6 +358,8 @@
     <string name="ui_direct_bypass_keeps_your_isp">Прямой обход сохраняет IP вашего провайдера и не добавляет зашифрованный VPN-туннель. Шифрование в самих приложениях сохраняется. Некоторым приложениям, включая Telegram, может понадобиться отдельный прокси или рабочий туннель.</string>
     <string name="ui_this_profile_has_no_tls">В этом профиле нет шифрования TLS/REALITY между устройством и VPN-сервером. Для конфиденциального подключения используйте профиль TLS или REALITY.</string>
     <string name="ui_connect_anyway">Всё равно подключиться</string>
+    <string name="ui_connect_with_verified">Подключиться через %1$s</string>
+    <string name="ui_pinned_stalled_reconnecting">%1$s перестал передавать трафик — переподключение</string>
     <string name="ui_trade_fixed_exit">Trade · фиксированный выход</string>
     <string name="ui_locked">Зафиксировано</string>
     <string name="ui_your_exit_ip_location_and">Ваш IP выхода, местоположение и конфигурация каждый раз остаются прежними. Пока включён Trade, переключение, резервирование и восстановление не выполняются.</string>

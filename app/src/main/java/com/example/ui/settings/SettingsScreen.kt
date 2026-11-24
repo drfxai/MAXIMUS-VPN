@@ -544,7 +544,8 @@ fun SettingsScreen(
                 onGeoViaVpn = { value ->
                     GeoFilesUpdater.setViaVpn(context, value)
                     geoViaVpn = value
-                }
+                },
+                automation = { AutomationStatusSection() }
             )
 
             SettingsPage.ENGINES -> EngineUpdatesSettingsPage(

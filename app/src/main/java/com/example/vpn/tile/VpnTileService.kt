@@ -51,12 +51,12 @@ class VpnTileService : TileService() {
         super.onClick()
         val currentState = RayVpnService.vpnState.value
 
-        // Any tunnel, verified or not, is stopped by a tap (same rule as the in-app button).
-        if (currentState.isTunnelUp) {
+        // Any tunnel, verified or not, and any connect still searching is stopped by a tap (same rule as the
+        // in-app button). Stop no longer waits for the connect lock (StopFence), so it is safe while busy.
+        if (com.example.vpn.boot.QuickConnect.tapStops(currentState)) {
             VpnController.stopVpn(applicationContext)
         } else if (currentState.isBusy) {
-            // Do not start a second service operation while the existing connect,
-            // reconnect, or teardown transaction still owns the service mutex.
+            // A teardown is already running: never start a second service operation behind it.
             return
         } else {
             val prepIntent = VpnController.prepareVpn(applicationContext)
