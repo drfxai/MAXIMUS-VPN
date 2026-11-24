@@ -83,8 +83,10 @@ class UnlockModeScreenshotTest {
                 }
             }
         }
-        compose.onNodeWithTag("unlock_query_shaping").assertIsDisplayed()
-        compose.onNodeWithTag("unlock_server_5.175.161.3").assertIsDisplayed()
+        // The redesigned sheet lists servers before the options, so the toggles can sit below a phone's first screen.
+        compose.onNodeWithTag("unlock_in_use_card").assertIsDisplayed()
+        compose.onNodeWithTag("unlock_server_5.175.161.3").assertExists()
+        compose.onNodeWithTag("unlock_query_shaping").assertExists()
         compose.onRoot().captureRoboImage("build/reports/tests/unlock-screens/unlock_dns_sheet.png", roborazziOptions = record)
     }
 

@@ -28,6 +28,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CropFree
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.Opacity
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Cloud
@@ -1383,6 +1389,7 @@ private fun ConfigFreeConnectButton(
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun ConfigFreeMethodPicker(
     accent: Color,
@@ -1407,85 +1414,228 @@ private fun ConfigFreeMethodPicker(
             }
         }
     }
-    val colors = MaterialTheme.colorScheme
-    val dark = AppTheme.colors.isDark
-    val shape = RoundedCornerShape(26.dp)
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = shape, color = colors.surface, border = BorderStroke(1.dp, colors.outlineVariant)) {
-            Column(Modifier.widthIn(max = 480.dp).fillMaxWidth().heightIn(max = 680.dp)) {
-                Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(
-                    accent.copy(alpha = if (dark) .16f else .10f), Color.Transparent)))
-                    .padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(stringResource(R.string.ui_connect_without_a_config), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+    val c = AppTheme.colors
+    val dark = c.isDark
+    // Counts follow the catalogue: every method row, plus the two setup cards on the Aether & chains tab.
+    val methodCount = ConfigFreeMethod.entries.count { it.aetherTransport == null }
+    val chainCount = ConfigFreeMethod.entries.count { it.aetherTransport != null } + 2
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = c.surface,
+        scrimColor = Color.Black.copy(alpha = if (dark) 0.6f else 0.35f),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(
+            accent.copy(alpha = if (dark) .10f else .06f), Color.Transparent))).testTag("config_free_picker")) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stringResource(R.string.ui_connect_without_a_config), color = c.textPrimary, fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold, lineHeight = 27.sp)
                     Text(if (transports) stringResource(R.string.ui_select_a_warp_transport_or) else stringResource(R.string.ui_choose_a_built_in_connection),
-                        style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                        color = c.textSecondary, fontSize = 13.sp)
                 }
-                Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    FilterChip(selected = !transports, onClick = { transports = false }, label = { Text(stringResource(R.string.ui_methods)) })
-                    FilterChip(selected = transports, onClick = { transports = true }, label = { Text(stringResource(R.string.ui_aether_chains)) })
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = onDismiss, modifier = Modifier.size(44.dp).clip(CircleShape).border(1.dp, c.borderSubtle, CircleShape)) {
+                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.ui_close),
+                        tint = c.textPrimary, modifier = Modifier.size(20.dp))
                 }
-                androidx.compose.runtime.key(transports) {
-                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (transports) {
-                            ConfigMethodRow(stringResource(R.string.ui_build_a_connection_chain), stringResource(R.string.ui_combine_saved_nodes_and_built), Icons.Filled.Link, accent, onChain)
-                            ConfigMethodRow(stringResource(R.string.ui_aether_settings), stringResource(R.string.ui_configure_transport_and_registration), Icons.Filled.Cloud, accent, onAetherSettings)
+            }
+            // In-palette segmented tabs with counts.
+            Row(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceCard)
+                .border(1.dp, c.borderSubtle, RoundedCornerShape(16.dp)).padding(4.dp)) {
+                PickerTab(Modifier.weight(1f), Icons.Rounded.GridView,
+                    stringResource(R.string.ui_methods), methodCount, !transports) { transports = false }
+                PickerTab(Modifier.weight(1f), Icons.Filled.Link,
+                    stringResource(R.string.ui_aether_chains), chainCount, transports) { transports = true }
+            }
+            androidx.compose.runtime.key(transports) {
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
+                    val methods = availability
+                    if (transports) {
+                        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SetupCard(Modifier.weight(1f), Icons.Filled.Link, stringResource(R.string.ui_build_a_connection_chain),
+                                stringResource(R.string.ui_combine_saved_nodes_and_built), accent, highlighted = true, onClick = onChain)
+                            SetupCard(Modifier.weight(1f), Icons.Filled.Tune, stringResource(R.string.ui_aether_settings),
+                                stringResource(R.string.ui_configure_transport_and_registration), accent, highlighted = false, onClick = onAetherSettings)
                         }
-                        val methods = availability
-                        if (methods == null) Text(stringResource(R.string.ui_checking_installed_engines), color = colors.onSurfaceVariant)
-                        else {
-                            methods.filterKeys { (it.aetherTransport != null) == transports }.forEach { (method, problem) ->
-                                val icon = when (method) {
-                                    ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Filled.Public
-                                    ConfigFreeMethod.SERVERLESS -> Icons.Filled.Bolt
-                                    ConfigFreeMethod.PSIPHON, ConfigFreeMethod.PSIPHON_RADIANCE, ConfigFreeMethod.AETHER_PSIPHON -> Icons.Filled.Shield
-                                    ConfigFreeMethod.SHIROKHORSHID -> Icons.Filled.WbSunny
-                                    ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
-                                    ConfigFreeMethod.AETHER_TOR -> Icons.Filled.Link
-                                    else -> Icons.Filled.Cloud
-                                }
-                                ConfigMethodRow(method.title, problem ?: method.description, icon, accent,
-                                    if (problem == null) ({ onSelect(method) }) else null)
-                                if (method == ConfigFreeMethod.SHIROKHORSHID && problem == null) {
-                                    ConfigMethodRow(stringResource(R.string.ui_shirokhorshid_settings),
-                                        stringResource(R.string.ui_shirokhorshid_settings_detail), Icons.Filled.Tune, accent
-                                    ) { shirokhorshidSettings = true }
+                    }
+                    if (methods == null) {
+                        Text(stringResource(R.string.ui_checking_installed_engines), color = c.textSecondary, fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 16.dp))
+                    } else {
+                        val groups = if (transports) listOf(
+                            Triple(R.string.ui_picker_transports, R.string.ui_picker_transports_hint,
+                                listOf(ConfigFreeMethod.AETHER_H2, ConfigFreeMethod.AETHER_H3, ConfigFreeMethod.AETHER_WG)),
+                            Triple(R.string.ui_picker_nested, R.string.ui_picker_nested_hint,
+                                listOf(ConfigFreeMethod.AETHER_GOOL, ConfigFreeMethod.AETHER_GOOL_CLASSIC, ConfigFreeMethod.AETHER_MIM)),
+                            Triple(R.string.ui_picker_chains, R.string.ui_picker_chains_hint,
+                                listOf(ConfigFreeMethod.AETHER_PSIPHON, ConfigFreeMethod.AETHER_TOR))
+                        ) else listOf(
+                            Triple(R.string.ui_picker_direct_engines, R.string.ui_picker_direct_engines_hint,
+                                listOf(ConfigFreeMethod.AETHER_WARP, ConfigFreeMethod.SERVERLESS)),
+                            Triple(R.string.ui_picker_relay_networks, R.string.ui_picker_relay_networks_hint,
+                                ConfigFreeMethod.entries.filter { it.aetherTransport == null &&
+                                    it != ConfigFreeMethod.AETHER_WARP && it != ConfigFreeMethod.SERVERLESS })
+                        )
+                        // Anything in the catalogue that no group names still gets a row, at the end of its tab.
+                        val grouped = groups.flatMap { it.third }.toSet()
+                        val rest = ConfigFreeMethod.entries.filter { (it.aetherTransport != null) == transports && it !in grouped }
+                        val shown = if (rest.isEmpty()) groups else groups + Triple(0, 0, rest)
+                        shown.forEach { (label, hint, entries) ->
+                            if (label != 0) PickerGroupLabel(stringResource(label), stringResource(hint))
+                            else Spacer(Modifier.height(12.dp))
+                            PickerGroupCard {
+                                entries.forEachIndexed { index, method ->
+                                    val problem = methods[method]
+                                    if (index > 0) PickerDivider()
+                                    ConfigMethodRow(method.title, problem ?: method.description, method.pickerIcon(), accent,
+                                        if (problem == null) ({ onSelect(method) }) else null,
+                                        badge = method.pickerBadge(), chip = when (method) {
+                                            ConfigFreeMethod.AETHER_H2 -> "H2"
+                                            ConfigFreeMethod.AETHER_H3 -> "H3"
+                                            ConfigFreeMethod.AETHER_WG -> "WG"
+                                            else -> null
+                                        })
+                                    if (method == ConfigFreeMethod.SHIROKHORSHID && problem == null) {
+                                        PickerDivider()
+                                        ConfigMethodRow(stringResource(R.string.ui_shirokhorshid_settings),
+                                            stringResource(R.string.ui_shirokhorshid_settings_detail), Icons.Filled.Tune, accent,
+                                            { shirokhorshidSettings = true }, indented = true)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.End) {
-                    if (availability?.get(ConfigFreeMethod.PSIPHON) != null) {
-                        TextButton(onClick = onSetup) { Text(stringResource(R.string.ui_psiphon_setup)) }
-                    }
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.ui_close)) }
+            }
+            if (availability?.get(ConfigFreeMethod.PSIPHON) != null) {
+                Row(Modifier.fillMaxWidth().clickable(onClick = onSetup).padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Tune, null, tint = c.primary, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.ui_psiphon_setup), color = c.primary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+            Spacer(Modifier.navigationBarsPadding().height(8.dp))
         }
+    }
+}
+
+private fun ConfigFreeMethod.pickerIcon(): androidx.compose.ui.graphics.vector.ImageVector = when (this) {
+    ConfigFreeMethod.AETHER_WARP -> Icons.Filled.Cloud
+    ConfigFreeMethod.SERVERLESS -> Icons.Filled.Bolt
+    ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Rounded.Opacity
+    ConfigFreeMethod.PSIPHON -> Icons.Filled.Shield
+    ConfigFreeMethod.SHIROKHORSHID -> Icons.Filled.WbSunny
+    ConfigFreeMethod.PSIPHON_RADIANCE -> Icons.Rounded.Layers
+    ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
+    ConfigFreeMethod.AETHER_GOOL -> Icons.Rounded.CropFree
+    ConfigFreeMethod.AETHER_GOOL_CLASSIC, ConfigFreeMethod.AETHER_MIM -> Icons.Rounded.Layers
+    ConfigFreeMethod.AETHER_PSIPHON -> Icons.Filled.Shield
+    ConfigFreeMethod.AETHER_TOR -> Icons.Rounded.Opacity
+    else -> Icons.Filled.Cloud
+}
+
+@Composable
+private fun ConfigFreeMethod.pickerBadge(): Pair<String, Boolean>? = when (this) {
+    ConfigFreeMethod.SHIROKHORSHID -> stringResource(R.string.ui_picker_new) to true
+    ConfigFreeMethod.RADIANCE -> stringResource(R.string.ui_picker_engine) to false
+    else -> null
+}
+
+@Composable
+private fun PickerTab(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, count: Int,
+                      selected: Boolean, onClick: () -> Unit) {
+    val c = AppTheme.colors
+    val tint = if (selected) c.onPrimaryContainer else c.textSecondary
+    Row(modifier.clip(RoundedCornerShape(12.dp)).background(if (selected) c.primaryContainer else Color.Transparent)
+        .clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Spacer(Modifier.width(5.dp))
+        Text(count.toString(), color = tint.copy(alpha = 0.65f), fontSize = 13.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun PickerGroupLabel(text: String, hint: String) {
+    val c = AppTheme.colors
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text.uppercase(), color = c.textSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+            modifier = Modifier.weight(1f), maxLines = 1)
+        Text(hint, color = c.textMuted, fontSize = 12.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun PickerGroupCard(content: @Composable () -> Unit) {
+    val c = AppTheme.colors
+    val shape = RoundedCornerShape(20.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(c.surfaceCard).border(1.dp, c.borderSubtle, shape)) { content() }
+}
+
+@Composable
+private fun PickerDivider() = Box(Modifier.fillMaxWidth().height(1.dp).background(AppTheme.colors.borderSubtle))
+
+@Composable
+private fun SetupCard(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, detail: String,
+                      accent: Color, highlighted: Boolean, onClick: () -> Unit) {
+    val c = AppTheme.colors
+    val shape = RoundedCornerShape(18.dp)
+    Column(modifier.clip(shape).background(if (highlighted) c.primary.copy(alpha = if (c.isDark) .08f else .05f) else c.surfaceCard)
+        .border(1.dp, if (highlighted) c.primary.copy(alpha = .45f) else c.borderSubtle, shape)
+        .clickable(onClick = onClick).heightIn(min = 112.dp).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, lineHeight = 19.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(30.dp).clip(RoundedCornerShape(9.dp)).background(accent.copy(alpha = .13f)), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = accent, modifier = Modifier.size(16.dp))
+            }
+        }
+        Text(detail, color = c.textSecondary, fontSize = 12.sp, lineHeight = 16.sp)
     }
 }
 
 @Composable
 private fun ConfigMethodRow(
     title: String, detail: String, icon: androidx.compose.ui.graphics.vector.ImageVector, accent: Color,
-    onClick: (() -> Unit)?
+    onClick: (() -> Unit)?, badge: Pair<String, Boolean>? = null, chip: String? = null, indented: Boolean = false
 ) {
-    val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(13.dp)
-    Row(Modifier.fillMaxWidth().clip(shape).background(colors.surfaceVariant.copy(alpha = .42f))
-        .border(1.dp, colors.outlineVariant, shape)
+    val c = AppTheme.colors
+    Row(Modifier.fillMaxWidth()
         .then(if (onClick == null) Modifier else Modifier.clickable(onClick = onClick))
-        .heightIn(min = 56.dp).padding(10.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(accent.copy(alpha = .13f)),
-            contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp))
+        .heightIn(min = 60.dp).padding(start = if (indented) 28.dp else 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (indented) {
+            Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp))
+            }
+        } else {
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(accent.copy(alpha = .13f)),
+                contentAlignment = Alignment.Center) {
+                if (chip != null) Text(chip, color = accent, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, maxLines = 1)
+                else Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp))
+            }
         }
         Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = colors.onSurface, style = MaterialTheme.typography.bodyMedium)
-            Text(detail, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, fontWeight = FontWeight.SemiBold, color = if (onClick == null) c.textSecondary else c.textPrimary,
+                    fontSize = if (indented) 14.sp else 15.sp, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                badge?.let { (text, highlight) ->
+                    Spacer(Modifier.width(8.dp))
+                    Text(text, color = if (highlight) accent else c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (highlight) accent.copy(alpha = .14f) else c.surfacePill)
+                            .padding(horizontal = 8.dp, vertical = 2.dp))
+                }
+            }
+            Text(detail, color = c.textSecondary, fontSize = 12.5.sp, lineHeight = 16.sp)
         }
-        if (onClick != null) Icon(Icons.Filled.ChevronRight, null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        if (onClick != null) Icon(Icons.Filled.ChevronRight, null, tint = c.textMuted, modifier = Modifier.size(18.dp))
     }
 }

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -40,11 +41,12 @@ import androidx.compose.material.icons.rounded.Android
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.NetworkCheck
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.CircularProgressIndicator
@@ -76,7 +78,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -365,77 +370,75 @@ private const val RECHECK_AFTER_MS = 5 * 60_000L
 internal fun UnlockDnsSheetContent(state: UnlockDns.State, actions: UnlockSheetActions) {
     val c = AppTheme.colors
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("unlock_dns_sheet"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(Modifier.fillMaxWidth().padding(bottom = 2.dp)) {
-            Text(stringResource(R.string.unlock_sheet_title), color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.align(Alignment.Center))
-            IconButton(onClick = actions::recheck, enabled = !state.checking, modifier = Modifier.align(Alignment.CenterEnd).size(36.dp)) {
+        // Header: title and subtitle on the left, Re-check as an icon button on the right.
+        Row(Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.unlock_sheet_title), color = c.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.unlock_sheet_subtitle), color = c.textSecondary, fontSize = 13.sp, lineHeight = 17.sp)
+            }
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).border(1.dp, c.borderMedium, CircleShape)
+                    .clickable(enabled = !state.checking, onClickLabel = stringResource(R.string.unlock_recheck), onClick = actions::recheck)
+                    .testTag("unlock_recheck"),
+                contentAlignment = Alignment.Center
+            ) {
                 if (state.checking) CircularProgressIndicator(Modifier.size(16.dp), color = c.primary, strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.NetworkCheck, contentDescription = stringResource(R.string.unlock_recheck), tint = c.textSecondary,
+                else Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.unlock_recheck), tint = c.textPrimary,
                     modifier = Modifier.size(20.dp))
             }
         }
         if (state.privateDnsStrict) PrivateDnsWarning()
 
-        // Auto-pick
-        Surface(shape = RoundedCornerShape(16.dp), color = c.surfaceCard, border = BorderStroke(1.dp, c.borderSubtle),
-            modifier = Modifier.fillMaxWidth()) {
-            Row(Modifier.clickable { actions.setAutoPick(!state.autoPick) }.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.unlock_auto_pick), color = c.textPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
-                    Text(stringResource(if (state.autoPick) R.string.unlock_auto_pick_hint else R.string.unlock_manual_hint),
-                        color = c.textMuted, fontSize = 11.5.sp)
-                }
-                Switch(
-                    checked = state.autoPick,
-                    onCheckedChange = { actions.setAutoPick(it) },
-                    modifier = Modifier.testTag("unlock_auto_pick"),
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = c.onPrimary, checkedTrackColor = c.primary, checkedBorderColor = c.primary,
-                        uncheckedThumbColor = c.textMuted, uncheckedTrackColor = c.surfaceElevated, uncheckedBorderColor = c.borderMedium
-                    )
-                )
-            }
-        }
-
-        // Anti-censorship query shaping (CircumVolve, CCS 2026)
-        Surface(shape = RoundedCornerShape(16.dp), color = c.surfaceCard, border = BorderStroke(1.dp, c.borderSubtle),
-            modifier = Modifier.fillMaxWidth()) {
-            Row(Modifier.clickable { actions.setShaping(!state.shaping) }.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.unlock_shaping), color = c.textPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
-                    Text(stringResource(if (state.shaping) R.string.unlock_shaping_hint_on else R.string.unlock_shaping_hint_off),
-                        color = c.textMuted, fontSize = 11.5.sp, lineHeight = 15.sp)
-                }
-                Spacer(Modifier.width(8.dp))
-                Switch(
-                    checked = state.shaping,
-                    onCheckedChange = { actions.setShaping(it) },
-                    modifier = Modifier.testTag("unlock_query_shaping"),
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = c.onPrimary, checkedTrackColor = c.primary, checkedBorderColor = c.primary,
-                        uncheckedThumbColor = c.textMuted, uncheckedTrackColor = c.surfaceElevated, uncheckedBorderColor = c.borderMedium
-                    )
-                )
-            }
-        }
+        val inUse = state.active ?: if (state.autoPick) UnlockDnsHealth.pick(state.checks, true, null) else state.manual
+        val checked = state.rows.mapNotNull { it.check }
+        // One health shared by every checked server is said once, in the summary, instead of on every row.
+        val sharedHealth = checked.map { it.health }.distinct().singleOrNull()
+            ?.takeIf { checked.size > 1 && checked.size == state.rows.size && it != ServerHealth.UNKNOWN }
+        InUseCard(state, inUse, sharedHealth)
 
         // Servers
-        val inUse = state.active ?: if (state.autoPick) UnlockDnsHealth.pick(state.checks, true, null) else state.manual
-        state.rows.forEach { row ->
-            ServerRow(row, selected = row.ip == inUse, active = row.ip == state.active, checking = state.checking,
-                selectable = !state.autoPick, onSelect = { actions.select(row.ip) }, onRemove = { actions.removeCustom(row.ip) })
+        val reachable = checked.count { it.usable }
+        SheetLabel(
+            text = if (checked.isEmpty()) stringResource(R.string.unlock_servers_count, state.rows.size)
+                else stringResource(R.string.unlock_servers_reachable, reachable),
+            trailing = if (checked.isEmpty()) null else stringResource(R.string.unlock_sorted_by_latency)
+        )
+        val latencies = state.rows.mapNotNull { r -> r.check?.takeIf { it.usable }?.latencyMs }
+        val fastest = state.rows.firstOrNull { it.check?.usable == true }?.ip
+        SheetCard {
+            state.rows.forEachIndexed { index, row ->
+                if (index > 0) RowDivider()
+                ServerRow(row, rank = index + 1, selected = row.ip == inUse, active = row.ip == state.active, checking = state.checking,
+                    selectable = !state.autoPick, fastest = row.ip == fastest, showHealth = sharedHealth == null,
+                    minMs = latencies.minOrNull(), maxMs = latencies.maxOrNull(),
+                    onSelect = { actions.select(row.ip) }, onRemove = { actions.removeCustom(row.ip) })
+            }
+            if (state.rows.isNotEmpty()) RowDivider()
+            AddCustomDns(actions, enabled = state.custom.size < UnlockDnsList.MAX_CUSTOM)
         }
 
-        AddCustomDns(actions, enabled = state.custom.size < UnlockDnsList.MAX_CUSTOM)
-
-        // Server list from GitHub
-        Surface(shape = RoundedCornerShape(16.dp), color = c.surfaceCard, border = BorderStroke(1.dp, c.borderSubtle),
-            modifier = Modifier.fillMaxWidth()) {
-            Row(Modifier.padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Options: auto-pick, query shaping (CircumVolve, CCS 2026) and the GitHub list together.
+        SheetLabel(stringResource(R.string.unlock_options), null)
+        SheetCard {
+            OptionSwitchRow(
+                title = stringResource(R.string.unlock_auto_pick),
+                detail = stringResource(if (state.autoPick) R.string.unlock_auto_pick_hint else R.string.unlock_manual_hint),
+                checked = state.autoPick, tag = "unlock_auto_pick", onChange = actions::setAutoPick
+            )
+            RowDivider()
+            OptionSwitchRow(
+                title = stringResource(R.string.unlock_shaping),
+                detail = stringResource(if (state.shaping) R.string.unlock_shaping_hint_on else R.string.unlock_shaping_hint_off),
+                checked = state.shaping, tag = "unlock_query_shaping", onChange = actions::setShaping
+            )
+            RowDivider()
+            Row(Modifier.padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.surfacePill), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Code, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.unlock_list_title), color = c.textPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.unlock_list_title), color = c.textPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
                     val updated = state.listUpdatedAt
                     Text(
                         text = when {
@@ -444,7 +447,7 @@ internal fun UnlockDnsSheetContent(state: UnlockDns.State, actions: UnlockSheetA
                                 DateUtils.getRelativeTimeSpanString(updated, System.currentTimeMillis(), DateUtils.DAY_IN_MILLIS).toString())
                             else -> stringResource(R.string.unlock_list_builtin)
                         },
-                        color = c.textMuted, fontSize = 11.5.sp
+                        color = c.textSecondary, fontSize = 12.sp
                     )
                     when (state.listResult) {
                         UnlockDns.ListResult.NOT_PUBLISHED -> Text(stringResource(R.string.unlock_list_not_published), color = c.textSecondary, fontSize = 11.sp)
@@ -454,22 +457,135 @@ internal fun UnlockDnsSheetContent(state: UnlockDns.State, actions: UnlockSheetA
                 }
                 IconButton(onClick = actions::refreshList, enabled = !state.listBusy) {
                     if (state.listBusy) CircularProgressIndicator(Modifier.size(16.dp), color = c.primary, strokeWidth = 2.dp)
-                    else Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.unlock_list_refresh), tint = c.textSecondary,
+                    else Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.unlock_list_refresh), tint = c.primary,
                         modifier = Modifier.size(20.dp))
                 }
             }
         }
-        InfoChip()
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.Top) {
+            Icon(Icons.Outlined.Info, contentDescription = null, tint = c.textMuted, modifier = Modifier.padding(top = 1.dp).size(16.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(stringResource(R.string.unlock_info_only_dns), color = c.textSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+        }
     }
+}
+
+@Composable
+private fun healthStyle(health: ServerHealth, checking: Boolean, hasCheck: Boolean): Pair<Color, String> {
+    val c = AppTheme.colors
+    return when {
+        checking && !hasCheck -> c.textMuted to stringResource(R.string.unlock_health_checking)
+        health == ServerHealth.HEALTHY -> c.statusConnected to stringResource(R.string.unlock_health_healthy)
+        health == ServerHealth.SLOW -> c.statusWarning to stringResource(R.string.unlock_health_slow)
+        health == ServerHealth.BLOCKED -> c.statusError to stringResource(R.string.unlock_health_blocked)
+        else -> c.textMuted to stringResource(R.string.unlock_health_unknown)
+    }
+}
+
+/** The "In use" summary: the server answering now, its latency and health. */
+@Composable
+private fun InUseCard(state: UnlockDns.State, inUse: String?, sharedHealth: ServerHealth?) {
+    val c = AppTheme.colors
+    val row = state.rows.firstOrNull { it.ip == inUse }
+    val check = row?.check
+    val ms = (if (inUse != null && inUse == state.active) state.activeMs else null) ?: check?.latencyMs?.takeIf { check.usable }
+    val (healthColor, healthText) = healthStyle(check?.health ?: ServerHealth.UNKNOWN, state.checking, check != null)
+    Surface(shape = RoundedCornerShape(20.dp), color = c.surfaceCard, border = BorderStroke(1.dp, c.borderSubtle),
+        modifier = Modifier.fillMaxWidth().testTag("unlock_in_use_card")) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(c.surfacePill), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Public, contentDescription = null, tint = c.primary, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.unlock_in_use_mode,
+                        stringResource(if (state.autoPick) R.string.unlock_auto_short else R.string.unlock_manual_short)).uppercase(),
+                    color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, maxLines = 1
+                )
+                Text(inUse ?: "—", color = c.textPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                if (ms != null) {
+                    Text(
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(fontSize = 19.sp, fontWeight = FontWeight.Bold)) { append(ms.toString()) }
+                            withStyle(SpanStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold)) { append(" ms") }
+                        },
+                        color = healthColor, maxLines = 1
+                    )
+                }
+                if (check != null || state.checking) Text(
+                    if (sharedHealth != null) stringResource(R.string.unlock_all_servers, healthText) else healthText,
+                    color = c.textSecondary, fontSize = 12.sp, maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetLabel(text: String, trailing: String?) {
+    val c = AppTheme.colors
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text.uppercase(), color = c.textSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+            modifier = Modifier.weight(1f), maxLines = 1)
+        trailing?.let { Text(it, color = c.textMuted, fontSize = 12.sp, maxLines = 1) }
+    }
+}
+
+@Composable
+private fun SheetCard(content: @Composable () -> Unit) {
+    val c = AppTheme.colors
+    Surface(shape = RoundedCornerShape(20.dp), color = c.surfaceCard, border = BorderStroke(1.dp, c.borderSubtle),
+        modifier = Modifier.fillMaxWidth()) {
+        Column { content() }
+    }
+}
+
+@Composable
+private fun RowDivider() = Box(Modifier.fillMaxWidth().height(1.dp).background(AppTheme.colors.borderSubtle))
+
+@Composable
+private fun OptionSwitchRow(title: String, detail: String, checked: Boolean, tag: String, onChange: (Boolean) -> Unit) {
+    val c = AppTheme.colors
+    Row(Modifier.clickable { onChange(!checked) }.padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = c.textPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(detail, color = c.textSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            modifier = Modifier.testTag(tag),
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = c.onPrimary, checkedTrackColor = c.primary, checkedBorderColor = c.primary,
+                uncheckedThumbColor = c.textMuted, uncheckedTrackColor = c.surfaceElevated, uncheckedBorderColor = c.borderMedium
+            )
+        )
+    }
+}
+
+@Composable
+private fun SmallTag(text: String, color: Color) {
+    Text(text, color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(color.copy(alpha = 0.14f)).padding(horizontal = 5.dp, vertical = 1.dp))
 }
 
 @Composable
 private fun ServerRow(
     row: UnlockDns.Row,
+    rank: Int,
     selected: Boolean,
     active: Boolean,
     checking: Boolean,
     selectable: Boolean,
+    fastest: Boolean,
+    showHealth: Boolean,
+    minMs: Long?,
+    maxMs: Long?,
     onSelect: () -> Unit,
     onRemove: () -> Unit
 ) {
@@ -477,64 +593,63 @@ private fun ServerRow(
     val health = row.check?.health ?: ServerHealth.UNKNOWN
     val blocked = health == ServerHealth.BLOCKED
     val dim by animateFloatAsState(if (blocked && !selected) 0.5f else 1f, label = "unlock_row_alpha")
-    val (statusColor, statusText) = when {
-        checking && row.check == null -> c.textMuted to stringResource(R.string.unlock_health_checking)
-        health == ServerHealth.HEALTHY -> c.statusConnected to stringResource(R.string.unlock_health_healthy)
-        health == ServerHealth.SLOW -> c.statusWarning to stringResource(R.string.unlock_health_slow)
-        health == ServerHealth.BLOCKED -> c.statusError to stringResource(R.string.unlock_health_blocked)
-        else -> c.textMuted to stringResource(R.string.unlock_health_unknown)
-    }
-    val shape = RoundedCornerShape(16.dp)
-    Surface(
-        shape = shape,
-        color = if (selected) c.primary.copy(alpha = if (c.isDark) 0.10f else 0.07f) else c.surfaceCard,
-        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) c.primary.copy(alpha = 0.85f) else c.borderSubtle),
-        modifier = Modifier.fillMaxWidth().alpha(dim).clip(shape)
+    val (statusColor, statusText) = healthStyle(health, checking, row.check != null)
+    val latency = row.check?.latencyMs?.takeIf { !blocked }
+    Row(
+        Modifier.fillMaxWidth().alpha(dim)
+            .background(if (selected) c.primary.copy(alpha = if (c.isDark) 0.06f else 0.05f) else Color.Transparent)
             .then(if (selectable) Modifier.clickable(onClick = onSelect) else Modifier)
-            .testTag("unlock_server_${row.ip}")
+            .padding(start = 12.dp, end = if (row.custom) 4.dp else 14.dp, top = 12.dp, bottom = 12.dp)
+            .testTag("unlock_server_${row.ip}"),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(Modifier.padding(start = 12.dp, end = if (row.custom) 4.dp else 14.dp, top = 10.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.surfaceElevated), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Dns, contentDescription = null, tint = if (selected) c.primary else c.textSecondary, modifier = Modifier.size(18.dp))
+        // A check tile for the server in use, its rank for the rest.
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(if (selected) c.primaryContainer.copy(alpha = 0.6f) else c.surfaceElevated),
+            contentAlignment = Alignment.Center) {
+            if (selected) Icon(Icons.Rounded.Check, contentDescription = null, tint = c.primary, modifier = Modifier.size(19.dp))
+            else Text(rank.toString(), color = c.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(row.ip, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                if (row.custom) { Spacer(Modifier.width(6.dp)); SmallTag(stringResource(R.string.unlock_custom_badge), c.primary) }
+                if (row.check?.shape != null && !blocked) { Spacer(Modifier.width(6.dp)); SmallTag(stringResource(R.string.unlock_shaped_badge), c.statusWarning) }
             }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(row.ip, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                    if (row.custom) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.unlock_custom_badge), color = c.primary, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(c.primary.copy(alpha = 0.14f))
-                                .padding(horizontal = 5.dp, vertical = 1.dp))
-                    }
-                    if (row.check?.shape != null && !blocked) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.unlock_shaped_badge), color = c.statusWarning, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(c.statusWarning.copy(alpha = 0.14f))
-                                .padding(horizontal = 5.dp, vertical = 1.dp))
-                    }
-                    if (active) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.unlock_in_use), color = c.statusConnected, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(c.statusConnected.copy(alpha = 0.14f))
-                                .padding(horizontal = 5.dp, vertical = 1.dp))
-                    }
-                }
-                Text(
-                    text = row.check?.latencyMs?.takeIf { !blocked }?.let { stringResource(R.string.unlock_latency_ms, it) } ?: "—",
-                    color = if (health == ServerHealth.HEALTHY) c.statusConnected else c.textMuted,
-                    fontSize = 12.sp
-                )
-            }
+            Text(
+                text = when {
+                    latency != null && fastest -> stringResource(R.string.unlock_latency_fastest, latency)
+                    latency != null -> stringResource(R.string.unlock_latency_ms, latency)
+                    else -> "—"
+                },
+                color = c.textSecondary,
+                fontSize = 12.sp
+            )
+        }
+        if (active) {
+            Text(stringResource(R.string.unlock_in_use), color = c.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(c.surfacePill).padding(horizontal = 10.dp, vertical = 4.dp))
+            Spacer(Modifier.width(10.dp))
+        }
+        if (showHealth || blocked || row.check == null) {
             Box(Modifier.size(7.dp).clip(CircleShape).background(statusColor))
             Spacer(Modifier.width(6.dp))
-            Text(statusText, color = statusColor, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-            if (row.custom) {
-                IconButton(onClick = onRemove, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.unlock_remove, row.ip), tint = c.textMuted,
-                        modifier = Modifier.size(16.dp))
-                }
+            Text(statusText, color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            if (latency != null) Spacer(Modifier.width(10.dp))
+        }
+        if (latency != null) {
+            // Relative speed: the fastest checked server fills most of the bar, the slowest the least.
+            val span = (maxMs ?: latency) - (minMs ?: latency)
+            val fraction = if (span <= 0L) 0.6f else 0.2f + 0.6f * ((maxMs ?: latency) - latency).toFloat() / span
+            Box(Modifier.width(48.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(c.surfacePill)) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(fraction).clip(RoundedCornerShape(3.dp))
+                    .background(if (selected) c.primary else statusColor))
+            }
+        }
+        if (row.custom) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.unlock_remove, row.ip), tint = c.textMuted,
+                    modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -552,53 +667,51 @@ private fun AddCustomDns(actions: UnlockSheetActions, enabled: Boolean) {
     val shownError = error
     if (!editing) {
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(50))
-                .border(1.dp, if (enabled) c.primary.copy(alpha = 0.8f) else c.borderSubtle, RoundedCornerShape(50))
+            Modifier.fillMaxWidth()
                 .clickable(enabled = enabled) { editing = true; error = null }
-                .padding(vertical = 11.dp)
+                .padding(horizontal = 12.dp, vertical = 12.dp)
                 .testTag("unlock_add_custom"),
-            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Rounded.Add, contentDescription = null, tint = if (enabled) c.primary else c.textMuted, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
+            Box(Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).border(1.dp, if (enabled) c.borderMedium else c.borderSubtle, RoundedCornerShape(11.dp)),
+                contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Add, contentDescription = null, tint = if (enabled) c.primary else c.textMuted, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(12.dp))
             Text(if (enabled) stringResource(R.string.unlock_add_custom) else full,
-                color = if (enabled) c.primary else c.textMuted, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                color = if (enabled) c.primary else c.textMuted, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
         return
     }
-    Surface(shape = RoundedCornerShape(16.dp), color = c.surfaceCard, border = BorderStroke(1.dp, c.primary.copy(alpha = 0.6f)),
-        modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp)) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it.filter { ch -> ch.isDigit() || ch == '.' }.take(15); error = null },
-                placeholder = { Text(stringResource(R.string.unlock_custom_hint), fontSize = 13.sp) },
-                isError = error != null,
-                supportingText = shownError?.let { message -> @Composable { Text(message, fontSize = 11.sp) } },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = c.primary, unfocusedBorderColor = c.borderMedium,
-                    focusedTextColor = c.textPrimary, unfocusedTextColor = c.textPrimary, cursorColor = c.primary
-                ),
-                modifier = Modifier.fillMaxWidth().testTag("unlock_custom_input")
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { editing = false; input = ""; error = null }) {
-                    Text(stringResource(R.string.unlock_cancel), color = c.textSecondary)
+    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+        OutlinedTextField(
+            value = input,
+            onValueChange = { input = it.filter { ch -> ch.isDigit() || ch == '.' }.take(15); error = null },
+            placeholder = { Text(stringResource(R.string.unlock_custom_hint), fontSize = 13.sp) },
+            isError = error != null,
+            supportingText = shownError?.let { message -> @Composable { Text(message, fontSize = 11.sp) } },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = c.primary, unfocusedBorderColor = c.borderMedium,
+                focusedTextColor = c.textPrimary, unfocusedTextColor = c.textPrimary, cursorColor = c.primary
+            ),
+            modifier = Modifier.fillMaxWidth().testTag("unlock_custom_input")
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { editing = false; input = ""; error = null }) {
+                Text(stringResource(R.string.unlock_cancel), color = c.textSecondary)
+            }
+            TextButton(onClick = {
+                when (actions.addCustom(input)) {
+                    is UnlockDnsList.CustomResult.Added -> { editing = false; input = ""; error = null }
+                    UnlockDnsList.CustomResult.Invalid -> error = invalid
+                    UnlockDnsList.CustomResult.Duplicate -> error = duplicate
+                    UnlockDnsList.CustomResult.Full -> error = full
                 }
-                TextButton(onClick = {
-                    when (actions.addCustom(input)) {
-                        is UnlockDnsList.CustomResult.Added -> { editing = false; input = ""; error = null }
-                        UnlockDnsList.CustomResult.Invalid -> error = invalid
-                        UnlockDnsList.CustomResult.Duplicate -> error = duplicate
-                        UnlockDnsList.CustomResult.Full -> error = full
-                    }
-                }, enabled = input.isNotBlank()) {
-                    Text(stringResource(R.string.unlock_custom_add), color = c.primary, fontWeight = FontWeight.SemiBold)
-                }
+            }, enabled = input.isNotBlank()) {
+                Text(stringResource(R.string.unlock_custom_add), color = c.primary, fontWeight = FontWeight.SemiBold)
             }
         }
     }
