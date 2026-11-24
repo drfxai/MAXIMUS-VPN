@@ -19,8 +19,10 @@ object PsiphonChainMemory {
     const val HOLD_MS = 6 * 60 * 60_000L
 
     private val inMemory = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val chainOk = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private fun key(network: String) = "psiphonDirectFailed#$network"
+    private fun chainKey(network: String) = "psiphonChainVerified#$network"
 
     /** The public direct Psiphon engine profile (not a private server, not a chain hop). Pure. */
     fun isDirect(profile: VlessProfile): Boolean =
@@ -55,17 +57,54 @@ object PsiphonChainMemory {
         return at?.takeIf { now - it in 0 until HOLD_MS }
     }
 
-    fun preferChain(network: String?, now: Long = System.currentTimeMillis()): Boolean = failedAt(network, now) != null
+    /**
+     * Build 173 (Irancell, 01:40 +0330): Psiphon over Lantern carried verified traffic (probe 630 ms, 53 KB/s down)
+     * minutes after direct Psiphon was silent for 240 s. Once the chain is verified on a network it stays the path
+     * tried first there for [HOLD_MS], unless direct Psiphon brings a tunnel up again ([clear]).
+     */
+    fun recordChainVerified(network: String?, now: Long = System.currentTimeMillis()) {
+        if (network.isNullOrBlank()) return
+        chainOk[network] = now
+        runCatching { BuiltinMethodMemory.write(chainKey(network), now.toString()) }
+    }
 
+    /** When the chain over Lantern last carried verified traffic on [network] within [HOLD_MS]; null otherwise. */
+    fun chainVerifiedAt(network: String?, now: Long = System.currentTimeMillis()): Long? {
+        if (network.isNullOrBlank()) return null
+        val at = chainOk[network] ?: runCatching { BuiltinMethodMemory.read(chainKey(network))?.toLongOrNull() }.getOrNull()
+            ?.also { chainOk[network] = it }
+        return at?.takeIf { now - it in 0 until HOLD_MS }
+    }
+
+    /** Direct Psiphon failed here recently, or the chain over Lantern is the path verified here: the chain goes first. */
+    fun preferChain(network: String?, now: Long = System.currentTimeMillis()): Boolean =
+        failedAt(network, now) != null || chainVerifiedAt(network, now) != null
+
+    /**
+     * The user's own direct Psiphon pick (exact) failed, or its running tunnel stopped carrying traffic: offer Psiphon
+     * over Lantern with one tap ("Connect with Psiphon over Lantern") instead of switching to it silently. Pure.
+     */
+    fun suggestChain(direct: Boolean, exact: Boolean, chainAvailable: Boolean, chainAlreadyTried: Boolean): Boolean =
+        direct && exact && chainAvailable && !chainAlreadyTried
+
+    /** Direct Psiphon brought a tunnel up on [network]: both memories are cleared, direct goes first again. */
     fun clear(network: String?) {
         if (network.isNullOrBlank()) return
         inMemory.remove(network)
+        chainOk.remove(network)
         runCatching { BuiltinMethodMemory.write(key(network), null) }
+        runCatching { BuiltinMethodMemory.write(chainKey(network), null) }
     }
 
     fun describe(network: String?, now: Long = System.currentTimeMillis()): String =
         failedAt(network, now)?.let { "direct Psiphon failed to start on this network ${(now - it) / 60_000} min ago; " +
-            "the chain over Lantern goes first for ${HOLD_MS / 3_600_000} h" } ?: "no direct Psiphon failure remembered"
+            "the chain over Lantern goes first for ${HOLD_MS / 3_600_000} h" }
+            ?: chainVerifiedAt(network, now)?.let { "Psiphon over Lantern carried verified traffic on this network " +
+                "${(now - it) / 60_000} min ago; it goes first" }
+            ?: "no direct Psiphon failure remembered"
 
-    internal fun resetForTest() = inMemory.clear()
+    internal fun resetForTest() {
+        inMemory.clear()
+        chainOk.clear()
+    }
 }

@@ -683,6 +683,67 @@ fun HomeScreen(
                                 Text(stringResource(R.string.ui_connect_anyway), color = AppTheme.colors.statusError, fontSize = 12.sp)
                             }
                         }
+                        // The user's own Aether pick failed fast here: one tap to the connection verified on this network.
+                        val suggestedId = connectionState.suggestedProfileId
+                        val suggestedName = connectionState.suggestedProfileName
+                        if (suggestedId != null && suggestedName != null) {
+                            TextButton(
+                                onClick = { vpnViewModel.connectSuggested(context, suggestedId) { onRequestVpnPermission() } }
+                            ) {
+                                Text(stringResource(R.string.ui_connect_with_verified, suggestedName),
+                                    color = AppTheme.colors.statusError, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // The power button's own config stopped carrying traffic and is being restarted (never switched silently):
+        // say so, and offer Smart Connect or the path verified on this network with one tap.
+        val pinnedRestartOf = connectionState.pinnedRestartOf
+        AnimatedVisibility(
+            visible = pinnedRestartOf != null && connectionState.status != ConnectionStatus.FAILED &&
+                connectionState.status != ConnectionStatus.DISCONNECTED,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+                    .testTag("pinned_restart_card"),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (AppTheme.colors.isDark) Color(0xFF2A2116) else Color(0xFFFFF8E8)
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D).copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D), modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.ui_pinned_stalled_reconnecting, pinnedRestartOf.orEmpty()),
+                            color = AppTheme.colors.textPrimary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                        Row {
+                            TextButton(onClick = { vpnViewModel.connectSmart(context) { onRequestVpnPermission() } }) {
+                                Text(stringResource(R.string.ui_smart_connect), fontSize = 12.sp)
+                            }
+                            val restartSuggestedId = connectionState.suggestedProfileId
+                            val restartSuggestedName = connectionState.suggestedProfileName
+                            if (restartSuggestedId != null && restartSuggestedName != null) {
+                                TextButton(onClick = { vpnViewModel.connectSuggested(context, restartSuggestedId) { onRequestVpnPermission() } }) {
+                                    Text(stringResource(R.string.ui_connect_with_verified, restartSuggestedName), fontSize = 12.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }

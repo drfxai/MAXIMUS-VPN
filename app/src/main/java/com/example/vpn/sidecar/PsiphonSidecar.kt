@@ -140,6 +140,17 @@ class PsiphonSidecar(
         @Volatile private var connected = 0
         @Volatile private var candidates: Int? = null
         @Volatile private var upstreamErrors = 0
+        /** The regions of the last AvailableEgressRegions notice (two-letter codes only); null until one arrives. */
+        @Volatile private var availableRegions: List<String>? = null
+        /** The region of the server the tunnel connected to (ConnectedServerRegion); null until then. */
+        @Volatile private var connectedRegion: String? = null
+
+        /** 0 nothing yet, 1 region list in, 2 a server dialed, 3 a server connected. */
+        val progressStage: Int get() = stage
+
+        fun availableRegions(): List<String>? = availableRegions
+
+        fun connectedRegion(): String? = connectedRegion
 
         fun observe(line: String) {
             if (line.length > 32_768) return
@@ -163,6 +174,12 @@ class PsiphonSidecar(
                 // CandidateServers (diagnostic) reports how many server entries the current limits allow.
                 "CandidateServers" -> if (data.has("count")) candidates = data.optInt("count")
                 "UpstreamProxyError" -> upstreamErrors++
+                "AvailableEgressRegions" -> data.optJSONArray("regions")?.let { a ->
+                    availableRegions = (0 until a.length()).map { a.optString(it).trim().uppercase() }
+                        .filter { REGION_CODE.matches(it) }.distinct()
+                }
+                "ConnectedServerRegion" -> data.optString("serverRegion").trim().uppercase()
+                    .takeIf { REGION_CODE.matches(it) }?.let { connectedRegion = it }
             }
             if (kind == "SkipServerEntry") {
                 skips++
@@ -268,6 +285,7 @@ class PsiphonSidecar(
                 return if (parts.isEmpty()) kind else "$kind " + parts.joinToString(" ")
             }
             private val SAFE_VALUE = Regex("^[A-Za-z0-9_.:-]+$")
+            private val REGION_CODE = Regex("^[A-Z]{2}$")
             private val PROTOCOL_NAME = Regex("^[A-Z0-9-]{2,48}$")
 
             val NOTICE_NAME = Regex("^[A-Za-z][A-Za-z0-9]{0,47}$")

@@ -355,6 +355,8 @@
     <string name="ui_direct_bypass_keeps_your_isp">Direct bypass keeps your ISP exit IP and does not add an encrypted VPN tunnel. App encryption still applies. Some apps, including Telegram, may need a separate proxy or a working tunnel.</string>
     <string name="ui_this_profile_has_no_tls">This profile has no TLS/REALITY encryption between this device and the VPN server. Use a TLS or REALITY profile for a confidential connection.</string>
     <string name="ui_connect_anyway">Connect anyway</string>
+    <string name="ui_connect_with_verified">Connect with %1$s</string>
+    <string name="ui_pinned_stalled_reconnecting">%1$s stopped carrying traffic — reconnecting</string>
     <string name="ui_trade_fixed_exit">Trade · fixed exit</string>
     <string name="ui_locked">Locked</string>
     <string name="ui_your_exit_ip_location_and">Your exit IP, location and configuration stay the same every time. No switching, failover or recovery runs while Trade is on.</string>
