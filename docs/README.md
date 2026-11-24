@@ -14,6 +14,7 @@
 | [Network classification](MAXIMUS_NETWORK_STATE.md) | Physical-network measurements and evidence states. |
 | [Optimal Node and Trade mode](MAXIMUS_OPTIMAL_NODE_TRADE.md) | Automatic route selection and a stable exit. |
 | [Unlock mode](UNLOCK_DNS.md) | Anti-sanction DNS: DNS-only VPN session, server health checks, remote list updates and limits. |
+| [DNS-first connectivity and automatic upkeep](DNS_FIRST.md) | DNS tunnel ladder, tunnel-aware resolver probing, scheduled resolver/clean-IP/revival/GeoFiles upkeep, and what is deferred. |
 | [Subscriptions](SUBSCRIPTIONS.md) | Refresh, mirrors, signatures and offline copies. |
 
 ## Own your infrastructure

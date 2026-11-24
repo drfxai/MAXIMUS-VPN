@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="automation_title">Автоматическое обслуживание</string>
+    <string name="automation_task_resolver_scan">Поиск DNS-резолверов</string>
+    <string name="automation_task_dns_ladder">Перебор DNS-туннелей</string>
+    <string name="automation_task_clean_ip">Поиск чистых IP CDN</string>
+    <string name="automation_task_revival">Восстановление конфигураций</string>
+    <string name="automation_task_geo">GeoFiles для Ирана</string>
+    <string name="automation_never">Ещё не запускалось</string>
+    <string name="automation_found">%1$s · найдено: %2$d</string>
+    <string name="automation_failed">%1$s · ошибка: %2$s</string>
+    <string name="automation_skip_vpn">Ждёт отключения VPN</string>
+    <string name="automation_skip_fresh">Актуально для этой сети</string>
+    <string name="automation_skip_nothing">Нет подходящих конфигураций</string>
+    <string name="automation_skip_metered">Ждёт Wi-Fi или туннель</string>
+    <string name="automation_skip_tunnel">Ждёт туннель (GeoFiles через прокси)</string>
+    <string name="automation_run_now">Запустить всё сейчас</string>
+    <string name="automation_run_now_sub">Нажмите на строку, чтобы запустить только эту задачу</string>
+    <string name="automation_auto_drop">Удалять мёртвые конфигурации подписок</string>
+    <string name="automation_auto_drop_sub">Только после 3 неудачных восстановлений за 2+ дня; избранное и ваши конфигурации не удаляются</string>
+    <string name="automation_footnote">Запускается при смене сети, ежедневно и после неудачного подключения. Пока активен VPN, измерения ждут; результаты хранятся для каждой сети.</string>
+</resources>

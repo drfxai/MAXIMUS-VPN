@@ -125,6 +125,11 @@ object DnsTunnelResolverOrder {
     data class Applied(val profile: VlessProfile, val changed: Boolean, val configFree: Boolean)
 
     fun apply(engineId: String, profile: VlessProfile, pool: List<VerifiedResolverPool.Entry>): Applied {
+        // The DNS tunnel ladder carried a real request through this profile on this network with a resolver
+        // variant: use it as verified (com.example.vpn.dnsfirst.DnsTunnelLadder; nothing when it never ran).
+        if (engineId in ENGINES) com.example.vpn.dnsfirst.DnsLadderHook.preferred(profile)?.let { laddered ->
+            if (laddered != profile) return Applied(laddered, true, false)
+        }
         if (pool.isEmpty()) return Applied(profile, false, false)
         return runCatching {
             when (engineId) {

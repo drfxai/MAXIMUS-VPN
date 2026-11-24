@@ -763,7 +763,9 @@ fun UpdatesSettingsPage(
     onChangelog: () -> Unit,
     onBack: () -> Unit,
     onUpdateGeoFiles: () -> Unit = {},
-    onGeoViaVpn: (Boolean) -> Unit = {}
+    onGeoViaVpn: (Boolean) -> Unit = {},
+    /** The automatic upkeep status (resolver scan, DNS tunnel ladder, clean IPs, revival, GeoFiles); none in previews. */
+    automation: (@Composable () -> Unit)? = null
 ) {
     Column {
         SettingsTopBar(stringResource(R.string.ui_app_updates), onBack = onBack)
@@ -854,6 +856,7 @@ fun UpdatesSettingsPage(
                 )
             }
             data.geoStatus?.let { SettingsFootnote(it) }
+            automation?.invoke()
 
         }
     }
