@@ -1,0 +1,13 @@
+# Android ABIs that the engine scripts build, one per line.
+#
+# Single source of truth for:
+#   - scripts/build-engines.sh, when it is run without an argument list
+#   - app/build.gradle.kts, which rejects any other -PtargetAbi value
+# so a build cannot request an ABI that no engine script produces an artifact for.
+#
+# Adding an ABI here is not enough: the pinned engine scripts need a hash for it too
+# (see docs/PINS.md). app/src/test/java/com/example/EngineAbiPinTest.kt fails until
+# scripts/engines/singbox.sh and docs/PINS.md cover it.
+arm64-v8a
+armeabi-v7a
+x86_64
