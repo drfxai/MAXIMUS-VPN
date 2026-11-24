@@ -7,10 +7,15 @@ import com.example.vpn.verify.TrafficCheck
 
 /** Real, bounded DNS-over-HTTPS and authenticated HTTPS checks through the selected engine. */
 object AccessProbe {
+    const val STEP_TIMEOUT_MS = 8_000
+    /** WARP through the Lantern hop or a saved server: two relays before Cloudflare, so each step takes longer. */
+    const val RELAYED_STEP_TIMEOUT_MS = 15_000
+
     data class Result(val dns: Boolean? = null, val tls: Boolean = false, val traffic: Boolean = false,
         val latencyMs: Long? = null, val failure: String? = null)
 
-    fun check(endpoint: Socks5.Endpoint, checkDns: Boolean, diagnoseAddress: Boolean = false): Result {
+    /** [stepTimeoutMs]: per connect / TLS / response step; a relayed carrier (two hops) gets more (build 174). */
+    fun check(endpoint: Socks5.Endpoint, checkDns: Boolean, diagnoseAddress: Boolean = false, stepTimeoutMs: Int = STEP_TIMEOUT_MS): Result {
         var tls = false
         var traffic = false
         var latencyMs: Long? = null
@@ -23,7 +28,7 @@ object AccessProbe {
             val start = System.nanoTime()
             var stage = "SOCKS"
             try {
-                val body = request(endpoint, host, path, status, onConnected = { stage = "TLS" }) {
+                val body = request(endpoint, host, path, status, onConnected = { stage = "TLS" }, stepTimeoutMs = stepTimeoutMs) {
                     tls = true
                     stage = "HTTP"
                 }
@@ -96,12 +101,12 @@ object AccessProbe {
     private fun request(
         endpoint: Socks5.Endpoint, host: String, path: String, status: Int,
         address: String = host, onConnected: () -> Unit = {},
-        headers: Map<String, String> = emptyMap(), onTls: () -> Unit
+        headers: Map<String, String> = emptyMap(), stepTimeoutMs: Int = STEP_TIMEOUT_MS, onTls: () -> Unit
     ): String {
         val dialer = Dialer { _, port, timeout ->
             Socks5.connect(endpoint, address, port, timeout).also { onConnected() }
         }
-        val probe = TrafficCheck(dialer, stepTimeoutMs = 8_000, onTlsVerified = onTls)
+        val probe = TrafficCheck(dialer, stepTimeoutMs = stepTimeoutMs, onTlsVerified = onTls)
         val response = probe.exchange(TrafficCheck.Target(host, 443, path), "GET", null, keepBody = true, extraHeaders = headers)
         check(response.status == status) { "Unexpected HTTPS status" }
         return response.body?.toString("UTF-8").orEmpty()

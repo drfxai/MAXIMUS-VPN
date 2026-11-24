@@ -223,7 +223,7 @@ class PsiphonSidecar(
             recent.takeIf { it.isNotEmpty() }?.joinToString(" | ")?.take(MAX_NOTICES_TEXT)
         }
 
-        fun failureAfter(timeoutMs: Long): String {
+        fun failureAfter(timeoutMs: Long, label: String = "Psiphon"): String {
             val phase = when (stage) {
                 3 -> "server connected but the tunnel did not become ready"
                 2 -> "server dialing did not establish a tunnel"
@@ -235,7 +235,7 @@ class PsiphonSidecar(
                 lastNotice?.let { add("last notice: $it") }
             }
             val suffix = if (detail.isEmpty()) "" else " (${detail.joinToString("; ")})"
-            return "Psiphon startup timed out after ${timeoutMs / 1000}s: $phase$suffix; traffic is unverified."
+            return "$label startup timed out after ${timeoutMs / 1000}s: $phase$suffix; traffic is unverified."
         }
 
         internal companion object {

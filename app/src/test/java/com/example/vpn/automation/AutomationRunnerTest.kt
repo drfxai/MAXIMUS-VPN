@@ -38,6 +38,28 @@ class AutomationRunnerTest {
         assertNull(plan(AutomationTrigger.CONNECTED, env(vpn = true, tunnel = true).copy(geoNeedsTunnel = true))[AutomationTask.GEO_UPDATE])
     }
 
+    /**
+     * Build 174: after a failed connect this app keeps only its traffic-blocking interface up (fail-closed), and every
+     * upkeep (CONNECT_FAILED, VPN_STOPPED) skipped every measurement with VPN_ACTIVE. Beside that block they run.
+     */
+    @Test
+    fun measuringRunsBesideThisAppsOwnTrafficBlockButNotUnderAnotherVpnOrTheTunnel() {
+        val block = env(vpn = true).copy(ownBlockOnly = true)
+        for (trigger in listOf(AutomationTrigger.CONNECT_FAILED, AutomationTrigger.VPN_STOPPED, AutomationTrigger.NETWORK_CHANGED)) {
+            val p = plan(trigger, block)
+            assertNull("$trigger", p[AutomationTask.RESOLVER_SCAN])
+            assertNull("$trigger", p[AutomationTask.DNS_LADDER])
+            assertNull("$trigger", p[AutomationTask.CLEAN_IP_SCAN])
+            assertNull("$trigger", p[AutomationTask.CONFIG_REVIVAL])
+        }
+        // GeoFiles beside the block: no tunnel to carry them, so the usual metered / via-proxy rules decide.
+        assertEquals(SkipReason.METERED, plan(AutomationTrigger.DAILY, env(vpn = true, metered = true).copy(ownBlockOnly = true))[AutomationTask.GEO_UPDATE])
+        assertEquals(SkipReason.NEEDS_TUNNEL, plan(AutomationTrigger.DAILY, block.copy(geoNeedsTunnel = true))[AutomationTask.GEO_UPDATE])
+        // Another app's VPN, or this app's own connected tunnel: still skipped.
+        assertEquals(SkipReason.VPN_ACTIVE, plan(AutomationTrigger.CONNECT_FAILED, env(vpn = true))[AutomationTask.RESOLVER_SCAN])
+        assertEquals(SkipReason.VPN_ACTIVE, plan(AutomationTrigger.DAILY, env(vpn = true, tunnel = true))[AutomationTask.DNS_LADDER])
+    }
+
     @Test
     fun freshnessIsPerNetworkAndShorterAfterAFailedConnect() {
         val ok = mapOf((AutomationTask.RESOLVER_SCAN to "cell:43235") to now - 2 * hour, (AutomationTask.GEO_UPDATE to "*") to now - hour)

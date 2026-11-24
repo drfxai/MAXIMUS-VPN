@@ -44,6 +44,15 @@ Khorshid with the user's saved choices, and a Shir o Khorshid started that way t
 Psiphon over Lantern (`PsiphonFallbackLadder`). Where Psiphon over Lantern is already the path verified on the network,
 Shir o Khorshid is skipped and the chain goes next. A Shir o Khorshid the user picked never hands over.
 
+## Diagnostics
+
+The fork prints Psiphon's notices (its `ConsoleClient` and `notice.go` match upstream 4d6eb0e8, including the
+readiness notice `Tunnels {"count":1}` that the start waits for). They are read like Psiphon's (`SidecarProcess.psiphonFamily`):
+a start that does not come up reports `psiphon.notices` (the last 20 notice types with whitelisted, address-free
+fields), `psiphon.dials` / `psiphon.verdict` (protocols dialed, servers connected) and the region count, and its reason
+says how far it got ("Shir o Khorshid startup timed out after 120s: server dialing did not establish a tunnel …").
+Build 174 had only "readiness marker was not observed within 120s" for two failures.
+
 ## Not included
 
 - The fork's private Conduit compartment ID, its build-time server entries and its MaxMind database are secrets of

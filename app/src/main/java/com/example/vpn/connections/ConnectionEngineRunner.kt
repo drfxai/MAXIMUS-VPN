@@ -582,8 +582,13 @@ object ConnectionEngineRunner {
         // WARP through Lantern failed on this network recently (LanternRelayMemory): not queued again until it expires.
         val lanternEligible = lanternRelayEligible(engine.id, automatic, manual, cloudflareBlocked, lanternAvailable,
             AetherSettings.read(ProfileExtras.read(profile)), relayExitNode, relayOnly)
-        val lanternFailedAt = if (lanternEligible) LanternRelayMemory.failedAt(networkKey) else null
+        val failedHop = if (lanternEligible) LanternRelayMemory.failedAt(networkKey) else null
+        // Build 174: the user's own pick (lanternEligible implies it) tries the hop again a few minutes after a failure.
+        val lanternRetry = failedHop != null && LanternRelayMemory.manualRetryDue(networkKey)
+        val lanternFailedAt = failedHop.takeUnless { lanternRetry }
         if (lanternFailedAt != null) record(H2_LANTERN, "queue", "SKIP", LanternRelayMemory.describe(networkKey))
+        if (lanternRetry) record(H2_LANTERN, "queue", "START", "your own Aether pick: WARP through Lantern failed here " +
+            "${(System.currentTimeMillis() - failedHop!!) / 60_000} min ago and is tried once more")
         val lanternChoice = if (lanternEligible && lanternFailedAt == null)
             carrierChoices.firstOrNull { ProfileExtras.read(it).let { e -> e.optString("carrier") == "h2" && !e.optBoolean(AetherSidecar.SNI_SPLIT) } }
                 ?.let(::lanternRelayed) else null

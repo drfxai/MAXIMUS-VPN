@@ -265,6 +265,11 @@ object TunForwarded {
  */
 object TunPathStatus {
     @Volatile var selfExcluded: Boolean = false
+    /**
+     * The engine program's local SOCKS port while the app is left out of its own VPN ([selfExcluded]): the way this
+     * app's own downloads reach the tunnel then (binding to the VPN network is refused). Null otherwise.
+     */
+    @Volatile var engineProxy: Socks5.Endpoint? = null
     @Volatile var meter: TunForwardMeter? = null
     /** The latest verdict window (set by the session's tun.forwarded watch); null before it ran. */
     @Volatile var lastWindow: TunForwardMeter.Snapshot? = null
@@ -281,6 +286,7 @@ object TunPathStatus {
         meter?.close()
         meter = null
         selfExcluded = false
+        engineProxy = null
         lastWindow = null
     }
 }

@@ -97,7 +97,7 @@ class LanternRelayFallbackTest {
         val failure = run(manual = true, cloudflareBlocked = true, lantern = false)
         assertTrue(attempted.toString(), attempted.isEmpty())
         val message = failure.message.orEmpty()
-        assertTrue(message, message.startsWith("Aether skipped: Cloudflare is filtered"))
+        assertTrue(message, message.startsWith("Aether skipped: Cloudflare TLS is filtered"))
         assertTrue(message, message.contains("Lantern or Serverless"))
     }
 
@@ -204,9 +204,34 @@ class LanternRelayFallbackTest {
         val failure = run(manual = true, cloudflareBlocked = true, lantern = true)
         assertTrue(attempted.toString(), attempted.isEmpty())
         val message = failure.message.orEmpty()
-        assertTrue(message, message.startsWith("Aether skipped: Cloudflare is filtered"))
+        assertTrue(message, message.startsWith("Aether skipped: Cloudflare TLS is filtered"))
         assertTrue(message, message.contains("WARP through Lantern also failed here"))
         assertTrue(message, message.contains("Lantern or Serverless"))
+    }
+
+    /**
+     * Build 174 (Irancell): WARP through Lantern carried verified traffic twice, failed once on a pinned restart, and
+     * every later power-button press on Aether was refused for 30 min. The user's own pick tries the hop again once the
+     * failure is [LanternRelayMemory.MANUAL_RETRY_AFTER_MS] old; a press right after the failure still stops at once.
+     */
+    @Test fun theUsersOwnPickTriesTheLanternHopAgainAFewMinutesAfterAFailure() {
+        WarpDataPlaneHold.record(network)
+        LanternRelayMemory.record(network, now = System.currentTimeMillis() - LanternRelayMemory.MANUAL_RETRY_AFTER_MS - 1_000)
+        run(manual = true, cloudflareBlocked = true, lantern = true)
+        assertEquals(listOf("lantern"), attempted)
+        // That retry failed too: remembered again, so an immediate press is refused at once.
+        attempted.clear()
+        val failure = run(manual = true, cloudflareBlocked = true, lantern = true)
+        assertTrue(attempted.toString(), attempted.isEmpty())
+        assertTrue(failure.message.orEmpty(), failure.message.orEmpty().contains("your next pick tries it again in about 5 min"))
+        assertFalse(LanternRelayMemory.manualRetryDue(network))
+        assertTrue(LanternRelayMemory.manualRetryDue(network, now = System.currentTimeMillis() + LanternRelayMemory.MANUAL_RETRY_AFTER_MS))
+    }
+
+    @Test fun automaticRunsStillWaitOutTheWholeLanternHold() {
+        LanternRelayMemory.record(network, now = System.currentTimeMillis() - LanternRelayMemory.MANUAL_RETRY_AFTER_MS - 1_000)
+        run(manual = false, cloudflareBlocked = true, lantern = true)
+        assertFalse(attempted.toString(), "lantern" in attempted)
     }
 
     @Test fun outsideTheHoldARememberedLanternFailureLeavesOnlyTheDirectCarriers() {
@@ -237,7 +262,7 @@ class LanternRelayFallbackTest {
         WarpDataPlaneHold.record(network, now = 0)
         val message = WarpDataPlaneHold.fastFailMessage(network, now = 10 * 60_000L, lanternFailedAt = 5 * 60_000L)
         assertTrue(message, message.contains("WARP through Lantern also failed here 5 min ago"))
-        assertTrue(message, message.contains("not retried for about 25 more min"))
+        assertTrue(message, message.contains("your next pick tries it again in about 1 min"))
         assertFalse(WarpDataPlaneHold.fastFailMessage(network, now = 10 * 60_000L).contains("also failed"))
     }
 

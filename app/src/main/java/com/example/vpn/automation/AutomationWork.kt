@@ -43,11 +43,33 @@ class AutomationWorker(context: Context, params: WorkerParameters) : CoroutineWo
         val trigger = AutomationScheduler.triggerOf(inputData)
         val only = AutomationScheduler.onlyOf(inputData)
         return try {
-            val tasks = AutomationTasks(applicationContext) { isStopped }
+            val tasks = AutomationTasks(applicationContext, { isStopped })
             val profiles = tasks.profiles()
             val env = tasks.env(profiles)
-            val summary = AutomationRunner(AutomationStores.status(applicationContext), tasks.bodies(profiles)).run(trigger, env, only)
-            XrayLogManager.i("AUTO", "Upkeep ($trigger): ran ${summary.ran}, skipped ${summary.skipped}, failed ${summary.failed}")
+            val book = AutomationStores.status(applicationContext)
+            // Beside this app's own traffic block (a failed connect kept fail-closed): measured outside it, other
+            // apps stay blocked (OwnVpnWindow). When the window cannot open, the run records VPN_ACTIVE and retries.
+            val summary = (if (env.ownBlockOnly) OwnVpnWindow.run { intact ->
+                XrayLogManager.i("AUTO", "Upkeep ($trigger) runs beside this app's traffic block; other apps stay blocked.")
+                AutomationRunner(book, AutomationTasks(applicationContext, { isStopped || !intact() }, intact).bodies(profiles))
+                    .run(trigger, env, only)
+            } else null) ?: AutomationRunner(book, tasks.bodies(profiles)).run(trigger, env.copy(ownBlockOnly = false), only)
+            XrayLogManager.i("AUTO", "Upkeep ($trigger): ran ${summary.ran}, skipped ${summary.skipped}, failed ${summary.failed}" +
+                if (env.vpnActive) " (VPN up: ${if (env.tunnelUp) "this app's tunnel" else if (env.ownBlockOnly) "this app's traffic block" else "another VPN or a connect under way"})" else "")
+            // The diagnostics report carries each upkeep run (build 174 had only log lines to go on).
+            runCatching {
+                com.example.vpn.diagnostics.events.EventLog.event("upkeep.run", attributes = mapOf(
+                    "trigger" to trigger.name,
+                    "ran" to summary.ran.joinToString(",").ifEmpty { "none" },
+                    "skipped" to summary.skipped.entries.joinToString(",") { "${it.key.name}=${it.value.name}" }.ifEmpty { "none" },
+                    "failed" to summary.failed.joinToString(",").ifEmpty { "none" },
+                    "vpn" to when {
+                        !env.vpnActive -> "none"
+                        env.tunnelUp -> "tunnel"
+                        env.ownBlockOnly -> "own-block"
+                        else -> "other"
+                    }), result = if (summary.failed.isEmpty()) "PASS" else "FAIL")
+            }
             // After a failed connect the blocking interface may still be up for a moment: try again a little later.
             if (summary.blockedByVpn && trigger == AutomationTrigger.CONNECT_FAILED && runAttemptCount < MAX_RETRIES) Result.retry()
             else Result.success()

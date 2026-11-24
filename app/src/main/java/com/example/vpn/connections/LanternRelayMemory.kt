@@ -16,6 +16,17 @@ package com.example.vpn.connections
 object LanternRelayMemory {
     const val HOLD_MS = 30 * 60_000L
 
+    /**
+     * The user's own Aether pick tries the hop again this long after it failed, inside [HOLD_MS] (automatic runs still
+     * wait out the hold). Build 174 (Irancell): WARP through Lantern carried verified traffic twice, failed once on a
+     * pinned restart, and every later press of the power button on Aether for 30 min was refused at once.
+     */
+    const val MANUAL_RETRY_AFTER_MS = 5 * 60_000L
+
+    /** A hop failure is remembered on [network] and the user's own pick may try it again now ([MANUAL_RETRY_AFTER_MS]). */
+    fun manualRetryDue(network: String?, now: Long = System.currentTimeMillis()): Boolean =
+        failedAt(network, now)?.let { now - it >= MANUAL_RETRY_AFTER_MS } == true
+
     private val inMemory = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private fun key(network: String) = "lanternHopFailed#$network"

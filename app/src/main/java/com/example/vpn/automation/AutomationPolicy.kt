@@ -14,13 +14,21 @@ data class AutomationEnv(
     val hasFronted: Boolean = false,
     val hasRevivable: Boolean = false,
     /** "GeoFiles via proxy" is on: download them only through this app's tunnel. */
-    val geoNeedsTunnel: Boolean = false
+    val geoNeedsTunnel: Boolean = false,
+    /**
+     * The only VPN up is this app's own traffic-blocking interface (a failed connect kept fail-closed until the user
+     * presses Disconnect) and the service can let this app's own sockets out beside it ([OwnVpnWindow]): measuring
+     * tasks run then, while other apps stay blocked. Build 174 report: every upkeep after a failed connect or a
+     * stop was skipped with VPN_ACTIVE because that blocking interface counted as "a VPN".
+     */
+    val ownBlockOnly: Boolean = false
 )
 
 /**
  * Which upkeep tasks a trigger runs, given the phone's state and how fresh each task's result is on this
- * network. Pure. Measuring tasks never run under a VPN (they would measure the tunnel, or be refused while it
- * holds traffic); the GeoFiles download prefers the tunnel and otherwise waits for an unmetered network.
+ * network. Pure. Measuring tasks never run under another app's VPN or this app's connected tunnel (they would measure
+ * the tunnel); beside this app's own traffic block ([AutomationEnv.ownBlockOnly]) they run, outside it. The GeoFiles
+ * download prefers the tunnel and otherwise waits for an unmetered network.
  */
 object AutomationPolicy {
     data class Decision(val task: AutomationTask, val skip: SkipReason?) {
@@ -72,10 +80,10 @@ object AutomationPolicy {
         when (task) {
             AutomationTask.GEO_UPDATE -> {
                 if (!env.tunnelUp && env.geoNeedsTunnel) return SkipReason.NEEDS_TUNNEL
-                if (!env.tunnelUp && env.vpnActive) return SkipReason.VPN_ACTIVE
+                if (!env.tunnelUp && env.vpnActive && !env.ownBlockOnly) return SkipReason.VPN_ACTIVE
                 if (!env.tunnelUp && env.metered && trigger != AutomationTrigger.MANUAL) return SkipReason.METERED
             }
-            else -> if (env.vpnActive) return SkipReason.VPN_ACTIVE
+            else -> if (env.vpnActive && !env.ownBlockOnly) return SkipReason.VPN_ACTIVE
         }
         when (task) {
             AutomationTask.DNS_LADDER -> if (!env.hasDnsTunnels) return SkipReason.NOTHING_TO_DO

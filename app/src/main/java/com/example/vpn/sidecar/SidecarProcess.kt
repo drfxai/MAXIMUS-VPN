@@ -51,7 +51,7 @@ class SidecarProcess(
                     EngineSignals.publish(name, line)
                     reportApiTlsEvent(line)
                     // ConnectedServerRegion can follow the Tunnels notice that makes the start ready.
-                    if (name.removePrefix("lab-") == PsiphonSidecar.ID && (!ready || line.contains("ConnectedServerRegion")))
+                    if (psiphonFamily(name) && (!ready || line.contains("ConnectedServerRegion")))
                         psiphonStartup.observe(line)
                     if (name == AetherSidecar.ID) aetherStage(line)?.let { stage ->
                         if (startupStage != stage) {
@@ -152,8 +152,8 @@ class SidecarProcess(
         }
         if (startupFailure == null) startupFailure = if (name == AetherSidecar.ID && !sawReadyLine)
             aetherTimeout(startupStage, failureHint, timeoutMs)
-        else if (name.removePrefix("lab-") == PsiphonSidecar.ID && !sawReadyLine)
-            psiphonStartup.failureAfter(timeoutMs)
+        else if (psiphonFamily(name) && !sawReadyLine)
+            psiphonStartup.failureAfter(timeoutMs, label = if (name.removePrefix("lab-") == ShirokhorshidSidecar.ID) "Shir o Khorshid" else "Psiphon")
         else if (portOpen(socksPort) && !sawReadyLine)
             "Local proxy socket opened, but the required transport readiness marker was not observed within ${timeoutMs / 1000}s; traffic is unverified."
         else if (readyLine != null) "Engine never reported a connected session with its server within ${timeoutMs / 1000}s: " +
@@ -168,6 +168,14 @@ class SidecarProcess(
     }
 
     companion object {
+        /**
+         * Psiphon and its Shir o Khorshid fork print the same notices (the fork's ConsoleClient and notice.go match
+         * upstream's, readiness included: `Tunnels {"count":1}`). Build 174: the fork's notices were not read, so its two
+         * 120 s failures said only "readiness marker was not observed" with no notice, dial or verdict. Pure.
+         */
+        internal fun psiphonFamily(name: String): Boolean =
+            name.removePrefix("lab-").let { it == PsiphonSidecar.ID || it == ShirokhorshidSidecar.ID }
+
         internal const val AETHER_SCAN_EXHAUSTED =
             "Aether gateway scan completed without a verified endpoint; traffic is unverified."
 

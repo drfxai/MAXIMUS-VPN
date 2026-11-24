@@ -107,6 +107,10 @@ class FailoverManager(
     /** Strikes inside the window now (failed real checks and tunnel errors); 0 while healthy. */
     fun strikeCount(): Int = strikes.count()
 
+    /** Why the last real traffic check failed (exception type and redacted message), for the report; null before one. */
+    @Volatile var lastCheckFailure: String? = null
+        private set
+
     /** When the first real traffic check after connect passed (0: none yet), for the background relay's gate. */
     fun firstRealPassAt(): Long = firstRealPassAt
     private val lastTunnelReportTime = java.util.concurrent.atomic.AtomicLong(0L)
@@ -164,6 +168,12 @@ class FailoverManager(
                     // The same line every few seconds for minutes says nothing new (build 173): rate-limited.
                     checkWarn.admit()?.let { note ->
                         XrayLogManager.w("FAILOVER", "Node $safeName failed a real traffic check (${strikes.describe(n)}).$note")
+                        // Build 174: Aether's pinned restart 84 s after a verified connect left no trace of why the checks
+                        // failed. The report now carries each admitted strike with its (redacted) reason.
+                        com.example.vpn.diagnostics.events.EventLog.event("watchdog.strike",
+                            com.example.vpn.diagnostics.events.Severity.WARN, attributes = mapOf(
+                                "strikes" to n.toString(), "window" to strikes.describe(n),
+                                "reason" to (lastCheckFailure ?: "unknown")), result = "FAIL")
                     }
 
                     // Three failures inside the window, in a row or with passes between them.
@@ -283,6 +293,7 @@ class FailoverManager(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            lastCheckFailure = SecretRedactor.redact("${e.javaClass.simpleName}: ${e.message.orEmpty()}").take(160)
             // After a switch or disconnect the request fails because the tunnel is gone; not worth a log.
             if (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 XrayLogManager.d("FAILOVER", "Request through the tunnel failed: ${SecretRedactor.redact(e.message.orEmpty())}")
