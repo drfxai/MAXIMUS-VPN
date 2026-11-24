@@ -38,6 +38,12 @@ Shir o Khorshid is in the recovery pool (`RecoveryEngineCatalog`, family `PSIPHO
 goes before it on a network where direct Psiphon failed to start recently (`PsiphonChainMemory`, or a recent
 Psiphon failure in the engine ledger).
 
+In an automatic connect (Smart Connect, auto failover or the power button's fallback; never a pinned, exit-locked or
+forced one), a direct Psiphon that fails to start, or whose tunnel stops carrying traffic, hands over to Shir o
+Khorshid with the user's saved choices, and a Shir o Khorshid started that way that also fails to start hands over to
+Psiphon over Lantern (`PsiphonFallbackLadder`). Where Psiphon over Lantern is already the path verified on the network,
+Shir o Khorshid is skipped and the chain goes next. A Shir o Khorshid the user picked never hands over.
+
 ## Not included
 
 - The fork's private Conduit compartment ID, its build-time server entries and its MaxMind database are secrets of

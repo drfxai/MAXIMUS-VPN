@@ -104,6 +104,15 @@ A config that answers once is cleared from the list.
 
 **Iran geo data.** Chocolate4U/Iran-v2ray-rules (GPL-3.0) is already bundled and verified. Its `geosite` `ir` category already includes bootmortis/iran-hosted-domains (MIT), so no second source is downloaded. Chocolate4U publishes SHA-256 sums but no signatures. The updater checks both the `.sha256sum` file and the GitHub API digest, and rejects any mismatch, so nothing is installed unverified.
 
+### C. Smart Connect uses the ladder's results
+
+Every DNS tunnel the ladder carried a real request through is also recorded in Smart Connect's per-network memory of
+verified paths (`VerifiedWinnerBook`, via `DnsLadderWinners`). Automatic Aether on a Cloudflare-filtered link falls
+back to the best path verified on that network, and a pinned config that stopped carrying traffic offers it with one
+tap; a verified DNS tunnel can now be that path, and when it starts `DnsLadderHook` applies the resolver variant that
+was verified. Only wins are recorded, with no rate (the ladder measures latency), so a path with a measured download
+rate still ranks first; the memory keeps a path for six hours.
+
 ## Deferred, and why
 
 - **CircumVolve shaping on tunnel queries.** The tunnel engines are separate native programs that send their own queries. Shaping those queries would need a local UDP relay between the engine and the resolvers, with its lifecycle tied to every sidecar start and stop. That means touching the engine start path, which another branch is changing. The relay also could not be validated against the Iranian censor in CI. The probe already records which resolvers accept the Z bit, so a relay can later be limited to those resolvers.
