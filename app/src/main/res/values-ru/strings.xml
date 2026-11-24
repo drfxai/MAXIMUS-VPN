@@ -387,7 +387,7 @@
     <string name="ui_checking_installed_engines">Проверка установленных движков…</string>
     <string name="ui_psiphon_setup">Настройка Psiphon</string>
     <string name="ui_shirokhorshid_settings">Настройки Shir o Khorshid</string>
-    <string name="ui_shirokhorshid_settings_detail">Протокол, страна выхода и CDN-фронтинг для общественной версии Psiphon</string>
+    <string name="ui_shirokhorshid_settings_detail">Протокол, страна выхода и CDN-фронтинг для форка Psiphon от сообщества</string>
     <string name="ui_shirokhorshid_protocol">Протокол</string>
     <string name="ui_shirokhorshid_mode_auto">Авто</string>
     <string name="ui_shirokhorshid_mode_conduit">Conduit</string>
