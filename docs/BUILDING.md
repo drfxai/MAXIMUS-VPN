@@ -30,6 +30,27 @@ The release pipeline runs unit tests, release lint, APK packaging checks, signat
 
 Publishing is an explicit action: dispatch the release workflow with the matching tag, or update `release-version.txt` / `release-request.txt`. Documentation and artwork edits do not publish an APK. Existing public download availability is preserved while replacements are uploaded.
 
+## Instrumented tests
+
+`app/src/androidTest` runs on a device or emulator, not on the JVM. CI (`.github/workflows/instrumentation.yml`) boots an Android 15 (API 35) `x86_64` emulator on a pull request and runs:
+
+```bash
+bash scripts/ci/run-instrumented-tests.sh   # gradlew :app:connectedDebugAndroidTest plus device logs
+```
+
+`NativeXrayRuntimeTest` is the important one there: it loads the pinned libXray AAR on the device and asks it for its version, so a broken or missing `libgojni.so` fails CI instead of a phone. `ExampleInstrumentedTest` only checks the application id.
+
+The five safety classes named in `phase1-audit.md` — `DnsKillSwitchRegressionTest`, `PrivateDnsAndSecurityTest`, `SplitTunnelTest`, `ShadowLinkTest`, `VpnSupervisorTest` — are **JVM/Robolectric unit tests** under `app/src/test`. They cannot run on a device and already run in `Checks`. The same workflow re-runs them as a named job so a rename or an empty filter fails loudly.
+
+Locally they need an attached emulator or device:
+
+```bash
+bash scripts/fetch-libxray-android.sh
+bash gradlew --no-daemon :app:connectedDebugAndroidTest
+```
+
+What these tests still do **not** prove: no real-network DNS or IPv6 leak test through a live tunnel, no real Wi-Fi to cellular handover, and no real WARP/Psiphon credentials. The emulator has no carrier and no captive portal.
+
 ## Repository checks
 
 ```bash

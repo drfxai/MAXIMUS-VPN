@@ -237,6 +237,24 @@ object ConnectionEngineRunner {
                                 warpDataBlocked: Boolean): Boolean =
         warpDataBlocked && relayExitNode.isNullOrBlank() && relayEligible(engineId, automatic, options, "saved-server")
 
+    /**
+     * Automatic Aether (Smart Connect, the config-free button, the power-button fallback) on a link where Cloudflare is
+     * measured filtered, with a connection verified on this same network to hand over to: skip the gateway scans.
+     * Never for the user's own run ([manual]) or the background relay. Pure.
+     */
+    fun skipScansForVerifiedFallback(engineId: String, automatic: Boolean, manual: Boolean, relayOnly: Boolean,
+                                     cloudflareBlocked: Boolean, fallbackAvailable: Boolean): Boolean =
+        engineId == AetherSidecar.ID && automatic && !manual && !relayOnly && cloudflareBlocked && fallbackAvailable
+
+    /** The user's own MASQUE-over-HTTP/2 pick inside the hold with Cloudflare still filtered fails at once. Pure. */
+    fun explicitH2FastFail(engineId: String, automatic: Boolean, relayOnly: Boolean, cloudflareBlocked: Boolean,
+                           carrier: String, held: Boolean): Boolean =
+        engineId == AetherSidecar.ID && !automatic && !relayOnly && cloudflareBlocked && held && carrier == "h2"
+
+    fun verifiedFallbackMessage(verified: String): String =
+        "Cloudflare is filtered on this network and $verified carried verified traffic here recently: " +
+            "skipping Aether's gateway scans and connecting with it"
+
     /** One raced carrier's result; [process] is set (still running) only when its HTTPS was verified. */
     private class RaceLeg(val name: String, val candidate: VlessProfile, val context: SidecarContext,
                           val process: RunningEngine?, val launch: SidecarLaunch?, val check: AccessProbe.Result?,
@@ -483,6 +501,13 @@ object ConnectionEngineRunner {
         cloudflareBlocked: Boolean = preferWireGuard,
         /** Radiance (Lantern) can be started as a relay hop for WARP ([lanternRelayEligible]). */
         lanternAvailable: Boolean = false,
+        /**
+         * A connection that carried verified traffic on this network recently ("Serverless (41 KB/s)"), from
+         * [com.example.vpn.smart.VerifiedWinnerBook]. Named in the fast-fail messages.
+         */
+        verifiedAlternative: String? = null,
+        /** The caller falls back to [verifiedAlternative] when this run fails ([skipScansForVerifiedFallback]). */
+        handOver: Boolean = false,
         onProgress: (String) -> Unit = {},
         cancelled: () -> Boolean = { false }
     ): Started {
@@ -568,12 +593,28 @@ object ConnectionEngineRunner {
             record(ladderKind, "warp-data", "SKIP", why)
             throw NoVerifiedPath(listOf("$ladderKind: $why"), null)
         }
+        // Build 171: Cloudflare filtered here (cf_quick) and another connection verified on this same network recently:
+        // an automatic run hands over at once instead of up to three gateway scans (≈190 s) that fail the same way.
+        if (skipScansForVerifiedFallback(engine.id, automatic, manual, relayOnly, cloudflareBlocked, handOver && verifiedAlternative != null)) {
+            val why = verifiedFallbackMessage(verifiedAlternative!!)
+            record(ladderKind, "warp-data", "SKIP", why)
+            throw NoVerifiedPath(listOf("$ladderKind: $why"), null)
+        }
+        // The user's own pick of MASQUE over HTTP/2 (TLS to Cloudflare, what cf_quick saw filtered) while WARP's data plane
+        // is held here: it used to run its full ~180 s scan (19:01-19:04Z in the build 171 report). It stops at once and
+        // names what works here; it never switches by itself. UDP carriers (H3, WireGuard) still run.
+        if (explicitH2FastFail(engine.id, automatic, relayOnly, cloudflareBlocked,
+                carrier = ProfileExtras.read(profile).optString("carrier"), held = WarpDataPlaneHold.blocked(networkKey))) {
+            val why = WarpDataPlaneHold.fastFailMessage(networkKey, verified = verifiedAlternative)
+            record(method(profile), "warp-data", "SKIP", why)
+            throw NoVerifiedPath(listOf(why), null)
+        }
         // Build 170 (Irancell, cf_quick = filtered): the user's own Aether run repeated both 45 s gateway scans three
         // times inside the hold, each ending TLS_HANDSHAKE_FAILED. With Cloudflare still filtered the direct scans are
         // skipped: WARP goes through Lantern when it can, otherwise the run fails at once and names what works here.
         val lanternOnly = held && manual && cloudflareBlocked && !relayOnly && lanternChoice != null
         if (held && manual && cloudflareBlocked && !relayOnly && lanternChoice == null) {
-            val why = WarpDataPlaneHold.fastFailMessage(networkKey, lanternFailedAt = lanternFailedAt)
+            val why = WarpDataPlaneHold.fastFailMessage(networkKey, lanternFailedAt = lanternFailedAt, verified = verifiedAlternative)
             record(ladderKind, "warp-data", "SKIP", why)
             throw NoVerifiedPath(listOf(why), null)
         }

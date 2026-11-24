@@ -34,6 +34,15 @@ class SidecarProcess(
     /** Psiphon only: what this start dialed (counts and protocol names), for the TCP retry decision and diagnostics. */
     fun psiphonDials(): PsiphonSidecar.StartupDials = psiphonStartup.dials()
 
+    /** Psiphon only: how far the start got (0 nothing, 1 region list, 2 dialing, 3 server connected). */
+    fun psiphonStage(): Int = psiphonStartup.progressStage
+
+    /** Psiphon only: the regions its AvailableEgressRegions notice listed; null until one arrives. */
+    fun psiphonAvailableRegions(): List<String>? = psiphonStartup.availableRegions()
+
+    /** Psiphon only: the region of the server its tunnel connected to. */
+    fun psiphonConnectedRegion(): String? = psiphonStartup.connectedRegion()
+
     private val logThread = Thread({
         try {
             process.inputStream.bufferedReader().useLines { lines ->
@@ -41,7 +50,9 @@ class SidecarProcess(
                 lines.forEachIndexed { index, line ->
                     EngineSignals.publish(name, line)
                     reportApiTlsEvent(line)
-                    if (name.removePrefix("lab-") == PsiphonSidecar.ID && !ready) psiphonStartup.observe(line)
+                    // ConnectedServerRegion can follow the Tunnels notice that makes the start ready.
+                    if (name.removePrefix("lab-") == PsiphonSidecar.ID && (!ready || line.contains("ConnectedServerRegion")))
+                        psiphonStartup.observe(line)
                     if (name == AetherSidecar.ID) aetherStage(line)?.let { stage ->
                         if (startupStage != stage) {
                             // An account retry warning is no longer the failure once
