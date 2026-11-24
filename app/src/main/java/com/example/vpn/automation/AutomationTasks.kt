@@ -56,10 +56,10 @@ class AutomationTasks(
         }.getOrDefault(emptyList())
         val vpnActive = vpns.isNotEmpty()
         // Android runs one VPN per user, so while this app's service holds its blocking interface the VPN seen is
-        // that one. From API 29 an owner UID that is reported and is another app's (a work-profile VPN) rules it out;
+        // that one. From API 30 an owner UID that is reported and is another app's (a work-profile VPN) rules it out;
         // Android may also hide the owner (-1), which says nothing either way.
         val onlyOurs = vpns.all { caps ->
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R)
                 caps.ownerUid == android.os.Process.myUid() || caps.ownerUid < 0 else true
         }
         val tunnelUp = VpnController.connectionState.value.status == ConnectionStatus.CONNECTED
