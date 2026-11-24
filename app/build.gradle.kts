@@ -27,7 +27,7 @@ android {
     // Android requires monotonic versionCode; use the actual release workflow build number.
     // 61 remains the local/debug baseline and the floor for older public builds.
     versionCode = maxOf(61, System.getenv("MAXIMUS_RELEASE_BUILD").orEmpty().trim().toIntOrNull() ?: 0)
-    versionName = "1.0.5"
+    versionName = "1.0.4"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -101,8 +101,18 @@ android {
       }
     }
   }
+  // Engine ABIs come from one file that scripts/build-engines.sh also reads, so a
+  // -PtargetAbi value here always has engine artifacts to go with it.
   providers.gradleProperty("targetAbi").orNull?.let { targetAbi ->
-    require(targetAbi in setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
+    val engineAbis = rootProject.file("scripts/engine-abis.txt").readLines()
+      .map { it.substringBefore('#').trim() }
+      .filter { it.isNotEmpty() }
+    require(targetAbi in engineAbis) {
+      "targetAbi=$targetAbi has no engine build: no script under scripts/engines/ produces an " +
+        "artifact for it. Supported ABIs: ${engineAbis.joinToString(", ")} " +
+        "(scripts/engine-abis.txt). Pick one of those, or add $targetAbi to that file, to the " +
+        "engine scripts and to docs/PINS.md first."
+    }
     defaultConfig.ndk.abiFilters.add(targetAbi)
   }
   packaging { jniLibs { useLegacyPackaging = true } }
