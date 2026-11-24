@@ -1,0 +1,82 @@
+name: Shir o Khorshid engine
+
+# Builds the pinned Shir o Khorshid tunnel core (community Psiphon fork, GPL-3.0) for every release ABI the same way
+# the release does (scripts/build-engines.sh runs scripts/engines/shirokhorshid.sh), checks the corresponding-source
+# archive, and runs a host build of the same source with configs shaped like ShirokhorshidSidecar's.
+on:
+  pull_request:
+    paths:
+      - 'scripts/engines/shirokhorshid.sh'
+      - 'scripts/engines/psiphon-link-dns.py'
+      - 'scripts/engines/common.sh'
+      - 'tools/shirokhorshid-validation/**'
+      - 'app/src/main/java/com/example/vpn/sidecar/ShirokhorshidSidecar.kt'
+      - 'app/src/main/assets/psiphon/public-config.json'
+      - '.github/workflows/shirokhorshid-engine.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: shirokhorshid-engine-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-native:
+    name: Android build (${{ matrix.abi }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          cache: false
+      - name: Build the pinned engine program
+        env:
+          ABI: ${{ matrix.abi }}
+          OUT: ${{ runner.temp }}/sok-native
+        run: |
+          sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkmanager_bin=$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager -print -quit)
+          test -n "$sdkmanager_bin"
+          "$sdkmanager_bin" 'ndk;26.3.11579264' > /dev/null
+          export ANDROID_NDK_HOME="$sdk_root/ndk/26.3.11579264"
+          bash scripts/engines/shirokhorshid.sh
+      - name: Check the program and the source archive
+        env:
+          ABI: ${{ matrix.abi }}
+          LIB: ${{ runner.temp }}/sok-native/libshirokhorshid.so
+        run: |
+          test -s "$LIB"
+          case "$ABI" in
+            arm64-v8a) machine=AArch64; class=ELF64 ;;
+            armeabi-v7a) machine=ARM; class=ELF32 ;;
+            x86_64) machine=X86-64; class=ELF64 ;;
+          esac
+          readelf -h "$LIB" | tee /tmp/elf.txt
+          grep -q "Class:.*$class" /tmp/elf.txt
+          grep -q "Machine:.*$machine" /tmp/elf.txt
+          archive=build/transport-offer/Shirokhorshid-source.tar.gz
+          test -s "$archive"
+          tar -tzf "$archive" > /tmp/offer.txt
+          for f in ./LICENSE ./go.mod ./go.sum ./vendor/modules.txt ./ConsoleClient/main.go ./UPSTREAM_REVISION ./MAXIMUS_PATCH.py; do
+            grep -qx "$f" /tmp/offer.txt || { echo "missing $f in $archive"; exit 1; }
+          done
+          tar -xzOf "$archive" ./UPSTREAM_REVISION | head -1 | grep -qx 520f37c980df6909830ad541b42c305e648ed60d
+          tar -xzOf "$archive" ./ConsoleClient/main.go | grep -q MAXIMUS_PSIPHON_LINK_DNS
+          ls -la "$LIB" "$archive"
+      - name: Host build of the same source accepts every mode's config
+        if: matrix.abi == 'x86_64'
+        run: |
+          src=$(ls -d build/shirokhorshid-source-*)
+          (cd "$src" && CGO_ENABLED=0 GOFLAGS=-mod=vendor GOTOOLCHAIN=go1.26.8 go build -trimpath -buildvcs=false \
+            -ldflags '-s -w -checklinkname=0' -o "$RUNNER_TEMP/sok-host" ./ConsoleClient)
+          python3 tools/shirokhorshid-validation/check.py --binary "$RUNNER_TEMP/sok-host" --tunnel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shirokhorshid-native-${{ matrix.abi }}
+          path: ${{ runner.temp }}/sok-native/libshirokhorshid.so
+          retention-days: 7

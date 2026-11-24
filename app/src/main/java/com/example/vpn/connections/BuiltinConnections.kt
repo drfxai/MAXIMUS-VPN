@@ -9,6 +9,7 @@ import com.example.vpn.sidecar.EngineChain
 import com.example.vpn.sidecar.ServerlessSidecar
 import com.example.vpn.sidecar.PsiphonSidecar
 import com.example.vpn.sidecar.RadianceSidecar
+import com.example.vpn.sidecar.ShirokhorshidSidecar
 import com.example.vpn.sidecar.TorSidecar
 
 /** Built-ins are kept out of the saved-server race: Direct must never become an implicit VPN exit. */
@@ -20,6 +21,8 @@ object BuiltinConnections {
         TOR_SNOWFLAKE("config-free-tor", "Tor / Snowflake", "Tor through the built-in Snowflake bridge"),
         SERVERLESS("config-free-direct", "Serverless Direct", "Direct access with your ISP exit IP"),
         PSIPHON("config-free-psiphon", "Psiphon", "Uses configured Psiphon network settings"),
+        SHIROKHORSHID("config-free-shirokhorshid", "Shir o Khorshid",
+            "Community Psiphon fork for Iran: Conduit, CDN fronting"),
         PSIPHON_RADIANCE("config-free-psiphon-radiance", "Psiphon over Lantern",
             "Lantern carries the connection to the Psiphon network"),
         RADIANCE("config-free-radiance", "Lantern / Radiance", "Uses the Lantern network when the engine is installed"),
@@ -38,6 +41,7 @@ object BuiltinConnections {
             TOR_SNOWFLAKE -> TorSidecar.profile(name = title)
             SERVERLESS -> ServerlessSidecar.profile()
             PSIPHON -> PsiphonSidecar.profile()
+            SHIROKHORSHID -> ShirokhorshidSidecar.profile()
             PSIPHON_RADIANCE -> ChainRunner.profile(EngineChain.Chain(listOf(
                 EngineChain.Hop(PsiphonSidecar.ID), EngineChain.Hop(RadianceSidecar.id)
             )), titleOf = EngineChain::titleOf).copy(name = title)
@@ -64,6 +68,7 @@ object BuiltinConnections {
             return when (method) {
                 ConfigFreeMethod.AETHER_WARP -> resolve(context, AETHER)?.copy(id = id)
                 ConfigFreeMethod.SERVERLESS -> resolve(context, DIRECT)?.copy(id = id)
+                ConfigFreeMethod.SHIROKHORSHID -> ShirokhorshidSidecar.profile(ShirokhorshidSettings.load(context)).copy(id = id)
                 else -> method.profile()
             }
         }

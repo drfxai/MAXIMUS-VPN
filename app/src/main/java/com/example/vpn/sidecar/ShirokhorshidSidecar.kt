@@ -1,0 +1,410 @@
+package com.example.vpn.sidecar
+
+import com.example.data.model.AppSettings
+import com.example.data.model.ProfileType
+import com.example.data.model.ProtocolType
+import com.example.data.model.VlessProfile
+import com.example.vpn.engine.ProfileExtras
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+/**
+ * Shir o Khorshid (شیر و خورشید): the community Psiphon fork for Iran, run as its own program like [PsiphonSidecar].
+ *
+ * The program is the ConsoleClient of github.com/shirokhorshid/psiphon-tunnel-core (branch `shirokhorshid`, GPL-3.0,
+ * built by scripts/engines/shirokhorshid.sh at a pinned commit). That fork is upstream psiphon-tunnel-core 4d6eb0e8
+ * (the commit [PsiphonSidecar]'s program is built from) plus:
+ * - CDN fronting: FRONTED-MEEK-CDN-OSSH / -HTTP-OSSH / -QUIC-OSSH dial fronted meek to CDN edge addresses taken from
+ *   `FrontedMeekCDNScanSpec` (user edges, IPv4 or CIDR) and the fork's built-in edge corpus
+ *   (`FrontedMeekCDNScanUseBuiltInSpec`). The core scans the candidates, remembers working ones per NetworkID in its
+ *   data store and prints `cdn fronting scan found (ip: …)` when one carries a tunnel ([ShirokhorshidEdgeMemory]).
+ * - In-proxy (Conduit) filtering: `InproxyRejectProxyCIDRs` rejects a matched conduit whose address is inside the
+ *   listed ranges. MAXIMUS fills it from the bundled Iran GeoIP list ([GeoIpCidrs]) so a conduit inside Iran is
+ *   never used as the way out.
+ *
+ * Nothing about the fork's private build is used: its conduit compartment ID, its build-time server entries and its
+ * MaxMind database come from its own CI secrets. The network settings are the same ones [PsiphonSidecar] reads
+ * (this build's Psiphon settings, an imported Psiphon.config, or the bundled public profile).
+ */
+class ShirokhorshidSidecar(
+    private val configProvider: () -> String?,
+    /** CIDRs of conduits to reject (the bundled Iran list); read once per start. */
+    private val rejectCidrs: () -> List<String> = { emptyList() },
+    /** Edges the core's scanner found on [network] before; prepended to the user's edges in auto mode. */
+    private val rememberedEdges: (network: String?) -> List<String> = { ShirokhorshidEdgeMemory.edges(it) }
+) : SidecarEngine {
+    override val id: String = ID
+    override val binary: String = BINARY
+
+    override fun handles(profile: VlessProfile): Boolean =
+        ProfileExtras.read(profile).optString(PsiphonSidecar.KEY_ENGINE) == ID
+
+    override fun problem(profile: VlessProfile): String? {
+        val raw = runCatching { configProvider() }.getOrNull()?.trim()
+        if (raw.isNullOrEmpty()) return MISSING_SETTINGS
+        PsiphonSidecar.validateNetworkSettings(raw)?.let { return it }
+        return Options.read(profile).problem()
+    }
+
+    override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
+        problem(profile)?.let { throw IllegalStateException(it) }
+        ShirokhorshidEdgeMemory.listen()
+        val options = Options.read(profile)
+        val source = JSONObject(requireNotNull(configProvider()).trim())
+        val dataDir = File(context.workDir, PsiphonSidecar.DATA_DIR).apply { mkdirs() }
+        val chained = context.upstreamSocks != null
+        val base = PsiphonSidecar.buildConfig(source, options.region, context.socksPort, dataDir,
+            context.upstreamSocks, context.upstreamUser, context.upstreamPass, tcpOnly = false)
+        val link = runCatching { Sidecars.psiphonNetworkIdentity?.invoke() }.getOrNull()
+        val metered = runCatching { Sidecars.psiphonLinkMetered?.invoke() }.getOrNull() == true
+        PsiphonSidecar.networkId(link, chained)?.let { base.put("NetworkID", it) }
+        val network = runCatching { com.example.vpn.connections.BuiltinMethodMemory.network() }.getOrNull()
+        val config = applyOptions(base, options,
+            rejectCidrs = if (options.avoidIranConduits) runCatching { rejectCidrs() }.getOrDefault(emptyList()) else emptyList(),
+            remembered = if (options.cdnFronting) runCatching { rememberedEdges(network) }.getOrDefault(emptyList()) else emptyList(),
+            chained = chained)
+        val configFile = File(context.workDir, PsiphonSidecar.CONFIG_FILE)
+        PrivateEngineFile.write(configFile, config.toString())
+        val linkDns = if (!chained && !source.has("DNSResolverAlternateServers"))
+            runCatching { Sidecars.psiphonLinkDns?.invoke().orEmpty() }.getOrDefault(emptyList()) else emptyList()
+        return SidecarLaunch(
+            command = listOf(
+                context.executable.absolutePath,
+                "-config", configFile.absolutePath,
+                "-dataRootDirectory", dataDir.absolutePath,
+                "-formatNotices"
+            ),
+            environment = if (linkDns.isEmpty()) emptyMap() else mapOf(LINK_DNS_ENV to linkDns.joinToString(",")),
+            readyTimeoutMs = readyTimeoutMs(options, link, metered, chained),
+            // Like Psiphon's, its SOCKS server cannot check a login.
+            socksAuth = false,
+            readyLine = PsiphonSidecar.TUNNEL_UP
+        )
+    }
+
+    /** How the fork connects. [AUTO] lets the core choose among every protocol it may use. */
+    enum class Mode(val key: String) {
+        AUTO("auto"),
+        /** Only in-proxy (Conduit volunteer) protocols. */
+        CONDUIT("conduit"),
+        /** Only direct (non in-proxy) protocols, plus the CDN fronted ones when CDN fronting is on. */
+        DIRECT("direct");
+
+        companion object {
+            fun of(key: String?): Mode = entries.firstOrNull { it.key == key?.trim()?.lowercase() } ?: AUTO
+        }
+    }
+
+    /** What the user chose for this engine; stored in the profile's extras so a start needs nothing else. */
+    data class Options(
+        val mode: Mode = Mode.AUTO,
+        /** Exit country (two letters), or empty: Psiphon picks the best server in any region. */
+        val region: String = "",
+        val cdnFronting: Boolean = true,
+        /** User-supplied CDN edges (IPv4 or IPv4 CIDR), in the user's order. Empty: scanner only. */
+        val edges: List<String> = emptyList(),
+        /** Reject conduits inside Iran (Conduit and Auto modes). */
+        val avoidIranConduits: Boolean = true
+    ) {
+        fun problem(): String? {
+            if (!PsiphonSidecar.validRegion(region)) return "The exit country must be a two-letter country code, or Auto."
+            if (edges.size > MAX_EDGES) return "At most $MAX_EDGES CDN edge addresses can be used."
+            edges.firstOrNull { !validEdge(it) }?.let { return "Not a valid CDN edge address: $it (use an IPv4 address or range such as 23.215.0.0/24)." }
+            return null
+        }
+
+        fun writeTo(extras: JSONObject): JSONObject = extras
+            .put(KEY_MODE, mode.key)
+            .put(PsiphonSidecar.KEY_REGION, region)
+            .put(KEY_CDN, cdnFronting)
+            .put(KEY_EDGES, JSONArray(edges))
+            .put(KEY_AVOID_IR, avoidIranConduits)
+
+        companion object {
+            fun read(profile: VlessProfile): Options = read(ProfileExtras.read(profile))
+
+            fun read(extras: JSONObject): Options = Options(
+                mode = Mode.of(extras.optString(KEY_MODE)),
+                region = extras.optString(PsiphonSidecar.KEY_REGION).trim().uppercase(),
+                cdnFronting = extras.optBoolean(KEY_CDN, true),
+                edges = extras.optJSONArray(KEY_EDGES)?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+                    .map { it.trim() }.filter { it.isNotEmpty() },
+                avoidIranConduits = extras.optBoolean(KEY_AVOID_IR, true)
+            )
+        }
+    }
+
+    companion object {
+        const val ID = "shirokhorshid"
+        const val BINARY = "shirokhorshid"
+        /** Upstream commit of the fork's tunnel core this build pins (scripts/engines/shirokhorshid.sh). */
+        const val REVISION = "520f37c980df"
+        const val KEY_MODE = "sokMode"
+        const val KEY_CDN = "sokCdn"
+        const val KEY_EDGES = "sokEdges"
+        const val KEY_AVOID_IR = "sokAvoidIr"
+        const val MAX_EDGES = 64
+        /** Read by the ConsoleClient DNS patch shared with Psiphon (scripts/engines/psiphon-link-dns.py). */
+        const val LINK_DNS_ENV = "MAXIMUS_PSIPHON_LINK_DNS"
+
+        const val MISSING_SETTINGS =
+            "Shir o Khorshid needs Psiphon network settings, which are not included. Import a Psiphon.config file in Settings → Engine updates."
+
+        /** The CDN scan and conduit matching take longer than a plain Psiphon dial (a scan found an edge after ~40 s). */
+        const val SCAN_READY_TIMEOUT_MS = 120_000L
+
+        /** In-proxy protocols, from the fork's common/protocol (and its Android app's Conduit list). */
+        val CONDUIT_PROTOCOLS = listOf(
+            "INPROXY-WEBRTC-SSH", "INPROXY-WEBRTC-OSSH", "INPROXY-WEBRTC-TLS-OSSH",
+            "INPROXY-WEBRTC-UNFRONTED-MEEK-OSSH", "INPROXY-WEBRTC-UNFRONTED-MEEK-HTTPS-OSSH",
+            "INPROXY-WEBRTC-UNFRONTED-MEEK-SESSION-TICKET-OSSH", "INPROXY-WEBRTC-FRONTED-MEEK-OSSH",
+            "INPROXY-WEBRTC-FRONTED-MEEK-HTTP-OSSH", "INPROXY-WEBRTC-QUIC-OSSH",
+            "INPROXY-WEBRTC-FRONTED-MEEK-QUIC-OSSH", "INPROXY-WEBRTC-SHADOWSOCKS-OSSH"
+        )
+
+        /** The fork's CDN fronted meek protocols. */
+        val CDN_PROTOCOLS = listOf("FRONTED-MEEK-CDN-OSSH", "FRONTED-MEEK-CDN-HTTP-OSSH", "FRONTED-MEEK-CDN-QUIC-OSSH")
+
+        /** Direct (not in-proxy) protocols. */
+        val DIRECT_PROTOCOLS = listOf(
+            "SSH", "OSSH", "TLS-OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
+            "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "QUIC-OSSH", "SHADOWSOCKS-OSSH", "FRONTED-MEEK-OSSH",
+            "FRONTED-MEEK-HTTP-OSSH", "FRONTED-MEEK-QUIC-OSSH"
+        )
+
+        /** Fields the app owns for this engine: whatever the network settings say about them is replaced. */
+        private val OWNED_FIELDS = listOf(
+            "FrontedMeekCDNScanUseBuiltInSpec", "FrontedMeekCDNScanSpec", "FrontedMeekDialOverrides",
+            "FrontedMeekDialOverridesProbability", "InproxyRejectProxyCIDRs", "InproxyRejectProxyCountryCodes",
+            "GeoIPDatabasePath", "LocalProxyUsername", "LocalProxyPassword"
+        )
+
+        private val IPV4 = Regex("^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$")
+
+        /** An IPv4 address, or an IPv4 CIDR from /8 to /32. Pure. */
+        fun validEdge(value: String): Boolean {
+            val parts = value.trim().split('/')
+            if (parts.size > 2 || !IPV4.matches(parts[0])) return false
+            if (parts.size == 1) return true
+            val prefix = parts[1].toIntOrNull() ?: return false
+            return prefix in 8..32 && parts[1] == prefix.toString()
+        }
+
+        /** Edges from free text (one per line, or separated by spaces, commas or semicolons), deduplicated. Pure. */
+        fun parseEdges(text: String): List<String> =
+            text.split(Regex("[\\s,;]+")).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+        /** A Shir o Khorshid profile with [options]. */
+        fun profile(options: Options = Options()): VlessProfile {
+            val extras = options.writeTo(JSONObject().put(PsiphonSidecar.KEY_ENGINE, ID))
+            return VlessProfile(
+                name = if (options.region.isEmpty()) "Shir o Khorshid" else "Shir o Khorshid (${options.region})",
+                address = ID,
+                port = 0,
+                uuid = "",
+                profileType = ProfileType.VLESS,
+                protocolType = ProtocolType.MIXED,
+                extraSettings = extras.toString()
+            )
+        }
+
+        internal fun readyTimeoutMs(options: Options, link: String?, metered: Boolean, chained: Boolean): Long =
+            if (options.cdnFronting || options.mode == Mode.CONDUIT) SCAN_READY_TIMEOUT_MS
+            else PsiphonSidecar.readyTimeoutMs(link, metered, chained)
+
+        /**
+         * The fork-specific part of the config: protocol limits for [Options.mode], CDN fronting and conduit
+         * filtering. [config] is [PsiphonSidecar.buildConfig]'s output and is changed in place. Pure apart from that.
+         */
+        fun applyOptions(
+            config: JSONObject,
+            options: Options,
+            rejectCidrs: List<String> = emptyList(),
+            remembered: List<String> = emptyList(),
+            chained: Boolean = false
+        ): JSONObject {
+            val owned = OWNED_FIELDS.map { it.lowercase() }.toSet()
+            config.keys().asSequence().filter { it.lowercase() in owned }.toList().forEach { config.remove(it) }
+            val cdn = options.cdnFronting && options.mode != Mode.CONDUIT
+            if (cdn) {
+                config.put("FrontedMeekCDNScanUseBuiltInSpec", true)
+                val edges = (options.edges + remembered).map { it.trim() }.filter { validEdge(it) }.distinct().take(MAX_EDGES)
+                if (edges.isNotEmpty()) config.put("FrontedMeekCDNScanSpec", JSONObject().put("IPCandidates", JSONArray(edges)))
+            }
+            val limit: List<String>? = when (options.mode) {
+                Mode.AUTO -> null
+                Mode.CONDUIT -> CONDUIT_PROTOCOLS
+                Mode.DIRECT -> DIRECT_PROTOCOLS + (if (cdn) CDN_PROTOCOLS else emptyList())
+            }
+            if (limit != null) {
+                // Initial limits from the network settings would otherwise narrow the first round outside the mode.
+                config.remove("InitialLimitTunnelProtocols")
+                config.remove("InitialLimitTunnelProtocolsCandidateCount")
+                config.remove("TunnelProtocol")
+                config.put("LimitTunnelProtocols", JSONArray(limit))
+            }
+            // As the fork's own app does, CDN and direct modes skip tactics: tactics can re-enable protocols the
+            // mode excludes, and its requests need a capable (non-CDN) server first.
+            if (options.mode == Mode.DIRECT) config.put("DisableTactics", true)
+            if (options.mode != Mode.DIRECT && rejectCidrs.isNotEmpty()) {
+                config.put("InproxyRejectProxyCIDRs", JSONArray(rejectCidrs))
+            }
+            if (chained) {
+                // A chain hop reaches its servers through the next hop's SOCKS port: TCP protocols only.
+                val current = config.optJSONArray("LimitTunnelProtocols")
+                    ?.let { a -> (0 until a.length()).map { a.optString(it) } }
+                    ?: (DIRECT_PROTOCOLS + CDN_PROTOCOLS + CONDUIT_PROTOCOLS)
+                val tcp = current.filter { it in PsiphonSidecar.TCP_PROTOCOLS || it in CDN_TCP_PROTOCOLS }
+                require(tcp.isNotEmpty()) { "Shir o Khorshid in this mode has no TCP protocol for a chain hop." }
+                config.put("LimitTunnelProtocols", JSONArray(tcp))
+            }
+            return config
+        }
+
+        private val CDN_TCP_PROTOCOLS = setOf("FRONTED-MEEK-CDN-OSSH", "FRONTED-MEEK-CDN-HTTP-OSSH")
+    }
+}
+
+/**
+ * CDN edges Shir o Khorshid's scanner found carrying a tunnel, per network (a [BuiltinMethodMemory] network key), so
+ * the next start on that network tries them first even after the engine's data directory is cleared. Only addresses
+ * that passed the core's own scan are kept, newest first, at most [MAX] per network, for [TTL_MS].
+ */
+object ShirokhorshidEdgeMemory {
+    const val MAX = 8
+    const val TTL_MS = 3 * 24 * 60 * 60_000L
+    private val FOUND = Regex("cdn fronting scan found \\(ip: ([0-9.\\\\]+)")
+    @Volatile private var subscription: AutoCloseable? = null
+
+    private fun key(network: String) = "shirokhorshidEdges#$network"
+
+    /** The edge in a `cdn fronting scan found (ip: 92\.123\.102\.43, …)` notice, or null. Pure. */
+    fun foundEdge(line: String): String? {
+        if (line.length > 4_096) return null
+        val raw = FOUND.find(line)?.groupValues?.get(1) ?: return null
+        val ip = raw.replace("\\", "")
+        return ip.takeIf { ShirokhorshidSidecar.validEdge(it) && !it.contains('/') }
+    }
+
+    /** "ip@time;ip@time" newest first. Pure. */
+    internal fun encode(entries: List<Pair<String, Long>>): String = entries.joinToString(";") { "${it.first}@${it.second}" }
+
+    internal fun decode(value: String?): List<Pair<String, Long>> = value.orEmpty().split(';').mapNotNull { item ->
+        val ip = item.substringBefore('@')
+        val at = item.substringAfter('@', "").toLongOrNull() ?: return@mapNotNull null
+        (ip to at).takeIf { ShirokhorshidSidecar.validEdge(ip) }
+    }
+
+    fun record(network: String?, ip: String, now: Long = System.currentTimeMillis()) {
+        if (network.isNullOrBlank() || !ShirokhorshidSidecar.validEdge(ip)) return
+        runCatching {
+            val memory = com.example.vpn.connections.BuiltinMethodMemory
+            val kept = decode(memory.read(key(network))).filter { it.first != ip && now - it.second in 0 until TTL_MS }
+            memory.write(key(network), encode((listOf(ip to now) + kept).take(MAX)))
+        }
+    }
+
+    fun edges(network: String?, now: Long = System.currentTimeMillis()): List<String> {
+        if (network.isNullOrBlank()) return emptyList()
+        return runCatching {
+            decode(com.example.vpn.connections.BuiltinMethodMemory.read(key(network)))
+                .filter { now - it.second in 0 until TTL_MS }.map { it.first }
+        }.getOrDefault(emptyList())
+    }
+
+    /** Watches the engine's output (only while it runs, via [EngineSignals]); idempotent. */
+    fun listen() {
+        if (subscription != null) return
+        synchronized(this) {
+            if (subscription != null) return
+            subscription = EngineSignals.subscribe { source, line ->
+                if (source.removePrefix("lab-") != ShirokhorshidSidecar.ID) return@subscribe
+                val ip = foundEdge(line) ?: return@subscribe
+                record(runCatching { com.example.vpn.connections.BuiltinMethodMemory.network() }.getOrNull(), ip)
+            }
+        }
+    }
+}
+
+/**
+ * CIDRs of one country from a V2Ray `geoip.dat` (GeoIPList protobuf: repeated GeoIP{country_code=1, cidr=2:
+ * CIDR{ip=1 bytes, prefix=2}}). IPv4 only. Used for the bundled Chocolate4U `geoip-lite.dat`, whose only country is IR.
+ */
+object GeoIpCidrs {
+    fun ipv4(data: ByteArray, country: String, limit: Int = 20_000): List<String> {
+        val out = ArrayList<String>()
+        val reader = Proto(data, 0, data.size)
+        while (reader.more()) {
+            val (field, wire) = reader.tag() ?: break
+            if (field == 1 && wire == 2) {
+                val entry = reader.bytes() ?: break
+                parseEntry(data, entry.first, entry.second, country, out, limit)
+                if (out.size >= limit) break
+            } else if (!reader.skip(wire)) break
+        }
+        return out
+    }
+
+    private fun parseEntry(data: ByteArray, start: Int, end: Int, country: String, out: MutableList<String>, limit: Int) {
+        val r = Proto(data, start, end)
+        var code: String? = null
+        val cidrs = ArrayList<Pair<Int, Int>>()
+        while (r.more()) {
+            val (field, wire) = r.tag() ?: return
+            when {
+                field == 1 && wire == 2 -> code = r.bytes()?.let { String(data, it.first, it.second - it.first, Charsets.UTF_8) } ?: return
+                field == 2 && wire == 2 -> cidrs += r.bytes() ?: return
+                else -> if (!r.skip(wire)) return
+            }
+        }
+        if (!code.equals(country, ignoreCase = true)) return
+        for ((s, e) in cidrs) {
+            val c = Proto(data, s, e)
+            var ip: ByteArray? = null
+            var prefix = -1
+            while (c.more()) {
+                val (field, wire) = c.tag() ?: break
+                when {
+                    field == 1 && wire == 2 -> ip = c.bytes()?.let { data.copyOfRange(it.first, it.second) }
+                    field == 2 && wire == 0 -> prefix = c.varint()?.toInt() ?: -1
+                    else -> if (!c.skip(wire)) break
+                }
+            }
+            val bytes = ip ?: continue
+            if (bytes.size != 4 || prefix !in 0..32) continue
+            out += bytes.joinToString(".") { (it.toInt() and 0xff).toString() } + "/" + prefix
+            if (out.size >= limit) return
+        }
+    }
+
+    private class Proto(val data: ByteArray, var pos: Int, val end: Int) {
+        fun more() = pos < end
+        fun varint(): Long? {
+            var shift = 0
+            var result = 0L
+            while (pos < end && shift < 64) {
+                val b = data[pos++].toInt() and 0xff
+                result = result or ((b and 0x7f).toLong() shl shift)
+                if (b and 0x80 == 0) return result
+                shift += 7
+            }
+            return null
+        }
+        fun tag(): Pair<Int, Int>? = varint()?.let { (it ushr 3).toInt() to (it and 7).toInt() }
+        fun bytes(): Pair<Int, Int>? {
+            val len = varint() ?: return null
+            if (len < 0 || len > end - pos) return null
+            val start = pos
+            pos += len.toInt()
+            return start to pos
+        }
+        fun skip(wire: Int): Boolean = when (wire) {
+            0 -> varint() != null
+            1 -> (pos + 8 <= end).also { if (it) pos += 8 }
+            2 -> bytes() != null
+            5 -> (pos + 4 <= end).also { if (it) pos += 4 }
+            else -> false
+        }
+    }
+}

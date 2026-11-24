@@ -117,7 +117,8 @@ enum class PathFamily(val title: String, val udp: Boolean = false, val engine: B
                 "psiphon,radiance" -> PSIPHON_RADIANCE
                 else -> ENGINE_CHAIN
             }
-            engineId == "psiphon" -> PSIPHON
+            // Shir o Khorshid is a Psiphon fork: same family, so the planner treats it as another Psiphon candidate.
+            engineId == "psiphon" || engineId == "shirokhorshid" -> PSIPHON
             engineId == "radiance" -> RADIANCE
             engineId == "tor" -> when (detail) {
                 "webtunnel" -> TOR_WEBTUNNEL

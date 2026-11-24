@@ -8,6 +8,7 @@ import com.example.vpn.sidecar.EngineChain
 import com.example.vpn.sidecar.MasqueSidecar
 import com.example.vpn.sidecar.PsiphonSidecar
 import com.example.vpn.sidecar.RadianceSidecar
+import com.example.vpn.sidecar.ShirokhorshidSidecar
 import com.example.vpn.sidecar.Sidecars
 import com.example.vpn.sidecar.TorSidecar
 
@@ -15,18 +16,27 @@ import com.example.vpn.sidecar.TorSidecar
  * Public bridge seeds remain unverified; no third-party account settings or relaxed TLS settings are supplied.
  */
 object RecoveryEngineCatalog {
+    const val SHIROKHORSHID_ID = "recovery-shirokhorshid"
+
     fun candidates(
         saved: List<VlessProfile>,
         seedBridges: List<String> = webTunnelSeeds(),
         tcpOnly: Boolean = false,
+        /**
+         * Direct Psiphon failed to start on this network recently ([com.example.vpn.connections.PsiphonChainMemory]):
+         * Shir o Khorshid (the Psiphon fork with Conduit and CDN fronting) is tried before direct Psiphon. Both are in
+         * the PSIPHON family, so their order here is the order the planner takes them in.
+         */
+        psiphonDirectFailed: Boolean = false,
         available: (VlessProfile) -> Boolean = { RuntimeCapabilities.unsupportedReason(it) == null }
     ): List<VlessProfile> {
-        val defaults = listOf(
-            MasqueSidecar.profile().copy(id = "recovery-masque"),
-            PsiphonSidecar.profile(tcpOnly = tcpOnly).copy(
-                id = if (tcpOnly) "recovery-psiphon-tcp" else "recovery-psiphon",
-                name = if (tcpOnly) "Psiphon direct (TCP)" else "Psiphon direct"
-            ),
+        val psiphonDirect = PsiphonSidecar.profile(tcpOnly = tcpOnly).copy(
+            id = if (tcpOnly) "recovery-psiphon-tcp" else "recovery-psiphon",
+            name = if (tcpOnly) "Psiphon direct (TCP)" else "Psiphon direct"
+        )
+        val shirokhorshid = ShirokhorshidSidecar.profile().copy(id = SHIROKHORSHID_ID, name = "Shir o Khorshid (Conduit, CDN fronting)")
+        val defaults = listOf(MasqueSidecar.profile().copy(id = "recovery-masque")) +
+            (if (psiphonDirectFailed) listOf(shirokhorshid, psiphonDirect) else listOf(psiphonDirect, shirokhorshid)) + listOf(
             RadianceSidecar.profile().copy(id = "recovery-radiance"),
             ConfigFreeMethod.PSIPHON_RADIANCE.profile().copy(id = "recovery-psiphon-radiance"),
             TorSidecar.profile().copy(id = "recovery-tor-snowflake"),

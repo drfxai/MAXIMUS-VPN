@@ -21,6 +21,17 @@ The Android application bundles the official XTLS/libXray release `v26.11.9` and
   https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/4d6eb0e8a7e91d3f9a615f70ef65668b8b3595ec and
   it is built by `scripts/engines/psiphon.sh`. The same source offer as for Mihomo applies. Psiphon's
   network settings are issued by Psiphon Inc. and are not part of this repository.
+- Shir o Khorshid tunnel-core (شیر و خورشید, the community Psiphon fork for Iran), commit
+  `520f37c980df6909830ad541b42c305e648ed60d` of https://github.com/shirokhorshid/psiphon-tunnel-core (branch
+  `shirokhorshid`, which merges Psiphon tunnel-core `4d6eb0e8` above), GNU General Public License v3.0. It runs as a
+  separate program (`libshirokhorshid.so`) reached over a local SOCKS port, built by
+  `scripts/engines/shirokhorshid.sh` from the repository's own `vendor/` directory with one MAXIMUS change to
+  ConsoleClient (`scripts/engines/psiphon-link-dns.py`: use the phone's link DNS servers). The complete corresponding
+  source, including that change, is published with every release as `Shirokhorshid-source.tar.gz`. The fork's Android
+  app (https://github.com/shirokhorshid/shirokhorshid-android, GPL-3.0, read at `2c719306c2340938cbafcb3dc59c8e03173bcf8c`,
+  and its open pull request #73 at `39c3d51f1fb89581628939b618964aba8874b522`) was read for how it configures the core
+  (protocol selection, Conduit filtering, CDN fronting); no code, names of its private build values, server entries,
+  icons or other branding assets are copied. Shir o Khorshid is not developed or endorsed by Psiphon Inc.
 - dnstt `v1.20260501.0` (David Fifield), CC0 1.0 Universal (public domain). Runs as a separate program
   (`libdnstt.so`); source https://www.bamsoftware.com/git/dnstt.git, built by `scripts/engines/dnstt.sh` with
   `scripts/engines/dnstt-query-rate.patch` (a query rate cap) and `scripts/engines/dnstt-multipath.patch` (several

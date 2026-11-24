@@ -23,7 +23,7 @@ class RecoveryEngineCatalogTest {
         val candidates = RecoveryEngineCatalog.candidates(listOf(saved), seedBridges = emptyList()) { true }
         assertTrue(candidates.any { it.id == saved.id })
         assertFalse(candidates.any { it.id == "recovery-tor-snowflake" })
-        assertEquals(11, candidates.size)
+        assertEquals(12, candidates.size)
     }
 
     @Test fun availabilityAndSecurityAreGates() {
@@ -63,6 +63,26 @@ class RecoveryEngineCatalogTest {
         assertEquals(a.map { PathRef.of(it) }, b.map { PathRef.of(it) })
         val chain = ChainRunner.readChain(a.first { it.id == "recovery-psiphon-masque" })!!
         assertEquals(listOf("psiphon", "masque"), chain.hops.map { it.engineId })
+    }
+
+    @Test fun shirokhorshidFollowsDirectPsiphonAndLeadsWhereDirectPsiphonFailed() {
+        fun ids(failed: Boolean) = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList(),
+            psiphonDirectFailed = failed) { true }.map { it.id }
+        val normal = ids(false)
+        assertEquals(normal.indexOf("recovery-psiphon") + 1, normal.indexOf(RecoveryEngineCatalog.SHIROKHORSHID_ID))
+        val failed = ids(true)
+        assertEquals(failed.indexOf("recovery-psiphon") - 1, failed.indexOf(RecoveryEngineCatalog.SHIROKHORSHID_ID))
+        assertEquals(normal.toSet(), failed.toSet())
+        val profile = RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList()) { true }
+            .single { it.id == RecoveryEngineCatalog.SHIROKHORSHID_ID }
+        assertEquals(PathFamily.PSIPHON, PathFamily.of(profile, "shirokhorshid"))
+        // Both Psiphon candidates share a family, so the planner takes them in this order.
+        val pool = com.example.vpn.lab.FullAnalysis.select(
+            RecoveryEngineCatalog.candidates(emptyList(), seedBridges = emptyList(), psiphonDirectFailed = true) { true }
+                .filter { it.id == "recovery-psiphon" || it.id == RecoveryEngineCatalog.SHIROKHORSHID_ID }
+                .map { it to PathFamily.PSIPHON },
+            ExperimentPlanner.plan(null, null, 4))
+        assertEquals(listOf(RecoveryEngineCatalog.SHIROKHORSHID_ID, "recovery-psiphon"), pool.map { it.profile.id })
     }
 
     @Test fun masqueIsNotMisclassifiedAsMihomo() {

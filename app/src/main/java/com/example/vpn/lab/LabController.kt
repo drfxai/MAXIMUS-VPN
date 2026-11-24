@@ -690,8 +690,11 @@ class LabController(
             val bridgeBook = com.example.vpn.smart.WebTunnelFailureBook.shared
             // WebTunnel bridges reset or misanswered repeatedly on this network in the last 6 h are left out.
             val seeds = bridgeBook.usable(currentIdentity, com.example.vpn.smart.RecoveryEngineCatalog.webTunnelSeeds())
+            // Direct Psiphon failed to start here recently: Shir o Khorshid (Conduit, CDN fronting) goes before it.
+            val psiphonDirectFailed = com.example.vpn.connections.PsiphonChainMemory.failedAt(currentIdentity) != null ||
+                com.example.vpn.engine.registry.EngineLedger.shared.recentFailure(com.example.vpn.sidecar.PsiphonSidecar.ID, currentIdentity) != null
             val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(
-                saved, seedBridges = seeds, tcpOnly = ExperimentPlanner.udpDead(cap)
+                saved, seedBridges = seeds, tcpOnly = ExperimentPlanner.udpDead(cap), psiphonDirectFailed = psiphonDirectFailed
             ) + fakeSni
             val poolProfiles = if (rememberedOnly) {
                 val eligible = if (rememberedRadianceOnly) builtIn.filter { com.example.vpn.sidecar.RadianceSidecar.handles(it) } else builtIn
