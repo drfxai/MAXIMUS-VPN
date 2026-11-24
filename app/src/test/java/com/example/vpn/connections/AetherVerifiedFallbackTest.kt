@@ -108,8 +108,8 @@ class AetherVerifiedFallbackTest {
         val failure = run(profile = explicitH2(), manual = true, handOver = false)
         assertTrue(attempted.toString(), attempted.isEmpty())
         val message = failure.message.orEmpty()
-        assertTrue(message, message.startsWith("Aether skipped: Cloudflare is filtered"))
-        assertTrue(message, message.contains("Chain (51 KB/s) carried verified traffic on this network recently: connect with it instead"))
+        assertTrue(message, message.startsWith("Aether skipped: Cloudflare TLS is filtered"))
+        assertTrue(message, message.contains("Connect with Chain (51 KB/s) instead: it worked on this network recently."))
     }
 
     @Test fun theUsersOwnHttp2PickStillRunsOutsideTheHoldOrWithCloudflareReachable() {
@@ -139,8 +139,8 @@ class AetherVerifiedFallbackTest {
 
     @Test fun theDefaultFastFailMessageIsUnchangedWithoutAVerifiedConnection() {
         WarpDataPlaneHold.record(network)
-        assertTrue(WarpDataPlaneHold.fastFailMessage(network).contains("Connect with Lantern or Serverless instead"))
+        assertTrue(WarpDataPlaneHold.fastFailMessage(network).contains("Connect with Lantern or Serverless instead."))
         assertTrue(WarpDataPlaneHold.fastFailMessage(network, verified = "Serverless (41 KB/s)")
-            .endsWith("Serverless (41 KB/s) carried verified traffic on this network recently: connect with it instead"))
+            .endsWith("Connect with Serverless (41 KB/s) instead: it worked on this network recently."))
     }
 }

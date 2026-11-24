@@ -247,4 +247,47 @@ class PsiphonRegionsTest {
         assertTrue("$starts", "DE" !in starts)
         assertTrue("took $now ms", now <= PsiphonRegionPlan.TOTAL_AUTO_MS)
     }
+
+    /**
+     * Build 174 (Irancell, the user's own Psiphon pick): "AvailableEgressRegions regions=0", no dial, and the start was cut
+     * at 40 s of its 95 s budget ("abandoned early by the connection plan"). An empty region list means Psiphon is still
+     * fetching its server list: nothing to rotate to, so the start keeps its whole window.
+     */
+    @Test fun anEmptyRegionListIsBootstrapNotAStallAndKeepsTheWholeWindow() {
+        val starts = mutableListOf<FakeStart>()
+        val out = run.run("", emptyList(), PsiphonRegionPlan.TOTAL_AUTO_MS, launch = { step ->
+            FakeStart(step.region, available = emptyList(), readyAtMs = 70_000, connected = "DE").also { starts += it }
+        })
+        assertEquals(1, starts.size)
+        assertEquals("DE", out.winner?.region)
+        assertTrue(PsiphonRegionPlan.anyStalled(41_000, stage = 1, availableSeen = true))
+        assertTrue(!PsiphonRegionPlan.anyStalled(41_000, stage = 0, availableSeen = false))
+    }
+
+    @Test fun anEmptyRegionListThatNeverDialsUsesTheWholeBudgetNotForty() {
+        val out = run.run("", emptyList(), PsiphonRegionPlan.TOTAL_AUTO_MS, launch = { step ->
+            FakeStart(step.region, available = emptyList())
+        })
+        assertNull(out.ready)
+        assertEquals(1, out.attempts.size)
+        assertTrue("ran ${out.attempts.single().elapsedMs} ms", out.attempts.single().elapsedMs >= PsiphonRegionPlan.TOTAL_AUTO_MS)
+    }
+
+    /**
+     * Build 174: Shir o Khorshid failed twice with only "readiness marker was not observed within 120s": its notices
+     * (the same as Psiphon's; readiness is the same `Tunnels {"count":1}`) were never read.
+     */
+    @Test fun shirOKhorshidNoticesAreReadLikePsiphonsAndItsTimeoutSaysHowFarItGot() {
+        assertTrue(SidecarProcess.psiphonFamily(ShirokhorshidSidecar.ID))
+        assertTrue(SidecarProcess.psiphonFamily("lab-" + ShirokhorshidSidecar.ID))
+        assertTrue(SidecarProcess.psiphonFamily(PsiphonSidecar.ID))
+        assertTrue(!SidecarProcess.psiphonFamily(AetherSidecar.ID))
+        assertTrue(PsiphonSidecar.TUNNEL_UP.containsMatchIn("""2026-11-24T19:23:01Z Tunnels {"count":1}"""))
+        val progress = PsiphonSidecar.StartupProgress()
+        progress.observe("""2026-11-24T19:23:01Z AvailableEgressRegions {"regions":["DE","NL","US"]}""")
+        progress.observe("""2026-11-24T19:23:02Z ConnectingServer {"protocol":"FRONTED-MEEK-CDN-OSSH","region":"DE"}""")
+        val text = progress.failureAfter(120_000, label = "Shir o Khorshid")
+        assertTrue(text, text.startsWith("Shir o Khorshid startup timed out after 120s: server dialing did not establish a tunnel"))
+        assertEquals("dials_failed", progress.dials().verdict)
+    }
 }

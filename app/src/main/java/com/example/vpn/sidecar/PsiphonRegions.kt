@@ -119,7 +119,12 @@ object PsiphonRegionPlan {
     fun unavailable(region: String, available: List<String>?): Boolean =
         region.isNotEmpty() && !available.isNullOrEmpty() && available.none { it.equals(region, ignoreCase = true) }
 
-    /** Any region listed its regions but dialed no server for [ANY_STALL_MS] ([stage] < 2: no ConnectingServer). Pure. */
+    /**
+     * Any region listed its regions but dialed no server for [ANY_STALL_MS] ([stage] < 2: no ConnectingServer). Pure.
+     * [availableSeen] means a NON-EMPTY region list: build 174 (Irancell) cut the user's own Psiphon pick at 40 s of its
+     * 95 s budget on "AvailableEgressRegions regions=0" — Psiphon had no server entries yet and was still fetching its
+     * server list, so there was nothing to rotate to and the cut only ended the start early.
+     */
     fun anyStalled(elapsedMs: Long, stage: Int, availableSeen: Boolean): Boolean =
         availableSeen && stage < 2 && elapsedMs >= ANY_STALL_MS
 
@@ -181,7 +186,7 @@ class PsiphonRegionRun(private val clock: () -> Long = System::currentTimeMillis
             val ready = start.await(budget) {
                 PsiphonRegionPlan.unavailable(step.region, start.available()) ||
                     (step.any && fixed.isEmpty() && !rotated &&
-                        PsiphonRegionPlan.anyStalled(clock() - stepStart, start.stage(), start.available() != null))
+                        PsiphonRegionPlan.anyStalled(clock() - stepStart, start.stage(), !start.available().isNullOrEmpty()))
             }
             val attempt = Attempt(step, ready, clock() - stepStart, start.available(), start.stage(), start.connectedRegion())
             attempts += attempt

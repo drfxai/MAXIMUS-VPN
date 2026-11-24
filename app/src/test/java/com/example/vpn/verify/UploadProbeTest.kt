@@ -85,4 +85,32 @@ class UploadProbeTest {
         assertFalse(cloudflareWorkerExit("104.16.1.1", "cdn.example.com", "cdn.example.com"))
         assertFalse(cloudflareWorkerExit(null, null, null))
     }
+
+    /**
+     * Build 174 (Serverless on Irancell): 16 KB ok in 1.2 s, 64 KB ok in 17.0 s, then all 256 KB were written locally in
+     * 3.7 s and no answer came within 20 s. At 64 KB per 17 s, 256 KB needs about 68 s: a slow uplink, not a stall at
+     * 262144 B, and never a per-connection cap.
+     */
+    @Test fun aGradeWrittenInFullThatTheConfirmedRateCannotFinishIsSlowNotAStall() {
+        val field = Grade(262_144, Outcome.STALLED, 262_144, 20_000, listOf(Sample(3_700, 262_144)), FailureStage.TIMEOUT)
+        val p = UploadProbe(listOf(HostAttempt("speed.cloudflare.com",
+            listOf(Grade(16_384, Outcome.OK, 16_384, 1_200), Grade(65_536, Outcome.OK, 65_536, 17_023), field))))
+        assertNull(p.stallBytes)
+        assertTrue(p.slowUplink)
+        assertTrue(p.describe(), p.describe().contains("256 KB too slow to confirm (all 262144 B written)"))
+        assertTrue(p.describe(), p.describe().contains("partial: 64 KB ok, larger grade too slow to confirm"))
+        val e = TrafficEvidence("a", 1, ProbePath.ENGINE_PROXY, LegResult.Passed(65_536, 6_176), p.toLeg(), 0L, p)
+        assertTrue(e.diagLine(null), e.diagLine(null).startsWith("server=unknown stall=none"))
+    }
+
+    @Test fun aFastPathThatStopsAnsweringIsStillAStallEvenWhenWrittenInFull() {
+        val p = UploadProbe(listOf(HostAttempt("speed.cloudflare.com",
+            listOf(Grade(16_384, Outcome.OK, 16_384, 300), Grade(65_536, Outcome.OK, 65_536, 900),
+                Grade(262_144, Outcome.STALLED, 262_144, 20_000)))))
+        assertEquals(262_144, p.stallBytes)
+        assertFalse(p.slowUplink)
+        // The ~16 KB freeze: nothing smaller was confirmed, so a full write of the first grade stays a stall.
+        val freeze = UploadProbe(listOf(HostAttempt("speed.cloudflare.com", listOf(Grade(16_384, Outcome.STALLED, 16_384, 8_000)))))
+        assertEquals(16_384, freeze.stallBytes)
+    }
 }

@@ -38,6 +38,20 @@ data class UploadProbe(
         /** The first grade that was not confirmed, if any. */
         val firstMiss: Grade? get() = grades.firstOrNull { it.outcome != Outcome.OK }
         fun complete(all: List<Int>): Boolean = all.isNotEmpty() && confirmedBytes >= (all.maxOrNull() ?: 0)
+
+        /**
+         * [g] was written in full and only the reference's answer timed out, while a smaller grade confirmed here says
+         * the uplink is too slow for [g] to be answered in its time: a slow path, not a transfer that stopped part-way.
+         * Build 174 (Serverless on Irancell): 64 KB confirmed in 17 s, so 256 KB needed about 68 s; it was "stalled
+         * after 262144 B" in 20 s, and that count (the grade's own size) was then read as a per-connection cap. A grade
+         * with no smaller confirmed one (the ~16 KB freeze) is never reclassified. Pure.
+         */
+        fun tooSlow(g: Grade): Boolean {
+            if (g.outcome != Outcome.STALLED || g.sentBytes < g.size) return false
+            val ref = grades.filter { it.outcome == Outcome.OK && it.size < g.size && it.elapsedMs > 0 }.maxByOrNull { it.size }
+                ?: return false
+            return ref.elapsedMs.toDouble() * g.size / ref.size > g.elapsedMs
+        }
     }
 
     /** The attempt that got furthest: most bytes confirmed, then most bytes written before it stalled or failed. */
@@ -47,7 +61,10 @@ data class UploadProbe(
     val confirmedBytes: Int get() = best?.confirmedBytes ?: 0
 
     /** Bytes written when the best attempt's first unconfirmed grade stalled; null when nothing stalled there. */
-    val stallBytes: Int? get() = best?.firstMiss?.takeIf { it.outcome == Outcome.STALLED }?.sentBytes
+    val stallBytes: Int? get() = best?.let { b -> b.firstMiss?.takeIf { it.outcome == Outcome.STALLED && !b.tooSlow(it) }?.sentBytes }
+
+    /** The best attempt's first unconfirmed grade was only too slow to confirm ([HostAttempt.tooSlow]). */
+    val slowUplink: Boolean get() = best?.let { b -> b.firstMiss?.let(b::tooSlow) } == true
 
     /** Some grades confirmed and a larger one was not. */
     val partial: Boolean get() = confirmedBytes > 0 && best?.firstMiss != null
@@ -71,12 +88,12 @@ data class UploadProbe(
     /** "speed.cloudflare.com 16 KB ok, 64 KB ok, 256 KB stalled after 98304 B" for the best attempt. */
     fun summary(): String {
         val b = best ?: return "no upload reference" + skippedNote()
-        return "${b.host} " + b.grades.joinToString(", ") { g -> "${g.size / 1024} KB " + gradeWord(g) }
+        return "${b.host} " + b.grades.joinToString(", ") { g -> "${g.size / 1024} KB " + gradeWord(g, b) }
     }
 
-    private fun gradeWord(g: Grade): String = when (g.outcome) {
+    private fun gradeWord(g: Grade, a: HostAttempt): String = when (g.outcome) {
         Outcome.OK -> "ok"
-        Outcome.STALLED -> "stalled after ${g.sentBytes} B"
+        Outcome.STALLED -> if (a.tooSlow(g)) "too slow to confirm (all ${g.sentBytes} B written)" else "stalled after ${g.sentBytes} B"
         Outcome.FAILED -> "failed after ${g.sentBytes} B (${g.stage?.name ?: "error"})"
         Outcome.NOT_TESTED -> "not tested"
     }
@@ -86,13 +103,14 @@ data class UploadProbe(
         if (attempts.isEmpty()) return "upload grades: none tried" + skippedNote()
         val parts = attempts.joinToString(" | ") { a ->
             a.host + ": " + a.grades.joinToString(", ") { g ->
-                "${g.size / 1024} KB ${gradeWord(g)} in ${secs(g.elapsedMs)}" +
+                "${g.size / 1024} KB ${gradeWord(g, a)} in ${secs(g.elapsedMs)}" +
                     if (g.outcome != Outcome.OK && g.timeline.isNotEmpty()) " [" + timeline(g.timeline) + "]" else ""
             }
         }
         val verdict = when {
             best?.complete(grades) == true -> "all grades ok"
-            partial -> "partial: ${confirmedBytes / 1024} KB ok" + (stallBytes?.let { ", stalled at $it B" } ?: "")
+            partial -> "partial: ${confirmedBytes / 1024} KB ok" + (stallBytes?.let { ", stalled at $it B" }
+                ?: if (slowUplink) ", larger grade too slow to confirm" else "")
             else -> "no grade confirmed" + (stallBytes?.let { ", stalled at $it B" } ?: "")
         }
         return "upload grades ($verdict): $parts" + skippedNote()

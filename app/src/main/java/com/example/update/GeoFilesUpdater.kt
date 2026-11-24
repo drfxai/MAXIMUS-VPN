@@ -218,12 +218,25 @@ object GeoFilesUpdater {
         return out.toByteArray()
     }
 
+    /** The engine's local SOCKS port while the app is left out of its own VPN; null when the VPN network is usable. */
+    private fun engineProxy(): com.example.vpn.verify.Socks5.Endpoint? =
+        com.example.vpn.verify.TunPathStatus.engineProxy?.takeIf { com.example.vpn.verify.TunPathStatus.selfExcluded }
+
     private fun client(context: Context, viaVpn: Boolean): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .followRedirects(true)
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
         if (viaVpn) {
+            // Build 174: with an engine program (Aether, Serverless, Psiphon…) the app is left out of its own VPN, so
+            // binding to the VPN network is refused and the upkeep's GeoFiles update failed while connected. The
+            // engine's local port carries the download through the tunnel instead; names are resolved by the engine.
+            engineProxy()?.let { proxy ->
+                val factory = com.example.vpn.verify.Socks5SocketFactory(proxy)
+                return builder.proxy(java.net.Proxy.NO_PROXY).socketFactory(factory).dns(object : Dns {
+                    override fun lookup(hostname: String) = com.example.vpn.verify.Socks5SocketFactory.remoteDns(hostname)
+                }).build()
+            }
             val manager = context.getSystemService(ConnectivityManager::class.java)
                 ?: error("Cannot determine network routing")
             val vpn = manager.allNetworks.firstOrNull {

@@ -94,7 +94,6 @@ class RayVpnService : VpnService() {
         /** Requests through a new tunnel before it counts as unverified, and the pause between them. */
         private const val VERIFY_ATTEMPTS = 3
         private const val VERIFY_RETRY_MS = 1_500L
-        private const val SLOW_PROBE_STEP_MS = 20_000
         private const val SLOW_VERIFY_STEP_MS = 25_000L
         /** How long tun.forwarded waits for other apps' traffic before it says "waiting" (not a failure). */
         private const val TUN_FORWARD_WINDOW_MS = 90_000L
@@ -210,6 +209,12 @@ class RayVpnService : VpnService() {
      * out of its own tunnel then (Android refuses it the VPN network), so checks go through this port.
      */
     @Volatile private var engineEndpoint: com.example.vpn.verify.Socks5.Endpoint? = null
+    /** The running engine's carrier relays through another hop (WARP through Lantern or a saved server). */
+    @Volatile private var relayedCarrier = false
+
+    private fun isRelayedCarrier(running: VlessProfile): Boolean = runCatching {
+        com.example.vpn.engine.ProfileExtras.read(running).optBoolean(com.example.vpn.connections.ConnectionEngineRunner.RELAY_FOLLOW_UP)
+    }.getOrDefault(false)
     /** The Smart Connect search of the current attempt: what each stage tested and verified. */
     @Volatile private var search: com.example.vpn.smart.SearchTracker? = null
     /** Network, MTU the tunnel was built with, and the configured MTU, for the MTU test (TunMtuTrial). */
@@ -332,6 +337,8 @@ class RayVpnService : VpnService() {
             tcp = { socket -> vpnInterface == null || safeProtectSocket(socket) }
         )
         com.example.vpn.unlock.UnlockDns.onChoiceChanged = { onUnlockChoiceChanged() }
+        // Background upkeep may measure beside this service's traffic block (OwnVpnWindow).
+        com.example.vpn.automation.OwnVpnWindow.host = upkeepWindowHost
     }
 
     private fun observeSettingsFlow() {
@@ -1884,6 +1891,7 @@ class RayVpnService : VpnService() {
                 profile = startSidecar(sidecarEngine, profile, settings, aetherFallback)
             }
             mutateState { it.copy(activeRoute = com.example.data.model.ConnectionRoute.label(profile)) }
+            routeEngines = engineChain?.hops?.map { it.engineId } ?: listOfNotNull(sidecarEngine?.id)
             engineEndpoint = if (sidecarEngine?.id == com.example.vpn.sidecar.ByedpiSidecar.ID)
                 com.example.vpn.sidecar.ByedpiSidecar.healthEndpoint(profile)
                 else if (engineChain != null || sidecarEngine != null) com.example.vpn.verify.Socks5.endpointOf(profile) else null
@@ -2247,14 +2255,23 @@ class RayVpnService : VpnService() {
                     direct = com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile), exact = exactSession,
                     chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null,
                     chainAlreadyTried = chain.id in exclude) } else null
+            // Build 174: the user's own Aether pick failed with nothing verified on this network to offer: Lantern, which
+            // does not depend on Cloudflare's TLS, gets the one-tap "Connect with …" (never started by itself).
+            val lanternOffer = if (suggestion == null && chainSuggestion == null && exactSession &&
+                e is com.example.vpn.connections.ConnectionEngineRunner.NoVerifiedPath &&
+                com.example.vpn.sidecar.AetherSidecar.handles(requestedProfile)) runCatching {
+                com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod.RADIANCE.let { m ->
+                    m.profile().takeIf { com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null && it.id !in exclude }
+                }
+            }.getOrNull() else null
             pinnedRestartNote = null
             updateState(_vpnState.value.copy(
                 status = ConnectionStatus.FAILED,
                 errorMessage = e.localizedMessage ?: "Unknown connection failure",
                 failureStage = if (e is EngineStartException) com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED
                     else com.example.vpn.diagnostics.FailureStage.of(e),
-                suggestedProfileId = suggestion?.first?.id ?: chainSuggestion?.id,
-                suggestedProfileName = suggestion?.second?.label() ?: chainSuggestion?.name,
+                suggestedProfileId = suggestion?.first?.id ?: chainSuggestion?.id ?: lanternOffer?.id,
+                suggestedProfileName = suggestion?.second?.label() ?: chainSuggestion?.name ?: lanternOffer?.name,
                 pinnedRestartOf = null
             ))
             disconnectResources()
@@ -2736,6 +2753,7 @@ class RayVpnService : VpnService() {
                 XrayLogManager.i("VPN", "Engine ${engine.id} kept running from the recovery test; no second start-up")
                 watchSidecar(engine, kept.engine)
                 registerWarpThroughCarrier(engine.id, kept.engine, kept.context, kept.launch, settings)
+                relayedCarrier = isRelayedCarrier(profile)
                 return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(profile, kept.context, kept.launch)
             }
             val executable = com.example.vpn.sidecar.Sidecars.executable(engine)
@@ -2982,12 +3000,15 @@ class RayVpnService : VpnService() {
                             put("psiphon.regions.tried", o.attempts.joinToString(",") { it.step.region.ifEmpty { "any" } })
                             o.attempts.lastOrNull { it.available != null }?.available?.let { put("psiphon.regions.available", it.sorted().joinToString(",")) }
                         }
-                        if (engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID) {
+                        // Shir o Khorshid prints Psiphon's notices too (build 174: its 120 s failures carried none).
+                        if (com.example.vpn.sidecar.SidecarProcess.psiphonFamily(engine.id)) {
                             (com.example.vpn.sidecar.EngineReaper.underlying(process) as? com.example.vpn.sidecar.SidecarProcess)?.psiphonDials()?.let {
                                 put("psiphon.dials", it.summary())
                                 put("psiphon.verdict", it.verdict)
                             }
                             if (retry != null) firstDials?.let { put("psiphon.dials.first_try", it.summary()) }
+                            if (regionRun == null) (com.example.vpn.sidecar.EngineReaper.underlying(process) as? com.example.vpn.sidecar.SidecarProcess)
+                                ?.psiphonAvailableRegions()?.let { put("psiphon.regions.available.count", it.size.toString()) }
                         }
                     },
                     stage = com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED, result = "FAIL")
@@ -2999,6 +3020,7 @@ class RayVpnService : VpnService() {
             XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
             watchSidecar(engine, process)
             registerWarpThroughCarrier(engine.id, process, engineContext, launch, settings)
+            relayedCarrier = isRelayedCarrier(runningProfile)
             return@runInterruptible com.example.vpn.sidecar.SidecarChain.xrayProfile(runningProfile, engineContext, launch)
     }
 
@@ -3218,6 +3240,55 @@ class RayVpnService : VpnService() {
             }
         }
     }
+
+    /**
+     * Upkeep beside the traffic block (build 174): after a failed connect this service keeps its blocking interface
+     * (fail-closed) until Disconnect, and the background upkeep skipped every measurement because "a VPN" was up. Here
+     * the blocking interface is swapped for one that leaves this app's own sockets out while [block] runs, exactly as
+     * [engineWindow] does for engine tests; other apps stay blocked throughout. Only when nothing else holds the
+     * connection lock (no connect, switch or stop under way) and only a blocking interface is up; a connect or stop
+     * that starts meanwhile replaces the interface itself, which ends the window ([block]'s `intact` turns false).
+     */
+    private val upkeepWindowHost = object : com.example.vpn.automation.OwnVpnWindow.Host {
+        override fun blockOnly(): Boolean = holdsBlockOnly()
+
+        override suspend fun <T : Any> outside(block: suspend (intact: () -> Boolean) -> T): T? {
+            val open = withContext(Dispatchers.IO) {
+                if (!connectionMutex.tryLock()) return@withContext null
+                try {
+                    if (!holdsBlockOnly()) return@withContext null
+                    val opened = runCatching { createBlockingInterface(excludeApp = true) }.getOrNull() ?: return@withContext null
+                    val previous = vpnInterface
+                    vpnInterface = opened
+                    runCatching { previous?.close() }
+                    opened
+                } finally {
+                    connectionMutex.unlock()
+                }
+            } ?: return null
+            try {
+                return block { vpnInterface === open }
+            } finally {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    // A connect holding the lock replaces the interface itself; nothing to restore then.
+                    if (connectionMutex.tryLock()) try {
+                        if (vpnInterface === open) {
+                            runCatching { createBlockingInterface() }.getOrNull()?.let { closed ->
+                                vpnInterface = closed
+                                runCatching { open.close() }
+                            }
+                        }
+                    } finally {
+                        connectionMutex.unlock()
+                    }
+                }
+            }
+        }
+    }
+
+    /** Only the traffic-blocking interface is up: a failed (or stopped, still protected) connect, no engine, no Unlock. */
+    private fun holdsBlockOnly(): Boolean = vpnInterface != null && protectionRequested && sidecar == null &&
+        unlockSession == null && _vpnState.value.status in setOf(ConnectionStatus.FAILED, ConnectionStatus.DISCONNECTED)
 
     private fun ensureBlockingInterface() {
         if (vpnInterface == null) vpnInterface = createBlockingInterface()
@@ -3455,7 +3526,10 @@ class RayVpnService : VpnService() {
             com.example.vpn.connections.BuiltinConnections.AETHER, com.example.vpn.connections.BuiltinConnections.DIRECT
         )
         if (managed) return kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
-            val check = com.example.vpn.connections.AccessProbe.check(endpoint, checkDns = false)
+            // Build 174: Aether through the Lantern hop needed 10.5 s and a retry for its first check, and its pinned
+            // restart came 84 s after a verified connect while the bulk and video checks passed: two relays get longer steps.
+            val check = com.example.vpn.connections.AccessProbe.check(endpoint, checkDns = false, stepTimeoutMs =
+                if (relayedCarrier) com.example.vpn.connections.AccessProbe.RELAYED_STEP_TIMEOUT_MS else com.example.vpn.connections.AccessProbe.STEP_TIMEOUT_MS)
             check.latencyMs ?: throw java.io.IOException(check.failure ?: "HTTPS response was not verified")
         }
         return withContext(Dispatchers.IO) {
@@ -3471,7 +3545,10 @@ class RayVpnService : VpnService() {
     private fun slowTunnel(): Boolean =
         _vpnState.value.activeProfile?.let { com.example.vpn.ServerTester.isDnsTunnel(it) } == true
 
-    private fun probeStepMs(): Int = if (slowTunnel()) SLOW_PROBE_STEP_MS else 4_000
+    private fun probeStepMs(): Int = com.example.vpn.verify.RouteProbeSteps.stepMs(routeEngines, slowTunnel())
+
+    /** The session's engine programs (one sidecar, or each hop of a chain); empty for Xray alone. */
+    @Volatile private var routeEngines: List<String> = emptyList()
 
     /**
      * Psiphon and Aether sessions: once traffic is verified, check through the engine's local port that YouTube's
@@ -3815,6 +3892,7 @@ class RayVpnService : VpnService() {
     private fun withTunForwardMeter(profile: VlessProfile): VlessProfile {
         com.example.vpn.verify.TunPathStatus.reset()
         com.example.vpn.verify.TunPathStatus.selfExcluded = appOutsideVpn
+        com.example.vpn.verify.TunPathStatus.engineProxy = engineEndpoint?.takeIf { appOutsideVpn }
         val endpoint = engineEndpoint ?: return profile
         if (!appOutsideVpn || com.example.vpn.verify.Socks5.endpointOf(profile)?.port != endpoint.port) return profile
         val meter = runCatching { com.example.vpn.verify.TunForwardMeter.start(endpoint.port) }.getOrNull() ?: run {
@@ -3998,6 +4076,8 @@ class RayVpnService : VpnService() {
                 "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(running.id) ?: "none"),
                 "restart" to restartNo.toString(),
                 "avoid.region" to (psiphonAvoid?.second?.joinToString(",") ?: "none"),
+                "last.check" to (failoverManager?.lastCheckFailure ?: "unknown"),
+                "since.verified.s" to (_vpnState.value.lastConnectedTime?.let { ((System.currentTimeMillis() - it) / 1000).toString() } ?: "unknown"),
                 "suggested" to (suggestion?.first?.let { com.example.vpn.diagnostics.events.DiagEvent.profileRef(it) } ?: "none")))
         launchSwitch("pinned restart $restartNo · $name") { ticket ->
             XrayLogManager.w("FAILOVER", "Restarting $name (the power button's config): $reason")
@@ -4664,6 +4744,7 @@ class RayVpnService : VpnService() {
         videoProbeJob?.cancel()
         videoProbeJob = null
         engineEndpoint = null
+        routeEngines = emptyList()
         tunMtu = null
 
         serviceTxBytes.set(0)
@@ -4685,6 +4766,7 @@ class RayVpnService : VpnService() {
             sidecarForwardProfile = null
             sidecarNetwork = null
             sidecarOwnerFingerprint = null
+            relayedCarrier = false
         }
 
         if (previousInterface !== vpnInterface) {
@@ -4920,6 +5002,7 @@ class RayVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        if (com.example.vpn.automation.OwnVpnWindow.host === upkeepWindowHost) com.example.vpn.automation.OwnVpnWindow.host = null
         com.example.xray.RealDelayProbe.socketProtector = null
         com.example.xray.RealDelayProbe.skipUselessRetry = false
         com.example.xray.RealDelayProbe.retryMemory.reset()

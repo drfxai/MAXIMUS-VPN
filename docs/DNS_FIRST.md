@@ -68,7 +68,7 @@ Rules the ladder follows:
 
 | Task | Runs on | Skips when | Result kept |
 |---|---|---|---|
-| Resolver scan | network change, VPN stopped, daily, failed connect, manual | any VPN is up; scanned on this network in the last 6 h (30 min after a failed connect) | `VerifiedResolverPool` per network |
+| Resolver scan | network change, VPN stopped, daily, failed connect, manual | another app's VPN or this app's tunnel is up; scanned on this network in the last 6 h (30 min after a failed connect) | `VerifiedResolverPool` per network |
 | DNS tunnel ladder | same | VPN up; no DNS tunnel profiles; ran here in the last 24 h (1 h after a failed connect) | `DnsLadderMemory` per network |
 | Clean CDN IP scan | same | VPN up; no CDN-fronted profiles; scanned here in the last 12 h (1 h) | `CleanIpCache` per network (used by revival and connect) |
 | Config revival | same | VPN up; nothing revivable; ran here in the last 24 h (2 h) | revival winners per network; measured latency written back to working configs; dead-strike book |
@@ -79,8 +79,10 @@ Rules the ladder follows:
 - WorkManager runs a daily periodic job, with battery-not-low required.
 - A network change (default-network callback, compared by `NetworkIdentity`) starts a run after 20 s. A newer change replaces a pending one.
 - When the VPN stops, a run starts after 30 s.
-- A failed connect (`ConnectionStatus.FAILED`) starts a run after 15 s. If the blocking interface is still up, it retries up to 3 times.
-- When the VPN connects, the GeoFiles task runs through the tunnel after 60 s.
+- A failed connect (`ConnectionStatus.FAILED`) starts a run after 15 s. If the window beside the blocking interface cannot open yet (a connect holds the service), it retries up to 3 times.
+- When the VPN connects, the GeoFiles task runs through the tunnel after 60 s. When an engine program carries the session (the app is left out of its own VPN), the download goes through the engine's local SOCKS port, with names resolved by the engine (`Socks5SocketFactory`).
+
+**Beside the traffic block** (`OwnVpnWindow`). After a failed connect the service keeps its traffic-blocking interface up (fail-closed) until Disconnect. "Any VPN is up" then means *this app's own block*, not a tunnel: the measuring tasks run, with the block swapped for one that leaves only this app's sockets out (the same exemption the engine tests use). Other apps stay blocked throughout, and the ordinary block comes back when the run ends. A connect, Disconnect or revoke ends the window; the run stops and records nothing measured after that. Measuring still skips under another app's VPN and under this app's connected tunnel. Build 174 (Irancell): every run, including `CONNECT_FAILED` and `VPN_STOPPED`, had skipped every task with `VPN_ACTIVE`. Each run is in the diagnostics report as an `upkeep.run` event (trigger, ran, skipped, failed, which VPN was up).
 - Manual: "Run all now", or tap one row to run only that task.
 
 **No network-type constraint.** WorkManager's "connected" constraint requires Android to *validate* the network, and a DNS-only network never validates. That is exactly when this upkeep matters most. The tasks handle having no network themselves.

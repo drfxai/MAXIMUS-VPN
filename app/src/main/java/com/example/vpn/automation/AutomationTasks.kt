@@ -35,7 +35,12 @@ import kotlinx.coroutines.withContext
  * profile except: measured latency of configs that answered, and — only when the user turned it on — removal of
  * subscription configs that stayed dead ([ConfigHealthBook]).
  */
-class AutomationTasks(private val context: Context, private val stopped: () -> Boolean = { false }) {
+class AutomationTasks(
+    private val context: Context,
+    private val stopped: () -> Boolean = { false },
+    /** False once the window beside this app's own traffic block closed ([OwnVpnWindow]); true otherwise. */
+    private val windowIntact: () -> Boolean = { true }
+) {
     private val app: RayApplication get() = RayApplication.instance
 
     fun network(): String = runCatching { NetworkIdentity.current(context) }.getOrElse { NetworkKey.current(context) }
@@ -46,9 +51,17 @@ class AutomationTasks(private val context: Context, private val stopped: () -> B
     suspend fun env(profiles: List<VlessProfile>): AutomationEnv = withContext(Dispatchers.IO) {
         val cm = context.getSystemService(ConnectivityManager::class.java)
         @Suppress("DEPRECATION")
-        val vpnActive = runCatching {
-            cm?.allNetworks.orEmpty().any { cm?.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }
-        }.getOrDefault(false)
+        val vpns = runCatching {
+            cm?.allNetworks.orEmpty().mapNotNull { cm?.getNetworkCapabilities(it) }.filter { it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) }
+        }.getOrDefault(emptyList())
+        val vpnActive = vpns.isNotEmpty()
+        // Android runs one VPN per user, so while this app's service holds its blocking interface the VPN seen is
+        // that one. From API 30 an owner UID that is reported and is another app's (a work-profile VPN) rules it out;
+        // Android may also hide the owner (-1), which says nothing either way.
+        val onlyOurs = vpns.all { caps ->
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R)
+                caps.ownerUid == android.os.Process.myUid() || caps.ownerUid < 0 else true
+        }
         val tunnelUp = VpnController.connectionState.value.status == ConnectionStatus.CONNECTED
         val metered = runCatching { cm?.isActiveNetworkMetered ?: true }.getOrDefault(true)
         AutomationEnv(
@@ -56,7 +69,8 @@ class AutomationTasks(private val context: Context, private val stopped: () -> B
             hasDnsTunnels = dnsTunnels(profiles).isNotEmpty(),
             hasFronted = fronted(profiles).isNotEmpty(),
             hasRevivable = runCatching { app.configRevival.eligibleCount(revivable(profiles)) > 0 }.getOrDefault(false),
-            geoNeedsTunnel = GeoFilesUpdater.viaVpn(context)
+            geoNeedsTunnel = GeoFilesUpdater.viaVpn(context),
+            ownBlockOnly = vpnActive && !tunnelUp && onlyOurs && OwnVpnWindow.blockOnly()
         )
     }
 
@@ -68,7 +82,11 @@ class AutomationTasks(private val context: Context, private val stopped: () -> B
         AutomationTask.GEO_UPDATE to TaskBody { env -> geo(env) }
     )
 
-    private fun sameNetwork(env: AutomationEnv) = check(network() == env.network) { "the network changed during the run" }
+    private fun sameNetwork(env: AutomationEnv) {
+        check(network() == env.network) { "the network changed during the run" }
+        // A connect or Disconnect ended the window beside the traffic block: later measurements may have been caught.
+        check(windowIntact()) { "the traffic block changed during the run" }
+    }
 
     private suspend fun resolverScan(env: AutomationEnv, profiles: List<VlessProfile>): TaskResult = withContext(Dispatchers.IO) {
         val configured = dnsTunnels(profiles).mapNotNull { DnsTunnelSpecs.spec(it) }.flatMap { it.configured }
@@ -103,7 +121,7 @@ class AutomationTasks(private val context: Context, private val stopped: () -> B
         val plan = DnsTunnelLadder.plan(specs, caps, memory, env.network)
         val byId = tunnels.associateBy { it.id }
         val report = DnsLadderRunner.run(plan, specs, memory, env.network, budgetMs = LADDER_BUDGET_MS,
-            cancelled = { stopped() || network() != env.network }) test@{ rung ->
+            cancelled = { stopped() || !windowIntact() || network() != env.network }) test@{ rung ->
             val base = byId[rung.profileId] ?: return@test DnsLadderRunner.Outcome(false, failure = "config removed", notTested = true)
             val variant = DnsTunnelSpecs.apply(base, rung)
                 ?: return@test DnsLadderRunner.Outcome(false, failure = "variant does not apply", notTested = true)
@@ -133,7 +151,7 @@ class AutomationTasks(private val context: Context, private val stopped: () -> B
         var found = 0
         val notes = mutableListOf<String>()
         for (p in targets) {
-            if (stopped()) break
+            if (stopped() || !windowIntact()) break
             val f = runCatching { finder.find(p, env.network, country) }.getOrNull() ?: continue
             found += f.ips.size
             f.skipped?.let { notes += it }
@@ -145,7 +163,8 @@ class AutomationTasks(private val context: Context, private val stopped: () -> B
     private suspend fun revival(env: AutomationEnv, profiles: List<VlessProfile>): TaskResult = withContext(Dispatchers.IO) {
         // Revival keeps its winners under the carrier key, as the VPN reads them on connect.
         val coarse = NetworkKey.current(context)
-        val report = app.configRevival.run(revivable(profiles), coarse, cancelled = { stopped() })
+        val report = app.configRevival.run(revivable(profiles), coarse, cancelled = { stopped() || !windowIntact() })
+        check(windowIntact()) { "the traffic block changed during the run" }
         val ok = setOf(ConfigRevival.Outcome.REVIVED, ConfigRevival.Outcome.ALREADY_WORKING)
         report.results.filter { it.outcome in ok }.forEach { r ->
             r.latencyMs?.let { runCatching { app.serverRepository.updateLatency(r.profileId, it) } }

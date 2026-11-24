@@ -73,15 +73,14 @@ object WarpDataPlaneHold {
                         verified: String? = null): String {
         val at = heldAt(network, now)
         val ago = at?.let { " ${(now - it) / 60_000} min ago" }.orEmpty()
-        val left = at?.let { " for about ${minutesLeft(HOLD_MS, now - it)} more min" }.orEmpty()
-        // WARP through the Lantern hop also failed here (LanternRelayMemory): say so, so the user does not expect the
-        // next press to try it again. Lantern on its own is a different path and still the first suggestion.
+        val left = at?.let { " (paused for about ${minutesLeft(HOLD_MS, now - it)} more min)" }.orEmpty()
+        // WARP through the Lantern hop also failed here (LanternRelayMemory): say when the user's own pick tries it again.
         val lantern = lanternFailedAt?.let { "; WARP through Lantern also failed here ${(now - it) / 60_000} min ago " +
-            "and is not retried for about ${minutesLeft(LanternRelayMemory.HOLD_MS, now - it)} more min" }.orEmpty()
-        val suggestion = if (verified != null) "$verified carried verified traffic on this network recently: connect with it instead"
-            else "Connect with Lantern or Serverless instead; they do not depend on Cloudflare's TLS"
-        return "Aether skipped: Cloudflare is filtered on this network and WARP's gateway scan found no serving tunnel " +
-            "here$ago, so Aether's direct scans are paused$left$lantern. $suggestion"
+            "(your next pick tries it again in about ${minutesLeft(LanternRelayMemory.MANUAL_RETRY_AFTER_MS, now - it)} min)" }.orEmpty()
+        val suggestion = if (verified != null) "Connect with $verified instead: it worked on this network recently."
+            else "Connect with Lantern or Serverless instead."
+        // Build 174: kept short; the Home card carries the one-tap "Connect with …".
+        return "Aether skipped: Cloudflare TLS is filtered here and WARP found no gateway$ago$left$lantern. $suggestion"
     }
 
     private fun minutesLeft(holdMs: Long, elapsedMs: Long): Long = maxOf(1L, (holdMs - elapsedMs + 59_999) / 60_000)
