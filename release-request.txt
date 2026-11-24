@@ -1,2 +1,3 @@
-V1.0.4 signed Android rebuild after PR #275 (ce2173bd412b27e7c5095ce0b57ecd81ae525534); replaces the withdrawn V1.0.5 request.
+V1.0.4 signed Android rebuild after PR #282 (aba87d2ac01a3ab24ac41dd76f3416d85204c4e6); version stays V1.0.4.
+Redesigned Unlock DNS, connection picker, WARP and Direct screens (#282); Smart Connect fast stop/recovery, DNS-first automation and the Shir o Khorshid engine in the Psiphon fallback ladder (#276-#281).
 Unlock mode: anti-sanction DNS with health-checked servers, auto-pick, custom servers and a remote-updatable list (#275); optional anti-censorship DNS query shaping from CircumVolve (Zohaib et al., ACM CCS 2026): TC/Z bits, ANCOUNT claim and deep compression-pointer chain, per network + server, with plain fallback (#275).
