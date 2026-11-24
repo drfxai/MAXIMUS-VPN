@@ -12,6 +12,7 @@ import com.example.vpn.VpnController
 import com.example.vpn.cleanip.CdnEdgeScanner
 import com.example.vpn.dns.ResolverScanner
 import com.example.vpn.dnsfirst.DnsLadderRunner
+import com.example.vpn.dnsfirst.DnsLadderWinners
 import com.example.vpn.dnsfirst.DnsTunnelLadder
 import com.example.vpn.dnsfirst.DnsTunnelSpecs
 import com.example.vpn.dnsfirst.EngineKind
@@ -115,6 +116,10 @@ class AutomationTasks(private val context: Context, private val stopped: () -> B
                 else -> DnsLadderRunner.Outcome(false, failure = r.failure)
             }
         }
+        // Smart Connect's verified-path memory: automatic Aether's fallback and the pinned-restart offer can use them.
+        DnsLadderWinners.publish(report, env.network,
+            nameOf = { id -> byId[id]?.let { com.example.core.SecretRedactor.redact(it.name) } },
+            record = { net, id, name -> app.networkMemory.winners.recordVerified(net, id, name) })
         val usable = caps.values.sumOf { list -> list.count { it.usable } }
         XrayLogManager.i("DNS", "DNS tunnel ladder: ${report.wins.size} of ${specs.size} tunnels verified, ${report.tested} variants tried, " +
             "$usable resolver paths reach the tunnel domains")

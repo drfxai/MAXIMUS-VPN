@@ -145,6 +145,8 @@ class RayVpnService : VpnService() {
 
         /** Never a profile id: marks a recovery search that follows an engine's failed carrier search. */
         internal const val ENGINE_FAILED_MARKER = "__engine-carriers-failed__"
+        /** Never a profile id: this connect runs Shir o Khorshid as the fallback of a failed direct Psiphon (PsiphonFallbackLadder). */
+        internal const val PSIPHON_LADDER_MARKER = "__psiphon-ladder__"
         /**
          * Never a profile id: the saved servers stalled or froze in this session (see [StallFailover]), so the
          * search skips them and the selected server and goes on with the later stages (E-G).
@@ -922,6 +924,7 @@ class RayVpnService : VpnService() {
         fun recentlyFailed(p: VlessProfile) = !force &&
             book.eligibility(com.example.vpn.connectivity.PathRef.of(p)) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED
         psiphonDirectStartFailed = false
+        shirokhorshidStartFailed = false
         psiphonChainAllowed = false
         try {
             supervisor.requestProtection()
@@ -2162,15 +2165,23 @@ class RayVpnService : VpnService() {
                 engineFallback = engineFallback@{ degraded ->
                     if (exactSession || !com.example.vpn.connections.PsiphonChainMemory.isDirect(degraded)) return@engineFallback null
                     val net = ledgerNetwork()
-                    // Direct Psiphon carried nothing at runtime here: remembered, and the chain over Lantern goes next.
+                    // Direct Psiphon carried nothing at runtime here: remembered, and Shir o Khorshid (unless the chain is
+                    // the path verified here) or the chain over Lantern goes next (PsiphonFallbackLadder).
                     com.example.vpn.connections.PsiphonChainMemory.recordDirectFailure(net)
                     val chain = com.example.vpn.connections.PsiphonChainMemory.chainProfile()
-                    chain.takeIf {
-                        com.example.vpn.connections.PsiphonChainMemory.mayUseChain(direct = true, smart = smart,
+                    val sok = shirokhorshidFallbackProfile()
+                    when (com.example.vpn.connections.PsiphonFallbackLadder.next(failedDirect = true, failedShirokhorshidFallback = false,
+                        allowed = com.example.vpn.connections.PsiphonChainMemory.mayUseChain(direct = true, smart = smart,
                             autoFailover = settings.autoFailoverEnabled, fallback = settings.powerButtonFallback,
-                            exact = false, exitLocked = policy.lockExit, force = false, chainAlreadyTried = false,
-                            chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null)
-                    }?.let { com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, it.id) ?: it }
+                            exact = false, exitLocked = policy.lockExit, force = false, chainAlreadyTried = false, chainAvailable = true),
+                        shirokhorshidAvailable = sok != null, shirokhorshidTried = false,
+                        chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null, chainTried = false,
+                        chainVerifiedHere = com.example.vpn.connections.PsiphonChainMemory.chainVerifiedAt(net) != null)) {
+                        com.example.vpn.connections.PsiphonFallbackLadder.Step.SHIROKHORSHID -> sok
+                        com.example.vpn.connections.PsiphonFallbackLadder.Step.CHAIN ->
+                            com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, chain.id) ?: chain
+                        null -> null
+                    }
                 },
                 onTriggerSwitch = onTriggerSwitch@{ newProfile, reason, excluded ->
                     if (exactSession) {
@@ -2303,24 +2314,47 @@ class RayVpnService : VpnService() {
                     exclude = exclude + requestedProfile.id + ENGINE_FAILED_MARKER)
                 return@withContext
             }
-            // Direct Psiphon never brought a tunnel up here: try Psiphon chained over Lantern before giving up
-            // (build 170 Irancell: direct timed out twice while the chain connected at once).
-            if (psiphonDirectStartFailed && configured != null) {
+            // Direct Psiphon never brought a tunnel up here: try Shir o Khorshid (Conduit, CDN fronting), then Psiphon
+            // chained over Lantern, before giving up (build 170 Irancell: direct timed out twice while the chain
+            // connected at once). PsiphonFallbackLadder decides; the chain goes straight next where it is verified.
+            val shirokhorshidFallbackFailed = shirokhorshidStartFailed && PSIPHON_LADDER_MARKER in exclude
+            if ((psiphonDirectStartFailed || shirokhorshidFallbackFailed) && configured != null) {
+                val failedDirect = psiphonDirectStartFailed && com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile)
                 psiphonDirectStartFailed = false
+                shirokhorshidStartFailed = false
                 val chain = com.example.vpn.connections.PsiphonChainMemory.chainProfile()
-                if (com.example.vpn.connections.PsiphonChainMemory.mayUseChain(
-                        direct = com.example.vpn.connections.PsiphonChainMemory.isDirect(requestedProfile),
+                val sok = shirokhorshidFallbackProfile()
+                val step = com.example.vpn.connections.PsiphonFallbackLadder.next(
+                    failedDirect = failedDirect, failedShirokhorshidFallback = shirokhorshidFallbackFailed,
+                    allowed = com.example.vpn.connections.PsiphonChainMemory.mayUseChain(direct = true,
                         smart = smart, autoFailover = configured.autoFailoverEnabled,
                         fallback = configured.powerButtonFallback, exact = exactSession,
                         exitLocked = com.example.vpn.safety.OperatingModePolicy.of(configured.operationalMode).lockExit,
-                        force = force, chainAlreadyTried = chain.id in exclude,
-                        chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null)) {
-                    com.example.vpn.diagnostics.events.EventLog.event("psiphon.chain_fallback", attributes = mapOf(
-                        "reason" to "direct Psiphon start failed", "next" to "psiphon over lantern"))
-                    XrayLogManager.w("SMART", "Direct Psiphon did not start on this network; trying Psiphon over Lantern.")
-                    showForegroundNotification("Psiphon failed; trying Psiphon over Lantern...")
-                    connectLocked(chain, smart = smart, exclude = exclude + requestedProfile.id)
-                    return@withContext
+                        force = force, chainAlreadyTried = false, chainAvailable = true),
+                    shirokhorshidAvailable = sok != null, shirokhorshidTried = sok == null || sok.id in exclude,
+                    chainAvailable = com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(chain) == null,
+                    chainTried = chain.id in exclude,
+                    chainVerifiedHere = com.example.vpn.connections.PsiphonChainMemory.chainVerifiedAt(failedNetwork) != null)
+                when (step) {
+                    com.example.vpn.connections.PsiphonFallbackLadder.Step.SHIROKHORSHID -> {
+                        com.example.vpn.diagnostics.events.EventLog.event("psiphon.chain_fallback", attributes = mapOf(
+                            "reason" to "direct Psiphon start failed", "next" to "shir o khorshid"))
+                        XrayLogManager.w("SMART", "Direct Psiphon did not start on this network; trying Shir o Khorshid (Conduit, CDN fronting).")
+                        showForegroundNotification("Psiphon failed; trying Shir o Khorshid...")
+                        connectLocked(requireNotNull(sok), smart = smart, exclude = exclude + requestedProfile.id + PSIPHON_LADDER_MARKER)
+                        return@withContext
+                    }
+                    com.example.vpn.connections.PsiphonFallbackLadder.Step.CHAIN -> {
+                        val what = if (failedDirect) "Direct Psiphon" else "Shir o Khorshid"
+                        com.example.vpn.diagnostics.events.EventLog.event("psiphon.chain_fallback", attributes = mapOf(
+                            "reason" to (if (failedDirect) "direct Psiphon start failed" else "shir o khorshid start failed"),
+                            "next" to "psiphon over lantern"))
+                        XrayLogManager.w("SMART", "$what did not start on this network; trying Psiphon over Lantern.")
+                        showForegroundNotification("Psiphon failed; trying Psiphon over Lantern...")
+                        connectLocked(chain, smart = smart, exclude = exclude + requestedProfile.id)
+                        return@withContext
+                    }
+                    null -> Unit
                 }
             }
             if (fallbackFromDirect(requestedProfile)) return@withContext
@@ -2329,6 +2363,16 @@ class RayVpnService : VpnService() {
             if (!protectionRequested) stopSelf()
         }
     }
+
+    /**
+     * Shir o Khorshid with the user's saved choices, as the fallback of a failed direct Psiphon; null when this build
+     * cannot run it here (no engine program, or no Psiphon network settings).
+     */
+    private fun shirokhorshidFallbackProfile(): VlessProfile? = runCatching {
+        com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService,
+            com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod.SHIROKHORSHID.id)
+            ?.takeIf { com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
+    }.getOrNull()
 
     /**
      * The best other path verified on [network] ([com.example.vpn.smart.VerifiedWinnerBook]), resolved to its profile;
@@ -2366,6 +2410,8 @@ class RayVpnService : VpnService() {
     @Volatile private var directFallbackAttempt: String? = null
     /** Direct Psiphon failed its start in the current connect attempt (set in [startSidecar], read by its catch). */
     @Volatile private var psiphonDirectStartFailed = false
+    /** Shir o Khorshid failed its start in the current connect attempt (set in [startSidecar], read by its catch). */
+    @Volatile private var shirokhorshidStartFailed = false
     /** The current connect may hand a failed direct Psiphon start over to Psiphon over Lantern (set in connectLocked). */
     @Volatile private var psiphonChainAllowed = false
 
@@ -2921,6 +2967,7 @@ class RayVpnService : VpnService() {
                     com.example.vpn.connections.PsiphonChainMemory.recordDirectFailure(ledgerNetwork())
                     psiphonDirectStartFailed = true
                 }
+                if (engine.id == com.example.vpn.sidecar.ShirokhorshidSidecar.ID) shirokhorshidStartFailed = true
                 val notices = (com.example.vpn.sidecar.EngineReaper.underlying(process) as? com.example.vpn.sidecar.SidecarProcess)?.psiphonNotices()
                 com.example.vpn.diagnostics.events.EventLog.event("engine.startup.failure",
                     com.example.vpn.diagnostics.events.Severity.ERROR,
