@@ -94,7 +94,6 @@ class RayVpnService : VpnService() {
         /** Requests through a new tunnel before it counts as unverified, and the pause between them. */
         private const val VERIFY_ATTEMPTS = 3
         private const val VERIFY_RETRY_MS = 1_500L
-        private const val SLOW_PROBE_STEP_MS = 20_000
         private const val SLOW_VERIFY_STEP_MS = 25_000L
         /** How long tun.forwarded waits for other apps' traffic before it says "waiting" (not a failure). */
         private const val TUN_FORWARD_WINDOW_MS = 90_000L
@@ -1892,6 +1891,7 @@ class RayVpnService : VpnService() {
                 profile = startSidecar(sidecarEngine, profile, settings, aetherFallback)
             }
             mutateState { it.copy(activeRoute = com.example.data.model.ConnectionRoute.label(profile)) }
+            routeEngines = engineChain?.hops?.map { it.engineId } ?: listOfNotNull(sidecarEngine?.id)
             engineEndpoint = if (sidecarEngine?.id == com.example.vpn.sidecar.ByedpiSidecar.ID)
                 com.example.vpn.sidecar.ByedpiSidecar.healthEndpoint(profile)
                 else if (engineChain != null || sidecarEngine != null) com.example.vpn.verify.Socks5.endpointOf(profile) else null
@@ -3545,7 +3545,10 @@ class RayVpnService : VpnService() {
     private fun slowTunnel(): Boolean =
         _vpnState.value.activeProfile?.let { com.example.vpn.ServerTester.isDnsTunnel(it) } == true
 
-    private fun probeStepMs(): Int = if (slowTunnel()) SLOW_PROBE_STEP_MS else 4_000
+    private fun probeStepMs(): Int = com.example.vpn.verify.RouteProbeSteps.stepMs(routeEngines, slowTunnel())
+
+    /** The session's engine programs (one sidecar, or each hop of a chain); empty for Xray alone. */
+    @Volatile private var routeEngines: List<String> = emptyList()
 
     /**
      * Psiphon and Aether sessions: once traffic is verified, check through the engine's local port that YouTube's
@@ -4741,6 +4744,7 @@ class RayVpnService : VpnService() {
         videoProbeJob?.cancel()
         videoProbeJob = null
         engineEndpoint = null
+        routeEngines = emptyList()
         tunMtu = null
 
         serviceTxBytes.set(0)
