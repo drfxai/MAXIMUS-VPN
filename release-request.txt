@@ -1,3 +1,4 @@
-V1.0.4 signed Android rebuild after PR #282 (aba87d2ac01a3ab24ac41dd76f3416d85204c4e6); version stays V1.0.4.
+V1.0.4 signed Android rebuild after PR #283 (c0b64d3602f35cddcf205216d0afda257cfe1ee2); version stays V1.0.4.
+Build 174 field-report fixes (#283): upkeep runs beside the post-failure traffic block, GeoFiles update via the engine SOCKS port, Psiphon keeps its full region window while the server list loads, Shir o Khorshid start diagnostics, slow-uplink grading in Serverless, Aether manual retry after 5 min, 10-15 s session check steps for engine programs and relayed carriers.
 Redesigned Unlock DNS, connection picker, WARP and Direct screens (#282); Smart Connect fast stop/recovery, DNS-first automation and the Shir o Khorshid engine in the Psiphon fallback ladder (#276-#281).
 Unlock mode: anti-sanction DNS with health-checked servers, auto-pick, custom servers and a remote-updatable list (#275); optional anti-censorship DNS query shaping from CircumVolve (Zohaib et al., ACM CCS 2026): TC/Z bits, ANCOUNT claim and deep compression-pointer chain, per network + server, with plain fallback (#275).
