@@ -19,6 +19,13 @@ class NativeXrayRuntimeTest {
 
         val controller = Class.forName("libXray.DialerController")
         assertTrue(controller.isInterface)
-        assertTrue(controller.methods.any { it.name.equals("protectFd", ignoreCase = true) && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType)) })
+        // The app calls this through reflection and reads the argument as a Number
+        // (XrayEngine.createDialerController), so a primitive int or long is the same contract;
+        // the pinned AAR (v26.11.9) declares long.
+        assertTrue(controller.methods.any {
+            it.name.equals("protectFd", ignoreCase = true) &&
+                (it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType)) ||
+                    it.parameterTypes.contentEquals(arrayOf(Long::class.javaPrimitiveType)))
+        })
     }
 }
