@@ -499,7 +499,9 @@ class RayVpnService : VpnService() {
         val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
         val smart = intent?.getBooleanExtra(EXTRA_SMART, false) == true
         val force = intent?.getBooleanExtra(EXTRA_FORCE, false) == true
-        val exact = intent?.getBooleanExtra(EXTRA_EXACT, false) == true && !smart
+        // The user's own pick of one connection (engine list, an engine's page, the pinned power button): only that
+        // connection runs; Smart Connect alone may choose, change or chain engines (ManualEnginePick).
+        val exact = ManualEnginePick.manual(smart = smart, exact = intent?.getBooleanExtra(EXTRA_EXACT, false) == true)
 
         when (action) {
             ACTION_CONNECT -> {
@@ -647,7 +649,9 @@ class RayVpnService : VpnService() {
                 if (key != watched) {
                     watched = key
                     since = now
-                    budget = profile?.let { runCatching { ConnectDeadline.budgetMs(it) }.getOrNull() } ?: ConnectDeadline.ENGINE_MS
+                    // A manual pick of direct Psiphon also gets the time its own region rotation needs.
+                    budget = profile?.let { runCatching { ConnectDeadline.budgetMs(it, manual = exactSession) }.getOrNull() }
+                        ?: ConnectDeadline.ENGINE_MS
                     engineProfile = profile == null || runCatching { com.example.vpn.sidecar.Sidecars.isEngineProfile(profile) }.getOrDefault(true)
                     unverifiedSince = null
                 }
@@ -693,13 +697,17 @@ class RayVpnService : VpnService() {
         val settings = settingsRepository.getSettings()
         val locked = com.example.vpn.safety.OperatingModePolicy.of(settings.operationalMode).lockExit
         val tried = deadlineTried.toSet()
-        val verified = network?.let { net ->
+        val manualPick = exactSession
+        val verified = if (manualPick) null else network?.let { net ->
             runCatching { networkMemory.winners.best(net, tried) { id -> !ConnectDeadline.ispExit(id) }?.profileId }.getOrNull()
         }
-        val runnable = (ConnectDeadline.CANDIDATES + listOfNotNull(verified)).filter { fallbackProfile(it) != null }.toSet()
+        val runnable = if (manualPick) emptySet() else
+            (ConnectDeadline.CANDIDATES + listOfNotNull(verified)).filter { fallbackProfile(it) != null }.toSet()
+        // The user's own pick (not Smart Connect) ends here with a reason: never another engine or chain.
         val decision = ConnectDeadline.decide(
             stopped = !lifecycle.isCurrent(ticket) || !StopFence.admits(ticket), exitLocked = locked,
-            fallbacksSoFar = deadlineFallbacks, tried = tried, verifiedHere = verified, runnable = { it in runnable })
+            fallbacksSoFar = deadlineFallbacks, tried = tried, verifiedHere = verified, runnable = { it in runnable },
+            manualPick = manualPick)
         when (decision) {
             ConnectDeadline.Decision.Stopped -> return
             is ConnectDeadline.Decision.Fallback -> {
@@ -725,6 +733,7 @@ class RayVpnService : VpnService() {
             is ConnectDeadline.Decision.GiveUp -> {
                 val why = getString(when (decision.reason) {
                     ConnectDeadline.GiveUpReason.EXIT_LOCKED -> com.example.R.string.connect_deadline_reason_locked
+                    ConnectDeadline.GiveUpReason.MANUAL_PICK -> com.example.R.string.connect_deadline_reason_manual
                     ConnectDeadline.GiveUpReason.FALLBACKS_USED -> com.example.R.string.connect_deadline_reason_exhausted
                     ConnectDeadline.GiveUpReason.NONE_LEFT -> com.example.R.string.connect_deadline_reason_none_left
                 })
@@ -3093,7 +3102,8 @@ class RayVpnService : VpnService() {
                             ?.takeIf { it.effectiveFingerprint == r.profileFingerprint }
                             ?.let(com.example.vpn.sidecar.BuiltinExitNode::eligible) == true }
             }.getOrNull() else null
-            val relayExitNode = verifiedExit?.profileId ?: relayRoute?.profileId
+            // The user's own Aether pick runs Aether alone: WARP through a saved server is another path (ManualEnginePick).
+            val relayExitNode = ManualEnginePick.savedServerRelay(manual = exactSession, exitNode = verifiedExit?.profileId ?: relayRoute?.profileId)
             val relayExitRoute = verifiedExit?.route
                 ?: com.example.vpn.sidecar.BuiltinExitNode.Route(relayRoute?.endpoint, relayRoute?.variantKey)
             val metered = hints.metered || runCatching { connectivityManager?.isActiveNetworkMetered }.getOrNull() == true
@@ -3106,8 +3116,10 @@ class RayVpnService : VpnService() {
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,
                 relayExitRoute = relayExitRoute, metered = metered, manual = exactSession, cloudflareBlocked = cfBlocked,
-                lanternAvailable = engine.id == com.example.vpn.sidecar.AetherSidecar.ID &&
-                    runCatching { com.example.vpn.sidecar.LanternRelayHop.available() }.getOrDefault(false),
+                // WARP through Lantern starts a second engine (Radiance): never for the user's own pick (ManualEnginePick).
+                lanternAvailable = ManualEnginePick.lanternHop(manual = exactSession,
+                    lanternAvailable = engine.id == com.example.vpn.sidecar.AetherSidecar.ID &&
+                        runCatching { com.example.vpn.sidecar.LanternRelayHop.available() }.getOrDefault(false)),
                 // Automatic: the path it hands over to. The user's own pick: named in its fast-fail message only.
                 verifiedAlternative = aetherFallback?.label() ?: if (engine.id == com.example.vpn.sidecar.AetherSidecar.ID &&
                     exactSession && relayNetwork != null) runCatching {

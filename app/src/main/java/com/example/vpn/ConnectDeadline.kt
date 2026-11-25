@@ -16,8 +16,10 @@ import com.example.vpn.connections.BuiltinConnections
  *  - A saved config (no engine program) is only timed once its tunnel is up without traffic: its Smart Connect race
  *    and failover have their own limits.
  *  - When the budget runs out: the user's Stop always wins ([Decision.Stopped]); a locked exit (Trade mode) stops with
- *    a clear error; otherwise the path verified on this network goes next, then the next built-in candidate that was
- *    not tried in this Connect, at most [MAX_FALLBACKS] times. Serverless Direct (the ISP's own exit) is never picked
+ *    a clear error; the user's own pick of one connection ([ManualEnginePick]) stops with a clear error and is never
+ *    replaced by another engine or chain; otherwise (Smart Connect and other automatic sessions) the path verified on
+ *    this network goes next, then the next built-in candidate that was not tried in this Connect, at most
+ *    [MAX_FALLBACKS] times. Serverless Direct (the ISP's own exit) is never picked
  *    as a fallback: it does not hide the address, and the test showed it passing plain sites while filtered ones failed.
  *
  * Pure, so the rules are unit-tested.
@@ -27,6 +29,11 @@ object ConnectDeadline {
     const val ENGINE_MS = 60_000L
     const val CHAIN_MS = 90_000L
     const val TOR_MS = 180_000L
+    /**
+     * The user's own pick of direct Psiphon: its own region rotation ([com.example.vpn.sidecar.PsiphonRegionPlan.TOTAL_AUTO_MS])
+     * plus the traffic check, so the same engine can finish retrying itself before the pick counts as failed.
+     */
+    const val PSIPHON_MANUAL_MS = com.example.vpn.sidecar.PsiphonRegionPlan.TOTAL_AUTO_MS + 20_000L
     const val MAX_FALLBACKS = 3
 
     /** Statuses in which the attempt has not carried verified traffic yet. */
@@ -79,6 +86,20 @@ object ConnectDeadline {
     fun budgetMs(profile: VlessProfile): Long = budgetMs(engines(profile))
 
     /**
+     * [budgetMs] for [profile]; a [manual] pick of direct Psiphon also gets the time its own region rotation needs
+     * ([budgetFor]).
+     */
+    fun budgetMs(profile: VlessProfile, manual: Boolean): Long =
+        budgetFor(engines(profile), manual,
+            runCatching { com.example.vpn.connections.PsiphonChainMemory.isDirect(profile) }.getOrDefault(false))
+
+    /** The budget of an attempt on [engines]; a [manual] pick of [directPsiphon] waits out its region rotation. Pure. */
+    fun budgetFor(engines: List<String>, manual: Boolean, directPsiphon: Boolean): Long {
+        val base = budgetMs(engines)
+        return if (manual && directPsiphon) maxOf(base, PSIPHON_MANUAL_MS) else base
+    }
+
+    /**
      * True when the attempt is still waiting for traffic at [now]. A saved config ([engineProfile] false) is timed only
      * while its tunnel is up without traffic.
      */
@@ -95,12 +116,13 @@ object ConnectDeadline {
         data class GiveUp(val reason: GiveUpReason) : Decision
     }
 
-    enum class GiveUpReason { EXIT_LOCKED, FALLBACKS_USED, NONE_LEFT }
+    enum class GiveUpReason { EXIT_LOCKED, MANUAL_PICK, FALLBACKS_USED, NONE_LEFT }
 
     /**
      * What follows an attempt that ran out of time. [tried]: profile ids already tried in this Connect (the user's own
      * pick included); [verifiedHere]: the path that carried verified traffic on this network, if one is remembered;
-     * [runnable]: whether this build can run a candidate here.
+     * [runnable]: whether this build can run a candidate here; [manualPick]: the user picked this one connection
+     * themselves (not Smart Connect), so no other engine or chain is ever started ([ManualEnginePick]).
      */
     fun decide(
         stopped: Boolean,
@@ -109,10 +131,12 @@ object ConnectDeadline {
         tried: Set<String>,
         verifiedHere: String?,
         runnable: (String) -> Boolean,
-        candidates: List<String> = CANDIDATES
+        candidates: List<String> = CANDIDATES,
+        manualPick: Boolean = false
     ): Decision {
         if (stopped) return Decision.Stopped
         if (exitLocked) return Decision.GiveUp(GiveUpReason.EXIT_LOCKED)
+        if (!ManualEnginePick.mayLeaveEngine(manualPick)) return Decision.GiveUp(GiveUpReason.MANUAL_PICK)
         if (fallbacksSoFar >= MAX_FALLBACKS) return Decision.GiveUp(GiveUpReason.FALLBACKS_USED)
         if (verifiedHere != null && verifiedHere !in tried && !ispExit(verifiedHere) && runnable(verifiedHere)) {
             return Decision.Fallback(verifiedHere, "verified on this network before")

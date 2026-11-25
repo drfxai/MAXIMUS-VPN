@@ -1737,6 +1737,7 @@
     <string name="connect_deadline_fallback">%1$s carried no traffic in %2$d s; trying %3$s…</string>
     <string name="connect_deadline_failed">%1$s carried no traffic in %2$d s: %3$s. Traffic stays blocked until you connect again or pick another connection.</string>
     <string name="connect_deadline_reason_locked">the exit is locked in this mode, so no other connection was tried</string>
+    <string name="connect_deadline_reason_manual">you picked this connection yourself, so no other connection was started. Pick another connection or use Smart Connect to let Maximus choose</string>
     <string name="connect_deadline_reason_exhausted">other connections were tried without traffic as well</string>
     <string name="connect_deadline_reason_none_left">no other built-in connection is available to try</string>
     <string name="connect_deadline_notification">Connection failed: no traffic within the time limit</string>
