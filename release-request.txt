@@ -1,3 +1,5 @@
+V1.0.4 signed Android rebuild after PR #286 (64ebd106fb9ed13bb0ff8041adeb04bf238abe74); version stays V1.0.4.
+Engine test fixes (#285, #286): connect works right after Disconnect, upkeep beside the tunnel, GeoFiles update, Shir o Khorshid seeded from Psiphon servers, per-engine connect deadline with fallback, Smart Connect filtered-site probe, Lantern-alone DNS, connection stages card and logcat, Aether tab count.
 V1.0.4 signed Android rebuild after PR #283 (c0b64d3602f35cddcf205216d0afda257cfe1ee2); version stays V1.0.4.
 Build 174 field-report fixes (#283): upkeep runs beside the post-failure traffic block, GeoFiles update via the engine SOCKS port, Psiphon keeps its full region window while the server list loads, Shir o Khorshid start diagnostics, slow-uplink grading in Serverless, Aether manual retry after 5 min, 10-15 s session check steps for engine programs and relayed carriers.
 Redesigned Unlock DNS, connection picker, WARP and Direct screens (#282); Smart Connect fast stop/recovery, DNS-first automation and the Shir o Khorshid engine in the Psiphon fallback ladder (#276-#281).
