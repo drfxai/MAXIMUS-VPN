@@ -53,6 +53,17 @@ class ShirokhorshidSidecar(
         val options = Options.read(profile)
         val source = JSONObject(requireNotNull(configProvider()).trim())
         val dataDir = File(context.workDir, PsiphonSidecar.DATA_DIR).apply { mkdirs() }
+        // An empty data store has nothing to dial (build 175): start from the Psiphon servers this phone already knows.
+        when (val seeded = PsiphonServerSeed.seed(dataDir, PsiphonServerSeed.psiphonRoots(context.workDir))) {
+            is PsiphonServerSeed.Result.Seeded -> runCatching {
+                com.example.xray.XrayLogManager.i("VPN", "Shir o Khorshid: no Psiphon servers in its own data store; " +
+                    "starting from the ${if (seeded.entries >= 64) "64+" else seeded.entries.toString()} known to Psiphon.")
+            }
+            is PsiphonServerSeed.Result.Failed -> runCatching {
+                com.example.xray.XrayLogManager.w("VPN", "Shir o Khorshid: could not copy Psiphon's known servers (${seeded.reason}).")
+            }
+            else -> Unit
+        }
         val chained = context.upstreamSocks != null
         val base = PsiphonSidecar.buildConfig(source, options.region, context.socksPort, dataDir,
             context.upstreamSocks, context.upstreamUser, context.upstreamPass, tcpOnly = false)

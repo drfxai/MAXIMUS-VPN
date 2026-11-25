@@ -185,7 +185,7 @@ class RayVpnService : VpnService() {
     private val connectionMutex = Mutex()
     private var connectJob: Job? = null
     /** Single-flight rules: stale failover or auto-reconnect work is dropped, one teardown and one switch at a time. */
-    private val lifecycle = ConnectionLifecycle()
+    private val lifecycle = ConnectionLifecycle(ConnectionLifecycle.PROCESS)
     private var durationJob: Job? = null
     private var pingJob: Job? = null
 
@@ -452,7 +452,8 @@ class RayVpnService : VpnService() {
             if (!showForegroundNotification("Starting Always-on Maximus VPN...")) return START_NOT_STICKY
             lifecycle.newIntent()
             connectJob?.cancel()
-            connectJob = serviceScope.launch(AttemptTicket(lifecycle.current())) {
+            val connectTicket = lifecycle.current()
+            connectJob = serviceScope.launch(AttemptTicket(connectTicket)) { settleConnect(connectTicket) {
                 val profile = settingsRepository.getSettings().selectedProfileId
                     ?.let { com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, it) ?: serverRepository.getProfileById(it) }
                     ?: serverRepository.getAllProfilesOnce().firstOrNull()
@@ -466,7 +467,7 @@ class RayVpnService : VpnService() {
                     if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
                     if (!protectionRequested) stopSelf()
                 }
-            }
+            } }
             return START_STICKY
         }
         val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
@@ -495,7 +496,8 @@ class RayVpnService : VpnService() {
                 // Engines of the attempt this Connect replaces stop now, so the new attempt does not wait behind them.
                 com.example.vpn.sidecar.EngineReaper.stopAll()
                 com.example.vpn.sidecar.EngineHandoff.clear()
-                connectJob = serviceScope.launch(AttemptTicket(lifecycle.current())) {
+                val connectTicket = lifecycle.current()
+                connectJob = serviceScope.launch(AttemptTicket(connectTicket)) { settleConnect(connectTicket) {
                     val profile = if (!profileId.isNullOrBlank()) {
                         com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, profileId)
                             ?: serverRepository.getProfileById(profileId)
@@ -517,7 +519,7 @@ class RayVpnService : VpnService() {
                         if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
                         if (!protectionRequested) stopSelf()
                     }
-                }
+                } }
             }
             ACTION_DISCONNECT -> {
                 // ACTION_DISCONNECT can arrive through startForegroundService() when the
@@ -553,7 +555,8 @@ class RayVpnService : VpnService() {
                 }
                 lifecycle.newIntent()
                 connectJob?.cancel()
-                connectJob = serviceScope.launch(AttemptTicket(lifecycle.current())) {
+                val connectTicket = lifecycle.current()
+                connectJob = serviceScope.launch(AttemptTicket(connectTicket)) { settleConnect(connectTicket) {
                     val profile = activeProfile
                     if (profile != null) {
                         connect(profile)
@@ -565,11 +568,43 @@ class RayVpnService : VpnService() {
                         if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
                         if (!protectionRequested) stopSelf()
                     }
-                }
+                } }
             }
         }
 
         return if (action == ACTION_CONNECT || action == ACTION_RECONNECT) START_STICKY else START_NOT_STICKY
+    }
+
+    /**
+     * Runs one connect job's [block]. When the job ends (returns or throws) while it is still the newest request and the
+     * state still says "connecting", the state becomes FAILED with a reason instead of an endless spinner
+     * ([UnfinishedConnect], build 175: direct Psiphon showed "Preparing" for 18 minutes after its start ended silently).
+     */
+    private suspend fun settleConnect(ticket: Long, block: suspend () -> Unit) {
+        var error: Throwable? = null
+        try {
+            block()
+        } catch (e: Throwable) {
+            error = e
+            throw e
+        } finally {
+            val cancelled = kotlinx.coroutines.currentCoroutineContext()[Job]?.isCancelled == true
+            val state = _vpnState.value
+            if (UnfinishedConnect.stuck(state.status, lifecycle.isCurrent(ticket), cancelled) && StopFence.admits()) {
+                val reason = UnfinishedConnect.reason(error)
+                runCatching {
+                    XrayLogManager.e("VPN", "[DIAGNOSTICS] $reason")
+                    com.example.vpn.diagnostics.events.EventLog.event("connect.unfinished",
+                        com.example.vpn.diagnostics.events.Severity.ERROR, attributes = mapOf(
+                            "status" to state.status.name, "error" to (error?.javaClass?.simpleName ?: "none")),
+                        result = "FAIL", stage = com.example.vpn.diagnostics.FailureStage.UNKNOWN)
+                }
+                val shown = runCatching { getString(com.example.R.string.connect_unfinished_message) }.getOrDefault(reason)
+                updateState(_vpnState.value.copy(status = ConnectionStatus.FAILED, errorMessage = shown,
+                    failureStage = com.example.vpn.diagnostics.FailureStage.UNKNOWN))
+                runCatching { showForegroundNotification(getString(com.example.R.string.connect_unfinished_notification)) }
+            }
+        }
     }
 
     /**
@@ -2021,7 +2056,12 @@ class RayVpnService : VpnService() {
             val verificationGeneration = _vpnState.value.networkGeneration
             val result = verifyTraffic()
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if (_vpnState.value.attemptId != attemptId) return@withContext
+            if (_vpnState.value.attemptId != attemptId) {
+                // Build 175: this return was silent, so a verified session that never became CONNECTED left no trace.
+                XrayLogManager.w("VPN", "[DIAGNOSTICS] 10. Verification result (${if (result.first != null) "passed" else "failed"}) " +
+                    "not applied: another attempt owns the connection state now.")
+                return@withContext
+            }
             val currentNetwork = _vpnState.value.networkGeneration == verificationGeneration &&
                 result.second != com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED
             val check = if (currentNetwork) result else null to com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED

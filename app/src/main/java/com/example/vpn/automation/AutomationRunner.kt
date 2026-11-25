@@ -20,7 +20,9 @@ class AutomationRunner(
     private val bodies: Map<AutomationTask, TaskBody>,
     private val clock: () -> Long = System::currentTimeMillis
 ) {
-    data class Summary(val ran: List<AutomationTask>, val skipped: Map<AutomationTask, SkipReason>, val failed: List<AutomationTask>) {
+    data class Summary(val ran: List<AutomationTask>, val skipped: Map<AutomationTask, SkipReason>, val failed: List<AutomationTask>,
+                       /** Why each failed task failed (its own detail, or the exception message). */
+                       val failures: Map<AutomationTask, String> = emptyMap()) {
         /** Every task wanted to run but a VPN was up: worth trying again a little later. */
         val blockedByVpn: Boolean get() = ran.isEmpty() && skipped.values.any { it == SkipReason.VPN_ACTIVE } &&
             skipped.values.none { it == SkipReason.FRESH }
@@ -29,6 +31,7 @@ class AutomationRunner(
     suspend fun run(trigger: AutomationTrigger, env: AutomationEnv, only: Set<AutomationTask>? = null): Summary {
         val ran = mutableListOf<AutomationTask>()
         val failed = mutableListOf<AutomationTask>()
+        val failures = linkedMapOf<AutomationTask, String>()
         val skipped = linkedMapOf<AutomationTask, SkipReason>()
         for (d in AutomationPolicy.plan(trigger, env) { t, n -> book.lastOk(t, n) }) {
             if (only != null && d.task !in only) continue
@@ -49,11 +52,14 @@ class AutomationRunner(
                 TaskResult(0, e.message ?: e.javaClass.simpleName, ok = false)
             }
             ran += d.task
-            if (!result.ok) failed += d.task
+            if (!result.ok) {
+                failed += d.task
+                failures[d.task] = result.detail.ifBlank { "no detail" }
+            }
             book.record(TaskStatus(d.task, clock(), if (result.ok) TaskOutcome.OK else TaskOutcome.FAILED, result.found,
                 network, trigger, null, result.detail))
         }
-        return Summary(ran, skipped, failed)
+        return Summary(ran, skipped, failed, failures)
     }
 }
 

@@ -44,7 +44,8 @@ class Socks5SocketFactoryTest {
         }
         val factory = Socks5SocketFactory(Socks5.Endpoint("127.0.0.1", server.localPort, "u1", "p1"), 5_000)
         val placeholder = Socks5SocketFactory.remoteDns("api.github.com").single()
-        assertArrayEquals(ByteArray(4), placeholder.address)
+        assertArrayEquals(Socks5SocketFactory.placeholder("api.github.com"), placeholder.address)
+        assertEquals(0, placeholder.address[0].toInt())
         factory.createSocket().use { socket ->
             socket.connect(InetSocketAddress(placeholder, 443), 5_000)
             assertEquals(Triple("api.github.com", 443, "u1"), seen.get(5, TimeUnit.SECONDS))
@@ -53,6 +54,17 @@ class Socks5SocketFactoryTest {
             assertEquals("ok", String(buf))
         }
         server.close()
+    }
+
+    /** Build 175: one shared placeholder let OkHttp send github.com requests on the api.github.com connection. */
+    @Test fun eachNameGetsItsOwnPlaceholder() {
+        val api = Socks5SocketFactory.remoteDns("api.github.com").single()
+        val web = Socks5SocketFactory.remoteDns("github.com").single()
+        assertEquals("api.github.com", api.hostName)
+        assertEquals("github.com", web.hostName)
+        org.junit.Assert.assertNotEquals(api, web)
+        assertArrayEquals(Socks5SocketFactory.placeholder("GitHub.com"), Socks5SocketFactory.placeholder("github.com"))
+        org.junit.Assert.assertFalse(Socks5SocketFactory.placeholder("x").contentEquals(ByteArray(4)))
     }
 
     @Test fun theTargetNameIsTheHostNameWhenThereIsOne() {

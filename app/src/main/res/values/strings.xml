@@ -1725,4 +1725,6 @@
     <string name="unlock_sorted_by_latency">sorted by latency</string>
     <string name="unlock_latency_fastest">%1$d ms · fastest</string>
     <string name="unlock_options">Options</string>
+    <string name="connect_unfinished_message">The connection attempt ended without a result; traffic is unverified. Try again, or pick another connection.</string>
+    <string name="connect_unfinished_notification">Connection failed: no result</string>
 </resources>

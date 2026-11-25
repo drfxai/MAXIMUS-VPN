@@ -30,6 +30,12 @@ import java.util.concurrent.TimeUnit
 object GeoFilesUpdater {
     const val REPO = "Chocolate4U/Iran-v2ray-rules"
     const val LATEST_API = "https://api.github.com/repos/$REPO/releases/latest"
+    /**
+     * The release pages on github.com: `releases/latest` redirects to `releases/tag/<tag>` and every asset is at
+     * `releases/download/<tag>/<name>`. Used when the API refuses or fails: its unauthenticated limit (60 requests an
+     * hour per address) is shared by everyone behind the same carrier NAT or WARP / Lantern exit.
+     */
+    const val WEB_BASE = "https://github.com/$REPO"
     private const val MAX_FILE_BYTES = 32L * 1024 * 1024
     private const val MAX_CHECKSUM_BYTES = 4L * 1024
     private const val PREFS = "maximus_geo_update"
@@ -59,7 +65,7 @@ object GeoFilesUpdater {
         val client = client(context, viaVpn)
         val manifest = GeoAssets.activeManifest(context) ?: error("Bundled GeoFiles manifest missing")
         val stagingDir = File(context.filesDir, GeoAssets.ASSET_DIR).also { it.mkdirs() }
-        val result = download(client, LATEST_API, manifest, stagingDir) {
+        val result = download(client, LATEST_API, manifest, stagingDir, webBase = WEB_BASE) {
             if (!viaVpn) UpdateNetworkPolicy.requireAllowed(context)
         }
         when (result) {
@@ -88,10 +94,27 @@ object GeoFilesUpdater {
         apiUrl: String,
         currentManifest: String,
         stagingDir: File,
+        /** The repository's github.com base ([WEB_BASE]); when set, a failed API read falls back to the release pages. */
+        webBase: String? = null,
         guard: () -> Unit = {}
     ): Downloaded {
         guard()
-        val release = parseRelease(fetchText(client, apiUrl, 512 * 1024))
+        val release = try {
+            parseRelease(fetchText(client, apiUrl, 512 * 1024))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (webBase == null) throw e
+            currentCoroutineContext().ensureActive()
+            guard()
+            try {
+                releaseFromWeb(client, webBase)
+            } catch (web: kotlinx.coroutines.CancellationException) {
+                throw web
+            } catch (web: Exception) {
+                throw IllegalStateException("Release API: ${e.message}; release page: ${web.message}", web)
+            }
+        }
         val newManifest = manifestFor(currentManifest, release.tag, emptyMap())
         if (!GeoAssets.isNewer(newManifest, currentManifest)) return Downloaded.Current(GeoAssets.tagOf(currentManifest))
 
@@ -139,6 +162,35 @@ object GeoFilesUpdater {
         return Release(tag, assets)
     }
 
+    /** Pure: the tag in a `.../releases/tag/<tag>` redirect target; only the numeric tags this repository publishes. */
+    fun tagFromLocation(location: String): String {
+        val raw = location.substringAfter("/releases/tag/", "").substringBefore('?').substringBefore('#').trimEnd('/')
+        val tag = java.net.URLDecoder.decode(raw, "UTF-8")
+        check(tag.isNotBlank() && tag.length <= 32 && tag.all(Char::isDigit)) { "Unexpected GeoFiles release tag '${tag.take(40)}'" }
+        return tag
+    }
+
+    /**
+     * Pure: the release [tag] as its github.com download URLs under [webBase]. Sizes are unknown here (-1): a download
+     * is then capped at the largest accepted size and still has to match the published SHA-256.
+     */
+    fun webRelease(webBase: String, tag: String): Release {
+        check(webBase.startsWith("https://")) { "Insecure GeoFiles download URL" }
+        val assets = GeoAssets.FILES.keys.flatMap { name ->
+            listOf(name, "$name.sha256sum").map { it to Asset("$webBase/releases/download/$tag/$it", -1, null) }
+        }.toMap()
+        return Release(tag, assets)
+    }
+
+    private fun releaseFromWeb(client: OkHttpClient, webBase: String): Release {
+        val noRedirect = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+        noRedirect.newCall(Request.Builder().url("$webBase/releases/latest").build()).execute().use { reply ->
+            check(reply.code in 300..399) { "HTTP ${reply.code} from ${reply.request.url.host}" }
+            val location = reply.header("Location") ?: error("The latest-release page did not name a release")
+            return webRelease(webBase, tagFromLocation(location))
+        }
+    }
+
     /**
      * Pure: the SHA-256 for [name] in a `sha256sum` file ("<hex>  [path/]<name>" lines, or a bare hash).
      * Throws when it is absent or not a SHA-256.
@@ -180,12 +232,14 @@ object GeoFilesUpdater {
     }
 
     private suspend fun fetchFile(client: OkHttpClient, url: String, size: Long, out: File, guard: () -> Unit): String {
-        check(size in 1..MAX_FILE_BYTES) { "Unexpected GeoFiles size $size" }
+        // -1: size unknown (release pages); the download is then capped at MAX_FILE_BYTES and checked by its hash.
+        check(size == -1L || size in 1..MAX_FILE_BYTES) { "Unexpected GeoFiles size $size" }
+        val limit = if (size < 0) MAX_FILE_BYTES else size
         val digest = MessageDigest.getInstance("SHA-256")
         client.newCall(Request.Builder().url(url).build()).execute().use { reply ->
             check(reply.isSuccessful) { "HTTP ${reply.code} downloading ${out.name.removeSuffix(".download")}" }
             val body = reply.body ?: error("Empty download")
-            check(body.contentLength() <= size) { "Download larger than published" }
+            check(body.contentLength() <= limit) { "Download larger than published" }
             var count = 0L
             body.byteStream().use { input ->
                 out.outputStream().use { output ->
@@ -195,14 +249,14 @@ object GeoFilesUpdater {
                         val n = input.read(buf)
                         if (n < 0) break
                         count += n
-                        check(count <= size) { "Download larger than published" }
+                        check(count <= limit) { "Download larger than published" }
                         digest.update(buf, 0, n)
                         output.write(buf, 0, n)
                     }
                 }
             }
             guard()
-            check(count == size) { "Truncated download" }
+            check(count > 0 && (size < 0 || count == size)) { "Truncated download" }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
@@ -222,6 +276,24 @@ object GeoFilesUpdater {
     private fun engineProxy(): com.example.vpn.verify.Socks5.Endpoint? =
         com.example.vpn.verify.TunPathStatus.engineProxy?.takeIf { com.example.vpn.verify.TunPathStatus.selfExcluded }
 
+    /**
+     * A client whose connections go through an engine's local SOCKS5 port, names resolved by the engine.
+     *
+     * HTTP/1.1 only. Build 175 report: the GeoFiles update still failed through Serverless and Aether after the SOCKS
+     * change. Every name had the same placeholder address (0.0.0.0), and OkHttp coalesces HTTP/2 connections whose
+     * address matches and whose certificate covers the new name: api.github.com's certificate covers github.com, so
+     * the asset requests to github.com were sent on the api.github.com connection, to a server that does not serve
+     * them. Placeholders now differ per name ([com.example.vpn.verify.Socks5SocketFactory.remoteDns]) and HTTP/2 is
+     * off for this client, so a connection only ever carries requests for the name it was opened to.
+     */
+    internal fun socksClient(proxy: com.example.vpn.verify.Socks5.Endpoint, builder: OkHttpClient.Builder): OkHttpClient =
+        builder.proxy(java.net.Proxy.NO_PROXY)
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+            .socketFactory(com.example.vpn.verify.Socks5SocketFactory(proxy))
+            .dns(object : Dns {
+                override fun lookup(hostname: String) = com.example.vpn.verify.Socks5SocketFactory.remoteDns(hostname)
+            }).build()
+
     private fun client(context: Context, viaVpn: Boolean): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .followRedirects(true)
@@ -231,12 +303,7 @@ object GeoFilesUpdater {
             // Build 174: with an engine program (Aether, Serverless, Psiphon…) the app is left out of its own VPN, so
             // binding to the VPN network is refused and the upkeep's GeoFiles update failed while connected. The
             // engine's local port carries the download through the tunnel instead; names are resolved by the engine.
-            engineProxy()?.let { proxy ->
-                val factory = com.example.vpn.verify.Socks5SocketFactory(proxy)
-                return builder.proxy(java.net.Proxy.NO_PROXY).socketFactory(factory).dns(object : Dns {
-                    override fun lookup(hostname: String) = com.example.vpn.verify.Socks5SocketFactory.remoteDns(hostname)
-                }).build()
-            }
+            engineProxy()?.let { proxy -> return socksClient(proxy, builder) }
             val manager = context.getSystemService(ConnectivityManager::class.java)
                 ?: error("Cannot determine network routing")
             val vpn = manager.allNetworks.firstOrNull {

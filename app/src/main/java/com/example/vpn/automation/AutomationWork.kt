@@ -54,25 +54,32 @@ class AutomationWorker(context: Context, params: WorkerParameters) : CoroutineWo
                 AutomationRunner(book, AutomationTasks(applicationContext, { isStopped || !intact() }, intact).bodies(profiles))
                     .run(trigger, env, only)
             } else null) ?: AutomationRunner(book, tasks.bodies(profiles)).run(trigger, env.copy(ownBlockOnly = false), only)
+            val label = AutomationPolicy.vpnLabel(env)
             XrayLogManager.i("AUTO", "Upkeep ($trigger): ran ${summary.ran}, skipped ${summary.skipped}, failed ${summary.failed}" +
-                if (env.vpnActive) " (VPN up: ${if (env.tunnelUp) "this app's tunnel" else if (env.ownBlockOnly) "this app's traffic block" else "another VPN or a connect under way"})" else "")
-            // The diagnostics report carries each upkeep run (build 174 had only log lines to go on).
+                if (env.vpnActive) " (VPN up: ${when (label) {
+                    "tunnel-app-outside" -> "this app's tunnel; network-only tasks ran beside it"
+                    "tunnel" -> "this app's tunnel"
+                    "own-block" -> "this app's traffic block"
+                    "own-connect" -> "this app's connect under way"
+                    else -> "another VPN"
+                }})" else "")
+            val retry = AutomationPolicy.retryLater(trigger, env, summary.skipped.values, summary.ran.isNotEmpty(),
+                runAttemptCount, MAX_RETRIES)
+            // The diagnostics report carries each upkeep run (build 174 had only log lines to go on); a failed task
+            // carries its reason (build 175: GEO_UPDATE failed twice with nothing to say why).
             runCatching {
-                com.example.vpn.diagnostics.events.EventLog.event("upkeep.run", attributes = mapOf(
-                    "trigger" to trigger.name,
-                    "ran" to summary.ran.joinToString(",").ifEmpty { "none" },
-                    "skipped" to summary.skipped.entries.joinToString(",") { "${it.key.name}=${it.value.name}" }.ifEmpty { "none" },
-                    "failed" to summary.failed.joinToString(",").ifEmpty { "none" },
-                    "vpn" to when {
-                        !env.vpnActive -> "none"
-                        env.tunnelUp -> "tunnel"
-                        env.ownBlockOnly -> "own-block"
-                        else -> "other"
-                    }), result = if (summary.failed.isEmpty()) "PASS" else "FAIL")
+                com.example.vpn.diagnostics.events.EventLog.event("upkeep.run", attributes = buildMap {
+                    put("trigger", trigger.name)
+                    put("ran", summary.ran.joinToString(",").ifEmpty { "none" })
+                    put("skipped", summary.skipped.entries.joinToString(",") { "${it.key.name}=${it.value.name}" }.ifEmpty { "none" })
+                    put("failed", summary.failed.joinToString(",").ifEmpty { "none" })
+                    if (summary.failures.isNotEmpty()) put("failed.detail", summary.failures.entries.joinToString(" | ") {
+                        "${it.key.name}: ${com.example.core.SecretRedactor.redact(it.value).take(160)}" })
+                    put("vpn", label)
+                    if (retry) put("retry", "in about ${(runAttemptCount + 1)} min")
+                }, result = if (summary.failed.isEmpty()) "PASS" else "FAIL")
             }
-            // After a failed connect the blocking interface may still be up for a moment: try again a little later.
-            if (summary.blockedByVpn && trigger == AutomationTrigger.CONNECT_FAILED && runAttemptCount < MAX_RETRIES) Result.retry()
-            else Result.success()
+            if (retry) Result.retry() else Result.success()
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
