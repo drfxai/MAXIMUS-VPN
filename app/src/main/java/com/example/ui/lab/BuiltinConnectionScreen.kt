@@ -458,12 +458,10 @@ internal fun BuiltinConnectionScreen(
                 enabled = failed || own && !idle || configurable && bundled && valid) {
                 if (failed || own && !idle) VpnController.stopVpn(context)
                 else if (VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
-                    // Same rule as the power button: with "Power button fallback" on (default) a WARP that carries no
-                    // traffic here hands over to saved servers and the recovery engines (Psiphon, Tor); off pins it.
-                    // Direct keeps its own explicit WARP fallback switch and stays pinned.
-                    vpn.startOrRequestPermission(context, model.profile(),
-                        exact = direct || com.example.vpn.safety.PowerButtonPolicy.exact(
-                            com.example.RayApplication.instance.settingsRepository.getSettings())) { onPermission() }
+                    // The user's own pick of this connection: only it runs (ManualEnginePick). A WARP that carries no
+                    // traffic here ends with a reason instead of handing over to saved servers or the recovery engines;
+                    // Smart Connect is the button that may choose another. Direct keeps its own explicit WARP fallback switch.
+                    vpn.startOrRequestPermission(context, model.profile(), exact = true) { onPermission() }
                 }
             }
         }

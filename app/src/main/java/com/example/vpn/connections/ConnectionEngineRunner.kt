@@ -745,7 +745,9 @@ object ConnectionEngineRunner {
             if (!warpBlockFastPath && warpDataBlockedFastPath(engine.id, automatic, carrier, onIrancell, preferWireGuard, reverseRelay)) {
                 warpBlockFastPath = true
                 BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
-                if (relays.isEmpty() && deferRelayToSavedServer(engine.id, automatic, options, relayExitNode, warpDataBlocked = true)) {
+                // Not for the user's own pick: nothing follows it, so Aether keeps trying its own carriers (ManualEnginePick).
+                if (relays.isEmpty() && com.example.vpn.ManualEnginePick.mayLeaveEngine(manual) &&
+                    deferRelayToSavedServer(engine.id, automatic, options, relayExitNode, warpDataBlocked = true)) {
                     // No saved server verified here yet: stop Aether now (no MTU retry, no other carrier) so the session
                     // reaches saved servers at once; WARP through the first one verified is retried in the background.
                     deferRelay = true
