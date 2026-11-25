@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="automation_title">نگهداری خودکار</string>
+    <string name="automation_task_resolver_scan">اسکن حل‌کننده DNS</string>
+    <string name="automation_task_dns_ladder">آزمون پلکانی تونل‌های DNS</string>
+    <string name="automation_task_clean_ip">اسکن IP پاک CDN</string>
+    <string name="automation_task_revival">احیای پیکربندی‌ها</string>
+    <string name="automation_task_geo">GeoFiles ایران</string>
+    <string name="automation_never">هنوز اجرا نشده است</string>
+    <string name="automation_found">%1$s · %2$d یافت شد</string>
+    <string name="automation_failed">%1$s · ناموفق: %2$s</string>
+    <string name="automation_skip_vpn">منتظر می‌ماند تا VPN خاموش شود</string>
+    <string name="automation_skip_fresh">برای این شبکه به‌روز است</string>
+    <string name="automation_skip_nothing">هیچ پیکربندی نیازی به این ندارد</string>
+    <string name="automation_skip_metered">منتظر Wi-Fi یا تونل می‌ماند</string>
+    <string name="automation_skip_tunnel">منتظر تونل است (GeoFiles از طریق پروکسی)</string>
+    <string name="automation_run_now">اجرای همه اکنون</string>
+    <string name="automation_run_now_sub">برای اجرای تنها همان وظیفه، روی یک ردیف لمس کنید</string>
+    <string name="automation_auto_drop">حذف پیکربندی‌های اشتراک ازکارافتاده</string>
+    <string name="automation_auto_drop_sub">تنها پس از 3 بار احیای ناموفق در طول 2+ روز؛ موارد دلخواه و پیکربندی‌های خودتان هرگز حذف نمی‌شوند</string>
+    <string name="automation_footnote">هنگام تغییر شبکه، روزانه و پس از اتصال ناموفق اجرا می‌شود. اندازه‌گیری‌ها تا زمانی که VPN متصل است به تعویق می‌افتند؛ نتایج به‌صورت جداگانه برای هر شبکه ذخیره می‌شوند.</string>
+</resources>
