@@ -75,6 +75,7 @@ object XrayLogManager {
         val mainLine = "[$timestamp]$levelTag [$tag] $sanitizedMsg"
 
         addEntry(mainLine)
+        Logcat.write(level, tag, sanitizedMsg)
 
         if (throwable != null) {
             val trace = SecretRedactor.formatThrowable(throwable, maxFrames = 8)
@@ -194,3 +195,30 @@ object XrayLogManager {
     }
 }
 
+/**
+ * The app's own log also goes to Android's logcat (tag [TAG]), already redacted by [SecretRedactor]. 2026-11-25 engine
+ * test: a 19 595-line logcat of a failed Aether connect held not one line from the app, so nothing showed which stage
+ * an engine reached. Lines are capped at [MAX_LINE] characters; DEBUG lines are left out. On the JVM (unit tests)
+ * android.util.Log is a stub that throws: the first failure turns the mirror off.
+ */
+internal object Logcat {
+    const val TAG = "MaximusVPN"
+    const val MAX_LINE = 900
+    @Volatile private var available = true
+
+    fun format(tag: String, message: String): String = "[$tag] ${message.replace('\n', ' ')}".take(MAX_LINE)
+
+    fun write(level: LogLevel, tag: String, message: String) {
+        if (!available || level == LogLevel.DEBUG) return
+        val line = format(tag, message)
+        try {
+            when (level) {
+                LogLevel.DEBUG, LogLevel.INFO -> android.util.Log.i(TAG, line)
+                LogLevel.WARN -> android.util.Log.w(TAG, line)
+                LogLevel.ERROR, LogLevel.FATAL -> android.util.Log.e(TAG, line)
+            }
+        } catch (_: Throwable) {
+            available = false
+        }
+    }
+}

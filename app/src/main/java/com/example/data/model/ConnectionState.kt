@@ -100,7 +100,12 @@ data class ConnectionState(
     /** The Smart Connect search of this attempt, stage by stage: what was tested and what carried traffic. */
     val search: com.example.vpn.smart.SearchProgress? = null,
     /** The session was started with the Smart Connect button (not the power button or a tile). */
-    val smartSession: Boolean = false
+    val smartSession: Boolean = false,
+    /**
+     * Other apps' traffic went both ways through this attempt's TUN → engine hop (tun.forwarded VERIFIED): device traffic
+     * is verified for an engine program, whose bind-based TUN check cannot run while the app is outside its own tunnel.
+     */
+    val deviceTrafficSeen: Boolean = false
 ) {
     val isConnected: Boolean get() = status == ConnectionStatus.CONNECTED
 

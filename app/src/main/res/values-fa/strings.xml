@@ -1714,4 +1714,22 @@
     <string name="unlock_sorted_by_latency">مرتب‌شده بر اساس تأخیر</string>
     <string name="unlock_latency_fastest">%1$d ms · سریع‌ترین</string>
     <string name="unlock_options">گزینه‌ها</string>
+    <string name="config_free_checking">در حال بررسی اتصال و ترافیک دستگاه…</string>
+    <string name="config_free_no_traffic">تونل برقرار است، هنوز ترافیکی نیست · با پایان مهلت متوقف می‌شود</string>
+    <string name="config_free_reconnecting">در حال اتصال دوباره…</string>
+    <string name="config_free_verified">متصل · ترافیک دستگاه تأیید شد</string>
+    <string name="config_free_limited">موتور متصل است · ترافیک دستگاه در انتظار تأیید</string>
+    <string name="config_free_interrupted">اتصال قطع شد</string>
+    <string name="config_free_stopping">در حال قطع اتصال…</string>
+    <string name="connect_deadline_fallback">%1$s در %2$d ثانیه ترافیکی منتقل نکرد؛ امتحان %3$s…</string>
+    <string name="connect_deadline_failed">%1$s در %2$d ثانیه ترافیکی منتقل نکرد: %3$s. تا اتصال دوباره یا انتخاب اتصال دیگر، ترافیک مسدود می‌ماند.</string>
+    <string name="connect_deadline_reason_locked">خروجی در این حالت قفل است، پس اتصال دیگری امتحان نشد</string>
+    <string name="connect_deadline_reason_exhausted">اتصال‌های دیگر هم بدون ترافیک امتحان شدند</string>
+    <string name="connect_deadline_reason_none_left">اتصال داخلی دیگری برای امتحان باقی نمانده است</string>
+    <string name="connect_deadline_notification">اتصال ناموفق: در مهلت زمانی ترافیکی نبود</string>
+    <string name="ui_connection_stages">مراحل اتصال</string>
+    <string name="ui_connection_stages_hint">کاری که هر موتور هنگام اتصال انجام داد، جدیدترین در پایین</string>
+    <string name="ui_connection_stages_empty">مراحل پس از شروع اتصال اینجا نمایش داده می‌شوند.</string>
+    <string name="connect_unfinished_message">تلاش برای اتصال بدون نتیجه پایان یافت؛ ترافیک تأیید نشده است. دوباره امتحان کنید یا اتصال دیگری انتخاب کنید.</string>
+    <string name="connect_unfinished_notification">اتصال ناموفق: بدون نتیجه</string>
 </resources>

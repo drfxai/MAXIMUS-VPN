@@ -1,0 +1,124 @@
+package com.example.vpn
+
+import com.example.data.model.ConnectionStatus
+import com.example.data.model.VlessProfile
+import com.example.vpn.connections.BuiltinConnections
+
+/**
+ * How long one connect attempt may go without verified traffic, and what happens then.
+ *
+ * 2026-11-25 engine test (V1.0.4 build 175, Irancell LTE, manual picks from Advanced options): Aether / WARP held the
+ * tunnel with zero internet for 7+ minutes, Psiphon, Shir o Khorshid, Lantern and MASQUE HTTP/2 for the whole 3-minute
+ * window, with no timeout, no error and no fallback, while Psiphon over Lantern worked in 11 s and Tor in ~127 s.
+ *
+ *  - Each attempt (its own attemptId) gets [budgetMs] from the moment it is seen: 45 s for Serverless, 60 s for one
+ *    engine or a saved config, 90 s for a chain of engines, 180 s for anything that runs Tor.
+ *  - A saved config (no engine program) is only timed once its tunnel is up without traffic: its Smart Connect race
+ *    and failover have their own limits.
+ *  - When the budget runs out: the user's Stop always wins ([Decision.Stopped]); a locked exit (Trade mode) stops with
+ *    a clear error; otherwise the path verified on this network goes next, then the next built-in candidate that was
+ *    not tried in this Connect, at most [MAX_FALLBACKS] times. Serverless Direct (the ISP's own exit) is never picked
+ *    as a fallback: it does not hide the address, and the test showed it passing plain sites while filtered ones failed.
+ *
+ * Pure, so the rules are unit-tested.
+ */
+object ConnectDeadline {
+    const val SERVERLESS_MS = 45_000L
+    const val ENGINE_MS = 60_000L
+    const val CHAIN_MS = 90_000L
+    const val TOR_MS = 180_000L
+    const val MAX_FALLBACKS = 3
+
+    /** Statuses in which the attempt has not carried verified traffic yet. */
+    val WAITING: Set<ConnectionStatus> = setOf(
+        ConnectionStatus.PREPARING, ConnectionStatus.CONNECTING, ConnectionStatus.VPN_INTERFACE_ESTABLISHED,
+        ConnectionStatus.ENGINE_STARTED, ConnectionStatus.PROXY_CONNECTING, ConnectionStatus.VERIFYING,
+        ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED
+    )
+
+    /** Built-ins tried after a deadline, best first (from the engine test: the chain in 11 s, Tor in ~2 min). */
+    val CANDIDATES: List<String> = listOf(
+        BuiltinConnections.ConfigFreeMethod.PSIPHON_RADIANCE.id,
+        BuiltinConnections.ConfigFreeMethod.TOR_SNOWFLAKE.id,
+        BuiltinConnections.ConfigFreeMethod.PSIPHON.id,
+        BuiltinConnections.ConfigFreeMethod.SHIROKHORSHID.id,
+        BuiltinConnections.ConfigFreeMethod.RADIANCE.id,
+        BuiltinConnections.ConfigFreeMethod.AETHER_WARP.id
+    )
+
+    /** Profile ids whose exit is the phone's own ISP address. */
+    private val ISP_EXIT_IDS = setOf(BuiltinConnections.ConfigFreeMethod.SERVERLESS.id, BuiltinConnections.DIRECT)
+
+    fun ispExit(profileId: String?): Boolean = profileId != null && profileId in ISP_EXIT_IDS
+
+    /** The engine programs [profile] runs ("psiphon", "radiance", ...); empty for a saved config on Xray alone. */
+    fun engines(profile: VlessProfile): List<String> {
+        val chain = runCatching { com.example.vpn.sidecar.ChainRunner.readChain(profile) }.getOrNull()
+        if (chain != null) return chain.hops.map { it.engineId }
+        val id = com.example.vpn.sidecar.EngineUdp.engineId(profile)
+        if (id.isBlank()) return emptyList()
+        if (id == com.example.vpn.sidecar.AetherSidecar.ID) {
+            val options = runCatching {
+                com.example.vpn.sidecar.AetherSettings.read(com.example.vpn.engine.ProfileExtras.read(profile))
+            }.getOrNull()
+            return listOfNotNull(id,
+                com.example.vpn.sidecar.PsiphonSidecar.ID.takeIf { options != null && options.psiphon != "off" },
+                com.example.vpn.sidecar.TorSidecar.ID.takeIf { options != null && options.tor != "off" })
+        }
+        return listOf(id)
+    }
+
+    /** The time an attempt on these engines gets before it counts as failed. */
+    fun budgetMs(engines: List<String>): Long = when {
+        com.example.vpn.sidecar.TorSidecar.ID in engines -> TOR_MS
+        engines.size > 1 -> CHAIN_MS
+        engines == listOf(com.example.vpn.sidecar.ServerlessSidecar.ID) -> SERVERLESS_MS
+        else -> ENGINE_MS
+    }
+
+    fun budgetMs(profile: VlessProfile): Long = budgetMs(engines(profile))
+
+    /**
+     * True when the attempt is still waiting for traffic at [now]. A saved config ([engineProfile] false) is timed only
+     * while its tunnel is up without traffic.
+     */
+    fun expired(status: ConnectionStatus, engineProfile: Boolean, since: Long, now: Long, budgetMs: Long): Boolean {
+        if (status !in WAITING) return false
+        if (!engineProfile && status != ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED) return false
+        return now - since >= budgetMs
+    }
+
+    sealed interface Decision {
+        /** The user stopped (or a newer Connect came): nothing more is started. */
+        data object Stopped : Decision
+        data class Fallback(val profileId: String, val why: String) : Decision
+        data class GiveUp(val reason: GiveUpReason) : Decision
+    }
+
+    enum class GiveUpReason { EXIT_LOCKED, FALLBACKS_USED, NONE_LEFT }
+
+    /**
+     * What follows an attempt that ran out of time. [tried]: profile ids already tried in this Connect (the user's own
+     * pick included); [verifiedHere]: the path that carried verified traffic on this network, if one is remembered;
+     * [runnable]: whether this build can run a candidate here.
+     */
+    fun decide(
+        stopped: Boolean,
+        exitLocked: Boolean,
+        fallbacksSoFar: Int,
+        tried: Set<String>,
+        verifiedHere: String?,
+        runnable: (String) -> Boolean,
+        candidates: List<String> = CANDIDATES
+    ): Decision {
+        if (stopped) return Decision.Stopped
+        if (exitLocked) return Decision.GiveUp(GiveUpReason.EXIT_LOCKED)
+        if (fallbacksSoFar >= MAX_FALLBACKS) return Decision.GiveUp(GiveUpReason.FALLBACKS_USED)
+        if (verifiedHere != null && verifiedHere !in tried && !ispExit(verifiedHere) && runnable(verifiedHere)) {
+            return Decision.Fallback(verifiedHere, "verified on this network before")
+        }
+        val next = candidates.firstOrNull { it !in tried && !ispExit(it) && runnable(it) }
+            ?: return Decision.GiveUp(GiveUpReason.NONE_LEFT)
+        return Decision.Fallback(next, "next built-in connection")
+    }
+}

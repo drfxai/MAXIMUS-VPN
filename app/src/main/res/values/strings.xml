@@ -1727,4 +1727,20 @@
     <string name="unlock_options">Options</string>
     <string name="connect_unfinished_message">The connection attempt ended without a result; traffic is unverified. Try again, or pick another connection.</string>
     <string name="connect_unfinished_notification">Connection failed: no result</string>
+    <string name="config_free_checking">Checking connection and device traffic…</string>
+    <string name="config_free_no_traffic">Tunnel up, no traffic yet · stops at the time limit</string>
+    <string name="config_free_reconnecting">Reconnecting…</string>
+    <string name="config_free_verified">Connected · Device traffic verified</string>
+    <string name="config_free_limited">Engine connected · Device traffic awaits verification</string>
+    <string name="config_free_interrupted">Connection interrupted</string>
+    <string name="config_free_stopping">Disconnecting…</string>
+    <string name="connect_deadline_fallback">%1$s carried no traffic in %2$d s; trying %3$s…</string>
+    <string name="connect_deadline_failed">%1$s carried no traffic in %2$d s: %3$s. Traffic stays blocked until you connect again or pick another connection.</string>
+    <string name="connect_deadline_reason_locked">the exit is locked in this mode, so no other connection was tried</string>
+    <string name="connect_deadline_reason_exhausted">other connections were tried without traffic as well</string>
+    <string name="connect_deadline_reason_none_left">no other built-in connection is available to try</string>
+    <string name="connect_deadline_notification">Connection failed: no traffic within the time limit</string>
+    <string name="ui_connection_stages">Connection stages</string>
+    <string name="ui_connection_stages_hint">What each engine did while connecting, newest last</string>
+    <string name="ui_connection_stages_empty">Stages appear here once a connection starts.</string>
 </resources>

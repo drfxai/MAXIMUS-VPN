@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -88,6 +89,7 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
     val up = samples.mapNotNull { it.uploadBps }
     val stable = samples.count { it.status == ConnectionStatus.CONNECTED }
     val reconnecting = samples.count { it.status in recoveryStatuses }
+    val stages by com.example.vpn.diagnostics.EngineStages.entries.collectAsState()
     Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.TopCenter) {
         LazyColumn(Modifier.widthIn(max = 620.dp).fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
@@ -107,6 +109,24 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                         Metric(c, "Latency", samples.lastOrNull()?.latencyMs?.takeIf { state.isConnected }?.let { "$it ms" }, Modifier.weight(1f))
                         Metric(c, "Download", state.downloadSpeedBps.takeIf { state.isConnected }?.toDouble()?.let(::speed), Modifier.weight(1f))
                         Metric(c, "Upload", state.uploadSpeedBps.takeIf { state.isConnected }?.toDouble()?.let(::speed), Modifier.weight(1f))
+                    }
+                }
+            }
+            item {
+                // 2026-11-25 engine test: while connecting this screen said only "CONNECTING". Each engine's stages and
+                // errors (EngineStages) are listed here, newest last.
+                AnalyticsCard(c, stringResource(R.string.ui_connection_stages), stringResource(R.string.ui_connection_stages_hint)) {
+                    if (stages.isEmpty()) {
+                        LabText(stringResource(R.string.ui_connection_stages_empty), c.text2, 13.sp)
+                    } else stages.takeLast(STAGES_SHOWN).forEach { entry ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LabText(stageTime(entry.at), c.text3, 11.sp)
+                            Column(Modifier.weight(1f)) {
+                                LabText("${entry.engine} · ${entry.stage}", if (entry.error) c.bad else c.text, 13.sp,
+                                    if (entry.error) FontWeight.SemiBold else FontWeight.Normal)
+                                entry.detail?.let { LabText(it, c.text2, 11.sp, maxLines = 3) }
+                            }
+                        }
                     }
                 }
             }
@@ -161,6 +181,11 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
         }
     }
 }
+
+private const val STAGES_SHOWN = 14
+
+private fun stageTime(at: Long): String =
+    java.text.SimpleDateFormat("HH:mm:ss", Locale.US).format(java.util.Date(at))
 
 private val recoveryStatuses = setOf(ConnectionStatus.RECONNECTING, ConnectionStatus.SWITCHING, ConnectionStatus.NETWORK_CHANGED)
 

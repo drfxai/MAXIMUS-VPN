@@ -1726,4 +1726,20 @@
     <string name="unlock_options">Параметры</string>
     <string name="connect_unfinished_message">Попытка подключения завершилась без результата; трафик не проверен. Повторите попытку или выберите другое подключение.</string>
     <string name="connect_unfinished_notification">Подключение не удалось: нет результата</string>
+    <string name="config_free_checking">Проверка подключения и трафика устройства…</string>
+    <string name="config_free_no_traffic">Туннель поднят, трафика пока нет · остановка по лимиту времени</string>
+    <string name="config_free_reconnecting">Переподключение…</string>
+    <string name="config_free_verified">Подключено · Трафик устройства проверен</string>
+    <string name="config_free_limited">Движок подключён · Трафик устройства ещё не проверен</string>
+    <string name="config_free_interrupted">Подключение прервано</string>
+    <string name="config_free_stopping">Отключение…</string>
+    <string name="connect_deadline_fallback">%1$s не передал трафик за %2$d с; пробуем %3$s…</string>
+    <string name="connect_deadline_failed">%1$s не передал трафик за %2$d с: %3$s. Трафик остаётся заблокированным, пока вы не подключитесь снова или не выберете другое подключение.</string>
+    <string name="connect_deadline_reason_locked">выход закреплён в этом режиме, поэтому другие подключения не пробовались</string>
+    <string name="connect_deadline_reason_exhausted">другие подключения тоже не передали трафик</string>
+    <string name="connect_deadline_reason_none_left">других встроенных подключений для проверки не осталось</string>
+    <string name="connect_deadline_notification">Подключение не удалось: нет трафика в пределах лимита времени</string>
+    <string name="ui_connection_stages">Этапы подключения</string>
+    <string name="ui_connection_stages_hint">Что делал каждый движок при подключении, новые внизу</string>
+    <string name="ui_connection_stages_empty">Этапы появятся здесь, когда начнётся подключение.</string>
 </resources>
