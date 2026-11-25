@@ -1283,16 +1283,6 @@ private fun formatDuration(seconds: Long): String {
 }
 
 
-private enum class ConfigFreeStatus(val detail: String) {
-    READY(""),
-    CHECKING("Checking connection and device traffic…"),
-    RECONNECTING("Reconnecting…"),
-    VERIFIED("Connected · Device traffic verified"),
-    LIMITED("Engine connected · Device traffic awaits verification"),
-    INTERRUPTED("Connection interrupted"),
-    STOPPING("Disconnecting…")
-}
-
 @Composable
 private fun ConfigFreeConnectButton(
     state: com.example.data.model.ConnectionState,
@@ -1310,25 +1300,12 @@ private fun ConfigFreeConnectButton(
     }
     val enabled = !state.isTunnelUp && !state.isBusy
     val active = requested && (state.isTunnelUp || state.isBusy)
-    val verified = state.trafficEvidence?.takeIf { it.appliesTo(state) }?.let {
-        it.path == com.example.vpn.verify.ProbePath.TUN && it.bidirectional
-    } == true
     val dark = AppTheme.colors.isDark
     val accent = if (dark) Color(0xFF70EFF3) else Color(0xFF00646D)
-    val status = when {
-        !requested -> ConfigFreeStatus.READY
-        state.status in setOf(ConnectionStatus.FAILED, ConnectionStatus.DEGRADED) -> ConfigFreeStatus.INTERRUPTED
-        state.status in setOf(ConnectionStatus.RECONNECTING, ConnectionStatus.SWITCHING,
-            ConnectionStatus.NETWORK_CHANGED) -> ConfigFreeStatus.RECONNECTING
-        state.status == ConnectionStatus.DISCONNECTING -> ConfigFreeStatus.STOPPING
-        state.status == ConnectionStatus.CONNECTED && verified -> ConfigFreeStatus.VERIFIED
-        state.status == ConnectionStatus.CONNECTED -> ConfigFreeStatus.LIMITED
-        state.isTunnelUp || state.isBusy -> ConfigFreeStatus.CHECKING
-        else -> ConfigFreeStatus.READY
-    }
+    val status = ConfigFreeStatusModel.of(requested, state)
     val target = when (status) {
         ConfigFreeStatus.READY -> accent
-        ConfigFreeStatus.CHECKING, ConfigFreeStatus.LIMITED -> if (dark) Color(0xFFFFC568) else Color(0xFF805000)
+        ConfigFreeStatus.CHECKING, ConfigFreeStatus.LIMITED, ConfigFreeStatus.NO_TRAFFIC -> if (dark) Color(0xFFFFC568) else Color(0xFF805000)
         ConfigFreeStatus.RECONNECTING -> if (dark) Color(0xFFC8AAFF) else Color(0xFF6533AA)
         ConfigFreeStatus.VERIFIED -> if (dark) Color(0xFF6DF5BC) else Color(0xFF006B4C)
         ConfigFreeStatus.INTERRUPTED -> if (dark) Color(0xFFFF8888) else Color(0xFFA02336)
@@ -1353,7 +1330,7 @@ private fun ConfigFreeConnectButton(
                 MaterialTheme.colorScheme.surface, glow.copy(alpha = .08f))))
             .testTag("config_free_auto_connect")
     ) {
-        if (status == ConfigFreeStatus.CHECKING || status == ConfigFreeStatus.RECONNECTING) {
+        if (status == ConfigFreeStatus.CHECKING || status == ConfigFreeStatus.RECONNECTING || status == ConfigFreeStatus.NO_TRAFFIC) {
             androidx.compose.material3.CircularProgressIndicator(
                 modifier = Modifier.size(16.dp), color = glow, strokeWidth = 2.dp)
         } else {
@@ -1368,8 +1345,8 @@ private fun ConfigFreeConnectButton(
             else -> stringResource(R.string.ui_connect_without_a_config)
         }, fontWeight = FontWeight.SemiBold)
     }
-    if (status != ConfigFreeStatus.READY) {
-        Text(status.detail, style = MaterialTheme.typography.bodySmall,
+    status.detail?.let { detail ->
+        Text(stringResource(detail), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp))
     }
@@ -1417,8 +1394,8 @@ private fun ConfigFreeMethodPicker(
     val c = AppTheme.colors
     val dark = c.isDark
     // Counts follow the catalogue: every method row, plus the two setup cards on the Aether & chains tab.
-    val methodCount = ConfigFreeMethod.entries.count { it.aetherTransport == null }
-    val chainCount = ConfigFreeMethod.entries.count { it.aetherTransport != null } + 2
+    val methodCount = ConfigFreePickerCounts.methods()
+    val chainCount = ConfigFreePickerCounts.chains()
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -1556,9 +1533,11 @@ private fun PickerTab(modifier: Modifier, icon: androidx.compose.ui.graphics.vec
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
-        Text(label, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        // The label gives way (ellipsis) so the count is never cut: "Aether & chains 10" read "1" (2026-11-25 test).
+        Text(label, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         Spacer(Modifier.width(5.dp))
-        Text(count.toString(), color = tint.copy(alpha = 0.65f), fontSize = 13.sp, maxLines = 1)
+        Text(count.toString(), color = tint.copy(alpha = 0.65f), fontSize = 13.sp, maxLines = 1, softWrap = false)
     }
 }
 

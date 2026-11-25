@@ -49,8 +49,22 @@ object EngineUdp {
     /** Engines whose local proxy is known (from their source) to accept SOCKS CONNECT only. */
     private val TCP_ONLY_ENGINES = setOf(PsiphonSidecar.ID, ShirokhorshidSidecar.ID, TorSidecar.ID)
 
-    /** Engines that resolve a host name on their own servers when Xray hands it to them. */
-    private val REMOTE_DNS_ENGINES = setOf(PsiphonSidecar.ID, ShirokhorshidSidecar.ID)
+    /**
+     * Engines that resolve a host name on their own servers when Xray hands it to them.
+     *
+     * Lantern (Radiance) joined in the 2026-11-25 engine test: alone it gave the phone no internet for 3 minutes, every
+     * curl ending with exit code 6 (host name not resolved) after ~5.8 s, while Psiphon over Lantern worked in 11 s and
+     * the app's own check through Radiance's SOCKS port (which hands it host names) passed. Apps' DNS went to Xray's own
+     * resolver through Radiance and got no answer; in the chain, Psiphon's FakeDNS answers locally. Radiance accepts host
+     * names in SOCKS CONNECT (the verify path), so app names are now answered by FakeDNS and resolved by Lantern.
+     */
+    private val REMOTE_DNS_ENGINES = setOf(PsiphonSidecar.ID, ShirokhorshidSidecar.ID, RadianceSidecar.id)
+
+    /**
+     * Engines whose UDP relay is not established: QUIC is ended locally so apps use HTTPS over TCP at once instead of
+     * waiting for a QUIC handshake that may never complete (Radiance: its SOCKS UDP path is unverified).
+     */
+    private val QUIC_LOCAL_END_ENGINES = setOf(RadianceSidecar.id)
 
     /** Aether carriers that run MASQUE (or WARP-in-WARP) over HTTP/2, i.e. over one TCP connection. */
     val AETHER_TCP_CARRIERS = setOf("h2", "gool", "mim")
@@ -89,7 +103,7 @@ object EngineUdp {
      * carrier (its UDP relay looks the name up again for each datagram; see the class comment).
      */
     fun quicEndedLocally(profile: VlessProfile): Boolean =
-        of(profile) == Capability.TCP_ONLY || engineId(profile) == AetherSidecar.ID
+        of(profile) == Capability.TCP_ONLY || engineId(profile) == AetherSidecar.ID || engineId(profile) in QUIC_LOCAL_END_ENGINES
 
     /** Kept for callers that ask the old question: is QUIC ended locally on this profile? */
     fun blocksQuic(profile: VlessProfile): Boolean = quicEndedLocally(profile)
@@ -99,7 +113,8 @@ object EngineUdp {
      * through Aether's HTTP/2 carriers, where a datagram gains nothing over a TCP query on the same TCP stream.
      */
     fun resolverOverTcp(profile: VlessProfile): Boolean = of(profile) == Capability.TCP_ONLY ||
-        engineId(profile) == AetherSidecar.ID && aetherCarrier(profile) in AETHER_TCP_CARRIERS
+        engineId(profile) == AetherSidecar.ID && aetherCarrier(profile) in AETHER_TCP_CARRIERS ||
+        engineId(profile) in QUIC_LOCAL_END_ENGINES
 
     /** App DNS answered by FakeDNS and resolved by the engine on its server. */
     fun remoteDns(profile: VlessProfile): Boolean = engineId(profile) in REMOTE_DNS_ENGINES

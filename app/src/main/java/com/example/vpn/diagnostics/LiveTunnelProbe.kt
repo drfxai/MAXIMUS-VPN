@@ -39,6 +39,19 @@ object LiveTunnelProbe {
 
     data class Exit(val country: String?, val ip: String?)
 
+    /**
+     * The exit country and address through an engine program's local port, for sessions where the app is outside its
+     * own tunnel. 2026-11-25: Serverless Direct showed "Measuring…" for 8 minutes because the exit was only ever measured
+     * through the VPN network, which such a session cannot use. Throws when the trace page does not answer.
+     */
+    fun traceVia(dialer: com.example.vpn.verify.Dialer, stepTimeoutMs: Int = 4_000): Exit {
+        val (status, body) = com.example.vpn.verify.TrafficCheck(dialer, stepTimeoutMs = stepTimeoutMs).fetchText(TRACE, 8_192)
+        check(status == 200) { "Trace page returned HTTP $status" }
+        return parseTrace(body)
+    }
+
+    internal val TRACE = com.example.vpn.verify.TrafficCheck.Target("www.cloudflare.com", 443, "/cdn-cgi/trace", cloudflare = true)
+
     /** The `loc=` and `ip=` lines of a trace page; anything that is not a country code or an IP address is dropped. */
     internal fun parseTrace(trace: String): Exit {
         fun field(key: String) = trace.lineSequence().firstOrNull { it.startsWith("$key=") }?.substringAfter('=')?.trim()

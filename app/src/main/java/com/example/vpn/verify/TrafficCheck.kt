@@ -88,6 +88,19 @@ class TrafficCheck(
         throw failure ?: IOException("No probe reference")
     }
 
+    /**
+     * One GET that reads at most [maxBytes] of the body and returns the HTTP status with that much text. Any status
+     * counts as an answer: the certificate and name were verified first, so the far side is who it says it is.
+     * Throws on a network or TLS failure.
+     */
+    fun fetchText(t: Target, maxBytes: Int = 8_192): Pair<Int, String> {
+        val r = exchange(t, "GET", null, keepBody = true, maxBodyBytes = maxBytes.coerceIn(1, MAX_BODY))
+        return r.status to (r.body?.toString(Charsets.UTF_8.name()) ?: "")
+    }
+
+    /** The HTTP status of one capped GET to [t] (verified TLS first); throws when no answer came. */
+    fun status(t: Target): Int = exchange(t, "GET", null, keepBody = false, maxBodyBytes = 1_024).status
+
     fun download(): LegResult = firstPassing(downloads.filterNot { cloudflareWorkerExit && it.cloudflare }) { t -> downloadFrom(t) }
 
     /**

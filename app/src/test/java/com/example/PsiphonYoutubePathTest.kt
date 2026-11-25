@@ -86,11 +86,13 @@ class PsiphonYoutubePathTest {
         assertEquals("https://8.8.8.8/dns-query", config.getJSONObject("dns").getJSONArray("servers").getString(0))
     }
 
-    @Test fun enginesWithoutAKnownUdpLimitAreUnchanged() {
-        // Build 167 moved Aether out of this group (QUIC ended locally; see Build167DiagTest).
+    @Test fun enginesWithoutAKnownUdpLimitKeepTheirCapability() {
+        // Build 167 moved Aether out of this group (QUIC ended locally; see Build167DiagTest). Radiance keeps an unknown UDP
+        // capability, but since the 2026-11-25 engine test its QUIC is ended locally and app names go through FakeDNS.
         val config = xray(com.example.vpn.sidecar.RadianceSidecar.profile())
-        assertTrue(rules(config).none { it.optString("outboundTag") == EngineUdp.QUIC_BLOCK_TAG })
-        assertEquals(null, outbound(config, EngineUdp.QUIC_BLOCK_TAG))
+        assertEquals(EngineUdp.QUIC_BLOCK_TAG, rules(config).first().getString("outboundTag"))
+        assertTrue(config.has("fakedns"))
+        assertTrue(EngineUdp.remoteDns(com.example.vpn.sidecar.RadianceSidecar.profile()))
         assertEquals(EngineUdp.Capability.UNKNOWN, EngineUdp.of(com.example.vpn.sidecar.RadianceSidecar.profile()))
         assertEquals(EngineUdp.Capability.CARRIES_UDP, EngineUdp.of(AetherSidecar.profile()))
         assertEquals(EngineUdp.Capability.TCP_ONLY, EngineUdp.of(PsiphonSidecar.profile()))

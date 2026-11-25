@@ -99,6 +99,12 @@ class RayVpnService : VpnService() {
         private const val TUN_FORWARD_WINDOW_MS = 90_000L
         private const val TUN_FORWARD_POLL_MS = 3_000L
         private const val SLOW_VERIFY_CONFIG_MS = 90_000L
+        /** How often the connect deadline looks at the state ([ConnectDeadline]). */
+        private const val DEADLINE_POLL_MS = 1_000L
+        /** How long a deadline give-up waits for the hung attempt to release the connect lock. */
+        private const val DEADLINE_LOCK_MS = 5_000L
+        /** The whole filtered-site check of a just-verified path (two references, ~8 s each). */
+        private const val FILTERED_PROBE_LIMIT_MS = 20_000L
         /** Moves to the next working path after a stalled download, per Smart Connect. */
         private const val MAX_STALL_SWITCHES = com.example.vpn.smart.StallFailover.MAX_SWITCHES
 
@@ -128,7 +134,10 @@ class RayVpnService : VpnService() {
         fun updateState(state: ConnectionState) {
             // A connect attempt the user's Stop fenced off is still unwinding: it no longer owns the state (StopFence).
             if (!StopFence.admits()) return
-            _vpnState.value = stamped(state)
+            val previous = _vpnState.value
+            val next = stamped(state)
+            _vpnState.value = next
+            stageChange(previous, next)
         }
 
         /** Changes the state atomically, so concurrent watchers never overwrite each other's fields. */
@@ -136,8 +145,18 @@ class RayVpnService : VpnService() {
             if (!StopFence.admits()) return
             while (true) {
                 val current = _vpnState.value
-                if (_vpnState.compareAndSet(current, stamped(change(current)))) return
+                val next = stamped(change(current))
+                if (_vpnState.compareAndSet(current, next)) {
+                    stageChange(current, next)
+                    return
+                }
             }
+        }
+
+        /** Every published status change also goes to the connection's stage timeline (analytics screen, logcat). */
+        private fun stageChange(previous: ConnectionState, next: ConnectionState) {
+            if (previous === next) return
+            runCatching { com.example.vpn.diagnostics.EngineStages.onStateChange(previous, next) }
         }
 
         private fun newId(): String = java.util.UUID.randomUUID().toString().take(12)
@@ -339,6 +358,10 @@ class RayVpnService : VpnService() {
         com.example.vpn.unlock.UnlockDns.onChoiceChanged = { onUnlockChoiceChanged() }
         // Background upkeep may measure beside this service's traffic block (OwnVpnWindow).
         com.example.vpn.automation.OwnVpnWindow.host = upkeepWindowHost
+        // Each connect stage and error also goes to the app log, which mirrors to logcat (EngineStages).
+        com.example.vpn.diagnostics.EngineStages.sink = { entry ->
+            XrayLogManager.log("STAGE", entry.line(), if (entry.error) com.example.xray.LogLevel.WARN else com.example.xray.LogLevel.INFO)
+        }
     }
 
     private fun observeSettingsFlow() {
@@ -468,6 +491,9 @@ class RayVpnService : VpnService() {
                     if (!protectionRequested) stopSelf()
                 }
             } }
+            deadlineTried.clear()
+            deadlineFallbacks = 0
+            armConnectDeadline(connectTicket)
             return START_STICKY
         }
         val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
@@ -497,6 +523,8 @@ class RayVpnService : VpnService() {
                 com.example.vpn.sidecar.EngineReaper.stopAll()
                 com.example.vpn.sidecar.EngineHandoff.clear()
                 val connectTicket = lifecycle.current()
+                deadlineTried.clear()
+                deadlineFallbacks = 0
                 connectJob = serviceScope.launch(AttemptTicket(connectTicket)) { settleConnect(connectTicket) {
                     val profile = if (!profileId.isNullOrBlank()) {
                         com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, profileId)
@@ -508,6 +536,8 @@ class RayVpnService : VpnService() {
                         ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
                     if (targetProfile != null) {
+                        com.example.vpn.diagnostics.EngineStages.begin(com.example.vpn.diagnostics.EngineStages.engineOf(targetProfile))
+                        deadlineTried += targetProfile.id
                         connect(targetProfile, smart = smart, startedByUser = true, force = force)
                     } else {
                         val err = "No valid server profile found to connect."
@@ -520,6 +550,7 @@ class RayVpnService : VpnService() {
                         if (!protectionRequested) stopSelf()
                     }
                 } }
+                armConnectDeadline(connectTicket)
             }
             ACTION_DISCONNECT -> {
                 // ACTION_DISCONNECT can arrive through startForegroundService() when the
@@ -535,6 +566,8 @@ class RayVpnService : VpnService() {
                 StopFence.fence(lifecycle.newIntent())
                 connectJob?.cancel()
                 connectJob = null
+                deadlineJob?.cancel()
+                deadlineJob = null
                 // Show the stop at once, and end every engine still starting, so the cancelled attempt
                 // unwinds immediately instead of after its current round of tests (see Abandonable).
                 if (_vpnState.value.status != ConnectionStatus.DISCONNECTED) {
@@ -569,10 +602,155 @@ class RayVpnService : VpnService() {
                         if (!protectionRequested) stopSelf()
                     }
                 } }
+                armConnectDeadline(connectTicket)
             }
         }
 
         return if (action == ACTION_CONNECT || action == ACTION_RECONNECT) START_STICKY else START_NOT_STICKY
+    }
+
+    /** Profile ids tried in this Connect: the user's pick and each deadline fallback (see [ConnectDeadline]). */
+    private val deadlineTried: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())
+    @Volatile private var deadlineFallbacks = 0
+    private var deadlineJob: Job? = null
+
+    /**
+     * Watches the Connect started with [ticket]: an attempt that carries no verified traffic within its budget
+     * ([ConnectDeadline]) is stopped with a reason, and the path verified on this network or the next built-in takes
+     * over. 2026-11-25 engine test: failing engines held the tunnel for 3-7+ minutes with no internet and no message.
+     * Ends at the first verified connection, the user's Stop, or a newer Connect (the ticket is no longer current).
+     */
+    private fun armConnectDeadline(ticket: Long) {
+        deadlineJob?.cancel()
+        deadlineJob = serviceScope.launch {
+            var watched: String? = null
+            var since = System.currentTimeMillis()
+            var budget = ConnectDeadline.ENGINE_MS
+            var engineProfile = true
+            var unverifiedSince: Long? = null
+            // Attempts whose deadline already fired: their state may linger until the next attempt publishes its own.
+            val fired = mutableSetOf<String>()
+            while (isActive && lifecycle.isCurrent(ticket) && StopFence.admits(ticket)) {
+                delay(DEADLINE_POLL_MS)
+                val s = _vpnState.value
+                val now = System.currentTimeMillis()
+                when (s.status) {
+                    // Verified: from here failover and the session's own checks own it.
+                    ConnectionStatus.CONNECTED, ConnectionStatus.DEGRADED -> return@launch
+                    ConnectionStatus.DISCONNECTED -> return@launch
+                    ConnectionStatus.FAILED -> if (connectJob?.isActive != true) return@launch else continue
+                    else -> Unit
+                }
+                if (s.attemptId != null && s.attemptId in fired) continue
+                val profile = s.activeProfile
+                val key = (s.attemptId ?: "pending") + "|" + (profile?.id ?: "")
+                if (key != watched) {
+                    watched = key
+                    since = now
+                    budget = profile?.let { runCatching { ConnectDeadline.budgetMs(it) }.getOrNull() } ?: ConnectDeadline.ENGINE_MS
+                    engineProfile = profile == null || runCatching { com.example.vpn.sidecar.Sidecars.isEngineProfile(profile) }.getOrDefault(true)
+                    unverifiedSince = null
+                }
+                if (s.status == ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED) {
+                    if (unverifiedSince == null) unverifiedSince = now
+                } else unverifiedSince = null
+                val start = if (engineProfile) since else unverifiedSince ?: now
+                if (!ConnectDeadline.expired(s.status, engineProfile, start, now, budget)) continue
+                s.attemptId?.let { fired += it }
+                onConnectDeadline(ticket, s, budget)
+                // The next attempt (a fallback) gets its own budget; a give-up ends with FAILED.
+                watched = null
+            }
+        }
+    }
+
+    /** A profile a deadline may fall back to, when this build can run it here. */
+    private suspend fun fallbackProfile(id: String): VlessProfile? = runCatching {
+        val method = com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod.entries.firstOrNull { it.id == id }
+        if (method?.missingDependency() != null) return@runCatching null
+        (com.example.vpn.connections.BuiltinConnections.resolve(this@RayVpnService, id) ?: serverRepository.getProfileById(id))
+            ?.takeIf { com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
+    }.getOrNull()
+
+    private suspend fun onConnectDeadline(ticket: Long, state: ConnectionState, budgetMs: Long) {
+        if (!lifecycle.isCurrent(ticket) || !StopFence.admits(ticket)) return
+        val profile = state.activeProfile
+        val engine = com.example.vpn.diagnostics.EngineStages.engineOf(profile)
+        val name = profile?.name?.let { com.example.core.SecretRedactor.redact(it) } ?: engine
+        val seconds = (budgetMs / 1000).toInt()
+        com.example.vpn.diagnostics.EngineStages.record(engine, "deadline",
+            "no verified traffic within ${seconds}s (${com.example.vpn.diagnostics.EngineStages.stageName(state.status)})", error = true)
+        runCatching {
+            com.example.vpn.diagnostics.events.EventLog.event("connect.deadline", com.example.vpn.diagnostics.events.Severity.WARN,
+                attributes = mapOf("engine" to engine, "status" to state.status.name, "budget.s" to seconds.toString(),
+                    "fallbacks" to deadlineFallbacks.toString()),
+                result = "FAIL", stage = com.example.vpn.diagnostics.FailureStage.TIMEOUT)
+        }
+        profile?.let { deadlineTried += it.id }
+        val network = runCatching { com.example.vpn.smart.NetworkIdentity.current(this) }.getOrNull()
+        // A path that cannot carry traffic here now is not the one to hand over to next time.
+        if (network != null && profile != null) runCatching { networkMemory.winners.forget(network, profile.id) }
+        val settings = settingsRepository.getSettings()
+        val locked = com.example.vpn.safety.OperatingModePolicy.of(settings.operationalMode).lockExit
+        val tried = deadlineTried.toSet()
+        val verified = network?.let { net ->
+            runCatching { networkMemory.winners.best(net, tried) { id -> !ConnectDeadline.ispExit(id) }?.profileId }.getOrNull()
+        }
+        val runnable = (ConnectDeadline.CANDIDATES + listOfNotNull(verified)).filter { fallbackProfile(it) != null }.toSet()
+        val decision = ConnectDeadline.decide(
+            stopped = !lifecycle.isCurrent(ticket) || !StopFence.admits(ticket), exitLocked = locked,
+            fallbacksSoFar = deadlineFallbacks, tried = tried, verifiedHere = verified, runnable = { it in runnable })
+        when (decision) {
+            ConnectDeadline.Decision.Stopped -> return
+            is ConnectDeadline.Decision.Fallback -> {
+                val next = fallbackProfile(decision.profileId) ?: return
+                deadlineFallbacks++
+                deadlineTried += next.id
+                val nextName = com.example.core.SecretRedactor.redact(next.name)
+                XrayLogManager.w("VPN", "[DEADLINE] $engine carried no verified traffic within ${seconds}s; trying $nextName " +
+                    "(${decision.why}).")
+                com.example.vpn.diagnostics.EngineStages.record(com.example.vpn.diagnostics.EngineStages.engineOf(next), "fallback",
+                    "after $engine: ${decision.why}")
+                // The hung attempt ends now; its engines stop so the next one does not wait behind them.
+                connectJob?.cancel()
+                com.example.vpn.sidecar.EngineReaper.stopAll()
+                com.example.vpn.sidecar.EngineHandoff.clear()
+                withContext(AttemptTicket(ticket)) {
+                    runCatching { showForegroundNotification(getString(com.example.R.string.connect_deadline_fallback, name, seconds, nextName)) }
+                }
+                connectJob = serviceScope.launch(AttemptTicket(ticket)) { settleConnect(ticket) {
+                    connect(next, smart = false, exclude = deadlineTried.toSet(), ticket = ticket)
+                } }
+            }
+            is ConnectDeadline.Decision.GiveUp -> {
+                val why = getString(when (decision.reason) {
+                    ConnectDeadline.GiveUpReason.EXIT_LOCKED -> com.example.R.string.connect_deadline_reason_locked
+                    ConnectDeadline.GiveUpReason.FALLBACKS_USED -> com.example.R.string.connect_deadline_reason_exhausted
+                    ConnectDeadline.GiveUpReason.NONE_LEFT -> com.example.R.string.connect_deadline_reason_none_left
+                })
+                val message = getString(com.example.R.string.connect_deadline_failed, name, seconds, why)
+                XrayLogManager.e("VPN", "[DEADLINE] $engine carried no verified traffic within ${seconds}s; stopping (${decision.reason}).")
+                connectJob?.cancel()
+                com.example.vpn.sidecar.EngineReaper.stopAll()
+                com.example.vpn.sidecar.EngineHandoff.clear()
+                withContext(AttemptTicket(ticket)) {
+                    val locked2 = StopFence.acquireWithin(connectionMutex, DEADLINE_LOCK_MS)
+                    try {
+                        if (!lifecycle.isCurrent(ticket) || !StopFence.admits()) return@withContext
+                        disconnectResources()
+                        updateState(_vpnState.value.copy(status = ConnectionStatus.FAILED, errorMessage = message,
+                            failureStage = com.example.vpn.diagnostics.FailureStage.TIMEOUT))
+                        if (protectionRequested) showForegroundNotification(getString(com.example.R.string.connect_deadline_notification))
+                        else {
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                            stopSelf()
+                        }
+                    } finally {
+                        if (locked2) connectionMutex.unlock()
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -2119,6 +2297,51 @@ class RayVpnService : VpnService() {
                     }
                 }
             }
+            // 2026-11-25 (Irancell): Smart Connect called Serverless Direct working because www.gstatic.com answered, while
+            // YouTube and Instagram failed TLS and Telegram timed out for 8 minutes. An automatic pick, and any path that
+            // exits at the ISP's own address, must also reach a filtered site before it counts (FilteredSiteProbe).
+            var filteredBlocked = false
+            if (check.first != null && currentNetwork && com.example.vpn.verify.FilteredSiteProbe.required(smart = raceFirst,
+                    exact = exact, ispExit = com.example.vpn.sidecar.ServerlessSidecar.handles(requestedProfile))) {
+                val stageEngine = com.example.vpn.diagnostics.EngineStages.engineOf(requestedProfile)
+                val probeDialer = engineEndpoint?.let { com.example.vpn.verify.RouteDialers.engine(it) }
+                    ?: com.example.vpn.verify.RouteDialers.vpn(this@RayVpnService)
+                showForegroundNotification("Checking filtered sites through ${profile.name}...")
+                com.example.vpn.diagnostics.EngineStages.record(stageEngine, "checking filtered sites")
+                val filtered = withTimeoutOrNull(FILTERED_PROBE_LIMIT_MS) {
+                    kotlinx.coroutines.runInterruptible(Dispatchers.IO) { com.example.vpn.verify.FilteredSiteProbe.probe(probeDialer) }
+                }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (_vpnState.value.attemptId != attemptId) return@withContext
+                runCatching {
+                    com.example.vpn.diagnostics.events.EventLog.event("smart.filtered_probe", attributes = mapOf(
+                        "result" to if (filtered?.passed == true) "passed" else "blocked",
+                        "detail" to (filtered?.detail ?: "time limit"),
+                        "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(requestedProfile.id) ?: "none")))
+                }
+                if (filtered?.passed == true) {
+                    com.example.vpn.diagnostics.EngineStages.record(stageEngine, "filtered sites reachable", filtered.detail)
+                } else {
+                    filteredBlocked = true
+                    com.example.vpn.diagnostics.EngineStages.record(stageEngine, "filtered sites blocked",
+                        filtered?.detail ?: "no answer within ${FILTERED_PROBE_LIMIT_MS / 1000}s", error = true)
+                    // Never the remembered "verified here" path again while filtered sites fail through it.
+                    runCatching { networkMemory.winners.forget(routeNetwork, requestedProfile.id) }
+                    if (raceFirst && !exact) {
+                        val next = filteredFallback(routeNetwork, exclude + requestedProfile.id + userProfile.id)
+                        if (next != null) {
+                            val safe = com.example.core.SecretRedactor.redact(requestedProfile.name)
+                            XrayLogManager.w("SMART", "$safe carries plain sites but not filtered ones " +
+                                "(${filtered?.detail ?: "time limit"}); trying ${com.example.core.SecretRedactor.redact(next.name)}.")
+                            showForegroundNotification("Filtered sites fail through ${profile.name}; trying ${next.name}...")
+                            disconnectResources()
+                            connectLocked(next, smart = true, exclude = exclude + requestedProfile.id + userProfile.id)
+                            return@withContext
+                        }
+                        XrayLogManager.w("SMART", "Filtered sites fail through this path and no other path is left to try; keeping it.")
+                    }
+                }
+            }
             if (check.first != null) ladder.advance(com.example.vpn.connectivity.RecoveryStage.CONNECTED_VERIFIED)
             else if (currentNetwork) activeMtuKey?.let { com.example.vpn.lab.MtuIntelligence.cache.failed(it); activeMtuKey = null }
             // Local proxy checks only exercise the sidecar chain. TUN checks exercise the forwarding core.
@@ -2157,7 +2380,7 @@ class RayVpnService : VpnService() {
                         com.example.vpn.connections.PsiphonChainMemory.clear(routeNetwork)
                 }
                 // A fallback for automatic Aether on this network when Cloudflare is filtered (VerifiedWinnerBook).
-                if (!com.example.vpn.sidecar.AetherSidecar.handles(requestedProfile)) runCatching {
+                if (!com.example.vpn.sidecar.AetherSidecar.handles(requestedProfile) && !filteredBlocked) runCatching {
                     networkMemory.winners.recordVerified(routeNetwork, requestedProfile.id,
                         com.example.core.SecretRedactor.redact(requestedProfile.name))
                 }
@@ -2172,6 +2395,8 @@ class RayVpnService : VpnService() {
             } else {
                 val stage = check.second ?: com.example.vpn.diagnostics.FailureStage.UNKNOWN
                 showForegroundNotification("Tunnel up, no traffic yet (${stage.name})")
+                com.example.vpn.diagnostics.EngineStages.record(com.example.vpn.diagnostics.EngineStages.engineOf(requestedProfile),
+                    "traffic check failed", stage.name, error = true)
                 XrayLogManager.w("VPN", "[DIAGNOSTICS] 10. Tunnel started but no request went through it (${stage.name}). " +
                     "State: TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED; checks continue and failover may switch servers.")
                 if (currentNetwork) recordFreeOutcome(requestedProfile, success = false, rttMs = null, stage = stage)
@@ -2448,6 +2673,23 @@ class RayVpnService : VpnService() {
             com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(profile) != null) return@runCatching null
         profile to winner
     }.getOrNull()
+
+    /**
+     * The next path for Smart Connect after one that reached plain sites but not filtered ones: the path verified on
+     * this network, else the next built-in ([ConnectDeadline.CANDIDATES]); never one that exits at the ISP's address.
+     */
+    private suspend fun filteredFallback(network: String, exclude: Set<String>): VlessProfile? {
+        verifiedFallback(network, exclude)?.first?.takeIf {
+            !ConnectDeadline.ispExit(it.id) && !com.example.vpn.sidecar.ServerlessSidecar.handles(it)
+        }?.let { return it }
+        for (id in ConnectDeadline.CANDIDATES) {
+            if (id in exclude) continue
+            val p = fallbackProfile(id) ?: continue
+            if (p.id in exclude || com.example.vpn.sidecar.ServerlessSidecar.handles(p)) continue
+            return p
+        }
+        return null
+    }
 
     /** Network, Psiphon egress region and profile of the running direct Psiphon tunnel (PsiphonRegionBook). */
     @Volatile private var psiphonRegionInUse: Triple<String, String, String>? = null
@@ -2883,6 +3125,8 @@ class RayVpnService : VpnService() {
             }
             var launch = started?.launch ?: engine.prepare(runningProfile, settings, engineContext)
             showForegroundNotification("Starting the ${engine.id} engine...")
+            com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine starting",
+                "ready within ${launch.readyTimeoutMs / 1000}s" + if (started != null) " (carrier chosen by its test)" else "")
 
             fun launchProcess() = com.example.vpn.sidecar.EngineReaper.track(
                 engine.startPrepared(runningProfile, settings, launch, engineContext)
@@ -2939,6 +3183,7 @@ class RayVpnService : VpnService() {
                     firstStep = false
                     val label = step.region.ifEmpty { "any" } + if (step.tcpOnly) " (TCP only)" else ""
                     XrayLogManager.i("VPN", "Psiphon: region $label for up to ${step.budgetMs / 1000}s (${step.why}).")
+                    com.example.vpn.diagnostics.EngineStages.record(engine.id, "region $label", "up to ${step.budgetMs / 1000}s (${step.why})")
                     com.example.vpn.diagnostics.events.EventLog.event("psiphon.region", attributes = mapOf(
                         "region" to label, "budget.s" to (step.budgetMs / 1000).toString(), "why" to step.why), result = "START")
                     if (!step.any) showForegroundNotification("Psiphon: trying region $label…")
@@ -3052,12 +3297,14 @@ class RayVpnService : VpnService() {
                         }
                     },
                     stage = com.example.vpn.diagnostics.FailureStage.ENGINE_START_FAILED, result = "FAIL")
+                com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine start failed", hint, error = true)
                 error("The ${engine.id} engine did not start: $hint")
             }
             com.example.vpn.engine.registry.EngineLedger.shared.started(engine.id, ledgerNetwork())
             // Direct Psiphon clears PsiphonChainMemory only once traffic is verified through it (build 173: a direct
             // start came up and then carried nothing for five minutes).
             XrayLogManager.i("VPN", "Engine ${engine.id} is running on a local port")
+            com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine ready")
             watchSidecar(engine, process)
             registerWarpThroughCarrier(engine.id, process, engineContext, launch, settings)
             relayedCarrier = isRelayedCarrier(runningProfile)
@@ -3223,13 +3470,18 @@ class RayVpnService : VpnService() {
             },
             start = com.example.vpn.sidecar.ChainRunner.HopStarter { engine, hopProfile, context ->
                 showForegroundNotification("Starting the ${engine.id} engine...")
+                com.example.vpn.diagnostics.EngineStages.record(engine.id, "chain hop starting")
                 val launch = engine.prepare(hopProfile, settings, context)
                 val process = com.example.vpn.sidecar.EngineReaper.track(engine.startPrepared(hopProfile, settings, launch, context)
                     ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
                 try {
-                    check(process.awaitReady(launch.readyTimeoutMs)) {
+                    val hopReady = process.awaitReady(launch.readyTimeoutMs)
+                    if (!hopReady) com.example.vpn.diagnostics.EngineStages.record(engine.id, "chain hop failed",
+                        process.startupFailure ?: "no readiness signal", error = true)
+                    check(hopReady) {
                         process.startupFailure ?: "The ${engine.id} engine did not start"
                     }
+                    com.example.vpn.diagnostics.EngineStages.record(engine.id, "chain hop ready")
                     process to launch
                 } catch (t: Throwable) {
                     process.stop()
@@ -3417,17 +3669,20 @@ class RayVpnService : VpnService() {
                     break
                 }
                 val stats = activeEngine.getStats()
+                // An engine program behind Xray: what the TUN forwarded to it is counted on the meter between them
+                // (2026-11-25: Serverless Direct showed 0 B/s for 8 minutes while apps loaded pages).
+                val metered = com.example.vpn.verify.TunPathStatus.meter?.takeIf { !it.isClosed }?.snapshot()
 
-                val currentTx = maxOf(stats.txBytes, serviceTxBytes.get())
-                val currentRx = maxOf(stats.rxBytes, serviceRxBytes.get())
+                val currentTx = maxOf(stats.txBytes, serviceTxBytes.get(), metered?.upBytes ?: 0L)
+                val currentRx = maxOf(stats.rxBytes, serviceRxBytes.get(), metered?.downBytes ?: 0L)
 
                 val calcTxSpeed = (currentTx - lastTx).coerceAtLeast(0L)
                 val calcRxSpeed = (currentRx - lastRx).coerceAtLeast(0L)
                 lastTx = currentTx
                 lastRx = currentRx
 
-                val speedTx = if (stats.txSpeedBps > 0) stats.txSpeedBps else calcTxSpeed
-                val speedRx = if (stats.rxSpeedBps > 0) stats.rxSpeedBps else calcRxSpeed
+                val speedTx = if (stats.txSpeedBps > 0 && metered == null) stats.txSpeedBps else calcTxSpeed
+                val speedRx = if (stats.rxSpeedBps > 0 && metered == null) stats.rxSpeedBps else calcRxSpeed
 
                 updateState(_vpnState.value.copy(
                     connectedDurationSeconds = durationSec,
@@ -3448,8 +3703,32 @@ class RayVpnService : VpnService() {
             var okStreak = 0
             // The early-degrade strike is counted once per connection.
             var earlyStrikeCounted = false
+            // What the TUN → engine meter had counted when this attempt's checks began (device traffic since then).
+            val meterBaseline = com.example.vpn.verify.TunPathStatus.meter?.takeIf { !it.isClosed }?.snapshot()
+            var exitTries = 0
             while (isActive && _vpnState.value.isTunnelUp && _vpnState.value.attemptId == attemptId) {
                 val wasConnected = _vpnState.value.isConnected
+                // 2026-11-25: a manual engine pick stayed "Finding a path" while other apps' traffic flowed. When the
+                // engine-port check keeps failing but the TUN → engine hop carried traffic both ways for other apps
+                // (tun.forwarded VERIFIED), the device path is the proof: the attempt counts as verified through the TUN.
+                if (!wasConnected && meterBaseline != null) {
+                    val meter = com.example.vpn.verify.TunPathStatus.meter
+                    val window = meter?.takeIf { !it.isClosed }?.snapshot()?.minus(meterBaseline)
+                    if (window != null && com.example.vpn.verify.TunForwarded.verdict(window) ==
+                        com.example.vpn.verify.TunForwarded.State.VERIFIED) {
+                        mutateState {
+                            com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, true, null, System.currentTimeMillis(),
+                                path = com.example.vpn.verify.ProbePath.TUN)
+                                .let { st -> if (st.attemptId == attemptId) st.copy(deviceTrafficSeen = true) else st }
+                        }
+                        if (_vpnState.value.isConnected && _vpnState.value.attemptId == attemptId) {
+                            XrayLogManager.i("VPN", "Other apps' traffic flows both ways through the engine " +
+                                "(${com.example.vpn.verify.TunForwarded.describe(window)}): CONNECTED on device traffic.")
+                            showConnectedNotification()
+                            _vpnState.value.activeProfile?.let { onTrafficVerified(it, null) }
+                        }
+                    }
+                }
                 // A verified connection that is busy carrying data needs no extra request to prove it.
                 if (wasConnected && passive?.maySkipActiveCheck() == true) {
                     com.example.vpn.diagnostics.ConnectionMetrics.passiveSkips.incrementAndGet()
@@ -3458,8 +3737,21 @@ class RayVpnService : VpnService() {
                 }
                 try {
                     com.example.vpn.diagnostics.ConnectionMetrics.activeTunnelChecks.incrementAndGet()
-                    val sample = if (engineEndpoint != null) com.example.vpn.diagnostics.LiveTunnelProbe.Sample(routeLatency(), null)
-                        else com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService, probeStepMs())
+                    val endpoint = engineEndpoint
+                    val sample = if (endpoint != null) {
+                        val latency = routeLatency()
+                        // The exit through the engine's own port (the VPN network is not the app's to use here):
+                        // until it is known, then on every tenth check. Three misses in a row stop asking.
+                        val known = _vpnState.value.exitIp
+                        val exit = if ((known == null && exitTries < 3) || okStreak % 10 == 9) runCatching {
+                            kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
+                                com.example.vpn.diagnostics.LiveTunnelProbe.traceVia(com.example.vpn.verify.RouteDialers.engine(endpoint), probeStepMs())
+                            }
+                        }.onFailure { if (it is CancellationException) throw it; exitTries++ }.getOrNull() else null
+                        if (exit != null) exitTries = 0
+                        com.example.vpn.diagnostics.LiveTunnelProbe.Sample(latency, exit?.country ?: _vpnState.value.exitCountryCode,
+                            exit?.ip ?: known)
+                    } else com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService, probeStepMs())
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     if (_vpnState.value.attemptId == attemptId) passEvent("tunnel.recheck", sample.latencyMs)
                     passive?.recordActiveSuccess()
@@ -3847,6 +4139,11 @@ class RayVpnService : VpnService() {
             }
             com.example.vpn.verify.TunPathStatus.lastWindow = window
             val line = "TUN: ${verdict.word} · ${com.example.vpn.verify.TunForwarded.describe(window)}"
+            if (verdict == com.example.vpn.verify.TunForwarded.State.VERIFIED) {
+                mutateState { if (it.attemptId == attemptId) it.copy(deviceTrafficSeen = true) else it }
+                com.example.vpn.diagnostics.EngineStages.record(com.example.vpn.diagnostics.EngineStages.engineOf(state.activeProfile),
+                    "device traffic verified", com.example.vpn.verify.TunForwarded.describe(window))
+            }
             when (verdict) {
                 com.example.vpn.verify.TunForwarded.State.VERIFIED -> registry.finish(id, true, line)
                 // The engine refused flows the TUN handed it: a real device-path problem, reported (not acted on).

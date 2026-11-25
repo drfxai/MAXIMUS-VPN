@@ -109,11 +109,12 @@ class Build167DiagTest {
         assertTrue(EngineUdp.dnsPath(PsiphonSidecar.profile()).contains("psiphon on its server"))
     }
 
-    @Test fun otherEnginesAreUnchanged() {
+    @Test fun radianceNowEndsQuicLocallyAndAnswersAppNamesWithFakeDns() {
+        // 2026-11-25 engine test: Lantern alone gave the phone no DNS (curl exit 6) while Psiphon over Lantern worked.
         val config = xray(RadianceSidecar.profile())
-        val rules = config.optJSONObject("routing")?.optJSONArray("rules")
-        assertTrue(rules == null || (0 until rules.length()).none { rules.getJSONObject(it).optString("outboundTag") == EngineUdp.QUIC_BLOCK_TAG })
-        assertFalse(EngineUdp.quicEndedLocally(RadianceSidecar.profile()))
+        assertEquals(EngineUdp.QUIC_BLOCK_TAG, firstRule(config).optString("outboundTag"))
+        assertTrue(EngineUdp.quicEndedLocally(RadianceSidecar.profile()))
+        assertTrue(config.has("fakedns"))
     }
 
     // ---- 2. googlevideo probe ------------------------------------------------------------------------------
