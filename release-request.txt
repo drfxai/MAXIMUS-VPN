@@ -1,3 +1,5 @@
+V1.0.4 signed Android rebuild after PR #288 (388f2857c878790f7f76d2d6a1ac50772ea4f639); version stays V1.0.4.
+Build 176 device-test fixes (#287, #288): manual engine picks never fall back (Smart Connect only), deadline matches each engine's own window, power button with no server starts Smart Connect, traffic block released after a failed Connect (Daily, Kill Switch off), time-to-connect from the tap, YouTube+Telegram filtered-site probe with partial result, device-traffic verification, Tor network / chain labels, no false exit-141 crash.
 V1.0.4 signed Android rebuild after PR #286 (64ebd106fb9ed13bb0ff8041adeb04bf238abe74); version stays V1.0.4.
 Engine test fixes (#285, #286): connect works right after Disconnect, upkeep beside the tunnel, GeoFiles update, Shir o Khorshid seeded from Psiphon servers, per-engine connect deadline with fallback, Smart Connect filtered-site probe, Lantern-alone DNS, connection stages card and logcat, Aether tab count.
 V1.0.4 signed Android rebuild after PR #283 (c0b64d3602f35cddcf205216d0afda257cfe1ee2); version stays V1.0.4.
