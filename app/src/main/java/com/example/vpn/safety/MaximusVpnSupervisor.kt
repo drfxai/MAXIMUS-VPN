@@ -19,7 +19,9 @@ class MaximusVpnSupervisor(private val log: (String) -> Unit = {}) {
         /** See FailClosedPolicy: an unusable profile the user picked in DAILY mode. */
         INVALID_PROFILE_BY_USER,
         /** Unlock mode: only the resolver changes, there is no tunnel whose absence would leak. */
-        UNLOCK_MODE
+        UNLOCK_MODE,
+        /** See FailClosedPolicy.mayReleaseAfterFailedConnect: the user's Connect failed in DAILY mode, Kill Switch off. */
+        CONNECT_FAILED_BY_USER
     }
 
     /** What Android does with traffic when this app's process dies. */

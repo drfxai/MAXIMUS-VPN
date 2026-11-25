@@ -21,6 +21,12 @@ enum class RouteVerification(val title: String) {
     /** The server completed a handshake. Not connectivity: used for candidates, never for a live session. */
     HANDSHAKE_VERIFIED("Handshake only"),
     ENGINE_PROXY_VERIFIED("Engine proxy verified · Android VPN unconfirmed"),
+    /**
+     * The engine's local port carried a request, and other apps' traffic flowed both ways through the Android VPN into
+     * the engine (tun.forwarded, [ConnectionState.deviceTrafficSeen]). Build 176 kept saying "unconfirmed" after the log
+     * had "device traffic verified".
+     */
+    DEVICE_TRAFFIC_VERIFIED("Engine proxy and Android VPN traffic verified"),
     /** A real request went through the route and came back. */
     TUNNEL_TRAFFIC_VERIFIED("Traffic verified"),
     /** A download and an upload, each checked byte for byte, went through the route. */
@@ -50,6 +56,9 @@ enum class RouteVerification(val title: String) {
             ConnectionStatus.CONNECTED -> when {
                 state.revived -> REVIVED_AND_VERIFIED
                 state.trafficEvidence?.takeIf { it.appliesTo(state) && it.path == ProbePath.TUN }?.bidirectional == true -> BIDIRECTIONAL_VERIFIED
+                (state.lastVerifiedPath == ProbePath.ENGINE_PROXY ||
+                    state.trafficEvidence?.takeIf { it.appliesTo(state) }?.path == ProbePath.ENGINE_PROXY) &&
+                    state.deviceTrafficSeen -> DEVICE_TRAFFIC_VERIFIED
                 state.lastVerifiedPath == ProbePath.ENGINE_PROXY ||
                     state.trafficEvidence?.takeIf { it.appliesTo(state) }?.path == ProbePath.ENGINE_PROXY -> ENGINE_PROXY_VERIFIED
                 else -> TUNNEL_TRAFFIC_VERIFIED

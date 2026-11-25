@@ -88,13 +88,14 @@ object PsiphonRegionPlan {
 
     /**
      * The whole budget of one direct Psiphon start: [TOTAL_AUTO_MS] on any region, the engine's own window for a fixed
-     * region, and [KNOWN_BLOCKED_MS] at most for the user's own pick ([manual]) on a network where direct Psiphon
-     * failed recently and the chain over Lantern is the remembered path ([knownBlocked]). Pure.
+     * region. The user's own pick ([manual]) always gets that full window, also where direct Psiphon failed recently
+     * ([knownBlocked]): build 176 cut such a pick at 40 s ("abandoned early by the connection plan") while its deadline
+     * and stage text promised more. A manual pick tests only its engine, fully; the chain over Lantern stays a one-tap
+     * offer after it fails. [KNOWN_BLOCKED_MS] is no longer applied here. Pure.
      */
-    fun totalBudget(userRegion: String, readyTimeoutMs: Long, manual: Boolean, knownBlocked: Boolean): Long {
-        val base = if (userRegion.isBlank()) TOTAL_AUTO_MS else readyTimeoutMs
-        return if (manual && knownBlocked) minOf(base, KNOWN_BLOCKED_MS) else base
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun totalBudget(userRegion: String, readyTimeoutMs: Long, manual: Boolean, knownBlocked: Boolean): Long =
+        if (userRegion.isBlank()) TOTAL_AUTO_MS else readyTimeoutMs
 
     /**
      * Any region stayed silent: concrete regions from Psiphon's own [available] list, remembered ones first, then

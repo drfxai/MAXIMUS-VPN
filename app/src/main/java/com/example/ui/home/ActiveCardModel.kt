@@ -53,7 +53,7 @@ data class ActiveCardModel(
                     upload = DASH
                 )
             }
-            val code = state.exitCountryCode?.uppercase(Locale.US)?.takeIf { it.matches(Regex("[A-Z]{2}")) }
+            val code = state.exitCountryCode?.uppercase(Locale.US)?.takeIf { it.matches(Regex("[A-Z][A-Z0-9]")) }
             val (status, tone) = when (state.status) {
                 ConnectionStatus.CONNECTED -> "Verified" to Tone.OK
                 ConnectionStatus.DEGRADED -> "Degraded" to Tone.WARN
@@ -92,7 +92,8 @@ data class ActiveCardModel(
 
         /** The country's English name, or the code itself when the JVM does not know it. */
         fun countryName(code: String): String =
-            Locale("", code).getDisplayCountry(Locale.ENGLISH).takeIf { it.isNotBlank() && it != code } ?: code
+            com.example.data.model.ConnectionRoute.exitName(code)
+                ?: Locale("", code).getDisplayCountry(Locale.ENGLISH).takeIf { it.isNotBlank() && it != code } ?: code
 
         /** The flag emoji for a two-letter code; a globe when there is none. */
         fun flag(code: String?): String {

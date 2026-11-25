@@ -1725,6 +1725,10 @@
     <string name="connect_deadline_failed">%1$s در %2$d ثانیه ترافیکی منتقل نکرد: %3$s. تا اتصال دوباره یا انتخاب اتصال دیگر، ترافیک مسدود می‌ماند.</string>
     <string name="connect_deadline_reason_locked">خروجی در این حالت قفل است، پس اتصال دیگری امتحان نشد</string>
     <string name="connect_deadline_reason_manual">این اتصال را خودتان انتخاب کردید، پس اتصال دیگری اجرا نشد. اتصال دیگری انتخاب کنید یا با «اتصال هوشمند» انتخاب را به Maximus بسپارید</string>
+    <string name="route_engine_proxy_unconfirmed">پراکسی موتور تأیید شد · ترافیک VPN اندروید هنوز دیده نشده</string>
+    <string name="route_device_traffic_verified">پراکسی موتور و ترافیک VPN اندروید تأیید شد</string>
+    <string name="power_no_server_trade">هیچ سروری انتخاب نشده است. یک کانفیگ در Nodes اضافه کنید: این حالت فقط سرور انتخاب‌شده را وصل می‌کند.</string>
+    <string name="filtered_sites_partial">برخی سایت‌های فیلترشده هنوز از طریق این اتصال باز نمی‌شوند</string>
     <string name="connect_deadline_reason_exhausted">اتصال‌های دیگر هم بدون ترافیک امتحان شدند</string>
     <string name="connect_deadline_reason_none_left">اتصال داخلی دیگری برای امتحان باقی نمانده است</string>
     <string name="connect_deadline_notification">اتصال ناموفق: در مهلت زمانی ترافیکی نبود</string>

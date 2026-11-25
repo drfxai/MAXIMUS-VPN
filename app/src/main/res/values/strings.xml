@@ -1738,6 +1738,10 @@
     <string name="connect_deadline_failed">%1$s carried no traffic in %2$d s: %3$s. Traffic stays blocked until you connect again or pick another connection.</string>
     <string name="connect_deadline_reason_locked">the exit is locked in this mode, so no other connection was tried</string>
     <string name="connect_deadline_reason_manual">you picked this connection yourself, so no other connection was started. Pick another connection or use Smart Connect to let Maximus choose</string>
+    <string name="route_engine_proxy_unconfirmed">Engine proxy verified · Android VPN traffic not seen yet</string>
+    <string name="route_device_traffic_verified">Engine proxy and Android VPN traffic verified</string>
+    <string name="power_no_server_trade">No server is selected. Add a config in Nodes: this mode connects only the selected server.</string>
+    <string name="filtered_sites_partial">Some filtered sites are still blocked through this connection</string>
     <string name="connect_deadline_reason_exhausted">other connections were tried without traffic as well</string>
     <string name="connect_deadline_reason_none_left">no other built-in connection is available to try</string>
     <string name="connect_deadline_notification">Connection failed: no traffic within the time limit</string>

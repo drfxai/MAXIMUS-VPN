@@ -34,6 +34,8 @@ object ConnectDeadline {
      * plus the traffic check, so the same engine can finish retrying itself before the pick counts as failed.
      */
     const val PSIPHON_MANUAL_MS = com.example.vpn.sidecar.PsiphonRegionPlan.TOTAL_AUTO_MS + 20_000L
+    /** The user's own Aether pick: [com.example.vpn.connections.ConnectionEngineRunner.RACE_DEFAULT_DEADLINE_MS]. */
+    const val AETHER_MANUAL_MS = 200_000L
     const val MAX_FALLBACKS = 3
 
     /** Statuses in which the attempt has not carried verified traffic yet. */
@@ -96,8 +98,36 @@ object ConnectDeadline {
     /** The budget of an attempt on [engines]; a [manual] pick of [directPsiphon] waits out its region rotation. Pure. */
     fun budgetFor(engines: List<String>, manual: Boolean, directPsiphon: Boolean): Long {
         val base = budgetMs(engines)
-        return if (manual && directPsiphon) maxOf(base, PSIPHON_MANUAL_MS) else base
+        return when {
+            manual && directPsiphon -> maxOf(base, PSIPHON_MANUAL_MS)
+            // Aether's own carrier ladder (scan, then the next carrier) before it reports anything: the engine's default
+            // readiness window plus the check. An Irancell ladder announces its exact budget (EngineBudgetHint).
+            manual && engines.firstOrNull() == com.example.vpn.sidecar.AetherSidecar.ID -> maxOf(base, AETHER_MANUAL_MS)
+            else -> base
+        }
     }
+
+    /** The traffic check after an engine reports ready: what a deadline adds on top of the engine's own window. */
+    const val VERIFY_MARGIN_MS = 20_000L
+
+    /**
+     * One source of truth for a manual pick's deadline (build 176 device test: Psiphon cut at 40 s, Shir o Khorshid at
+     * 60 s while its stage said "ready within 120s", Aether at 60 s inside its own 220 s ladder). The attempt started
+     * at [since] gets [baseMs]; when the engine announced its own readiness window ending at [engineReadyBy]
+     * ([EngineBudgetHint]), a [manual] pick waits until then plus [VERIFY_MARGIN_MS]. Smart Connect keeps [baseMs]:
+     * its search moves on instead. Pure.
+     */
+    fun effectiveBudget(baseMs: Long, since: Long, engineReadyBy: Long?, manual: Boolean): Long {
+        if (!manual || engineReadyBy == null) return baseMs
+        return maxOf(baseMs, engineReadyBy + VERIFY_MARGIN_MS - since)
+    }
+
+    /**
+     * The readiness window shown in "engine starting · ready within Ns": the engine's own [readyMs] for a manual pick;
+     * for Smart Connect never longer than its deadline for this engine ([smartBudgetMs]). Pure.
+     */
+    fun shownReadyMs(readyMs: Long, manual: Boolean, smartBudgetMs: Long): Long =
+        if (manual) readyMs else minOf(readyMs, smartBudgetMs)
 
     /**
      * True when the attempt is still waiting for traffic at [now]. A saved config ([engineProfile] false) is timed only

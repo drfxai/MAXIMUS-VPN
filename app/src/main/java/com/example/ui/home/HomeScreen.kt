@@ -505,8 +505,21 @@ fun HomeScreen(
                     Text(if (directRoute) stringResource(R.string.ui_device_direct_dpi_bypass_internet)
                         else stringResource(R.string.ui_device_android_vpn_internet, connectionState.activeRoute ?: "selected route"),
                         color = AppTheme.colors.textPrimary, fontSize = 12.sp)
-                    Text(connectionState.verification.title,
+                    Text(when (connectionState.verification) {
+                            com.example.vpn.verify.RouteVerification.ENGINE_PROXY_VERIFIED -> stringResource(R.string.route_engine_proxy_unconfirmed)
+                            com.example.vpn.verify.RouteVerification.DEVICE_TRAFFIC_VERIFIED -> stringResource(R.string.route_device_traffic_verified)
+                            else -> connectionState.verification.title
+                        },
                         color = AppTheme.colors.textSecondary, fontSize = 12.sp)
+                    if (connectionState.isConnected && connectionState.filteredSitesPartial) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D),
+                                modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.filtered_sites_partial), color = AppTheme.colors.textPrimary,
+                                fontSize = 12.sp, modifier = Modifier.weight(1f).testTag("filtered_sites_partial"))
+                        }
+                    }
                     if (connectionState.bulkLimited) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D),

@@ -331,6 +331,7 @@ class RayVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         com.example.vpn.sidecar.Sidecars.nativeLibraryDir = applicationInfo.nativeLibraryDir
+        EngineBudgetHint.attemptSource = { _vpnState.value.attemptId }
         com.example.vpn.sidecar.Sidecars.openAsset = { name -> assets.open(name) }
         com.example.vpn.sidecar.Sidecars.torStarter = { torrc, port -> com.example.vpn.sidecar.TorInApp.start(this, torrc, port) }
         val db = AppDatabase.getInstance(applicationContext)
@@ -474,6 +475,8 @@ class RayVpnService : VpnService() {
             // Android can restart an Always-on VPN with a null intent after process death.
             if (!showForegroundNotification("Starting Always-on Maximus VPN...")) return START_NOT_STICKY
             lifecycle.newIntent()
+            userSession = false
+            userConnectAt = 0L
             connectJob?.cancel()
             val connectTicket = lifecycle.current()
             connectJob = serviceScope.launch(AttemptTicket(connectTicket)) { settleConnect(connectTicket) {
@@ -517,6 +520,9 @@ class RayVpnService : VpnService() {
                 }
 
                 lifecycle.newIntent()
+                // "Time from connect to verified traffic" runs from this tap, across any fallback (ConnectTiming).
+                userConnectAt = System.currentTimeMillis()
+                userSession = true
                 // The user's choice for this session: reconnects and mode switches keep it until the next Connect.
                 exactSession = exact
                 smartStarted = smart
@@ -659,9 +665,13 @@ class RayVpnService : VpnService() {
                     if (unverifiedSince == null) unverifiedSince = now
                 } else unverifiedSince = null
                 val start = if (engineProfile) since else unverifiedSince ?: now
-                if (!ConnectDeadline.expired(s.status, engineProfile, start, now, budget)) continue
+                // A manual pick waits out the readiness window its engine announced (EngineBudgetHint), so the stage
+                // text and the deadline say the same thing; Smart Connect keeps its own shorter limit.
+                val effective = ConnectDeadline.effectiveBudget(budget, start,
+                    EngineBudgetHint.readyBy(s.attemptId), manual = exactSession)
+                if (!ConnectDeadline.expired(s.status, engineProfile, start, now, effective)) continue
                 s.attemptId?.let { fired += it }
-                onConnectDeadline(ticket, s, budget)
+                onConnectDeadline(ticket, s, effective)
                 // The next attempt (a fallback) gets its own budget; a give-up ends with FAILED.
                 watched = null
             }
@@ -749,11 +759,7 @@ class RayVpnService : VpnService() {
                         disconnectResources()
                         updateState(_vpnState.value.copy(status = ConnectionStatus.FAILED, errorMessage = message,
                             failureStage = com.example.vpn.diagnostics.FailureStage.TIMEOUT))
-                        if (protectionRequested) showForegroundNotification(getString(com.example.R.string.connect_deadline_notification))
-                        else {
-                            stopForeground(STOP_FOREGROUND_REMOVE)
-                            stopSelf()
-                        }
+                        endFailedSession(getString(com.example.R.string.connect_deadline_notification))
                     } finally {
                         if (locked2) connectionMutex.unlock()
                     }
@@ -820,6 +826,10 @@ class RayVpnService : VpnService() {
 
     /** The session was started with the power button: only the selected config, as saved (see [EXTRA_EXACT]). */
     @Volatile private var exactSession = false
+    /** The user's Connect tap not yet followed by verified traffic; 0 otherwise ([ConnectTiming]). */
+    @Volatile private var userConnectAt = 0L
+    /** The session was started by the user's Connect (not Always-on); see [endFailedSession]. */
+    @Volatile private var userSession = false
 
     /**
      * Paths that also carried traffic when Smart Connect compared them, best first: the next one is used when
@@ -1399,7 +1409,9 @@ class RayVpnService : VpnService() {
             // Which stages this connect may run, steered by what was measured on this network (not by guesses).
             val plan = com.example.vpn.smart.SmartConnectPlan.of(com.example.vpn.smart.SmartConnectPlan.Input(
                 godMode = policy.mode == com.example.data.model.OperationalMode.GOD_MODE,
-                lockExit = lockExit, exact = exact && !policy.lockExit, force = force, mayMove = raceFirst || settings.autoFailoverEnabled,
+                lockExit = lockExit, exact = exact && !policy.lockExit,
+                enginePick = com.example.vpn.connections.BuiltinConnections.isBuiltin(userProfile.id),
+                force = force, mayMove = raceFirst || settings.autoFailoverEnabled,
                 reading = com.example.vpn.smart.SmartConnectPlan.freshReading(
                     com.example.vpn.smart.NetworkCapabilityDetector.last, routeNetwork, System.currentTimeMillis()),
                 cloudflareBlocked = cloudflareBlocked
@@ -2112,7 +2124,11 @@ class RayVpnService : VpnService() {
                     verifiedFallback(routeNetwork, exclude + requestedProfile.id)?.second else null
                 profile = startSidecar(sidecarEngine, profile, settings, aetherFallback)
             }
-            mutateState { it.copy(activeRoute = com.example.data.model.ConnectionRoute.label(profile)) }
+            // A chain is named by all its hops; the entry hop's own label alone read "Psiphon" for Psiphon over Lantern.
+            val routeLabel = engineChain?.let { chain ->
+                com.example.data.model.ConnectionRoute.chainLabel(chain.hops.map { com.example.vpn.sidecar.EngineChain.titleOf(it.engineId) })
+            } ?: com.example.data.model.ConnectionRoute.label(profile)
+            mutateState { it.copy(activeRoute = routeLabel) }
             routeEngines = engineChain?.hops?.map { it.engineId } ?: listOfNotNull(sidecarEngine?.id)
             engineEndpoint = if (sidecarEngine?.id == com.example.vpn.sidecar.ByedpiSidecar.ID)
                 com.example.vpn.sidecar.ByedpiSidecar.healthEndpoint(profile)
@@ -2324,12 +2340,20 @@ class RayVpnService : VpnService() {
                 if (_vpnState.value.attemptId != attemptId) return@withContext
                 runCatching {
                     com.example.vpn.diagnostics.events.EventLog.event("smart.filtered_probe", attributes = mapOf(
-                        "result" to if (filtered?.passed == true) "passed" else "blocked",
+                        "result" to (filtered?.verdict?.name?.lowercase() ?: "blocked"),
                         "detail" to (filtered?.detail ?: "time limit"),
                         "profile" to (com.example.vpn.diagnostics.events.DiagEvent.profileRef(requestedProfile.id) ?: "none")))
                 }
                 if (filtered?.passed == true) {
                     com.example.vpn.diagnostics.EngineStages.record(stageEngine, "filtered sites reachable", filtered.detail)
+                } else if (filtered?.anyReachable == true) {
+                    // Some filtered sites answer, others do not (build 176: YouTube yes, Telegram Web no through Serverless
+                    // Direct): reported as partial, never as reachable. The path stays: it does carry filtered traffic.
+                    com.example.vpn.diagnostics.EngineStages.record(stageEngine, "filtered sites partly reachable",
+                        filtered.detail, error = true)
+                    mutateState { if (it.attemptId == attemptId) it.copy(filteredPartialAttempt = attemptId) else it }
+                    XrayLogManager.w("SMART", "Filtered sites partly reachable through " +
+                        "${com.example.core.SecretRedactor.redact(requestedProfile.name)}: ${filtered.detail}.")
                 } else {
                     filteredBlocked = true
                     com.example.vpn.diagnostics.EngineStages.record(stageEngine, "filtered sites blocked",
@@ -2370,9 +2394,11 @@ class RayVpnService : VpnService() {
                 showConnectedNotification()
                 val checkedPath = if (engineEndpoint != null) "engine local proxy" else "Android VPN interface"
                 XrayLogManager.i("VPN", "[DIAGNOSTICS] 10. Traffic verified through $checkedPath (${check.first} ms). Final state: CONNECTED.")
-                val connectMs = System.currentTimeMillis() - connectStartedAt
+                val verifiedAt = System.currentTimeMillis()
+                val connectMs = ConnectTiming.elapsed(userConnectAt, connectStartedAt, verifiedAt)
+                userConnectAt = 0L
                 com.example.vpn.diagnostics.ConnectionMetrics.recordConnectTime(connectMs)
-                XrayLogManager.i("VPN", "Time from connect to verified traffic: $connectMs ms.")
+                XrayLogManager.i("VPN", ConnectTiming.describe(connectMs, verifiedAt - connectStartedAt))
                 onTrafficVerified(requestedProfile, check.first)
                 // A pinned restart that brings traffic back ends its notice (PinnedRecovery).
                 if (pinnedRestartNote != null) {
@@ -2649,9 +2675,29 @@ class RayVpnService : VpnService() {
                 }
             }
             if (fallbackFromDirect(requestedProfile)) return@withContext
-            if (protectionRequested) showForegroundNotification("Traffic blocked: connection failed")
-            if (!protectionRequested) stopForeground(STOP_FOREGROUND_REMOVE)
-            if (!protectionRequested) stopSelf()
+            endFailedSession("Traffic blocked: connection failed")
+        }
+    }
+
+    /**
+     * A Connect ended FAILED with nothing more to try. The user's own Connect in DAILY mode with the Kill Switch off
+     * releases the traffic block so the phone is not left without internet (FailClosedPolicy.mayReleaseAfterFailedConnect);
+     * otherwise the block stays and [blockedNotice] says so.
+     */
+    private fun endFailedSession(blockedNotice: String) {
+        val settings = runCatching { settingsRepository.getSettings() }.getOrNull()
+        if (protectionRequested && settings != null && com.example.vpn.safety.FailClosedPolicy.mayReleaseAfterFailedConnect(
+                startedByUser = userSession, mode = settings.operationalMode, killSwitchEnabled = settings.killSwitchEnabled)) {
+            supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.CONNECT_FAILED_BY_USER)
+            XrayLogManager.i("VPN", "Connection failed: the traffic block is released (Daily mode, Kill Switch off); " +
+                "apps use the network directly until you connect again.")
+            // Without the protection request this closes the blocking interface as well.
+            disconnectResources()
+        }
+        if (protectionRequested) showForegroundNotification(blockedNotice)
+        else {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
     }
 
@@ -3137,8 +3183,20 @@ class RayVpnService : VpnService() {
             }
             var launch = started?.launch ?: engine.prepare(runningProfile, settings, engineContext)
             showForegroundNotification("Starting the ${engine.id} engine...")
-            com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine starting",
-                "ready within ${launch.readyTimeoutMs / 1000}s" + if (started != null) " (carrier chosen by its test)" else "")
+            // One number for the stage text and the connect deadline (build 176: "ready within 120s" while the deadline
+            // cut the attempt at 40-60 s). A manual pick gets the engine's own window, announced to the deadline
+            // (EngineBudgetHint); Smart Connect shows its own, shorter limit.
+            fun recordStarting(readyMs: Long) {
+                val shown = ConnectDeadline.shownReadyMs(readyMs, manual = exactSession,
+                    smartBudgetMs = runCatching { ConnectDeadline.budgetMs(profile) }.getOrDefault(ConnectDeadline.ENGINE_MS))
+                if (exactSession && started == null) EngineBudgetHint.announce(readyMs)
+                com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine starting",
+                    "ready within ${shown / 1000}s" + when {
+                        started != null -> " (carrier chosen by its test)"
+                        shown < readyMs -> " (Smart Connect's limit; the engine allows ${readyMs / 1000}s)"
+                        else -> ""
+                    })
+            }
 
             fun launchProcess() = com.example.vpn.sidecar.EngineReaper.track(
                 engine.startPrepared(runningProfile, settings, launch, engineContext)
@@ -3174,7 +3232,8 @@ class RayVpnService : VpnService() {
                 val total = com.example.vpn.sidecar.PsiphonRegionPlan.totalBudget(userRegion, launch.readyTimeoutMs,
                     manual = exactSession, knownBlocked = knownBlocked)
                 if (knownBlocked) XrayLogManager.i("VPN", "Psiphon: " + com.example.vpn.connections.PsiphonChainMemory.describe(regionNetwork) +
-                    "; your direct Psiphon pick gets ${total / 1000}s before Psiphon over Lantern is offered.")
+                    "; your direct Psiphon pick still gets its full ${total / 1000}s; Psiphon over Lantern is offered only if it fails.")
+                recordStarting(total)
                 // A pinned restart leaves the region whose tunnel stopped carrying traffic (PinnedRecovery).
                 val avoid = psiphonAvoid?.takeIf { it.first == regionNetwork }?.second.orEmpty()
                 psiphonAvoid = null
@@ -3227,6 +3286,7 @@ class RayVpnService : VpnService() {
                     }
                 }
             } else {
+                recordStarting(launch.readyTimeoutMs)
                 process = started?.running ?: launchProcess()
                 sidecar = process
                 ready = started != null || process.awaitReady(launch.readyTimeoutMs)
@@ -3484,12 +3544,20 @@ class RayVpnService : VpnService() {
                 showForegroundNotification("Starting the ${engine.id} engine...")
                 com.example.vpn.diagnostics.EngineStages.record(engine.id, "chain hop starting")
                 val launch = engine.prepare(hopProfile, settings, context)
+                // A manual chain pick waits out each hop's own window (the deadline reads it; build 176 cut the Psiphon hop
+                // of Psiphon over Lantern at 90 s inside its 120 s window).
+                EngineBudgetHint.announce(launch.readyTimeoutMs)
                 val process = com.example.vpn.sidecar.EngineReaper.track(engine.startPrepared(hopProfile, settings, launch, context)
                     ?: com.example.vpn.sidecar.SidecarProcess.start(engine.id, launch, context.workDir, context.socksPort))
                 try {
                     val hopReady = process.awaitReady(launch.readyTimeoutMs)
-                    if (!hopReady) com.example.vpn.diagnostics.EngineStages.record(engine.id, "chain hop failed",
-                        process.startupFailure ?: "no readiness signal", error = true)
+                    val failure = process.startupFailure
+                    // Stopped by the app (a deadline, a Stop, a newer Connect): not a crash of the hop. Build 176 reported
+                    // "exit 141" here: the stop closes the program's output pipe and its shutdown notice then gets SIGPIPE.
+                    if (!hopReady && com.example.vpn.sidecar.SidecarProcess.stoppedByApp(failure))
+                        com.example.vpn.diagnostics.EngineStages.record(engine.id, "chain hop stopped", failure.orEmpty())
+                    else if (!hopReady) com.example.vpn.diagnostics.EngineStages.record(engine.id, "chain hop failed",
+                        failure ?: "no readiness signal", error = true)
                     check(hopReady) {
                         process.startupFailure ?: "The ${engine.id} engine did not start"
                     }

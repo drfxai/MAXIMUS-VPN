@@ -136,11 +136,16 @@ class SidecarProcess(
                 startupFailure = "Required account or exit helper stopped before engine readiness; traffic is unverified."
                 return false
             }
+            if (stopping) {
+                // The app stopped this program (deadline, Stop, newer Connect) while it was starting: whatever exit code
+                // follows (143 SIGTERM, 141 SIGPIPE once the stop closed its output pipe) is not the engine's failure.
+                if (startupFailure == null) startupFailure = STOPPED_BEFORE_READY
+                return false
+            }
             if (!isAlive) {
                 logThread.join(200) // Let the bounded diagnostic reader publish the exit reason.
-                if (startupFailure == null) startupFailure = "Engine process exited before local readiness " +
-                    "(exit ${runCatching { process.exitValue() }.getOrNull() ?: "unknown"}, " +
-                    "${failureHint ?: "no diagnostic category"}); inspect redacted engine logs."
+                if (startupFailure == null) startupFailure = exitedBeforeReady(
+                    runCatching { process.exitValue() }.getOrNull(), failureHint, stopping)
                 return false
             }
             if (sawReadyLine && portOpen(socksPort)) { ready = true; return true }
@@ -175,6 +180,29 @@ class SidecarProcess(
          */
         internal fun psiphonFamily(name: String): Boolean =
             name.removePrefix("lab-").let { it == PsiphonSidecar.ID || it == ShirokhorshidSidecar.ID }
+
+        /** The app stopped the program before it was ready (not an engine failure). */
+        const val STOPPED_BEFORE_READY = "Engine stopped by the app before it was ready (the connection attempt ended); not an engine crash."
+
+        /** Whether a startup failure only says the app stopped the program. Pure. */
+        fun stoppedByApp(failure: String?): Boolean = failure == STOPPED_BEFORE_READY
+
+        /**
+         * Why a program exited before readiness. Exit 141 is SIGPIPE (128 + 13): the program wrote to an output pipe that
+         * was already closed, which happens when the app stops it ([stopping]) since stopping closes the pipe; 143 is
+         * SIGTERM. Both are the app's stop when [stopping]. Pure.
+         */
+        fun exitedBeforeReady(code: Int?, hint: String?, stopping: Boolean): String {
+            if (stopping && (code == null || code == 141 || code == 143 || code == 137 || code == 0)) return STOPPED_BEFORE_READY
+            val signal = when (code) {
+                141 -> " SIGPIPE: its output pipe closed"
+                143 -> " SIGTERM"
+                137 -> " SIGKILL"
+                else -> ""
+            }
+            return "Engine process exited before local readiness (exit ${code ?: "unknown"}$signal, " +
+                "${hint ?: "no diagnostic category"}); inspect redacted engine logs."
+        }
 
         internal const val AETHER_SCAN_EXHAUSTED =
             "Aether gateway scan completed without a verified endpoint; traffic is unverified."

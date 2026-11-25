@@ -122,12 +122,7 @@ class VpnViewModel(
                 if (fallback != null) {
                     VpnController.startVpn(context, fallback, smart = smart, exact = exact)
                 } else {
-                    RayVpnService.updateState(
-                        VpnController.connectionState.value.copy(
-                            status = ConnectionStatus.FAILED,
-                            errorMessage = "No server profile available to connect."
-                        )
-                    )
+                    connectWithoutServer(context)
                 }
             }
         }
@@ -158,14 +153,34 @@ class VpnViewModel(
                 VpnController.startVpn(context, profileToConnect, smart = smart, exact = exact)
             } else {
                 XrayLogManager.w("VPN", "Permission granted but no profile available.")
-                RayVpnService.updateState(
-                    VpnController.connectionState.value.copy(
-                        status = ConnectionStatus.FAILED,
-                        errorMessage = "No server profile available after permission grant."
-                    )
-                )
+                connectWithoutServer(context)
             }
         }
+    }
+
+    /**
+     * The power button with no server selected or saved. Build 176 device test: it failed silently ("No server profile
+     * available to connect." only in the log, the screen still said "Tap the button to connect"). It now starts Smart
+     * Connect without a config, the same as the "Connect without a config" button; Trade mode, which connects only the
+     * selected server, says why nothing started instead.
+     */
+    private fun connectWithoutServer(context: Context) {
+        val mode = settingsRepository.getSettings().operationalMode
+        if (!com.example.vpn.safety.PowerButtonPolicy.configFreeWhenNoServer(mode)) {
+            RayVpnService.updateState(
+                VpnController.connectionState.value.copy(
+                    status = ConnectionStatus.FAILED,
+                    errorMessage = context.getString(com.example.R.string.power_no_server_trade)
+                )
+            )
+            return
+        }
+        XrayLogManager.i("VPN", "Power button: no server is selected or saved; starting Smart Connect without a config.")
+        val profile = com.example.vpn.connections.BuiltinConnections.resolve(context,
+            com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod.AETHER_WARP.id)
+            ?: com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod.AETHER_WARP.profile()
+        RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null) }
+        VpnController.startVpn(context, profile, smart = true, exact = false)
     }
 
     fun onPermissionDenied() {
