@@ -1737,6 +1737,10 @@
     <string name="connect_deadline_failed">%1$s не передал трафик за %2$d с: %3$s. Трафик остаётся заблокированным, пока вы не подключитесь снова или не выберете другое подключение.</string>
     <string name="connect_deadline_reason_locked">выход закреплён в этом режиме, поэтому другие подключения не пробовались</string>
     <string name="connect_deadline_reason_manual">вы выбрали это подключение сами, поэтому другие подключения не запускались. Выберите другое подключение или нажмите Smart Connect, чтобы Maximus выбрал сам</string>
+    <string name="route_engine_proxy_unconfirmed">Прокси движка проверен · трафик через Android VPN ещё не замечен</string>
+    <string name="route_device_traffic_verified">Прокси движка и трафик через Android VPN проверены</string>
+    <string name="power_no_server_trade">Сервер не выбран. Добавьте конфигурацию в разделе Nodes: этот режим подключает только выбранный сервер.</string>
+    <string name="filtered_sites_partial">Некоторые заблокированные сайты всё ещё недоступны через это подключение</string>
     <string name="connect_deadline_reason_exhausted">другие подключения тоже не передали трафик</string>
     <string name="connect_deadline_reason_none_left">других встроенных подключений для проверки не осталось</string>
     <string name="connect_deadline_notification">Подключение не удалось: нет трафика в пределах лимита времени</string>

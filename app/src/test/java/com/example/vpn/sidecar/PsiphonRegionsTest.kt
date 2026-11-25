@@ -214,11 +214,12 @@ class PsiphonRegionsTest {
         assertTrue(!PsiphonRegionPlan.tcpRetryAllowed(regionRun = true, userRegion = "JP", failure = "unavailable"))
     }
 
-    @Test fun theUsersDirectPickOnANetworkWhereOnlyTheChainWorksFailsFast() {
+    @Test fun theUsersDirectPickGetsItsFullWindowEvenWhereOnlyTheChainWorked() {
         assertEquals(PsiphonRegionPlan.TOTAL_AUTO_MS, PsiphonRegionPlan.totalBudget("", 120_000, manual = true, knownBlocked = false))
         assertEquals(PsiphonRegionPlan.TOTAL_AUTO_MS, PsiphonRegionPlan.totalBudget("", 120_000, manual = false, knownBlocked = true))
-        assertEquals(PsiphonRegionPlan.KNOWN_BLOCKED_MS, PsiphonRegionPlan.totalBudget("", 120_000, manual = true, knownBlocked = true))
-        assertEquals(PsiphonRegionPlan.KNOWN_BLOCKED_MS, PsiphonRegionPlan.totalBudget("DE", 120_000, manual = true, knownBlocked = true))
+        // Build 176: a manual pick was cut at 40 s here; it now gets the same window as everywhere else.
+        assertEquals(PsiphonRegionPlan.TOTAL_AUTO_MS, PsiphonRegionPlan.totalBudget("", 120_000, manual = true, knownBlocked = true))
+        assertEquals(120_000L, PsiphonRegionPlan.totalBudget("DE", 120_000, manual = true, knownBlocked = true))
         assertEquals(120_000L, PsiphonRegionPlan.totalBudget("DE", 120_000, manual = true, knownBlocked = false))
         val out = run.run("", emptyList(), PsiphonRegionPlan.KNOWN_BLOCKED_MS, launch = { step ->
             FakeStart(step.region, available = reportRegions, availableAtMs = 600)

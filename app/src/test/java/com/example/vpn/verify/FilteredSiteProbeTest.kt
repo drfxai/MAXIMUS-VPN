@@ -16,14 +16,32 @@ import java.net.Socket
  * Instagram failed TLS and Telegram timed out. A path must also reach a filtered site before Smart Connect keeps it.
  */
 class FilteredSiteProbeTest {
-    @Test fun oneAnswerFromAFilteredSitePasses() {
-        val asked = mutableListOf<String>()
+    @Test fun everyFilteredSiteIsAskedAndOneAnswerIsOnlyPartial() {
+        // Build 176: Serverless Direct reached YouTube but not Telegram Web, and the probe still said "reachable".
+        val asked = java.util.Collections.synchronizedList(mutableListOf<String>())
         val r = FilteredSiteProbe.probe { t ->
             asked += t.host
-            if (t.host == "www.youtube.com") throw IOException("reset") else 200
+            if (t.host == "web.telegram.org") throw IOException("timeout") else 204
         }
+        assertEquals(FilteredSiteProbe.Verdict.PARTIAL, r.verdict)
+        assertFalse(r.passed)
+        assertTrue(r.anyReachable)
+        assertEquals(setOf("www.youtube.com", "web.telegram.org"), asked.toSet())
+        assertTrue(r.detail, r.detail.contains("www.youtube.com answered HTTP 204") && r.detail.contains("web.telegram.org"))
+    }
+
+    @Test fun allAnsweringPasses() {
+        val r = FilteredSiteProbe.probe { 200 }
+        assertEquals(FilteredSiteProbe.Verdict.PASSED, r.verdict)
         assertTrue(r.passed)
-        assertEquals(listOf("www.youtube.com", "web.telegram.org"), asked)
+    }
+
+    @Test fun theTargetsAreAskedAtTheSameTime() {
+        val started = System.nanoTime()
+        val r = FilteredSiteProbe.probe { Thread.sleep(400); 204 }
+        val ms = (System.nanoTime() - started) / 1_000_000
+        assertTrue(r.passed)
+        assertTrue("took $ms ms", ms < 750)
     }
 
     @Test fun noAnswerFromAnyIsBlocked() {

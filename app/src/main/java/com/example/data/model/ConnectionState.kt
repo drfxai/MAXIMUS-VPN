@@ -105,8 +105,16 @@ data class ConnectionState(
      * Other apps' traffic went both ways through this attempt's TUN → engine hop (tun.forwarded VERIFIED): device traffic
      * is verified for an engine program, whose bind-based TUN check cannot run while the app is outside its own tunnel.
      */
-    val deviceTrafficSeen: Boolean = false
+    val deviceTrafficSeen: Boolean = false,
+    /**
+     * The attempt whose filtered-site probe was partial (some filtered sites answered, others did not); shown only while
+     * it is still this attempt ([filteredSitesPartial]).
+     */
+    val filteredPartialAttempt: String? = null
 ) {
+    /** Some filtered sites are still blocked through this attempt (FilteredSiteProbe PARTIAL). */
+    val filteredSitesPartial: Boolean get() = filteredPartialAttempt != null && filteredPartialAttempt == attemptId
+
     val isConnected: Boolean get() = status == ConnectionStatus.CONNECTED
 
     /**

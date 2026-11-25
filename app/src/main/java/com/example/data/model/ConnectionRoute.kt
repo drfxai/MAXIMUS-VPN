@@ -5,12 +5,29 @@ import java.util.Locale
 
 /** Display only the resolved runtime profile, never a guessed Auto transport. */
 object ConnectionRoute {
-    fun withExitCountry(route: String, countryCode: String?): String {
-        val code = countryCode?.uppercase(Locale.US)
-        val country = code?.takeIf { it.length == 2 && it in Locale.getISOCountries() }
+    /**
+     * Cloudflare's trace reports a Tor exit as loc=T1 (not a country). Build 176 showed "Tor · Unknown country" for a
+     * working Tor exit; it is named for what it is.
+     */
+    const val TOR_EXIT_CODE = "T1"
+    const val TOR_EXIT_NAME = "Tor network"
+
+    /** The exit's English name: a country, "Tor network" for T1, or null when unknown. Pure. */
+    fun exitName(countryCode: String?): String? {
+        val code = countryCode?.trim()?.uppercase(Locale.US) ?: return null
+        if (code == TOR_EXIT_CODE) return TOR_EXIT_NAME
+        return code.takeIf { it.length == 2 && it in Locale.getISOCountries() }
             ?.let { Locale.Builder().setRegion(it).build().getDisplayCountry(Locale.ENGLISH) }
-        return "$route · ${country ?: "Unknown country"}"
     }
+
+    fun withExitCountry(route: String, countryCode: String?): String =
+        "$route · ${exitName(countryCode) ?: "Unknown country"}"
+
+    /**
+     * A chain of engines by its hops, entry hop first, the way the app names it ("Psiphon over Lantern / Radiance").
+     * Build 176 labelled Psiphon over Lantern "Psiphon · Spain": the label was read from the entry hop alone. Pure.
+     */
+    fun chainLabel(hopTitles: List<String>): String = hopTitles.joinToString(" over ")
 
     fun label(profile: VlessProfile): String {
         val e = ProfileExtras.read(profile)

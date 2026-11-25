@@ -63,6 +63,9 @@ object BuiltinConnections {
         }
     }
 
+    /** Whether [id] is one of the built-in (config-free) connections rather than a saved config. */
+    fun isBuiltin(id: String?): Boolean = id != null && (id == AETHER || id == DIRECT || ConfigFreeMethod.entries.any { it.id == id })
+
     fun resolve(context: Context, id: String): VlessProfile? {
         ConfigFreeMethod.entries.firstOrNull { it.id == id }?.let { method ->
             return when (method) {

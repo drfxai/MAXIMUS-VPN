@@ -11,4 +11,12 @@ object PowerButtonPolicy {
      * pins the exit (OperatingModePolicy.lockExit). Smart Connect remains the separate button that compares.
      */
     fun exact(settings: AppSettings): Boolean = !settings.powerButtonFallback
+
+    /**
+     * Nothing is selected in Nodes and no config is saved: the power button starts Smart Connect without a config
+     * (build 176: it failed silently). Not in Trade mode or Ghost Rider, which connect only the selected server or route,
+     * nor in Unlock mode, which has its own Connect. Pure.
+     */
+    fun configFreeWhenNoServer(mode: com.example.data.model.OperationalMode): Boolean =
+        mode == com.example.data.model.OperationalMode.DAILY || mode == com.example.data.model.OperationalMode.GOD_MODE
 }

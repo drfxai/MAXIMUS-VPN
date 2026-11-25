@@ -62,6 +62,8 @@ data class SmartConnectPlan(
         val lockExit: Boolean,
         /** The power button (not Trade mode): only the config selected in Nodes, as saved. */
         val exact: Boolean = false,
+        /** [exact] for a built-in engine the user picked (engine list, an engine's page), not the power button. */
+        val enginePick: Boolean = false,
         /** "Connect anyway": the user's choice, started without a search. */
         val force: Boolean,
         /** Smart Connect, or automatic failover, may move the session to another server. */
@@ -73,13 +75,22 @@ data class SmartConnectPlan(
     )
 
     companion object {
+        /**
+         * Why a locked session searches nothing else. Build 176 logged "Power button: only the config selected in Nodes"
+         * for engines picked from the list; the reason now names what the user actually did. Pure.
+         */
+        fun skipReason(input: Input): String = when {
+            input.exact && input.enginePick -> "Your pick: only this connection runs; Smart Connect searches"
+            input.exact -> "Power button: only the config selected in Nodes; Smart Connect searches"
+            else -> "Trade mode keeps the exit on the selected server"
+        }
+
         fun of(input: Input): SmartConnectPlan {
             val skipped = linkedMapOf<SearchStage, String>()
             val off = linkedMapOf<EmergencyTransport, String>()
             when {
                 input.lockExit -> SearchStage.values().filter { it != SearchStage.SELECTED }
-                    .forEach { skipped[it] = if (input.exact) "Power button: only the config selected in Nodes; Smart Connect searches"
-                        else "Trade mode keeps the exit on the selected server" }
+                    .forEach { skipped[it] = skipReason(input) }
                 !input.mayMove -> listOf(SearchStage.OTHER_SERVERS, SearchStage.RECOVERY, SearchStage.REVIVAL)
                     .forEach { skipped[it] = "Smart Connect and automatic failover are off" }
             }
