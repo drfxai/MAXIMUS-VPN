@@ -1730,4 +1730,6 @@
     <string name="ui_connection_stages">مراحل اتصال</string>
     <string name="ui_connection_stages_hint">کاری که هر موتور هنگام اتصال انجام داد، جدیدترین در پایین</string>
     <string name="ui_connection_stages_empty">مراحل پس از شروع اتصال اینجا نمایش داده می‌شوند.</string>
+    <string name="connect_unfinished_message">تلاش برای اتصال بدون نتیجه پایان یافت؛ ترافیک تأیید نشده است. دوباره امتحان کنید یا اتصال دیگری انتخاب کنید.</string>
+    <string name="connect_unfinished_notification">اتصال ناموفق: بدون نتیجه</string>
 </resources>
