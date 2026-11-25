@@ -148,6 +148,10 @@ class PsiphonSidecar(
         /** 0 nothing yet, 1 region list in, 2 a server dialed, 3 a server connected. */
         val progressStage: Int get() = stage
 
+        /** The core listed no egress region (its data store holds no server entry) and dialed nothing since. */
+        val noServersKnown: Boolean get() = stage == 0 && skips == 0 && availableRegions?.isEmpty() == true && dialed.isEmpty() &&
+            (candidates ?: 0) == 0
+
         fun availableRegions(): List<String>? = availableRegions
 
         fun connectedRegion(): String? = connectedRegion
@@ -224,10 +228,14 @@ class PsiphonSidecar(
         }
 
         fun failureAfter(timeoutMs: Long, label: String = "Psiphon"): String {
-            val phase = when (stage) {
-                3 -> "server connected but the tunnel did not become ready"
-                2 -> "server dialing did not establish a tunnel"
-                1 -> "server candidates found but no tunnel became ready"
+            val phase = when {
+                stage == 3 -> "server connected but the tunnel did not become ready"
+                stage == 2 -> "server dialing did not establish a tunnel"
+                stage == 1 -> "server candidates found but no tunnel became ready"
+                // Build 175 (Shir o Khorshid): an empty region list and no dial at all means the data store held no
+                // server entry and the server list could not be downloaded on this network.
+                noServersKnown -> "no Psiphon servers known yet (empty server list) and the server list could not be " +
+                    "downloaded on this network"
                 else -> "server discovery or bootstrap did not produce a ready tunnel"
             }
             val detail = buildList {

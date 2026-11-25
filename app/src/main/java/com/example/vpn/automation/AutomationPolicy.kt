@@ -21,19 +21,40 @@ data class AutomationEnv(
      * tasks run then, while other apps stay blocked. Build 174 report: every upkeep after a failed connect or a
      * stop was skipped with VPN_ACTIVE because that blocking interface counted as "a VPN".
      */
-    val ownBlockOnly: Boolean = false
+    val ownBlockOnly: Boolean = false,
+    /**
+     * This app's tunnel is up and the app itself is left out of it (an engine program: Aether, Serverless, Psiphon,
+     * Lantern…): this app's own sockets then reach the phone's network directly, beside the tunnel, so a network-only
+     * measurement ([AutomationPolicy.BESIDE_TUNNEL]) measures the real link, not the tunnel. Build 175 report: every
+     * upkeep while connected skipped with VPN_ACTIVE, and the one after each stop found the next connect already up.
+     */
+    val appOutsideTunnel: Boolean = false,
+    /** The only VPN up is this app's own, and a connect is under way (no tunnel yet, no plain traffic block). */
+    val ownConnecting: Boolean = false
 )
 
 /**
  * Which upkeep tasks a trigger runs, given the phone's state and how fresh each task's result is on this
- * network. Pure. Measuring tasks never run under another app's VPN or this app's connected tunnel (they would measure
- * the tunnel); beside this app's own traffic block ([AutomationEnv.ownBlockOnly]) they run, outside it. The GeoFiles
+ * network. Pure. Measuring tasks never run under another app's VPN, nor through this app's connected tunnel (they would
+ * measure the tunnel); network-only ones run beside a tunnel the app is left out of ([BESIDE_TUNNEL]); beside this app's own traffic block ([AutomationEnv.ownBlockOnly]) they run, outside it. The GeoFiles
  * download prefers the tunnel and otherwise waits for an unmetered network.
  */
 object AutomationPolicy {
     data class Decision(val task: AutomationTask, val skip: SkipReason?) {
         val run: Boolean get() = skip == null
     }
+
+    /**
+     * Tasks that only send this app's own packets on the phone's network (DNS queries, TLS handshakes to CDN edges)
+     * and start no engine program. They run beside a connected tunnel the app is left out of
+     * ([AutomationEnv.appOutsideTunnel]). The DNS-tunnel ladder and config revival start engines (more processes,
+     * more ports, minutes of work on the user's link) and keep waiting for a stop.
+     */
+    val BESIDE_TUNNEL: Set<AutomationTask> = setOf(AutomationTask.RESOLVER_SCAN, AutomationTask.CLEAN_IP_SCAN)
+
+    /** A network-only [task] may run beside this app's connected tunnel. Pure. */
+    fun besideTunnel(task: AutomationTask, env: AutomationEnv): Boolean =
+        task in BESIDE_TUNNEL && env.tunnelUp && env.appOutsideTunnel
 
     private const val MIN = 60_000L
     private const val HOUR = 60 * MIN
@@ -69,6 +90,31 @@ object AutomationPolicy {
         )
     }
 
+    /**
+     * Whether a finished run should be tried again a little later (WorkManager's linear backoff, re-reading the phone's
+     * state each time). After a failed connect the blocking interface may still be settling; and while this app's own
+     * connect is under way (build 175: each VPN_STOPPED run, 30 s after a Disconnect, found the user's next connect
+     * already starting and skipped everything), the next try finds the tunnel up (network-only tasks run beside it),
+     * the traffic block (measured beside it) or nothing (everything runs). Pure.
+     */
+    fun retryLater(trigger: AutomationTrigger, env: AutomationEnv, skipped: Collection<SkipReason>, ranAny: Boolean,
+                   attempt: Int, maxRetries: Int): Boolean {
+        if (attempt >= maxRetries || SkipReason.VPN_ACTIVE !in skipped) return false
+        if (trigger == AutomationTrigger.CONNECT_FAILED) return !ranAny && SkipReason.FRESH !in skipped
+        return env.ownConnecting && trigger in setOf(AutomationTrigger.NETWORK_CHANGED, AutomationTrigger.VPN_STOPPED,
+            AutomationTrigger.DAILY, AutomationTrigger.CONNECT_FAILED)
+    }
+
+    /** The report's `vpn` label for a run. Pure. */
+    fun vpnLabel(env: AutomationEnv): String = when {
+        !env.vpnActive -> "none"
+        env.tunnelUp && env.appOutsideTunnel -> "tunnel-app-outside"
+        env.tunnelUp -> "tunnel"
+        env.ownBlockOnly -> "own-block"
+        env.ownConnecting -> "own-connect"
+        else -> "other"
+    }
+
     /** GeoFiles are global, not per network. */
     fun cacheKey(task: AutomationTask, env: AutomationEnv): String = if (task == AutomationTask.GEO_UPDATE) "*" else env.network
 
@@ -83,7 +129,7 @@ object AutomationPolicy {
                 if (!env.tunnelUp && env.vpnActive && !env.ownBlockOnly) return SkipReason.VPN_ACTIVE
                 if (!env.tunnelUp && env.metered && trigger != AutomationTrigger.MANUAL) return SkipReason.METERED
             }
-            else -> if (env.vpnActive && !env.ownBlockOnly) return SkipReason.VPN_ACTIVE
+            else -> if (env.vpnActive && !env.ownBlockOnly && !besideTunnel(task, env)) return SkipReason.VPN_ACTIVE
         }
         when (task) {
             AutomationTask.DNS_LADDER -> if (!env.hasDnsTunnels) return SkipReason.NOTHING_TO_DO

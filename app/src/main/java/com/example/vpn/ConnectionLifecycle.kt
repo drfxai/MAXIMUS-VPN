@@ -17,11 +17,25 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Pure (no Android), so the rules are unit-tested.
  */
-class ConnectionLifecycle {
-    private val generation = AtomicLong(0)
+class ConnectionLifecycle(
+    /**
+     * The generation counter. The VPN service passes the process-wide [PROCESS] counter: [StopFence] is process-wide,
+     * so tickets must keep counting up across service instances. Build 175 report: after a Disconnect the service
+     * stopped itself; the next Connect (3-5 s later, same process) created a new service whose own counter started
+     * again at 1, below the fence the Stop had set, so every state change of that connect was dropped. Psiphon's
+     * region run read the fence as a cancel and ended silently (18 min "Preparing"), and verified Lantern / Psiphon
+     * over Lantern sessions never became CONNECTED (no step 10, no transfer checks).
+     */
+    private val generation: AtomicLong = AtomicLong(0)
+) {
     private val switching = AtomicBoolean(false)
     private val teardownLock = Any()
     private var teardown: CompletableDeferred<Unit>? = null
+
+    companion object {
+        /** One counter for the whole process, shared by every service instance (see [generation]). */
+        val PROCESS = AtomicLong(0)
+    }
 
     /** A new request from outside; anything automatic started before it is now stale. */
     fun newIntent(): Long = generation.incrementAndGet()

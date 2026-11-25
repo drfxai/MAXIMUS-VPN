@@ -54,7 +54,11 @@ class AutomationTasks(
         val vpns = runCatching {
             cm?.allNetworks.orEmpty().mapNotNull { cm?.getNetworkCapabilities(it) }.filter { it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) }
         }.getOrDefault(emptyList())
-        val vpnActive = vpns.isNotEmpty()
+        val state = VpnController.connectionState.value
+        // Android shows a VPN network only to the apps it applies to: while an engine program's session leaves this app
+        // out of its own VPN, the VPN is invisible here. Build 175: at 10:23 a NETWORK_CHANGED run saw "no VPN" during
+        // an Aether connect and ran config revival (engine starts) beside it. This app's own session state counts too.
+        val vpnActive = vpns.isNotEmpty() || state.isBusy || state.isTunnelUp
         // Android runs one VPN per user, so while this app's service holds its blocking interface the VPN seen is
         // that one. From API 30 an owner UID that is reported and is another app's (a work-profile VPN) rules it out;
         // Android may also hide the owner (-1), which says nothing either way.
@@ -62,7 +66,8 @@ class AutomationTasks(
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R)
                 caps.ownerUid == android.os.Process.myUid() || caps.ownerUid < 0 else true
         }
-        val tunnelUp = VpnController.connectionState.value.status == ConnectionStatus.CONNECTED
+        val tunnelUp = state.status == ConnectionStatus.CONNECTED
+        val ownBlockOnly = vpnActive && !tunnelUp && onlyOurs && OwnVpnWindow.blockOnly()
         val metered = runCatching { cm?.isActiveNetworkMetered ?: true }.getOrDefault(true)
         AutomationEnv(
             network = network(), vpnActive = vpnActive, tunnelUp = tunnelUp, metered = metered, now = System.currentTimeMillis(),
@@ -70,7 +75,10 @@ class AutomationTasks(
             hasFronted = fronted(profiles).isNotEmpty(),
             hasRevivable = runCatching { app.configRevival.eligibleCount(revivable(profiles)) > 0 }.getOrDefault(false),
             geoNeedsTunnel = GeoFilesUpdater.viaVpn(context),
-            ownBlockOnly = vpnActive && !tunnelUp && onlyOurs && OwnVpnWindow.blockOnly()
+            ownBlockOnly = ownBlockOnly,
+            // An engine program's session leaves this app out of its own VPN: its sockets reach the phone's network.
+            appOutsideTunnel = tunnelUp && runCatching { com.example.vpn.RayVpnService.appOutsideVpn }.getOrDefault(false),
+            ownConnecting = vpnActive && !tunnelUp && !ownBlockOnly && onlyOurs && state.isBusy
         )
     }
 
@@ -86,6 +94,10 @@ class AutomationTasks(
         check(network() == env.network) { "the network changed during the run" }
         // A connect or Disconnect ended the window beside the traffic block: later measurements may have been caught.
         check(windowIntact()) { "the traffic block changed during the run" }
+        // Beside a tunnel the app was left out of: a session that puts the app inside its VPN (an in-process Xray
+        // config) would have carried the later measurements through the tunnel.
+        if (env.appOutsideTunnel) check(runCatching { com.example.vpn.RayVpnService.appOutsideVpn }.getOrDefault(false) ||
+            VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) { "this app joined its own tunnel during the run" }
     }
 
     private suspend fun resolverScan(env: AutomationEnv, profiles: List<VlessProfile>): TaskResult = withContext(Dispatchers.IO) {

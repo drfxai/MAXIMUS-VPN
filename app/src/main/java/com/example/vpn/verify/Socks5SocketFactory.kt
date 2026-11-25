@@ -51,9 +51,20 @@ class Socks5SocketFactory(private val endpoint: Socks5.Endpoint, private val han
         fun targetName(address: InetSocketAddress): String = address.hostString
 
         /**
-         * For OkHttp's `dns`: one placeholder address per name (0.0.0.0, never dialed) that keeps [host], so the socket
-         * sends the name to the engine instead of an address looked up outside the tunnel.
+         * For OkHttp's `dns`: one placeholder address per name, never dialed, that keeps [host], so the socket sends the
+         * name to the engine instead of an address looked up outside the tunnel. The placeholder is 0.x.y.z with x.y.z
+         * taken from the name, so two names get different addresses: OkHttp treats an equal address as the same server
+         * when it decides whether a connection may carry another name's requests (build 175, see
+         * [com.example.update.GeoFilesUpdater.socksClient]).
          */
-        fun remoteDns(host: String): List<InetAddress> = listOf(InetAddress.getByAddress(host, ByteArray(4)))
+        fun remoteDns(host: String): List<InetAddress> = listOf(InetAddress.getByAddress(host, placeholder(host)))
+
+        /** The four bytes of [host]'s placeholder: 0, then three bytes of the lower-case name's hash (never 0.0.0.0). Pure. */
+        fun placeholder(host: String): ByteArray {
+            val h = host.lowercase().hashCode()
+            val b = byteArrayOf(0, (h ushr 16).toByte(), (h ushr 8).toByte(), h.toByte())
+            if (b[1].toInt() == 0 && b[2].toInt() == 0 && b[3].toInt() == 0) b[3] = 1
+            return b
+        }
     }
 }

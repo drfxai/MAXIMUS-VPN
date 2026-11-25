@@ -1724,4 +1724,6 @@
     <string name="unlock_sorted_by_latency">по задержке</string>
     <string name="unlock_latency_fastest">%1$d мс · самый быстрый</string>
     <string name="unlock_options">Параметры</string>
+    <string name="connect_unfinished_message">Попытка подключения завершилась без результата; трафик не проверен. Повторите попытку или выберите другое подключение.</string>
+    <string name="connect_unfinished_notification">Подключение не удалось: нет результата</string>
 </resources>
