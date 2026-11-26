@@ -31,7 +31,7 @@ class UnlockDnsAnswerTest {
     private val opt4096 = "00 0029 1000 00000000 0000"
 
     @Test fun aTruncatedAnswerWithRecordsReachesTheAppWithoutTc() {
-        val echoed = answer(2, flags = "8382") // QR RD TC | RA: the resolver copied TC from a tc_z question
+        val echoed = answer(2, flags = "8380") // QR RD TC | RA: the resolver copied TC from a tc_z question
         assertTrue(UnlockDnsWire.truncated(echoed))
         val result = UnlockDnsAnswer.prepare(query, echoed, UnlockDnsRoutePolicy.MTU)
         assertTrue(result is UnlockDnsAnswer.Result.Ok)
@@ -45,7 +45,7 @@ class UnlockDnsAnswerTest {
     }
 
     @Test fun aTruncatedAnswerWithoutRecordsIsUnusable() {
-        val empty = answer(0, flags = "8382")
+        val empty = answer(0, flags = "8380")
         val result = UnlockDnsAnswer.prepare(query, empty, UnlockDnsRoutePolicy.MTU)
         assertEquals(UnlockDnsAnswer.Result.Unusable(UnlockDnsAnswer.Problem.TRUNCATED_EMPTY), result)
     }
@@ -107,7 +107,7 @@ class UnlockDnsAnswerTest {
         val asked = mutableListOf<String>()
         val outcome = UnlockDnsAnswerPlan.run(order, 4_500, { 0 }, { ip ->
             asked += ip
-            when (ip) { "193.233.112.67" -> null; "143.20.64.55" -> ex(answer(0, flags = "8382")); else -> ex(answer(1)) }
+            when (ip) { "193.233.112.67" -> null; "143.20.64.55" -> ex(answer(0, flags = "8380")); else -> ex(answer(1)) }
         }, { UnlockDnsAnswer.prepare(query, it.response, UnlockDnsRoutePolicy.MTU) })
         assertEquals(order, asked)
         assertEquals("5.175.161.3", outcome.server)

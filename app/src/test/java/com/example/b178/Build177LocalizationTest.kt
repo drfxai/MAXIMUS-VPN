@@ -81,7 +81,8 @@ class Build177LocalizationTest {
         assertFalse(text.contains("Benchmark tab"))
         assertTrue(text.contains(en.getString(R.string.nav_nodes)))
         assertTrue(text.contains(en.getString(R.string.ui_benchmark_lab)))
-        assertTrue(ru.getString(R.string.ui_run_a_benchmark_from_the).contains(ru.getString(R.string.ui_benchmark_lab)))
+        // Russian inflects the lab's name ("Лабораторию тестов"); the tab name is quoted as is.
+        assertTrue(ru.getString(R.string.ui_run_a_benchmark_from_the).contains("«" + ru.getString(R.string.nav_nodes) + "»"))
         assertTrue(fa.getString(R.string.ui_run_a_benchmark_from_the).contains(fa.getString(R.string.ui_benchmark_lab)))
     }
 
