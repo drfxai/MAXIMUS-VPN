@@ -119,7 +119,9 @@ class ManualEnginePickTest {
         val steps = PsiphonRegionPlan.rotation(available = listOf("DE", "NL", "US"), tried = emptySet(),
             remembered = emptyList(), leftMs = PsiphonRegionPlan.TOTAL_AUTO_MS)
         assertTrue(steps.toString(), steps.isNotEmpty())
-        assertTrue(steps.all { it.region.isNotEmpty() })
+        // Its own regions, and its own CDN-fronted meek protocols (same engine): never another engine.
+        assertTrue(steps.all { it.region.isNotEmpty() || it.fronted })
+        assertTrue(steps.any { it.region.isNotEmpty() })
     }
 
     @Test fun aPinnedSessionRestartsTheSameConfigAfterItStopsCarryingTraffic() {

@@ -37,6 +37,8 @@ object PsiphonRegionPlan {
      * failure that offers the chain with one tap (build 173 Irancell: direct 240 s → fail; the chain connected in 18 s).
      */
     const val KNOWN_BLOCKED_MS = 45_000L
+    /** The leading CDN-fronted step where direct Psiphon failed recently ([initial] with frontedFirst). */
+    const val FRONTED_FIRST_MS = 30_000L
 
     /**
      * Regions tried when nothing is remembered on this network, in this order, if Psiphon lists them: European exits
@@ -48,7 +50,14 @@ object PsiphonRegionPlan {
      * One Psiphon start. [tcpOnly]: TCP transports only (the old 120 s TCP-only retry, now one step inside the run's
      * budget instead of a second full window after it).
      */
-    data class Step(val region: String, val budgetMs: Long, val why: String, val tcpOnly: Boolean = false) {
+    data class Step(val region: String, val budgetMs: Long, val why: String, val tcpOnly: Boolean = false,
+                    /**
+                     * Psiphon's CDN-fronted meek protocols only (PsiphonSidecar.FRONTED_PROTOCOLS), never pinned to a region:
+                     * the tunnel and its bootstrap ride a CDN edge instead of a Psiphon server address the carrier can
+                     * block (build 178 field report, Irancell: candidates listed, no tunnel). Same engine, so it also
+                     * runs inside the user's own Psiphon pick.
+                     */
+                    val fronted: Boolean = false) {
         val any: Boolean get() = region.isEmpty()
     }
 
@@ -59,9 +68,16 @@ object PsiphonRegionPlan {
      * region from [knownAvailable] (Psiphon's last AvailableEgressRegions here) goes first. Pure.
      */
     fun initial(userRegion: String, remembered: List<String>, totalMs: Long = TOTAL_AUTO_MS,
-                avoid: Set<String> = emptySet(), knownAvailable: List<String> = emptyList()): List<Step> {
+                avoid: Set<String> = emptySet(), knownAvailable: List<String> = emptyList(),
+                /** Direct Psiphon failed on this network recently: the CDN-fronted step leads ([FRONTED_FIRST_MS]). */
+                frontedFirst: Boolean = false): List<Step> {
         val fixed = userRegion.trim().uppercase()
         if (fixed.isNotEmpty()) return listOf(Step(fixed, totalMs, "region chosen in the profile"))
+        if (frontedFirst && totalMs >= FRONTED_FIRST_MS + ANY_MIN_MS) {
+            val rest = initial(userRegion, remembered, totalMs - FRONTED_FIRST_MS, avoid, knownAvailable, frontedFirst = false)
+            return listOf(Step("", FRONTED_FIRST_MS, "CDN-fronted meek first: direct Psiphon failed on this network recently",
+                fronted = true)) + rest
+        }
         val avoided = avoid.map { it.trim().uppercase() }.toSet()
         val room = maxOf(0L, totalMs - ANY_MIN_MS)
         val slots = minOf(MAX_REMEMBERED, (room / REGION_STEP_MS).toInt())
@@ -101,19 +117,26 @@ object PsiphonRegionPlan {
      * Any region stayed silent: concrete regions from Psiphon's own [available] list, remembered ones first, then
      * [PRIOR], never one already [tried], inside [leftMs]. Pure.
      */
-    fun rotation(available: List<String>, tried: Set<String>, remembered: List<String>, leftMs: Long): List<Step> {
+    fun rotation(available: List<String>, tried: Set<String>, remembered: List<String>, leftMs: Long,
+                 frontedTried: Boolean = false): List<Step> {
         if (leftMs < MIN_STEP_MS) return emptyList()
         val listed = available.map { it.trim().uppercase() }.filter { REGION.matches(it) }.toSet()
         val order = (remembered.map { it.uppercase() } + PRIOR + listed.sorted())
             .filter { it in listed && it !in tried }.distinct()
-        val count = minOf(MAX_ROTATION, order.size, (leftMs / MIN_STEP_MS).toInt())
+        val count = if (frontedTried) minOf(MAX_ROTATION, order.size, (leftMs / MIN_STEP_MS).toInt())
+            else minOf(MAX_ROTATION, order.size + 1, (leftMs / MIN_STEP_MS).toInt())
         if (count <= 0) return emptyList()
         val each = minOf(REGION_STEP_MS, leftMs / count)
-        // The second rotated region runs TCP transports only: the old TCP-only retry, inside the same budget.
-        return order.take(count).mapIndexed { i, r ->
+        // Build 178 field report (Irancell): any region, DE and NL over TCP all ended with candidates and no tunnel. The
+        // first step after a silent any region is now Psiphon's CDN-fronted meek protocols on any region (the CDN edge,
+        // not a Psiphon address, is what the carrier sees); then one available region over TCP only (the old TCP retry).
+        // A run that already led with the fronted step goes straight to the regions.
+        if (frontedTried) return order.take(count).mapIndexed { i, r ->
             if (i == 0) Step(r, each, "available region; any region stayed silent")
             else Step(r, each, "available region over TCP only; any region stayed silent", tcpOnly = true)
         }
+        return listOf(Step("", each, "CDN-fronted meek protocols on any region; any region stayed silent", fronted = true)) +
+            order.take(count - 1).map { r -> Step(r, each, "available region over TCP only; any region stayed silent", tcpOnly = true) }
     }
 
     /**
@@ -122,7 +145,7 @@ object PsiphonRegionPlan {
      */
     fun stepWindowText(step: Step, userRegion: String): String {
         val upTo = "up to ${step.budgetMs / 1000}s"
-        return if (step.any && userRegion.isBlank() && step.budgetMs > ANY_STALL_MS)
+        return if (step.any && !step.fronted && userRegion.isBlank() && step.budgetMs > ANY_STALL_MS)
             "$upTo; next region after ${ANY_STALL_MS / 1000}s if no server is dialed" else upTo
     }
 
@@ -176,9 +199,9 @@ class PsiphonRegionRun(private val clock: () -> Long = System::currentTimeMillis
 
     fun <S : Start> run(userRegion: String, remembered: List<String>, totalMs: Long, launch: (PsiphonRegionPlan.Step) -> S,
                         cancelled: () -> Boolean = { false }, avoid: Set<String> = emptySet(),
-                        knownAvailable: List<String> = emptyList()): Outcome<S> {
+                        knownAvailable: List<String> = emptyList(), frontedFirst: Boolean = false): Outcome<S> {
         val fixed = userRegion.trim().uppercase()
-        val steps = ArrayDeque(PsiphonRegionPlan.initial(fixed, remembered, totalMs, avoid, knownAvailable))
+        val steps = ArrayDeque(PsiphonRegionPlan.initial(fixed, remembered, totalMs, avoid, knownAvailable, frontedFirst))
         val startedAt = clock()
         // A region just left because it stopped carrying traffic is not rotated back to.
         val tried = avoid.map { it.trim().uppercase() }.toMutableSet()
@@ -196,7 +219,7 @@ class PsiphonRegionRun(private val clock: () -> Long = System::currentTimeMillis
             val stepStart = clock()
             val ready = start.await(budget) {
                 PsiphonRegionPlan.unavailable(step.region, start.available()) ||
-                    (step.any && fixed.isEmpty() && !rotated &&
+                    (step.any && !step.fronted && fixed.isEmpty() && !rotated &&
                         PsiphonRegionPlan.anyStalled(clock() - stepStart, start.stage(), !start.available().isNullOrEmpty()))
             }
             val attempt = Attempt(step, ready, clock() - stepStart, start.available(), start.stage(), start.connectedRegion())
@@ -207,9 +230,10 @@ class PsiphonRegionRun(private val clock: () -> Long = System::currentTimeMillis
             tried += step.region
             if (fixed.isNotEmpty() && PsiphonRegionPlan.unavailable(fixed, attempt.available))
                 return Outcome(null, start, attempts, PsiphonRegionPlan.unavailableMessage(fixed, attempt.available.orEmpty()))
-            if (step.any && fixed.isEmpty() && !rotated && !attempt.available.isNullOrEmpty()) {
+            if (step.any && !step.fronted && fixed.isEmpty() && !rotated && !attempt.available.isNullOrEmpty()) {
                 rotated = true
-                steps.addAll(PsiphonRegionPlan.rotation(attempt.available, tried, remembered, totalMs - (clock() - startedAt)))
+                steps.addAll(PsiphonRegionPlan.rotation(attempt.available, tried, remembered, totalMs - (clock() - startedAt),
+                    frontedTried = attempts.any { it.step.fronted }))
             }
         }
         return Outcome(null, last, attempts, null)

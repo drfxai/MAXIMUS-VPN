@@ -1496,7 +1496,7 @@ private fun ConfigFreeMethodPicker(
                             Triple(R.string.ui_picker_nested, R.string.ui_picker_nested_hint,
                                 listOf(ConfigFreeMethod.AETHER_GOOL, ConfigFreeMethod.AETHER_GOOL_CLASSIC, ConfigFreeMethod.AETHER_MIM)),
                             Triple(R.string.ui_picker_chains, R.string.ui_picker_chains_hint,
-                                listOf(ConfigFreeMethod.AETHER_PSIPHON, ConfigFreeMethod.AETHER_TOR))
+                                listOf(ConfigFreeMethod.AETHER_PSIPHON, ConfigFreeMethod.AETHER_TOR, ConfigFreeMethod.AETHER_LANTERN))
                         ) else listOf(
                             Triple(R.string.ui_picker_direct_engines, R.string.ui_picker_direct_engines_hint,
                                 listOf(ConfigFreeMethod.AETHER_WARP, ConfigFreeMethod.SERVERLESS)),
@@ -1558,7 +1558,7 @@ private fun ConfigFreeMethod.pickerIcon(): androidx.compose.ui.graphics.vector.I
     ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Rounded.Opacity
     ConfigFreeMethod.PSIPHON -> Icons.Filled.Shield
     ConfigFreeMethod.SHIROKHORSHID -> Icons.Filled.WbSunny
-    ConfigFreeMethod.PSIPHON_RADIANCE -> Icons.Rounded.Layers
+    ConfigFreeMethod.PSIPHON_RADIANCE, ConfigFreeMethod.SHIROKHORSHID_RADIANCE, ConfigFreeMethod.AETHER_LANTERN -> Icons.Rounded.Layers
     ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
     ConfigFreeMethod.AETHER_GOOL -> Icons.Rounded.CropFree
     ConfigFreeMethod.AETHER_GOOL_CLASSIC, ConfigFreeMethod.AETHER_MIM -> Icons.Rounded.Layers

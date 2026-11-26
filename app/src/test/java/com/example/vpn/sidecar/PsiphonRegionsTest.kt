@@ -104,14 +104,15 @@ class PsiphonRegionsTest {
         val out = run.run("", emptyList(), PsiphonRegionPlan.TOTAL_AUTO_MS, launch = { step ->
             when (step.region) {
                 // The report: the region list arrives, then nothing is dialed.
+                // Then Psiphon's CDN-fronted meek protocols on any region (build 178 field report): still silent.
                 "" -> FakeStart("", available = listOf("US", "NL", "DE", "JP"))
-                "DE" -> FakeStart("DE", available = listOf("US", "NL", "DE", "JP"), dialing = true)
                 else -> FakeStart(step.region, available = listOf("US", "NL", "DE", "JP"), dialing = true, readyAtMs = 6_000, connected = step.region)
             }.also { starts += it }
         })
-        assertEquals(listOf("", "DE", "NL"), starts.map { it.region })
+        assertEquals(listOf("", "", "DE"), starts.map { it.region })
+        assertEquals(listOf(false, true, false), out.attempts.map { it.step.fronted })
         assertNotNull(out.ready)
-        assertEquals("NL", out.winner?.region)
+        assertEquals("DE", out.winner?.region)
         assertTrue("took $now ms", now <= PsiphonRegionPlan.TOTAL_AUTO_MS)
         assertTrue(starts.dropLast(1).all { it.stopped })
     }
@@ -204,8 +205,10 @@ class PsiphonRegionsTest {
         })
         assertNull(out.ready)
         assertTrue("took $now ms", now <= PsiphonRegionPlan.TOTAL_AUTO_MS)
-        assertEquals(listOf("", "DE", "NL"), starts.map { it.region })
-        // The old TCP-only retry now runs as the last rotation step, inside the same budget.
+        // Build 178 field report: after the silent any region, Psiphon's CDN-fronted meek protocols (any region), then one
+        // available region over TCP only (the old TCP-only retry), all inside the same budget.
+        assertEquals(listOf("", "", "DE"), starts.map { it.region })
+        assertEquals(listOf(false, true, false), starts.map { it.fronted })
         assertEquals(listOf(false, false, true), starts.map { it.tcpOnly })
         // And no second full window follows an automatic region run.
         assertTrue(!PsiphonRegionPlan.tcpRetryAllowed(regionRun = true, userRegion = "", failure = null))

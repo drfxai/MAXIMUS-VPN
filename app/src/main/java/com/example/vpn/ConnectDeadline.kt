@@ -36,6 +36,8 @@ object ConnectDeadline {
     const val PSIPHON_MANUAL_MS = com.example.vpn.sidecar.PsiphonRegionPlan.TOTAL_AUTO_MS + 20_000L
     /** The user's own Aether pick: [com.example.vpn.connections.ConnectionEngineRunner.RACE_DEFAULT_DEADLINE_MS]. */
     const val AETHER_MANUAL_MS = 200_000L
+    /** Shir o Khorshid as a chain's entry hop: its own 120 s scan window plus the traffic check. */
+    const val SHIROKHORSHID_CHAIN_MS = 140_000L
     const val MAX_FALLBACKS = 3
 
     /** Statuses in which the attempt has not carried verified traffic yet. */
@@ -103,6 +105,8 @@ object ConnectDeadline {
             // Aether's own carrier ladder (scan, then the next carrier) before it reports anything: the engine's default
             // readiness window plus the check. An Irancell ladder announces its exact budget (EngineBudgetHint).
             manual && engines.firstOrNull() == com.example.vpn.sidecar.AetherSidecar.ID -> maxOf(base, AETHER_MANUAL_MS)
+            // Shir o Khorshid over Lantern: its CDN scan needs up to 120 s before the chain carries anything (build 178).
+            engines.size > 1 && engines.firstOrNull() == com.example.vpn.sidecar.ShirokhorshidSidecar.ID -> maxOf(base, SHIROKHORSHID_CHAIN_MS)
             else -> base
         }
     }

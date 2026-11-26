@@ -68,7 +68,8 @@ class PsiphonSidecar(
             else requireNotNull(networkSettings())
         val config = buildConfig(source, if (privateId.isNotEmpty()) "" else region(profile),
             context.socksPort, dataDir, context.upstreamSocks, context.upstreamUser,
-            context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null)
+            context.upstreamPass, tcpOnly(profile) || context.upstreamSocks != null,
+            fronted = privateId.isEmpty() && isFrontedOnly(profile))
         // ConsoleClient otherwise shares tactics and dial history under UNKNOWN across
         // unrelated networks. Upstream uses this identifier locally and logs its prefix.
         val link = runCatching { Sidecars.psiphonNetworkIdentity?.invoke() }.getOrNull()
@@ -452,6 +453,19 @@ class PsiphonSidecar(
 
         fun tcpOnly(profile: VlessProfile): Boolean = ProfileExtras.read(profile).optBoolean("tcpOnly")
 
+        const val KEY_FRONTED = "frontedOnly"
+
+        /** The profile limited to Psiphon's CDN-fronted meek protocols ([FRONTED_PROTOCOLS]). */
+        fun frontedOnly(profile: VlessProfile): VlessProfile = ProfileExtras.with(profile, KEY_FRONTED, true)
+
+        fun isFrontedOnly(profile: VlessProfile): Boolean = ProfileExtras.read(profile).optBoolean(KEY_FRONTED)
+
+        /**
+         * Psiphon's CDN-fronted meek protocols (psiphon-tunnel-core common/protocol): the tunnel and the server-list
+         * fetch go to a CDN edge, so a carrier that drops Psiphon server addresses still sees ordinary CDN traffic.
+         */
+        val FRONTED_PROTOCOLS = listOf("FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH", "FRONTED-MEEK-QUIC-OSSH")
+
         internal fun tcpStartupRetry(profile: VlessProfile): VlessProfile? =
             if (privateId(profile).isEmpty() && !tcpOnly(profile)) ProfileExtras.with(profile, "tcpOnly", true)
             else null
@@ -534,7 +548,9 @@ class PsiphonSidecar(
             (settings.opt(key) as? JSONArray)?.length()?.let { it > 0 } == true
 
         /** The config file ConsoleClient reads: the build's settings plus what this connection needs. */
-        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false): JSONObject {
+        fun buildConfig(networkSettings: JSONObject, region: String, socksPort: Int, dataDir: File, upstreamSocks: Int? = null, upstreamUser: String? = null, upstreamPass: String? = null, tcpOnly: Boolean = false,
+                        /** Only [FRONTED_PROTOCOLS] (TCP ones when [tcpOnly]); the egress region is never pinned then. */
+                        fronted: Boolean = false): JSONObject {
             val config = JSONObject(networkSettings.toString())
             val owned = (LOCAL_FIELDS + CHAIN_ONLY_FIELDS).map { it.lowercase() }.toSet()
             config.keys().asSequence().filter { it.lowercase() in owned }.toList().forEach { config.remove(it) }
@@ -559,7 +575,8 @@ class PsiphonSidecar(
             config.put("EnableUpgradeDownload", false)
             // Everything is tunneled (see LOCAL_FIELDS): no destination is dialed outside Psiphon.
             config.put("SplitTunnelOwnRegion", false)
-            if (region.isNotEmpty()) config.put("EgressRegion", region)
+            // A fronted start is never pinned: few regions host fronted servers, and a pin would empty the candidates.
+            if (region.isNotEmpty() && !fronted) config.put("EgressRegion", region)
             if (!config.has("DNSResolverAlternateServers")) {
                 config.put("DNSResolverAlternateServers", JSONArray(DEFAULT_DNS_SERVERS))
             }
@@ -585,7 +602,19 @@ class PsiphonSidecar(
             // tunnel; without them only NetworkID repeats. psiphon-tunnel-core redacts IP addresses in every
             // notice (notice.go outputNotice), and StartupProgress keeps only whitelisted, sanitized fields.
             config.put("EmitDiagnosticNotices", true)
-            if (tcpOnly) {
+            if (fronted) {
+                config.remove("InitialLimitTunnelProtocols")
+                config.remove("InitialLimitTunnelProtocolsCandidateCount")
+                config.remove("TunnelProtocol")
+                val previous = config.optJSONArray("LimitTunnelProtocols")
+                val restricted = previous?.let { (0 until it.length()).map { i -> it.optString(i) } }.orEmpty()
+                val base = if (restricted.isEmpty()) FRONTED_PROTOCOLS else restricted.filter { it in FRONTED_PROTOCOLS }
+                    .ifEmpty { FRONTED_PROTOCOLS }
+                val protocols = if (tcpOnly) base.filter { it in TCP_PROTOCOLS } else base
+                config.put("LimitTunnelProtocols", JSONArray(protocols))
+                // Tactics may narrow the protocol set again; the fronted step decides it, as the fork's CDN mode does.
+                config.put("DisableTactics", true)
+            } else if (tcpOnly) {
                 config.remove("InitialLimitTunnelProtocols")
                 config.remove("InitialLimitTunnelProtocolsCandidateCount")
                 config.remove("TunnelProtocol")

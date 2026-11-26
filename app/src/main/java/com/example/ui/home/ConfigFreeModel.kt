@@ -117,5 +117,7 @@ internal object ConfigFreeMethodText {
         ConfigFreeMethod.AETHER_MIM -> R.string.picker_desc_aether_mim
         ConfigFreeMethod.AETHER_PSIPHON -> R.string.picker_desc_aether_psiphon
         ConfigFreeMethod.AETHER_TOR -> R.string.picker_desc_aether_tor
+        ConfigFreeMethod.SHIROKHORSHID_RADIANCE -> R.string.picker_desc_shirokhorshid_radiance
+        ConfigFreeMethod.AETHER_LANTERN -> R.string.picker_desc_aether_lantern
     }
 }

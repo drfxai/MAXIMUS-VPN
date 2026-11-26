@@ -3319,6 +3319,23 @@ class RayVpnService : VpnService() {
             if (engine.id == com.example.vpn.sidecar.CottenDnsSidecar.ID) {
                 runningProfile = prioritizeDnsTunnelResolvers(engine, runningProfile)
             }
+            // Build 178 field report: Shir o Khorshid brought no tunnel up in 120 s on Irancell. After a failed start on this
+            // network the next one runs its CDN-fronted protocols only (same engine; allowed in a manual pick), and back.
+            if (engine.id == com.example.vpn.sidecar.ShirokhorshidSidecar.ID && started == null && context.upstreamSocks == null) {
+                val shirNet = runCatching { com.example.vpn.connections.BuiltinMethodMemory.network() }.getOrNull()
+                val lastFailed = runCatching { com.example.vpn.engine.registry.EngineLedger.shared.lastOutcome(engine.id,
+                    ledgerNetwork(), com.example.vpn.sidecar.ShirokhorshidSidecar.FRONTED_MEMORY_MS)?.not() }.getOrNull()
+                val fronted = com.example.vpn.sidecar.ShirokhorshidSidecar.nextFronted(lastFailed,
+                    com.example.vpn.sidecar.ShirokhorshidSidecar.lastFronted(shirNet))
+                com.example.vpn.sidecar.ShirokhorshidSidecar.recordFronted(shirNet, fronted)
+                if (fronted) {
+                    runningProfile = com.example.vpn.sidecar.PsiphonSidecar.frontedOnly(runningProfile)
+                    val why = "CDN-fronted protocols only" + if (lastFailed == true) " (the last start on this network failed)" else ""
+                    XrayLogManager.i("VPN", "Shir o Khorshid: $why.")
+                    com.example.vpn.diagnostics.EngineStages.record(engine.id, "protocols", why)
+                    com.example.vpn.diagnostics.events.EventLog.event("shirokhorshid.fronted", attributes = mapOf("why" to why))
+                }
+            }
             var launch = started?.launch ?: engine.prepare(runningProfile, settings, engineContext)
             showForegroundNotification("Starting the ${engine.id} engine...")
             // One number for the stage text and the connect deadline (build 176: "ready within 120s" while the deadline
@@ -3379,12 +3396,16 @@ class RayVpnService : VpnService() {
                 psiphonAvoid = null
                 val knownAvailable = psiphonLastAvailable?.takeIf { it.first == regionNetwork }?.second.orEmpty()
                 var firstStep = true
+                // Build 178: where direct Psiphon failed here recently, its CDN-fronted meek protocols lead (same engine).
+                val frontedFirst = runCatching { com.example.vpn.connections.PsiphonChainMemory.failedAt(regionNetwork) != null }.getOrDefault(false)
                 val outcome = com.example.vpn.sidecar.PsiphonRegionRun().run(userRegion, remembered, total, avoid = avoid,
-                    knownAvailable = knownAvailable, launch = { step ->
+                    knownAvailable = knownAvailable, frontedFirst = frontedFirst, launch = { step ->
                     val regional = if (step.region == userRegion) profile
                         else com.example.vpn.engine.ProfileExtras.with(profile, com.example.vpn.sidecar.PsiphonSidecar.KEY_REGION, step.region)
                     // The TCP-only step of the rotation: the old 120 s TCP retry, now inside the run's budget.
-                    val stepProfile = if (step.tcpOnly) com.example.vpn.sidecar.PsiphonSidecar.tcpStartupRetry(regional) ?: regional else regional
+                    val tcpStep = if (step.tcpOnly) com.example.vpn.sidecar.PsiphonSidecar.tcpStartupRetry(regional) ?: regional else regional
+                    // Build 178: the CDN-fronted step (same engine: Psiphon's own fronted meek protocols, no region pin).
+                    val stepProfile = if (step.fronted) com.example.vpn.sidecar.PsiphonSidecar.frontedOnly(tcpStep) else tcpStep
                     if (!firstStep || stepProfile !== profile) {
                         runningProfile = stepProfile
                         // A stopped process can still be releasing its listener. Never reuse its port.
@@ -3392,14 +3413,15 @@ class RayVpnService : VpnService() {
                         launch = engine.prepare(runningProfile, settings, engineContext)
                     }
                     firstStep = false
-                    val label = step.region.ifEmpty { "any" } + if (step.tcpOnly) " (TCP only)" else ""
+                    val label = step.region.ifEmpty { "any" } + (if (step.tcpOnly) " (TCP only)" else "") +
+                        (if (step.fronted) " (CDN-fronted meek)" else "")
                     // Build 177: "region any · up to 70s" moved on at 40 s (anyStalled). Say both numbers.
                     val window = com.example.vpn.sidecar.PsiphonRegionPlan.stepWindowText(step, userRegion)
                     XrayLogManager.i("VPN", "Psiphon: region $label for $window (${step.why}).")
                     com.example.vpn.diagnostics.EngineStages.record(engine.id, "region $label", "$window (${step.why})")
                     com.example.vpn.diagnostics.events.EventLog.event("psiphon.region", attributes = mapOf(
                         "region" to label, "budget.s" to (step.budgetMs / 1000).toString(), "why" to step.why), result = "START")
-                    if (!step.any) showForegroundNotification("Psiphon: trying region $label…")
+                    if (!step.any || step.fronted) showForegroundNotification("Psiphon: trying region $label…")
                     RegionStart(launchProcess()).also { sidecar = it.running }
                 }, cancelled = { connectionOwner?.isActive == false || !StopFence.admits() })
                 regionOutcome = outcome

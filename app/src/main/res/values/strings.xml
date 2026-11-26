@@ -1882,4 +1882,6 @@
     <string name="picker_aether_cf_filtered">Cloudflare is filtered on this network (cf=0): WARP rarely connects here. A pick runs one short check (up to %1$d s); Lantern or Serverless usually work.</string>
     <string name="unlock_error_no_server_retried">No Unlock DNS server answered correctly on this network after %1$d checks. Re-check the servers or add a custom DNS.</string>
     <string name="unlock_notification_rechecking">No Unlock DNS server answered yet; checking again…</string>
+    <string name="picker_desc_shirokhorshid_radiance">Lantern carries the connection to Shir o Khorshid (an explicit chain)</string>
+    <string name="picker_desc_aether_lantern">WARP through the Lantern network, avoiding filtered Cloudflare addresses (an explicit chain)</string>
 </resources>

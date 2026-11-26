@@ -18,5 +18,6 @@ object AetherCloudflareNotice {
 
     /** Picker rows the notice applies to: Aether itself and every WARP transport or nested Aether method. Pure. */
     fun appliesTo(method: BuiltinConnections.ConfigFreeMethod): Boolean =
-        method == BuiltinConnections.ConfigFreeMethod.AETHER_WARP || method.aetherTransport != null
+        method != BuiltinConnections.ConfigFreeMethod.AETHER_LANTERN &&
+            (method == BuiltinConnections.ConfigFreeMethod.AETHER_WARP || method.aetherTransport != null)
 }

@@ -74,7 +74,7 @@ class ShirokhorshidSidecar(
         val config = applyOptions(base, options,
             rejectCidrs = if (options.avoidIranConduits) runCatching { rejectCidrs() }.getOrDefault(emptyList()) else emptyList(),
             remembered = if (options.cdnFronting) runCatching { rememberedEdges(network) }.getOrDefault(emptyList()) else emptyList(),
-            chained = chained)
+            chained = chained, fronted = PsiphonSidecar.isFrontedOnly(profile))
         val configFile = File(context.workDir, PsiphonSidecar.CONFIG_FILE)
         PrivateEngineFile.write(configFile, config.toString())
         val linkDns = if (!chained && !source.has("DNSResolverAlternateServers"))
@@ -233,7 +233,13 @@ class ShirokhorshidSidecar(
             options: Options,
             rejectCidrs: List<String> = emptyList(),
             remembered: List<String> = emptyList(),
-            chained: Boolean = false
+            chained: Boolean = false,
+            /**
+             * Build 178 field report (Irancell): Shir o Khorshid listed 26 regions and brought no tunnel up in 120 s. After
+             * such a failure on a network the next start runs only the CDN-fronted protocols (the fork's CDN meek and
+             * Psiphon's fronted meek), with tactics off as the fork's own CDN mode does. Same engine, so a manual pick may.
+             */
+            fronted: Boolean = false
         ): JSONObject {
             val owned = OWNED_FIELDS.map { it.lowercase() }.toSet()
             config.keys().asSequence().filter { it.lowercase() in owned }.toList().forEach { config.remove(it) }
@@ -243,10 +249,11 @@ class ShirokhorshidSidecar(
                 val edges = (options.edges + remembered).map { it.trim() }.filter { validEdge(it) }.distinct().take(MAX_EDGES)
                 if (edges.isNotEmpty()) config.put("FrontedMeekCDNScanSpec", JSONObject().put("IPCandidates", JSONArray(edges)))
             }
-            val limit: List<String>? = when (options.mode) {
-                Mode.AUTO -> null
-                Mode.CONDUIT -> CONDUIT_PROTOCOLS
-                Mode.DIRECT -> DIRECT_PROTOCOLS + (if (cdn) CDN_PROTOCOLS else emptyList())
+            val limit: List<String>? = when {
+                fronted && options.mode != Mode.CONDUIT -> (if (cdn) CDN_PROTOCOLS else emptyList()) + PsiphonSidecar.FRONTED_PROTOCOLS
+                options.mode == Mode.AUTO -> null
+                options.mode == Mode.CONDUIT -> CONDUIT_PROTOCOLS
+                else -> DIRECT_PROTOCOLS + (if (cdn) CDN_PROTOCOLS else emptyList())
             }
             if (limit != null) {
                 // Initial limits from the network settings would otherwise narrow the first round outside the mode.
@@ -257,7 +264,9 @@ class ShirokhorshidSidecar(
             }
             // As the fork's own app does, CDN and direct modes skip tactics: tactics can re-enable protocols the
             // mode excludes, and its requests need a capable (non-CDN) server first.
-            if (options.mode == Mode.DIRECT) config.put("DisableTactics", true)
+            if (options.mode == Mode.DIRECT || fronted && options.mode != Mode.CONDUIT) config.put("DisableTactics", true)
+            // A fronted start is not pinned to a region: few regions host fronted servers.
+            if (fronted && options.mode != Mode.CONDUIT) config.remove("EgressRegion")
             if (options.mode != Mode.DIRECT && rejectCidrs.isNotEmpty()) {
                 config.put("InproxyRejectProxyCIDRs", JSONArray(rejectCidrs))
             }
@@ -274,6 +283,31 @@ class ShirokhorshidSidecar(
         }
 
         private val CDN_TCP_PROTOCOLS = setOf("FRONTED-MEEK-CDN-OSSH", "FRONTED-MEEK-CDN-HTTP-OSSH")
+
+        /** How long a failed start on a network steers the next one ([nextFronted]). */
+        const val FRONTED_MEMORY_MS = 6 * 60 * 60_000L
+
+        /**
+         * Whether the next start on a network runs CDN-fronted only: after a failed start it switches to the other form
+         * (all protocols ↔ CDN-fronted), after a working one it keeps the form that worked; with no outcome on this network
+         * within [FRONTED_MEMORY_MS] (or a first start): all protocols. Pure.
+         */
+        fun nextFronted(lastFailed: Boolean?, lastFronted: Boolean): Boolean = when (lastFailed) {
+            true -> !lastFronted
+            false -> lastFronted
+            null -> false
+        }
+
+        private fun frontedKey(network: String) = "shirokhorshidFronted#$network"
+
+        fun lastFronted(network: String?): Boolean = network != null && runCatching {
+            com.example.vpn.connections.BuiltinMethodMemory.read(frontedKey(network)) == "1"
+        }.getOrDefault(false)
+
+        fun recordFronted(network: String?, fronted: Boolean) {
+            if (network.isNullOrBlank()) return
+            runCatching { com.example.vpn.connections.BuiltinMethodMemory.write(frontedKey(network), if (fronted) "1" else "0") }
+        }
     }
 }
 

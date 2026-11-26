@@ -154,6 +154,15 @@ class EngineLedger(private val clock: () -> Long = System::currentTimeMillis) {
         return last(engineId, network)?.kind == Kind.VERIFIED
     }
 
+    /** How [engineId]'s last attempt on [network] within [withinMs] ended: true verified, false failed, null none. */
+    @Synchronized
+    fun lastOutcome(engineId: String, network: String, withinMs: Long): Boolean? {
+        ensureLoaded()
+        val now = clock()
+        return events[engineId].orEmpty().lastOrNull { it.network == network && it.kind != Kind.STARTED && now - it.at in 0..withinMs }
+            ?.let { it.kind == Kind.VERIFIED }
+    }
+
     /** What [engineId] did on [network] within [HISTORY_MS]: "3 attempts here in 24 h: 2 failed, 1 verified". */
     @Synchronized
     fun historyLine(engineId: String, network: String): String? {
