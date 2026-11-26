@@ -49,6 +49,7 @@ Before reviving, a run looks at the network the phone is on:
 - **Firewall order** (`NetworkFirewalls`). The network key's MCC+MNC names the network, not the SIM.
   - Irancell (43235): the Irancell recipe first (empty-record fragment, Go TLS, Firefox cipher list), then the other fragment recipes.
   - Hamrah-e-Aval (43211): ECH first; fragment recipes are skipped, since the community reports fragment fully blocked there, IPv6 too.
+  - Hamrah-e-Aval with IPv6 and the patterniha Xray fork in the build: `mci-v6-oob` right after the Iran ClientHello split and before ECH — dialMode `oob6.0` (one TCP out-of-band byte on the first write, IPv6 destinations only), Chrome fingerprint, no fragment/cipher list/ECH, a Cloudflare IPv6 edge (validated, else 2a06:98c1:3120::7). It is tested with a real request through an isolated fork sidecar (`ForkAwareProbe`, `EngineProbe`), never on stock Xray, and connects through `ForkXraySidecar`. Never offered on Irancell, without IPv6, when IPv6 or the firewall is unknown, or without the fork.
   - Rightel (43220): ECH first, fragment last.
   - Wi-Fi and other networks: the usual order.
   - The user can override the detected network on the page (Auto, Irancell, MCI, Rightel, Other).

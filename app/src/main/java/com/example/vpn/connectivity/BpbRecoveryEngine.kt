@@ -194,7 +194,8 @@ class BpbRecoveryEngine(
 
         private val AUDITED = listOf<Pair<String, (VlessProfile) -> String>>(
             "finalMask" to { it.finalMask }, "fingerprint" to { it.fingerprint }, "alpn" to { it.alpn },
-            "cipherSuites" to { it.cipherSuites }, "echConfigList" to { it.echConfigList }, "address" to { it.address }
+            "cipherSuites" to { it.cipherSuites }, "echConfigList" to { it.echConfigList }, "address" to { it.address },
+            "dialMode" to { com.example.vpn.engine.ProfileExtras.read(it).optString(com.example.vpn.engine.ProfileExtras.PATT_DIAL_MODE) }
         )
 
         fun diff(parent: VlessProfile, derived: VlessProfile): List<FieldChange> =

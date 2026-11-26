@@ -268,6 +268,7 @@ class ConfigRevival(
                 id == "bpb-fragment" -> "Fragment (no empty record) + Go TLS"
                 id.startsWith("fragment-tlshello") -> "ClientHello fragments"
                 id.startsWith("fingerprint-") -> "${id.removePrefix("fingerprint-").replaceFirstChar { it.uppercase() }} fingerprint"
+                id == NetworkFirewalls.MCI_V6_OOB_PROFILE -> "oob6 (Xray fork) + Chrome over Cloudflare IPv6${endpoint?.let { " $it" }.orEmpty()}"
                 id == "alpn-http11" -> "HTTP/1.1 only"
                 id.startsWith("endpoint-") -> "Clean ${endpoint?.let { com.example.vpn.cleanip.CdnRanges.cdnOf(it)?.label } ?: "CDN"} IP${endpoint?.let { " $it" }.orEmpty()}"
                 else -> id

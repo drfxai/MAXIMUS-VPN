@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Patterniha's separate Xray fork: v26.11.23, required for v65 profiles and TCP fallback semantics.
+# Patterniha's separate Xray fork: v26.11.24 (7131abd; v65 profiles need >= v26.11.23 for TCP fallback semantics).
 set -euo pipefail
 export GOTOOLCHAIN=go1.27.0
 source "$(dirname "$0")/common.sh"
 TASK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REV=40fd599029e19f439f192b77cf428ac500b3372a
+REV=7131abd488e066687c77590dcc54697e5c9979ad
 source_dir="$TASK_ROOT/build/serverless-source-$REV"
 if [[ ! -f "$source_dir/UPSTREAM_REVISION" ]]; then
  mkdir -p "$source_dir"

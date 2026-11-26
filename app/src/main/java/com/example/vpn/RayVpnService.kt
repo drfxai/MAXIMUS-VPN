@@ -1106,6 +1106,17 @@ class RayVpnService : VpnService() {
 
     private fun probe(profile: VlessProfile, timeoutSec: Int): com.example.xray.RealDelayProbe.Outcome = probeAll(listOf(profile), timeoutSec).first()
 
+    /**
+     * A recovered copy's real request: one with a fork-only field (the oob recipe's dialMode) goes through an isolated
+     * fork sidecar, since stock Xray would drop that field and test another path; any other through [stock].
+     */
+    private fun probeRecovered(profile: VlessProfile, timeoutSec: Int,
+                               stock: (VlessProfile) -> com.example.xray.RealDelayProbe.Outcome): com.example.xray.RealDelayProbe.Outcome {
+        if (!com.example.vpn.sidecar.ForkXraySidecar.applies(profile)) return stock(profile)
+        val r = com.example.vpn.lab.EngineProbe.test(this, com.example.vpn.sidecar.ForkXraySidecar, profile, timeoutSec, record = false)
+        return com.example.vpn.connectivity.ForkAwareProbe.outcome(r.stage.carriesTraffic, r.notTested, r.latencyMs, r.failure)
+    }
+
     private suspend fun connectLocked(
         userProfile: VlessProfile,
         smart: Boolean = false,
@@ -1643,7 +1654,7 @@ class RayVpnService : VpnService() {
                     showForegroundNotification("Trying the recovered settings...")
                     if (recovery.clearsEch) XrayLogManager.i("RECOVERY", "Recovered settings ${recovery.recoveryProfileKey} remove the config's ECH; its server name is visible while they are used.")
                     tracker.start(com.example.vpn.smart.SearchStage.SAME_SERVER)
-                    when (val outcome = com.example.vpn.Abandonable.run { probe(recovery.profile, timeouts.firstSec) }) {
+                    when (val outcome = com.example.vpn.Abandonable.run { probeRecovered(recovery.profile, timeouts.firstSec) { probe(it, timeouts.firstSec) } }) {
                         is com.example.xray.RealDelayProbe.Outcome.Delay -> {
                             profile = recovery.profile
                             raced = true
@@ -1892,7 +1903,9 @@ class RayVpnService : VpnService() {
                     }.getOrNull()
                     val verified = chosen != null &&
                         // Not counted again: revival's own tests above already count this config.
-                        com.example.vpn.Abandonable.run { com.example.xray.RealDelayProbe.measure(chosen, timeouts.firstSec) } is com.example.xray.RealDelayProbe.Outcome.Delay
+                        com.example.vpn.Abandonable.run {
+                            probeRecovered(chosen, timeouts.firstSec) { com.example.xray.RealDelayProbe.measure(it, timeouts.firstSec) }
+                        } is com.example.xray.RealDelayProbe.Outcome.Delay
                     if (verified && chosen != null) {
                         requestedProfile = owner
                         activeProfile = owner

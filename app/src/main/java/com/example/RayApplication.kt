@@ -126,13 +126,24 @@ class RayApplication : Application() {
                 }
             ),
             probe = { profiles ->
-                com.example.xray.RealDelayProbe.measure(profiles, com.example.vpn.lab.ConfigRevival.TIMEOUT_SEC).map { o ->
-                    when (o) {
-                        is com.example.xray.RealDelayProbe.Outcome.Delay -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed(o.latencyMs)
-                        is com.example.xray.RealDelayProbe.Outcome.Failed -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Failed(o.reason)
-                        is com.example.xray.RealDelayProbe.Outcome.NotRun -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.NotRun(o.reason)
-                    }
-                }
+                // A candidate with a fork-only field (the oob recipe's dialMode) is tested on the fork, never on stock Xray.
+                com.example.vpn.connectivity.ForkAwareProbe.measure(profiles,
+                    needsFork = { com.example.vpn.sidecar.ForkXraySidecar.applies(it) },
+                    stock = { plain ->
+                        com.example.xray.RealDelayProbe.measure(plain, com.example.vpn.lab.ConfigRevival.TIMEOUT_SEC).map { o ->
+                            when (o) {
+                                is com.example.xray.RealDelayProbe.Outcome.Delay -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Passed(o.latencyMs)
+                                is com.example.xray.RealDelayProbe.Outcome.Failed -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.Failed(o.reason)
+                                is com.example.xray.RealDelayProbe.Outcome.NotRun -> com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.NotRun(o.reason)
+                            }
+                        }
+                    },
+                    fork = { p ->
+                        val r = com.example.vpn.lab.EngineProbe.test(this, com.example.vpn.sidecar.ForkXraySidecar, p,
+                            com.example.vpn.lab.ConfigRevival.TIMEOUT_SEC, record = false)
+                        com.example.vpn.connectivity.ForkAwareProbe.testResult(r.stage.carriesTraffic, r.notTested, r.latencyMs, r.failure)
+                    },
+                    missing = com.example.vpn.connectivity.DerivedRecoveryCandidate.TestResult.NotRun("no result"))
             },
             endpoints = { network -> endpointScores.validated(network) },
             winners = revivalWinners,

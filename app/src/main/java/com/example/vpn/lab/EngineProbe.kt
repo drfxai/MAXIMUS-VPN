@@ -92,7 +92,9 @@ object EngineProbe {
         gapMs: Long = FullAnalysis.STABLE_WINDOW_MS,
         mode: OperationalMode = AppSettings().operationalMode,
         /** A passing engine is left running in [EngineHandoff] for the connect that follows. */
-        keep: Boolean = false
+        keep: Boolean = false,
+        /** False for a test that is not about the engine itself (a recovery candidate run on the fork), so nothing is recorded. */
+        record: Boolean = true
     ): Result {
         val executable = Sidecars.executable(engine)
             ?: return Result(engine.id, ConnectionStage.NOT_TESTED, null, "the ${engine.id} engine is not in this build", notTested = true)
@@ -106,7 +108,7 @@ object EngineProbe {
                     com.example.vpn.smart.NetworkIdentity.current(context), System.currentTimeMillis()))
             }.getOrDefault(com.example.vpn.connections.ConnectionEngineRunner.LinkHints())
             return runIsolated(engine, profile, executable, workDir, timeoutSec, requests, gapMs, mode, keep, hints)
-                .also { record(context, network, listOf(engine.id), it, failures = true) }
+                .also { if (record) record(context, network, listOf(engine.id), it, failures = true) }
         } finally {
             if (!EngineHandoff.holds(workDir)) cleanup(workDir)
         }
