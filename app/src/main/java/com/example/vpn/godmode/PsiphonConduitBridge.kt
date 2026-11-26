@@ -69,17 +69,26 @@ object PsiphonConduitBridge {
             .minByOrNull { it.latencyMs ?: 9999L }
     }
 
+    private val unavailableNoted = AtomicBoolean(false)
+
+    /**
+     * Bridges are not available in this build (no authenticated discovery). Build 177 logged "bridges paused" on every
+     * mode tap although nothing had ever run: the unavailability is noted once per process, and "paused" only when
+     * bridges really were running ([GodModeLogOnce]).
+     */
     fun enableGodModeBridges() {
         disableGodModeBridges()
-        XrayLogManager.w("BRIDGE", "Emergency bridges disabled until authenticated discovery is implemented")
+        if (GodModeLogOnce.first(unavailableNoted)) {
+            XrayLogManager.w("BRIDGE", "Emergency bridges are not available in this build (authenticated discovery is not implemented).")
+        }
     }
 
     fun disableGodModeBridges() {
-        isBridgeActive.set(false)
+        val wasActive = isBridgeActive.getAndSet(false)
         watchdogJob?.cancel()
         watchdogJob = null
         _activeBridgeFlow.value = null
-        XrayLogManager.appendLog("GOD MODE: Psiphon & Conduit proxy bridges paused.", "GOD_MODE")
+        if (wasActive) XrayLogManager.appendLog("GOD MODE: Psiphon & Conduit proxy bridges paused.", "GOD_MODE")
     }
 
     /**

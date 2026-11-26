@@ -37,4 +37,56 @@ object FailClosedPolicy {
      */
     fun mayReleaseAfterFailedConnect(startedByUser: Boolean, mode: OperationalMode, killSwitchEnabled: Boolean): Boolean =
         startedByUser && !killSwitchEnabled && mode == OperationalMode.DAILY
+
+    /**
+     * Whether traffic stays blocked after a failed Connect: only while the protection (block) was requested and
+     * [mayReleaseAfterFailedConnect] does not release it. The failure text on Home follows this (build 177 said
+     * "Traffic stays blocked" while Daily mode with the Kill Switch off had released the block).
+     */
+    fun keepsBlockAfterFailedConnect(protectionRequested: Boolean, startedByUser: Boolean, mode: OperationalMode,
+                                     killSwitchEnabled: Boolean): Boolean =
+        protectionRequested && !mayReleaseAfterFailedConnect(startedByUser, mode, killSwitchEnabled)
+
+    /** What a failed Connect leaves behind, and so what its text says (build 177, B2 and B20). */
+    enum class AfterFailure {
+        /** No traffic block was requested (nothing to say). */
+        NO_BLOCK,
+        /** Daily mode, the user's Connect, Kill Switch off: the block is released. */
+        RELEASED,
+        /** Daily mode, the user's Connect, Kill Switch on: the block stays because of the Kill Switch. */
+        KILL_SWITCH,
+        /** GOD / Trade / Ghost Rider or an automatic session (Always-on, failover): the block stays. */
+        MODE_OR_AUTOMATIC
+    }
+
+    fun afterFailedConnect(protectionRequested: Boolean, startedByUser: Boolean, mode: OperationalMode,
+                           killSwitchEnabled: Boolean): AfterFailure = when {
+        !protectionRequested -> AfterFailure.NO_BLOCK
+        mayReleaseAfterFailedConnect(startedByUser, mode, killSwitchEnabled) -> AfterFailure.RELEASED
+        startedByUser && mode == OperationalMode.DAILY && killSwitchEnabled -> AfterFailure.KILL_SWITCH
+        else -> AfterFailure.MODE_OR_AUTOMATIC
+    }
+
+    /**
+     * Build 177 (B21): the Kill Switch was turned off while a failed Connect still held the traffic block, and the block
+     * stayed. The block a failed Connect holds ([holdingFailedBlock]) is released when the Kill Switch goes from on to
+     * off and the same rule as at the failure ([mayReleaseAfterFailedConnect]) now releases it: Daily mode and the
+     * user's own Connect only. GOD, Trade, Ghost Rider and automatic (Always-on) sessions keep the block.
+     */
+    fun releaseOnKillSwitchOff(holdingFailedBlock: Boolean, startedByUser: Boolean, mode: OperationalMode,
+                               killSwitchWas: Boolean, killSwitchNow: Boolean): Boolean =
+        holdingFailedBlock && killSwitchWas && !killSwitchNow && mayReleaseAfterFailedConnect(startedByUser, mode, killSwitchNow)
+
+    /**
+     * The failure message with exactly one sentence about the traffic block: [notice] replaces any of [knownNotices]
+     * already in [message] (a deadline message carries one; a later release changes it), or is appended. Pure.
+     */
+    fun withNotice(message: String?, notice: String, knownNotices: Collection<String>): String {
+        var base = message?.trim().orEmpty()
+        knownNotices.filter { it.isNotBlank() }.sortedByDescending { it.length }.forEach { base = base.replace(it, "") }
+        base = base.trim().replace(Regex("\\s{2,}"), " ")
+        if (notice.isBlank()) return base
+        if (base.isEmpty()) return notice
+        return if (base.last() in ".!?:") "$base $notice" else "$base. $notice"
+    }
 }

@@ -679,11 +679,24 @@ class LabController(
                 !it.allowInsecure && com.example.vpn.subscription.SubscriptionPreset.autoSelectable(it) &&
                     com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null
             }
+            // Fake-SNI whitelist mode: decoy pool, per-network TTL ladder and MD5 decoy, ordered by this carrier's firewall.
+            val firewall = com.example.vpn.connectivity.NetworkFirewalls.detect(currentIdentity)
             val fakeSni = if (rememberedOnly) emptyList() else withTimeoutOrNull(12_000L) {
                 kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
-                    com.example.vpn.smart.FakeSniRecovery.candidates(saved, resolveForRecovery)
+                    com.example.vpn.smart.FakeSniRecovery.candidates(saved, resolveForRecovery, firewall,
+                        com.example.vpn.smart.FakeSniMemory.state(currentIdentity),
+                        com.example.vpn.sidecar.Md5SigSupport.supported())
                 }
             }.orEmpty()
+            if (fakeSni.isNotEmpty()) XrayLogManager.i("SMART", "Recovery fake-SNI: ${fakeSni.size} candidate(s) on ${firewall.title}; " +
+                com.example.vpn.smart.FakeSniMemory.describe(currentIdentity) +
+                (if (com.example.vpn.sidecar.Md5SigSupport.supported()) "; kernel has TCP_MD5SIG" else "; no TCP_MD5SIG"))
+            val fakeBudget = com.example.vpn.smart.FakeSniRecovery.Budget()
+            fun rememberFakeSni(profile: VlessProfile, passed: Boolean) {
+                val v = com.example.vpn.smart.FakeSniRecovery.variantOf(profile) ?: return
+                if (com.example.vpn.smart.NetworkIdentity.current(context) != currentIdentity) return
+                com.example.vpn.smart.FakeSniMemory.record(currentIdentity, v, passed)
+            }
             val cloudflareBlocked = ExperimentPlanner.cloudflareBlocked(cap)
             val caps = com.example.vpn.smart.RecoveryEngineCaps.Budget(
                 com.example.vpn.smart.RecoveryEngineCaps.constrained(device.metered, cloudflareBlocked))
@@ -721,9 +734,11 @@ class LabController(
             val lowBattery = device.charging != true && (device.batteryPercent ?: 100) < 20
             val planner = AdaptivePlanner(plan, cap, AdaptivePlanner.Priors(memory = memory, recentlyFailed = recent),
                 AdaptivePlanner.Device(device.metered, lowBattery), AdaptivePlanner.Goal.CONNECT)
+            val fakeFactor = com.example.vpn.smart.FakeSniRecovery.firewallFactor(firewall)
             val candidates = pool.associate { pk -> pk.profile.id to AdaptivePlanner.Candidate(
                 pk.profile.id, pk.profile.name, pk.family, ipv6 = pk.profile.address.contains(':'),
-                provenHere = engineIds[pk.profile.id]?.let { ledger.verifiedHere(it, ledgerNetwork) } == true
+                provenHere = engineIds[pk.profile.id]?.let { ledger.verifiedHere(it, ledgerNetwork) } == true,
+                firewallFactor = if (com.example.vpn.smart.FakeSniRecovery.isCandidate(pk.profile)) fakeFactor else 1.0
             ) }
             planner.add(candidates.values.toList())
             // Stop the moment the attempt is cancelled (the user pressed Stop, or a newer Connect arrived),
@@ -814,7 +829,10 @@ class LabController(
                         EngineProbe.Result("parallel", ConnectionStage.NOT_TESTED, null, null, true)
                     }
                 }
-                outcome?.finished?.forEach { (id, r) -> byId[id]?.let { recordEngine(it, r) } }
+                outcome?.finished?.forEach { (id, r) -> byId[id]?.let {
+                    recordEngine(it, r)
+                    if (!r.notTested) rememberFakeSni(it.profile, r.outcomes.lastOrNull() == true)
+                } }
                 summary.add("parallel(${round.joinToString("+") { it.engineKey }})", System.currentTimeMillis() - parallelBegan,
                     outcome?.winner?.let { "won by ${engineIds[it.first] ?: it.first}" } ?: "nothing carried traffic")
                 outcome?.winner?.let { (id, _) -> XrayLogManager.i("SMART", "Recovery: ${byId[id]?.profile?.name?.let(com.example.core.SecretRedactor::redact)} won the parallel check") }
@@ -845,7 +863,14 @@ class LabController(
                             // Cancellation releases the child processes before the next route starts.
                             val normalMs = com.example.vpn.smart.RecoveryAttemptPolicy.window(engine?.id, remaining)
                             // Metered or cf=0: ByeDPI and Tor share hard per-search caps (RecoveryEngineCaps).
-                            val windowMs = caps.window(engine?.id, normalMs)
+                            val fake = com.example.vpn.smart.FakeSniRecovery.isCandidate(pk.profile)
+                            val capWindow = caps.window(engine?.id, normalMs)
+                            val windowMs = if (fake && capWindow != null) fakeBudget.window(capWindow) else capWindow
+                            if (windowMs == null && capWindow != null) {
+                                planner.notTested(pk.profile.id, "fake-SNI time for this search is used up")
+                                summary.add("byedpi", 0, "skipped (fake-SNI budget used up)")
+                                continue@loop
+                            }
                             if (windowMs == null) {
                                 planner.notTested(pk.profile.id, "${engine?.id} time cap for this search is used up")
                                 summary.add(engine?.id ?: "chain", 0, "skipped (cap used up)")
@@ -870,6 +895,7 @@ class LabController(
                             } finally { watched?.close() }
                             val spent = System.currentTimeMillis() - began
                             caps.charge(engine?.id, spent)
+                            if (fake) fakeBudget.charge(spent)
                             watched?.dropped?.invoke().orEmpty().forEach { host ->
                                 bridgeBook.drop(currentIdentity, host)
                                 XrayLogManager.w("SMART", "Recovery tor: WebTunnel bridge ${com.example.core.SecretRedactor.redact(host)} dropped " +
@@ -891,6 +917,9 @@ class LabController(
                                 else -> "failed (${result.failure ?: result.stage.title})"
                             })
                             recordEngine(pk, result)
+                            // A plain timeout at the cap says nothing about this decoy or TTL; a result or a watch abort does.
+                            if (fake && !result.notTested && (r != null || aborted != null))
+                                rememberFakeSni(pk.profile, result.outcomes.lastOrNull() == true)
                             if (result.outcomes.lastOrNull() != true && result.failure != null) {
                                 lastFailure = com.example.core.SecretRedactor.redact(result.failure).take(140)
                                 onProgress("Trying another route · $lastFailure")

@@ -52,13 +52,14 @@ fun GodBrowserScreen(
     var canGoForward by remember { mutableStateOf(false) }
     val currentWebView by rememberUpdatedState(webViewInstance)
 
-    BackHandler {
-        if (webViewInstance?.canGoBack() == true) {
-            webViewInstance?.goBack()
-        } else {
-            onNavigateBack()
-        }
-    }
+    // Build 177: Back from the Hardened Browser left the app for the launcher instead of returning to the GOD mode
+    // screen. Back is handled in one place ([GodBrowserBack]): by the activity's back dispatcher, and by the WebView
+    // itself when it holds focus (a focused WebView gets the key first), so the screen is always left through the
+    // navigation back stack.
+    val leave by rememberUpdatedState(onNavigateBack)
+    val back = remember { GodBrowserBack(canGoBack = { webViewInstance?.canGoBack() == true },
+        goBack = { webViewInstance?.goBack() }, leave = { leave() }) }
+    BackHandler { back.press() }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -207,6 +208,7 @@ fun GodBrowserScreen(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT
                             )
+                            setOnKeyListener { _, keyCode, event -> back.onKey(keyCode, event.action) }
 
                             @SuppressLint("SetJavaScriptEnabled")
                             settings.apply {
@@ -296,5 +298,27 @@ fun GodBrowserScreen(
                 )
             }
         }
+    }
+}
+
+/**
+ * What Back does in the Hardened Browser: the page's own history first, then leave the screen (back to the GOD mode
+ * screen). [onKey] takes the key the WebView received while focused and consumes both halves of a Back press, so the
+ * activity never sees it as well. Pure apart from the lambdas, so it is unit-tested.
+ */
+class GodBrowserBack(
+    private val canGoBack: () -> Boolean,
+    private val goBack: () -> Unit,
+    private val leave: () -> Unit
+) {
+    fun press() {
+        if (canGoBack()) goBack() else leave()
+    }
+
+    /** True when [keyCode] is Back (consumed); the press acts on key up. */
+    fun onKey(keyCode: Int, action: Int): Boolean {
+        if (keyCode != android.view.KeyEvent.KEYCODE_BACK) return false
+        if (action == android.view.KeyEvent.ACTION_UP) press()
+        return true
     }
 }

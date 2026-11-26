@@ -224,12 +224,17 @@ class ShapedForwarder(
             tried = known.shape
             transport.shaped(server, query, known.shape, UnlockDnsShaping.ATTEMPT_TIMEOUT_MS)?.let { if (clean(query, it)) return it }
         }
-        val plain = transport.plain(server, query, timeoutMs) ?: return null
-        if (clean(query, plain)) return plain
+        // Silence from a server that answers plain questions: fail over fast. A server that only works shaped
+        // (its health check needed a shape) gets a short plain try, then its shapes again, the remembered one
+        // included: one lost datagram must not turn into a SERVFAIL for the app (Build 177: gemini.google.com).
+        val shapedOnly = known?.always == true
+        val plain = transport.plain(server, query, if (shapedOnly) minOf(timeoutMs, UnlockDnsShaping.ATTEMPT_TIMEOUT_MS) else timeoutMs)
+        if (plain != null && clean(query, plain)) return plain
+        if (plain == null && !shapedOnly) return null
         val started = clock()
         val order = listOfNotNull(known?.shape) + QueryShape.entries.filter { it != known?.shape }
         for (shape in order) {
-            if (shape == tried) continue
+            if (shape == tried && !(shapedOnly && plain == null)) continue
             if (clock() - started >= UnlockDnsShaping.RETRY_BUDGET_MS) break
             val answer = transport.shaped(server, query, shape, UnlockDnsShaping.ATTEMPT_TIMEOUT_MS) ?: continue
             if (clean(query, answer)) {
@@ -237,7 +242,7 @@ class ShapedForwarder(
                 return answer
             }
         }
-        return plain.takeIf { !it.intercepted }
+        return plain?.takeIf { !it.intercepted }
     }
 }
 

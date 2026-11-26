@@ -21,6 +21,12 @@ object EngineBudgetHint {
         set(attempt, now + windowMs)
     }
 
+    /** The engine of the current attempt will be ready by [readyBy] (wall clock); e.g. Tor's bootstrap still advancing. */
+    fun announceUntil(readyBy: Long) {
+        val attempt = runCatching { attemptSource() }.getOrNull() ?: return
+        set(attempt, readyBy)
+    }
+
     fun set(attemptId: String, readyBy: Long) {
         val current = hint
         hint = if (current != null && current.attemptId == attemptId) current.copy(readyBy = maxOf(current.readyBy, readyBy))

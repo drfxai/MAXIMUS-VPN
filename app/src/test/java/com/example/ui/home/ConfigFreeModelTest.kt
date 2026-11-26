@@ -27,7 +27,8 @@ class ConfigFreeModelTest {
         assertEquals(ConfigFreeStatus.LIMITED, ConfigFreeStatusModel.of(true, state(ConnectionStatus.CONNECTED)))
         // An engine program's device traffic seen on the TUN → engine hop verifies it.
         assertEquals(ConfigFreeStatus.VERIFIED, ConfigFreeStatusModel.of(true, state(ConnectionStatus.CONNECTED, seen = true)))
-        assertEquals(ConfigFreeStatus.INTERRUPTED, ConfigFreeStatusModel.of(true, state(ConnectionStatus.FAILED)))
+        assertEquals(ConfigFreeStatus.FAILED, ConfigFreeStatusModel.of(true, state(ConnectionStatus.FAILED)))
+        assertEquals(ConfigFreeStatus.INTERRUPTED, ConfigFreeStatusModel.of(true, state(ConnectionStatus.DEGRADED)))
         assertEquals(ConfigFreeStatus.STOPPING, ConfigFreeStatusModel.of(true, state(ConnectionStatus.DISCONNECTING)))
         assertEquals(null, ConfigFreeStatus.READY.detail)
     }

@@ -297,7 +297,7 @@ private fun ModelOption(model: ModelInfo, selected: Boolean, onSelect: () -> Uni
             )
             Spacer(Modifier.weight(1f))
             if (selected) {
-                Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = c.primary, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.CheckCircle, contentDescription = stringResource(R.string.a11y_selected), tint = c.primary, modifier = Modifier.size(20.dp))
             } else {
                 Box(Modifier.size(20.dp).border(1.5.dp, c.borderMedium, CircleShape))
             }
