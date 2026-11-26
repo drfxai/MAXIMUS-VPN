@@ -277,7 +277,8 @@ class RayVpnService : VpnService() {
         var recovery: com.example.vpn.connectivity.DerivedRecoveryCandidate? = null
         val path = when {
             recipe.recoveryKey != null -> {
-                recovery = com.example.RayApplication.instance.bpbRecovery.active(owner, network, base = base)
+                recovery = com.example.RayApplication.instance.bpbRecovery.active(owner, network, base = base,
+                    context = com.example.RayApplication.instance.recoveryContext(network))
                     ?.takeIf { it.recoveryProfileKey == recipe.recoveryKey } ?: return null
                 recovery.profile
             }
@@ -1661,9 +1662,11 @@ class RayVpnService : VpnService() {
             // or earlier recovery): a derived copy, the saved config itself is unchanged. One request decides;
             // a failure counts towards its rollback and the normal path search continues.
             if (!raced && !lockExit && !xrayExhausted && !aetherLast && !frozenHold(requestedProfile)) {
-                val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile) }.getOrNull()
+                val recovery = runCatching { com.example.RayApplication.instance.bpbRecovery.active(requestedProfile, network, base = profile,
+                    context = com.example.RayApplication.instance.recoveryContext(network)) }.getOrNull()
                 if (recovery != null) {
                     showForegroundNotification("Trying the recovered settings...")
+                    if (recovery.clearsEch) XrayLogManager.i("RECOVERY", "Recovered settings ${recovery.recoveryProfileKey} remove the config's ECH; its server name is visible while they are used.")
                     tracker.start(com.example.vpn.smart.SearchStage.SAME_SERVER)
                     when (val outcome = com.example.vpn.Abandonable.run { probe(recovery.profile, timeouts.firstSec) }) {
                         is com.example.xray.RealDelayProbe.Outcome.Delay -> {
@@ -1898,7 +1901,8 @@ class RayVpnService : VpnService() {
                     ?.minByOrNull { it.latencyMs ?: Long.MAX_VALUE }
                 val owner = revived?.let { r -> saved.firstOrNull { it.id == r.profileId } }
                 val recovery = owner?.let {
-                    runCatching { com.example.RayApplication.instance.bpbRecovery.active(it, network, base = it) }.getOrNull()
+                    runCatching { com.example.RayApplication.instance.bpbRecovery.active(it, network, base = it,
+                        context = com.example.RayApplication.instance.recoveryContext(network)) }.getOrNull()
                 }
                 if (owner != null && recovery != null) {
                     // The revived copy still has to carry a real request here before we start the tunnel on

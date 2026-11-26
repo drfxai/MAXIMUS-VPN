@@ -92,7 +92,8 @@ class CandidateGenerator(
                 "address-family" -> if (!isIp(parent.address) && parent.security.equals("tls", true)) add(FAMILY_V6, null, parent.copy(targetStrategy = "UseIPv6v4"))
                 else -> {
                     val wanted = strategiesFor(h)
-                    profiles.filter { !it.isExpired(now) && it.networkConditions.any { s -> s in wanted } && it.appliesTo(parent) }
+                    // Recipes limited to a firewall type, to IPv6 or to the fork belong to recovery and revival, which know the network.
+                    profiles.filter { !it.isExpired(now) && !it.gated && it.networkConditions.any { s -> s in wanted } && it.appliesTo(parent) }
                         .sortedWith(compareBy({ -it.confidence }, { it.key }))
                         .forEach { rp ->
                             if (rp.addressFamily == "ipv6" && net?.ipv6Available == false) return@forEach
