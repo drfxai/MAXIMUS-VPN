@@ -67,6 +67,8 @@ object AetherSidecar : SidecarEngine {
         // A gateway that carried verified HTTP/2 on this network before (CleanH2PeerMemory): dial it directly,
         // skipping the scan (--peer), and send the HTTP/2 transport to the same address (--h2-peer).
         cleanH2Peer(e, carrier, advanced)?.let { command += listOf("--peer", it, "--h2-peer", it) }
+        // A MASQUE HTTP/3 gateway or WireGuard endpoint that carried verified traffic here before: dial it, no scan.
+        cleanPeer(e, carrier, advanced)?.let { command += listOf("--peer", it) }
         if (advanced.tor != "off") {
             command += when (advanced.tor) { "chain" -> "--tor"; "reverse" -> "--tor-reverse"; else -> "--tor-only" }
             if (advanced.tor != "only") command += listOf("--tor-bind",
@@ -166,6 +168,13 @@ object AetherSidecar : SidecarEngine {
         e.optString(CLEAN_H2_PEER).takeIf { carrier == "h2" && advanced.endpoint.isBlank() && advanced.exitNode.isBlank() &&
             com.example.vpn.connections.CleanH2PeerMemory.validPeer(it) }
 
+    /** Extras key: the remembered clean MASQUE HTTP/3 gateway or WireGuard endpoint to dial (session runner only). */
+    const val CLEAN_PEER = "cleanPeer"
+
+    internal fun cleanPeer(e: JSONObject, carrier: String, advanced: AetherSettings): String? =
+        e.optString(CLEAN_PEER).takeIf { carrier in listOf("h3", "wireguard") && advanced.endpoint.isBlank() &&
+            advanced.exitNode.isBlank() && com.example.vpn.connections.CleanH2PeerMemory.validPeer(it) }
+
     /** The SNI split only means something with --fragment, on a carrier that speaks TLS over TCP. */
     internal fun sniSplit(e: JSONObject, carrier: String): Boolean =
         e.optBoolean(SNI_SPLIT) && e.optBoolean("fragment", true) && carrier in listOf("h2", "gool", "mim")
@@ -175,18 +184,30 @@ object AetherSidecar : SidecarEngine {
      * scanned gateway is put to use), if it was written at or after [sinceMs]. Null for H3/WireGuard sessions,
      * forced peers (Aether does not save those) and anything unreadable.
      */
-    fun lastMasqueH2Peer(sinceMs: Long): String? = runCatching {
+    fun lastMasqueH2Peer(sinceMs: Long): String? = lastPeer("h2", sinceMs)
+
+    /**
+     * The gateway or endpoint Aether saved as its last connection for [carrier] ("h2", "h3" or "wireguard"), if written
+     * at or after [sinceMs]. MASQUE keeps it in `identity-lastconn.toml` (carrier masque-h2 / masque-h3), WireGuard in
+     * `wireguard-lastconn.toml` (carrier wireguard), as Aether's lastconn.rs writes them. Null for anything else.
+     */
+    fun lastPeer(carrier: String, sinceMs: Long): String? = runCatching {
+        val (fileName, saved) = LAST_CONNECTION[carrier] ?: return null
         val root = identityDirectory?.invoke() ?: return null
-        val file = File(AetherIdentityStore.current(root), "identity-lastconn.toml")
+        val file = File(AetherIdentityStore.current(root), fileName)
         if (!file.isFile || file.lastModified() + 2_000 < sinceMs) return null
-        parseLastConnection(file.readText())
+        parseLastConnection(file.readText(), saved)
     }.getOrNull()
 
-    /** `peer = "…"` of a lastconn file whose `carrier = "masque-h2"`. Pure. */
-    fun parseLastConnection(text: String): String? {
+    /** Carrier → (Aether's lastconn file, the carrier name Aether writes in it). */
+    private val LAST_CONNECTION = mapOf("h2" to ("identity-lastconn.toml" to "masque-h2"),
+        "h3" to ("identity-lastconn.toml" to "masque-h3"), "wireguard" to ("wireguard-lastconn.toml" to "wireguard"))
+
+    /** `peer = "…"` of a lastconn file whose `carrier` is [carrier] (Aether's name: masque-h2, masque-h3, wireguard). Pure. */
+    fun parseLastConnection(text: String, carrier: String = "masque-h2"): String? {
         fun value(key: String) = text.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("$key ") || it.startsWith("$key=") }
             ?.substringAfter('=')?.trim()?.removeSurrounding("\"")
-        if (value("carrier") != "masque-h2") return null
+        if (value("carrier") != carrier) return null
         return value("peer")?.takeIf(com.example.vpn.connections.CleanH2PeerMemory::validPeer)
     }
 
