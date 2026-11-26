@@ -35,6 +35,10 @@ object UnlockDnsWire {
 
     data class Exchange(val response: ByteArray, val ms: Long, val intercepted: Boolean, val tcp: Boolean)
 
+    /** ANCOUNT of a DNS message (0 when too short). */
+    fun answerCount(message: ByteArray): Int =
+        if (message.size < 12) 0 else ((message[6].toInt() and 0xff) shl 8) or (message[7].toInt() and 0xff)
+
     /** True when the TC (truncated) bit is set in a DNS header. */
     fun truncated(message: ByteArray): Boolean = message.size >= 3 && (message[2].toInt() and 0x02) != 0
 
@@ -61,6 +65,9 @@ object UnlockDnsWire {
         val accept = { reply: ByteArray -> UnlockDnsShaping.restore(original, reply) }
         val udp = udp(address, shaped, timeoutMs, protector, accept)
         if (udp == null || !truncated(udp.response)) return udp
+        // A shape that sets TC in the question: many resolvers copy it into a complete answer. With answer
+        // records present the answer is used as is (the session clears TC before an app sees it).
+        if (UnlockDnsAnswer.setsTc(shape) && answerCount(udp.response) > 0) return udp
         return tcp(address, shaped, timeoutMs, protector, accept) ?: udp
     }
 

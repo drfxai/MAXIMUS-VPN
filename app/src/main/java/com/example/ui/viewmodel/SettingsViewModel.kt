@@ -178,20 +178,13 @@ class SettingsViewModel(
         settingsRepository.updateSettings(current.copy(customBypassRules = rules))
     }
 
+    /**
+     * The Xray config the selected node generates, secrets redacted; empty when no node is selected (build 177, B15:
+     * an unlabelled made-up "Preview Server / example.com" config was shown as if it were the real one).
+     */
     suspend fun getPreviewConfigJson(): String {
         val currentSettings = settingsRepository.getSettings()
-        val profile = currentSettings.selectedProfileId?.let { serverRepository.getProfileById(it) }
-            ?: VlessProfile(
-                name = "Preview Server",
-                address = "example.com",
-                port = 443,
-                uuid = "00000000-0000-0000-0000-000000000000",
-                transport = "tcp",
-                security = "reality",
-                sni = "example.com",
-                publicKey = "SAMPLE_KEY",
-                flow = "xtls-rprx-vision"
-            )
+        val profile = currentSettings.selectedProfileId?.let { serverRepository.getProfileById(it) } ?: return ""
         val rawJson = XrayConfigBuilder.buildJson(profile, currentSettings)
         return SecretRedactor.redact(rawJson)
     }

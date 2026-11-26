@@ -20,7 +20,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * One reader thread takes the DNS questions apps send to the TUN's DNS address; a small bounded pool asks the
  * current Unlock server ([UnlockDnsWire.exchange]: protected UDP/53, TCP/53 when UDP is silent or truncated) and
  * writes each answer back as an IPv4/UDP packet. With query shaping on, a filtered answer is retried with the
- * CircumVolve query shapes ([ShapedForwarder]). Nothing else ever enters this TUN. After [FAILOVER_AFTER]
+ * CircumVolve query shapes ([ShapedForwarder]). An answer an app could not use (no answer, a truncated one, one too
+ * large) is made safe by [UnlockDnsAnswer] or asked again of up to [EXTRA_SERVERS] other usable servers
+ * ([UnlockDnsAnswerPlan]); a SERVFAIL goes back only when none answered, and the reason is logged. Nothing else ever enters this TUN. After [FAILOVER_AFTER]
  * unanswered questions in a row, an auto-picked session moves to the next usable server of the last check.
  */
 class UnlockDnsSession(
@@ -46,6 +48,7 @@ class UnlockDnsSession(
     @Volatile private var running = false
     private var reader: Thread? = null
     private val failures = AtomicInteger()
+    private val reported = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val dnsAddress = IPv4Header.parseIp(UnlockDnsRoutePolicy.DNS_SERVER)
     private val output = FileOutputStream(tun.fileDescriptor)
     private val workers = ThreadPoolExecutor(2, WORKERS, 30, TimeUnit.SECONDS, ArrayBlockingQueue(QUEUE),
@@ -113,20 +116,39 @@ class UnlockDnsSession(
     }
 
     private fun answer(query: UnlockDnsWire.Query) {
+        val started = System.currentTimeMillis()
         val asked = server
-        val exchange = forwarder.resolve(asked, query.payload, shaping(), UPSTREAM_TIMEOUT_MS)
-        if (exchange == null) {
-            onUnanswered(asked)
-            UnlockDnsWire.servfail(query.payload)?.let { write(UnlockDnsWire.reply(query, it)) }
+        val outcome = UnlockDnsAnswerPlan.run(
+            servers = UnlockDnsAnswerPlan.order(asked, checks, EXTRA_SERVERS),
+            budgetMs = QUESTION_BUDGET_MS,
+            elapsed = { System.currentTimeMillis() - started },
+            ask = { ip -> forwarder.resolve(ip, query.payload, shaping(), UPSTREAM_TIMEOUT_MS) },
+            prepare = { exchange -> UnlockDnsAnswer.prepare(query.payload, exchange.response, UnlockDnsRoutePolicy.MTU) }
+        )
+        if (outcome.problems.any { it.first == asked && it.second == UnlockDnsAnswer.Problem.NO_ANSWER }) onUnanswered(asked)
+        val answered = outcome.answer
+        if (answered != null) {
+            if (outcome.server == asked) {
+                failures.set(0)
+                outcome.ms?.let { ms -> latencyMs = latencyMs?.let { (it * 3 + ms) / 4 } ?: ms }
+            }
+            if (outcome.problems.isNotEmpty() || outcome.note != null) report(query, outcome)
+            write(UnlockDnsWire.reply(query, answered))
             return
         }
-        failures.set(0)
-        latencyMs = latencyMs?.let { (it * 3 + exchange.ms) / 4 } ?: exchange.ms
-        if (exchange.response.size + PACKET_OVERHEAD > UnlockDnsRoutePolicy.MTU) {
-            UnlockDnsWire.servfail(query.payload)?.let { write(UnlockDnsWire.reply(query, it)) }
-            return
-        }
-        write(UnlockDnsWire.reply(query, exchange.response))
+        report(query, outcome)
+        UnlockDnsWire.servfail(query.payload)?.let { write(UnlockDnsWire.reply(query, it)) }
+    }
+
+    /** Logs why a question needed another server or failed, at most once per name every [REPORT_EVERY_MS]. */
+    private fun report(query: UnlockDnsWire.Query, outcome: UnlockDnsAnswerPlan.Outcome) {
+        val name = UnlockDnsAnswer.describe(query.payload) ?: "a lookup"
+        val now = System.currentTimeMillis()
+        val last = reported[name]
+        if (last != null && now - last < REPORT_EVERY_MS) return
+        if (reported.size > REPORT_MEMORY) reported.clear()
+        reported[name] = now
+        log(UnlockDnsAnswerPlan.describe(name, outcome))
     }
 
     private fun onUnanswered(asked: String) {
@@ -148,10 +170,15 @@ class UnlockDnsSession(
 
     companion object {
         const val UPSTREAM_TIMEOUT_MS = 2_500
+        /** Other usable servers asked when the current one gives no usable answer to a question. */
+        const val EXTRA_SERVERS = 2
+        /** No further server is asked after this long (apps retry their question after ~5 s). */
+        const val QUESTION_BUDGET_MS = 4_500L
+        private const val REPORT_EVERY_MS = 30_000L
+        private const val REPORT_MEMORY = 256
         const val FAILOVER_AFTER = 3
         private const val WORKERS = 8
         private const val QUEUE = 256
         private const val POLL_MS = 500
-        private const val PACKET_OVERHEAD = 28
     }
 }

@@ -21,7 +21,9 @@ class MaximusVpnSupervisor(private val log: (String) -> Unit = {}) {
         /** Unlock mode: only the resolver changes, there is no tunnel whose absence would leak. */
         UNLOCK_MODE,
         /** See FailClosedPolicy.mayReleaseAfterFailedConnect: the user's Connect failed in DAILY mode, Kill Switch off. */
-        CONNECT_FAILED_BY_USER
+        CONNECT_FAILED_BY_USER,
+        /** See FailClosedPolicy.releaseOnKillSwitchOff: the Kill Switch was turned off while a failed Connect held the block. */
+        KILL_SWITCH_OFF_AFTER_FAILURE
     }
 
     /** What Android does with traffic when this app's process dies. */

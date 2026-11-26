@@ -645,7 +645,12 @@ object ConnectionEngineRunner {
                 "${irancellBudgetMs / 1000}s readiness budget; account API racing enabled")
         // The user's own Aether pick: the connect deadline waits out the budget this line promises (build 176: cut at 60 s
         // inside a 220 s ladder). Smart Connect keeps its own limit.
-        if (irancellHttp2 && !lanternOnly && manual && irancellPlan.isNotEmpty()) com.example.vpn.EngineBudgetHint.announce(irancellBudgetMs)
+        if (irancellHttp2 && !lanternOnly && manual && irancellPlan.isNotEmpty()) {
+            com.example.vpn.EngineBudgetHint.announce(irancellBudgetMs)
+            // The stage says the same number the deadline now waits for (build 177: stuck on "tunnel created" for 93 s).
+            com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine starting",
+                "Irancell carrier ladder (${irancellPlan.joinToString(", ") { method(it) }}) · ready within ${irancellBudgetMs / 1000}s")
+        }
         val failedRegistrationKinds = mutableSetOf<String>()
         // WARP registration failed on this network within WarpRegistrationMemory.HOLD_MS: a carrier that would need a
         // new registration is skipped at once (one with its own saved identity still runs).

@@ -10,10 +10,18 @@ import android.os.Build
 import android.os.LocaleList
 import java.util.Locale
 
-/** The languages the app ships. The tag is the BCP-47 language used for resources (values-ru). */
+/**
+ * The languages the app ships. The tag is the BCP-47 language used for resources (values-ru, values-fa). Persian is
+ * written right to left: the manifest's supportsRtl and the locale's layout direction mirror the UI (build 177: the
+ * complete values-fa translation could not be chosen).
+ */
 enum class AppLanguage(val tag: String, val nativeName: String, val flag: String) {
     ENGLISH("en", "English", "\uD83C\uDDEC\uD83C\uDDE7"),
-    RUSSIAN("ru", "Русский", "\uD83C\uDDF7\uD83C\uDDFA");
+    RUSSIAN("ru", "Русский", "\uD83C\uDDF7\uD83C\uDDFA"),
+    PERSIAN("fa", "فارسی", "\uD83C\uDDEE\uD83C\uDDF7");
+
+    /** True for a right-to-left script (Persian). */
+    val rightToLeft: Boolean get() = this == PERSIAN
 
     companion object {
         fun fromTag(tag: String?): AppLanguage? {
@@ -21,8 +29,8 @@ enum class AppLanguage(val tag: String, val nativeName: String, val flag: String
             return entries.firstOrNull { it.tag == lang }
         }
 
-        /** First-launch highlight: the phone's language when the app ships it as Russian, otherwise English. */
-        fun defaultFor(deviceLanguageTag: String?): AppLanguage = if (fromTag(deviceLanguageTag) == RUSSIAN) RUSSIAN else ENGLISH
+        /** First-launch highlight: the phone's language when the app ships it (Russian, Persian), otherwise English. */
+        fun defaultFor(deviceLanguageTag: String?): AppLanguage = fromTag(deviceLanguageTag) ?: ENGLISH
     }
 }
 
