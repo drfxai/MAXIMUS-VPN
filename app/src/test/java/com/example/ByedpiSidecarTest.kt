@@ -23,6 +23,24 @@ class ByedpiSidecarTest {
         assertNotEquals(profile.effectiveFingerprint, ByedpiSidecar.enable(original, "decoy.example", 4).effectiveFingerprint)
     }
 
+    @Test fun md5SignatureIsAnExplicitValidatedFlag() {
+        val plain = ByedpiSidecar.enable(original, "auth.vercel.com", 8)
+        assertFalse(ByedpiSidecar.prepare(plain, AppSettings(), context).command.contains("--md5sig"))
+        val signed = ByedpiSidecar.enable(original, "auth.vercel.com", 32, md5sig = true)
+        val command = ByedpiSidecar.prepare(signed, AppSettings(), context).command
+        assertTrue(command.containsAll(listOf("--fake", "-1", "--ttl", "32", "--md5sig", "--fake-sni", "auth.vercel.com")))
+        assertTrue(command.indexOf("--md5sig") > command.indexOf("--fake"))
+        assertNotEquals(ByedpiSidecar.enable(original, "auth.vercel.com", 32).effectiveFingerprint, signed.effectiveFingerprint)
+        // Without MD5 the fingerprint is unchanged from earlier builds' formula.
+        val legacy = java.security.MessageDigest.getInstance("SHA-256")
+            .digest("${original.effectiveFingerprint}|byedpi|auth.vercel.com|8".toByteArray()).joinToString("") { "%02x".format(it) }
+        assertEquals(legacy, plain.effectiveFingerprint)
+        // A non-boolean flag is rejected; wrapping removes it from the runtime profile.
+        val bad = signed.copy(extraSettings = JSONObject(signed.extraSettings).put(ByedpiSidecar.KEY_MD5SIG, "yes; rm").toString())
+        assertNotNull(ByedpiSidecar.problem(bad))
+        assertFalse(JSONObject(JSONObject(ByedpiSidecar.wrap(signed, context).rawConfig).toString()).toString().contains("md5"))
+    }
+
     @Test fun wrapperPreservesRealTlsCredentialsAndAddsOnlyDialer() {
         val profile = ByedpiSidecar.enable(original, "decoy.example", 8)
         val wrapped = ByedpiSidecar.wrap(profile, context)
