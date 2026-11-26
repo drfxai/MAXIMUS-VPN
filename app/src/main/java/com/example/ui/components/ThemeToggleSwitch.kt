@@ -1,5 +1,8 @@
 package com.example.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -115,11 +118,12 @@ fun ThemeToggleSwitch(
         label = "moonColor"
     )
 
+    val stateDescriptionText = if (isDark) stringResource(R.string.a11y_theme_dark_active) else stringResource(R.string.a11y_theme_light_active)
     Box(
         modifier = modifier
             .semantics {
                 role = Role.Switch
-                contentDescription = if (isDark) "Dark mode active. Swipe left or tap sun for light mode." else "Light mode active. Swipe right or tap moon for dark mode."
+                contentDescription = stateDescriptionText
             }
             .testTag("theme_toggle_switch")
             .width(84.dp)
@@ -168,7 +172,7 @@ fun ThemeToggleSwitch(
             ) {
                 Icon(
                     imageVector = Icons.Filled.WbSunny,
-                    contentDescription = "Light Theme",
+                    contentDescription = stringResource(R.string.a11y_light_theme),
                     tint = sunColor,
                     modifier = Modifier.size(16.dp)
                 )
@@ -188,7 +192,7 @@ fun ThemeToggleSwitch(
             ) {
                 Icon(
                     imageVector = Icons.Filled.DarkMode,
-                    contentDescription = "Dark Theme",
+                    contentDescription = stringResource(R.string.a11y_dark_theme),
                     tint = moonColor,
                     modifier = Modifier.size(16.dp)
                 )

@@ -25,7 +25,8 @@ object BuiltinConnections {
             "Community Psiphon fork for Iran: Conduit, CDN fronting"),
         PSIPHON_RADIANCE("config-free-psiphon-radiance", "Psiphon over Lantern",
             "Lantern carries the connection to the Psiphon network"),
-        RADIANCE("config-free-radiance", "Lantern / Radiance", "Uses the Lantern network when the engine is installed"),
+        // Build 177 (B14): the Radiance engine ships inside the app; "when the engine is installed" was outdated.
+        RADIANCE("config-free-radiance", "Lantern / Radiance", "Lantern network; the engine is built into the app"),
         AETHER_H2("config-free-aether-h2", "MASQUE HTTP/2", "TCP transport", "h2"),
         AETHER_H3("config-free-aether-h3", "MASQUE HTTP/3", "QUIC over UDP", "h3"),
         AETHER_WG("config-free-aether-wg", "WireGuard", "WARP over WireGuard", "wireguard"),

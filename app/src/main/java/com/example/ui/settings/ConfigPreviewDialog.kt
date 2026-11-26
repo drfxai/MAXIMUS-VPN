@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -54,39 +55,49 @@ fun ConfigPreviewDialog(
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = stringResource(R.string.ui_generated_json_sent_to_xray),
-                    color = AppTheme.colors.textSecondary,
-                    fontSize = 12.sp
-                )
-                Spacer(modifier = Modifier.height(10.dp))
+                // No node selected: say so instead of showing a made-up config (build 177, B15).
+                if (configJson.isBlank()) {
+                    Text(
+                        text = stringResource(R.string.config_preview_no_node),
+                        color = AppTheme.colors.textSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.testTag("config_preview_empty")
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.ui_generated_json_sent_to_xray),
+                        color = AppTheme.colors.textSecondary,
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(320.dp),
-                    colors = CardDefaults.cardColors(containerColor = AppTheme.colors.consoleBackground),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(
+                    Card(
                         modifier = Modifier
-                            .padding(12.dp)
-                            .verticalScroll(rememberScrollState())
+                            .fillMaxWidth()
+                            .height(320.dp),
+                        colors = CardDefaults.cardColors(containerColor = AppTheme.colors.consoleBackground),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.borderSubtle),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(
-                            text = configJson,
-                            color = AppTheme.colors.primary,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp
-                        )
+                        Column(
+                            modifier = Modifier
+                                .padding(12.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                text = configJson,
+                                color = AppTheme.colors.primary,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+                        }
                     }
                 }
             }
         },
         confirmButton = {
-            Button(
+            if (configJson.isNotBlank()) Button(
                 onClick = {
                     clipboardManager.setText(AnnotatedString(configJson))
                 },

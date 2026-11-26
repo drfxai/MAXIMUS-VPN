@@ -82,7 +82,9 @@ object IrancellWarp {
 
     /** Use upstream Aether's first-verified-gateway scan within the short readiness window. */
     internal fun forAttempt(candidate: VlessProfile, manual: Boolean): VlessProfile {
-        val routed = withFirefoxFingerprint(if (manual) candidate else withNativeApi(candidate))
+        // The MASQUE fingerprint is not set here: Auto is resolved per attempt by AetherFingerprintBook (semi-python,
+        // firefox, go, then chrome on Irancell), and a fingerprint the user chose is sent as it is.
+        val routed = if (manual) candidate else withNativeApi(candidate)
         val extras = ProfileExtras.read(routed)
         val options = AetherSettings.read(extras)
         if (extras.optString("carrier") != "h2" ||
@@ -104,17 +106,6 @@ object IrancellWarp {
         if (AetherSidecar.cleanH2Peer(extras, "h2", options) != null)
             return ConnectionEngineRunner.CLEAN_H2_BUDGET_MS
         return AetherSidecar.manualMasqueReadinessMs(options.scan, pinned = options.endpoint.isNotBlank())
-    }
-
-    /**
-     * Irancell blocks Chrome's uTLS ClientHello (XTLS/Xray-core#7208), so the MASQUE handshake uses the
-     * Firefox fingerprint here. Only the default ("chrome") is replaced; any other fingerprint the user
-     * picked (chrome-120, go, semi-python) is kept.
-     */
-    fun withFirefoxFingerprint(candidate: VlessProfile): VlessProfile {
-        val e = ProfileExtras.read(candidate)
-        if (e.optString("fingerprint", "chrome") != "chrome") return candidate
-        return candidate.copy(extraSettings = org.json.JSONObject(e.toString()).put("fingerprint", "firefox").toString())
     }
 
     /** The attempt's account API route: Aether's own (native) unless the user picked a route. */

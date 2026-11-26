@@ -70,7 +70,9 @@ object EngineStages {
      * Speed and counter updates change nothing here.
      */
     fun onStateChange(previous: ConnectionState, next: ConnectionState, now: Long = System.currentTimeMillis()) {
-        val engine = engineOf(next.activeProfile ?: previous.activeProfile)
+        // A new Connect ("preparing") names only the engine it starts: build 177 logged "shirokhorshid · preparing"
+        // for an Aether connect because the previous session's profile was still the fallback.
+        val engine = engineOf(if (next.status == ConnectionStatus.PREPARING) next.activeProfile else next.activeProfile ?: previous.activeProfile)
         if (next.status != previous.status) {
             val detail = when (next.status) {
                 in ERROR_STATUSES -> next.errorMessage ?: next.failureStage?.name

@@ -308,8 +308,10 @@ internal fun BuiltinConnectionScreen(
                                 model.options { it.copy(advanced = it.advanced.copy(apiRoute = value)) }
                             }
                             Hairline(c, 14.dp)
+                            val fingerprintAuto = stringResource(R.string.bc_fingerprint_auto_by_firewall)
                             InlineDropdownRow(c, stringResource(R.string.ui_fingerprint), options.advanced.fingerprint,
-                                com.example.vpn.sidecar.AetherTlsProfiles.names, configurable, ::optionLabel) { value ->
+                                com.example.vpn.sidecar.AetherTlsProfiles.choices, configurable,
+                                { if (it == com.example.vpn.sidecar.AetherTlsProfiles.AUTO) fingerprintAuto else optionLabel(it) }) { value ->
                                 model.options { it.copy(advanced = it.advanced.copy(fingerprint = value)) }
                             }
                         }

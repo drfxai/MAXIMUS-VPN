@@ -349,6 +349,13 @@ class RayApplication : Application() {
             com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)
         }
         com.example.vpn.sidecar.Sidecars.psiphonNetworkIdentity = { com.example.vpn.smart.NetworkIdentity.current(this) }
+        // Firewall type by behaviour (FirewallProbe): probed at Connect, used by NetworkFirewalls only when confident.
+        com.example.vpn.connectivity.FirewallProbe.store = getSharedPreferences("firewall_probe", MODE_PRIVATE).let { prefs ->
+            com.example.vpn.connectivity.FirewallBehaviour.Store(
+                load = { prefs.getString("v1", null)?.ifBlank { null } },
+                save = { prefs.edit().putString("v1", it).apply() }
+            )
+        }.also { store -> com.example.vpn.connectivity.NetworkFirewalls.behaviour = store::confident }
         com.example.vpn.sidecar.Sidecars.psiphonLinkMetered = {
             val manager = getSystemService(android.net.ConnectivityManager::class.java)
             manager?.let { cm ->
@@ -434,6 +441,12 @@ class RayApplication : Application() {
         com.example.vpn.connections.CleanH2PeerMemory.read = { key -> cleanH2.getString(key, null) }
         com.example.vpn.connections.CleanH2PeerMemory.write = { key, value ->
             cleanH2.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
+        }
+        // Per-network MASQUE TLS fingerprint for Aether's Auto setting (semi-python/firefox/go/chrome on Irancell).
+        val aetherFingerprints = getSharedPreferences("aether_fingerprints", MODE_PRIVATE)
+        com.example.vpn.connections.AetherFingerprintBook.read = { key -> aetherFingerprints.getString(key, null) }
+        com.example.vpn.connections.AetherFingerprintBook.write = { key, value ->
+            aetherFingerprints.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
         }
         runCatching { com.example.vpn.connections.AetherPrewarmMonitor.install(this) }
         com.example.xray.RealDelayProbe.observer = com.example.vpn.connectivity.ConnectivityBrain::onProbe

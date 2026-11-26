@@ -96,7 +96,7 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = c.text) }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.ui_back), tint = c.text) }
                     Column {
                         LabText(stringResource(R.string.ui_analytics), c.text, 27.sp, FontWeight.Bold)
                         LabText(stringResource(R.string.ui_connection_performance_up_to_60), c.text2, 12.sp)
@@ -104,11 +104,11 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                 }
             }
             item {
-                AnalyticsCard(c, state.statusLabel, state.activeRoute ?: state.activeProfile?.name ?: "Connection") {
+                AnalyticsCard(c, stringResource(com.example.ui.language.UiText.status(state)), state.activeRoute ?: state.activeProfile?.name ?: stringResource(R.string.ui_connection)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Metric(c, "Latency", samples.lastOrNull()?.latencyMs?.takeIf { state.isConnected }?.let { "$it ms" }, Modifier.weight(1f))
-                        Metric(c, "Download", state.downloadSpeedBps.takeIf { state.isConnected }?.toDouble()?.let(::speed), Modifier.weight(1f))
-                        Metric(c, "Upload", state.uploadSpeedBps.takeIf { state.isConnected }?.toDouble()?.let(::speed), Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.ui_latency), samples.lastOrNull()?.latencyMs?.takeIf { state.isConnected }?.let { "$it ms" }, Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_download), state.downloadSpeedBps.takeIf { state.isConnected }?.toDouble()?.let(::speed), Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_upload), state.uploadSpeedBps.takeIf { state.isConnected }?.toDouble()?.let(::speed), Modifier.weight(1f))
                     }
                 }
             }
@@ -130,13 +130,14 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                     }
                 }
             }
+            item { FirewallTypeCard(c, state.status) }
             item {
                 AnalyticsCard(c, stringResource(R.string.ui_connection_latency), stringResource(R.string.ui_recent_latency_measurements)) {
                     AnalyticsPlot(c, samples, { it.latencyMs }, unit = "ms")
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Metric(c, "Average", latency.takeIf { it.isNotEmpty() }?.average()?.let { "${it.toInt()} ms" }, Modifier.weight(1f))
-                        Metric(c, "Minimum", latency.minOrNull()?.let { "$it ms" }, Modifier.weight(1f))
-                        Metric(c, "Maximum", latency.maxOrNull()?.let { "$it ms" }, Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_average), latency.takeIf { it.isNotEmpty() }?.average()?.let { "${it.toInt()} ms" }, Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_minimum), latency.minOrNull()?.let { "$it ms" }, Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_maximum), latency.maxOrNull()?.let { "$it ms" }, Modifier.weight(1f))
                     }
                 }
             }
@@ -144,8 +145,8 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                 AnalyticsCard(c, stringResource(R.string.ui_transfer_speed), stringResource(R.string.ui_observed_traffic_rate_through_the)) {
                     TransferBars(c, samples)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Metric(c, "Avg. download", down.takeIf { it.isNotEmpty() }?.average()?.let(::speed), Modifier.weight(1f))
-                        Metric(c, "Avg. upload", up.takeIf { it.isNotEmpty() }?.average()?.let(::speed), Modifier.weight(1f), c.info)
+                        Metric(c, stringResource(R.string.analytics_avg_download), down.takeIf { it.isNotEmpty() }?.average()?.let(::speed), Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_avg_upload), up.takeIf { it.isNotEmpty() }?.average()?.let(::speed), Modifier.weight(1f), c.info)
                     }
                 }
             }
@@ -163,8 +164,8 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                         }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Metric(c, "Verified", samples.takeIf { it.isNotEmpty() }?.let { "${stable * 100 / it.size}%" }, Modifier.weight(1f))
-                        Metric(c, "Reconnecting", samples.takeIf { it.isNotEmpty() }?.let { "$reconnecting samples" },
+                        Metric(c, stringResource(R.string.ui_verified), samples.takeIf { it.isNotEmpty() }?.let { "${stable * 100 / it.size}%" }, Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_reconnecting), samples.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.analytics_samples, reconnecting) },
                             Modifier.weight(1f), c.okay)
                     }
                 }
@@ -172,9 +173,9 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
             item {
                 AnalyticsCard(c, stringResource(R.string.ui_session_summary), stringResource(R.string.ui_latest_tunnel_counters_on_this)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Metric(c, "Downloaded", tail?.let { TrafficStats.formatBytes(it.downloaded) }, Modifier.weight(1f))
-                        Metric(c, "Uploaded", tail?.let { TrafficStats.formatBytes(it.uploaded) }, Modifier.weight(1f))
-                        Metric(c, "Duration", tail?.let { "${it.durationSeconds / 60}m ${it.durationSeconds % 60}s" }, Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_downloaded), tail?.let { TrafficStats.formatBytes(it.downloaded) }, Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_uploaded), tail?.let { TrafficStats.formatBytes(it.uploaded) }, Modifier.weight(1f))
+                        Metric(c, stringResource(R.string.analytics_duration), tail?.let { "${it.durationSeconds / 60}m ${it.durationSeconds % 60}s" }, Modifier.weight(1f))
                     }
                 }
             }
@@ -183,6 +184,54 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
 }
 
 private const val STAGES_SHOWN = 14
+
+/**
+ * Which firewall type the app is using on this network and where that came from: the behaviour probe
+ * ([com.example.vpn.connectivity.FirewallProbe], only when confident) or the mobile network code.
+ */
+@Composable
+private fun FirewallTypeCard(c: LabColors, status: ConnectionStatus) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val view = androidx.compose.runtime.remember(status) {
+        val key = runCatching { com.example.vpn.smart.NetworkKey.current(context) }.getOrNull()
+        val identity = runCatching { com.example.vpn.smart.NetworkIdentity.current(context) }.getOrNull()
+        val detection = com.example.vpn.connectivity.NetworkFirewalls.detection(key)
+        val probe = com.example.vpn.connectivity.FirewallProbe.store?.latest?.takeIf { it.identity == identity }
+        detection to probe
+    }
+    val (detection, probe) = view
+    val firewall = detection.firewall
+    val detected = when (firewall) {
+        com.example.vpn.connectivity.NetworkFirewalls.Firewall.IRANCELL -> stringResource(R.string.ui_firewall_irancell_type)
+        com.example.vpn.connectivity.NetworkFirewalls.Firewall.MCI -> stringResource(R.string.ui_firewall_mci_type)
+        com.example.vpn.connectivity.NetworkFirewalls.Firewall.RIGHTEL -> firewall.title
+        com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER -> stringResource(R.string.ui_firewall_not_known)
+    }
+    val source = when (detection.source) {
+        com.example.vpn.connectivity.NetworkFirewalls.Source.BEHAVIOUR -> stringResource(R.string.ui_firewall_by_behaviour)
+        com.example.vpn.connectivity.NetworkFirewalls.Source.NETWORK_CODE -> stringResource(R.string.ui_firewall_by_network_code)
+        com.example.vpn.connectivity.NetworkFirewalls.Source.NONE -> stringResource(R.string.ui_firewall_no_source)
+    }
+    val probeText = when {
+        probe == null -> stringResource(R.string.ui_firewall_probe_none)
+        probe.verdict == com.example.vpn.connectivity.FirewallBehaviour.Verdict.IRANCELL_LIKE -> stringResource(R.string.ui_firewall_irancell_type)
+        probe.verdict == com.example.vpn.connectivity.FirewallBehaviour.Verdict.MCI_LIKE -> stringResource(R.string.ui_firewall_mci_type)
+        else -> stringResource(R.string.ui_firewall_probe_unknown)
+    }
+    AnalyticsCard(c, stringResource(R.string.ui_firewall_type), stringResource(R.string.ui_firewall_type_hint)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Metric(c, stringResource(R.string.ui_firewall_detected), detected, Modifier.weight(1f))
+            Metric(c, stringResource(R.string.ui_firewall_source), source, Modifier.weight(1f), c.info)
+            Metric(c, stringResource(R.string.ui_firewall_probe), probeText, Modifier.weight(1f), c.okay)
+        }
+        if (detection.source == com.example.vpn.connectivity.NetworkFirewalls.Source.BEHAVIOUR &&
+            detection.byCode != com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER && detection.byCode != firewall) {
+            LabText(stringResource(R.string.ui_firewall_code_differs, detection.byCode.title), c.text2, 12.sp, maxLines = 2)
+        }
+        probe?.let { LabText("${stageTime(it.measuredAt)} · ${it.summary()}", c.text3, 11.sp, maxLines = 2) }
+        LabText(stringResource(R.string.ui_firewall_unverified), c.text3, 11.sp, maxLines = 3)
+    }
+}
 
 private fun stageTime(at: Long): String =
     java.text.SimpleDateFormat("HH:mm:ss", Locale.US).format(java.util.Date(at))

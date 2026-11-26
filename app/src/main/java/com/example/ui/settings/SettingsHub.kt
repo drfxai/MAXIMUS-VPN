@@ -88,6 +88,11 @@ fun SettingsHub(
     onFreeConfigsChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // B19: subtitles from string resources in the app's language.
+    val resources = androidx.compose.ui.platform.LocalContext.current.resources
+    val hub = { s: AppSettings, page: SettingsPage, u: UpdateUi, v: String ->
+        SettingsLabels.hubText(s, page, u, v) { id, args -> resources.getString(id, *args) }
+    }
     SettingsPageColumn(modifier.testTag("settings_screen")) {
         Spacer(Modifier.height(16.dp))
         HubHeader(versionName, update, onUpdateChip)
@@ -104,8 +109,8 @@ fun SettingsHub(
         }
 
         SettingsSectionLabel(stringResource(R.string.ui_network_2))
-        val connectionSummary = SettingsLabels.hub(settings, connectionEntry.page, update, versionName)
-        val routingSummary = SettingsLabels.hub(settings, routingEntry.page, update, versionName)
+        val connectionSummary = hub(settings, connectionEntry.page, update, versionName)
+        val routingSummary = hub(settings, routingEntry.page, update, versionName)
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             if (maxWidth >= 346.dp && LocalDensity.current.fontScale <= 1.15f) {
                 Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -124,14 +129,14 @@ fun SettingsHub(
         }
         Spacer(Modifier.height(10.dp))
         SettingsGroup {
-            HubRow(sharingEntry, SettingsLabels.hub(settings, sharingEntry.page, update, versionName), onOpen)
+            HubRow(sharingEntry, hub(settings, sharingEntry.page, update, versionName), onOpen)
         }
 
         SettingsSectionLabel(stringResource(R.string.ui_protection))
         SettingsGroup {
             protectionEntries.forEachIndexed { index, entry ->
                 if (index > 0) SettingsDivider()
-                HubRow(entry, SettingsLabels.hub(settings, entry.page, update, versionName), onOpen)
+                HubRow(entry, hub(settings, entry.page, update, versionName), onOpen)
             }
         }
 
@@ -139,7 +144,7 @@ fun SettingsHub(
         SettingsGroup {
             appEntries.forEachIndexed { index, entry ->
                 if (index > 0) SettingsDivider()
-                HubRow(entry, SettingsLabels.hub(settings, entry.page, update, versionName), onOpen)
+                HubRow(entry, hub(settings, entry.page, update, versionName), onOpen)
             }
             SettingsDivider()
             SettingsNavRow(
@@ -150,7 +155,7 @@ fun SettingsHub(
                 onClick = onOpenAiAgent
             )
             SettingsDivider()
-            HubRow(aboutEntry, SettingsLabels.hub(settings, aboutEntry.page, update, versionName), onOpen)
+            HubRow(aboutEntry, hub(settings, aboutEntry.page, update, versionName), onOpen)
         }
     }
 }
@@ -240,11 +245,11 @@ private fun HubHeader(versionName: String, update: UpdateUi, onUpdateChip: () ->
 internal fun UpdateChip(update: UpdateUi, onClick: () -> Unit) {
     val colors = AppTheme.colors
     val (label, color) = when {
-        update.checking -> "Checking…" to colors.textSecondary
-        update.hasUpdate -> "Update ready" to if (colors.isDark) colors.statusWarning else Color(0xFF92400E)
-        update.checkFailed -> "Retry update check" to colors.textSecondary
-        update.checked -> "Up to date" to if (colors.isDark) colors.statusConnected else Color(0xFF065F46)
-        else -> "Check for updates" to colors.textSecondary
+        update.checking -> stringResource(R.string.settings_chip_checking) to colors.textSecondary
+        update.hasUpdate -> stringResource(R.string.settings_chip_update_ready) to if (colors.isDark) colors.statusWarning else Color(0xFF92400E)
+        update.checkFailed -> stringResource(R.string.settings_chip_retry) to colors.textSecondary
+        update.checked -> stringResource(R.string.settings_chip_up_to_date) to if (colors.isDark) colors.statusConnected else Color(0xFF065F46)
+        else -> stringResource(R.string.settings_chip_check) to colors.textSecondary
     }
     Box(
         modifier = Modifier
