@@ -326,6 +326,13 @@ class RayApplication : Application() {
             com.example.vpn.sidecar.PrivatePsiphonStore(this).load(id)
         }
         com.example.vpn.sidecar.Sidecars.psiphonNetworkIdentity = { com.example.vpn.smart.NetworkIdentity.current(this) }
+        // Firewall type by behaviour (FirewallProbe): probed at Connect, used by NetworkFirewalls only when confident.
+        com.example.vpn.connectivity.FirewallProbe.store = getSharedPreferences("firewall_probe", MODE_PRIVATE).let { prefs ->
+            com.example.vpn.connectivity.FirewallBehaviour.Store(
+                load = { prefs.getString("v1", null)?.ifBlank { null } },
+                save = { prefs.edit().putString("v1", it).apply() }
+            )
+        }.also { store -> com.example.vpn.connectivity.NetworkFirewalls.behaviour = store::confident }
         com.example.vpn.sidecar.Sidecars.psiphonLinkMetered = {
             val manager = getSystemService(android.net.ConnectivityManager::class.java)
             manager?.let { cm ->

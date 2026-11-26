@@ -1851,4 +1851,19 @@
     <string name="ui_connection_stages_empty">مراحل پس از شروع اتصال اینجا نمایش داده می‌شوند.</string>
     <string name="connect_unfinished_message">تلاش برای اتصال بدون نتیجه پایان یافت؛ ترافیک تأیید نشده است. دوباره امتحان کنید یا اتصال دیگری انتخاب کنید.</string>
     <string name="connect_unfinished_notification">اتصال ناموفق: بدون نتیجه</string>
+    <string name="ui_firewall_type">نوع فیلترینگ</string>
+    <string name="ui_firewall_type_hint">این شبکه کدام روش‌های عبور را می‌گیرد و برنامه از کجا می‌داند</string>
+    <string name="ui_firewall_detected">در حال استفاده</string>
+    <string name="ui_firewall_source">منبع</string>
+    <string name="ui_firewall_probe">آزمایش</string>
+    <string name="ui_firewall_irancell_type">از نوع ایرانسل</string>
+    <string name="ui_firewall_mci_type">از نوع همراه اول</string>
+    <string name="ui_firewall_not_known">نامشخص</string>
+    <string name="ui_firewall_by_behaviour">رفتار شبکه</string>
+    <string name="ui_firewall_by_network_code">کد شبکه موبایل</string>
+    <string name="ui_firewall_no_source">اطلاعاتی نیست</string>
+    <string name="ui_firewall_probe_none">هنوز انجام نشده</string>
+    <string name="ui_firewall_probe_unknown">نامشخص</string>
+    <string name="ui_firewall_code_differs">کد شبکه موبایل %1$s را نشان می‌دهد، اما این شبکه مثل فیلترینگ دیگر رفتار می‌کند.</string>
+    <string name="ui_firewall_unverified">بررسی رفتار هنگام اتصال، حداکثر روزی یک بار برای هر شبکه، انجام می‌شود و فقط وقتی نتیجه‌اش روشن باشد به کار می‌رود. قواعد آن هنوز روی گوشی تأیید نشده‌اند.</string>
 </resources>
