@@ -5,6 +5,7 @@ import com.example.vpn.connectivity.BpbRecoveryEngine
 import com.example.vpn.connectivity.DerivedRecoveryCandidate
 import com.example.vpn.connectivity.NetworkFirewalls
 import com.example.vpn.connectivity.NetworkFirewalls.Firewall
+import com.example.vpn.connectivity.RecoveryContext
 import com.example.vpn.connectivity.RecoveryProfile
 import com.example.vpn.connectivity.RecoveryProfiles
 
@@ -43,7 +44,12 @@ class ConfigRevival(
     /** Scans for clean Cloudflare addresses through a config on a network, records them, and returns them. */
     private val findCleanIps: (VlessProfile, String?) -> List<String> = { _, _ -> emptyList() },
     /** Which config and recipe won here lately ([RevivalWinnerMemory]): tried first on the next run on that network. */
-    private val winners: RevivalWinnerMemory = RevivalWinnerMemory()
+    private val winners: RevivalWinnerMemory = RevivalWinnerMemory(),
+    /**
+     * What is known about [network] (IPv6, the fork); the run puts its own firewall in. Recipes limited to a firewall
+     * type, to IPv6 or to the fork are offered only when this says so ([RecoveryProfile.allowedIn]).
+     */
+    private val context: (network: String?) -> RecoveryContext = { RecoveryContext.UNKNOWN }
 ) {
     enum class Outcome(val title: String) {
         REVIVED("Revived"),
@@ -134,6 +140,8 @@ class ConfigRevival(
             }
         }
         val bias = biasFor(wall, ech)
+        // The firewall the run uses (the user's choice wins over the detected one) also decides which gated recipes apply.
+        val here = runCatching { context(network) }.getOrDefault(RecoveryContext.UNKNOWN).copy(firewall = wall)
         val results = mutableListOf<Result>()
         pool.forEachIndexed { i, p ->
             val name = p.name.ifBlank { "Config" }
@@ -142,7 +150,7 @@ class ConfigRevival(
                 cancelled() -> results += Result(p.id, name, Outcome.NOT_TESTED, "stopped before this config")
                 before is DerivedRecoveryCandidate.TestResult.Passed && before.latencyMs >= SLOW_MS && ips.isNotEmpty() -> {
                     onProgress(Progress(i, pool.size, name))
-                    results += speedUp(p, name, network, ips, before.latencyMs)
+                    results += speedUp(p, name, network, ips, before.latencyMs, here)
                 }
                 before is DerivedRecoveryCandidate.TestResult.Passed ->
                     results += Result(p.id, name, Outcome.ALREADY_WORKING, "answers as it is; nothing was changed", before.latencyMs)
@@ -151,7 +159,7 @@ class ConfigRevival(
                 else -> {
                     onProgress(Progress(i, pool.size, name))
                     val cause = RevivalTriage.cause((before as? DerivedRecoveryCandidate.TestResult.Failed)?.reason)
-                    results += revive(p, name, network, ips, bias, cause).copy(cause = cause)
+                    results += revive(p, name, network, ips, bias, cause, here).copy(cause = cause)
                 }
             }
             onProgress(Progress(i + 1, pool.size, null))
@@ -161,13 +169,13 @@ class ConfigRevival(
 
     private fun revive(
         p: VlessProfile, name: String, network: String?, ips: List<String>, bias: (RecoveryProfile) -> Double?,
-        cause: RevivalTriage.Cause = RevivalTriage.Cause.UNKNOWN
+        cause: RevivalTriage.Cause = RevivalTriage.Cause.UNKNOWN, here: RecoveryContext = RecoveryContext.UNKNOWN
     ): Result {
         // The cause limits the recipes only when the error says it plainly (a name or address problem);
         // otherwise every strategy is allowed and the cause only orders them. The gate and the real request decide.
         // The recipe that won here lately (for this config, else for another) is tried first ([RevivalWinnerMemory]).
         val fp = p.effectiveFingerprint
-        val candidates = engine.generate(p, RevivalTriage.stage(cause), network, ips) { rp ->
+        val candidates = engine.generate(p, RevivalTriage.stage(cause), network, ips, here) { rp ->
             bias(rp)?.plus(RevivalTriage.boost(cause, rp))?.plus(winners.boost(network, fp, rp.key))
         }
         if (candidates.isEmpty()) return Result(p.id, name, Outcome.NOT_REVIVED, when (cause) {
@@ -183,7 +191,9 @@ class ConfigRevival(
                 else "no recipe got a request through ($ran tried); the server, its UUID or its Worker may be down", tried = ran)
         val ms = (winner.test as DerivedRecoveryCandidate.TestResult.Passed).latencyMs
         winners.record(network, fp, winner.recoveryProfileKey)
-        return Result(p.id, name, Outcome.REVIVED, "${describe(winner.recoveryProfileKey, winner.endpoint)} · used next time it connects",
+        // A recipe that removed the config's own ECH says so: its server name is visible while the recipe is used.
+        val echNote = if (winner.clearsEch) " · $ECH_REMOVED" else ""
+        return Result(p.id, name, Outcome.REVIVED, "${describe(winner.recoveryProfileKey, winner.endpoint)}$echNote · used next time it connects",
             ms, ran, winner.recoveryProfileKey)
     }
 
@@ -192,9 +202,13 @@ class ConfigRevival(
      * Host, path and credentials kept). The fastest copy is confirmed and recorded only when it beats the config
      * by [FASTER_RATIO]; otherwise the config stays as it is and nothing is recorded.
      */
-    private fun speedUp(p: VlessProfile, name: String, network: String?, ips: List<String>, ms: Long): Result {
+    private fun speedUp(p: VlessProfile, name: String, network: String?, ips: List<String>, ms: Long,
+                        here: RecoveryContext = RecoveryContext.UNKNOWN): Result {
         val working = Result(p.id, name, Outcome.ALREADY_WORKING, "answers as it is ($ms ms); no faster clean IP was found", ms)
-        val candidates = engine.generate(p, null, network, ips) { rp -> if (rp.needsEndpoint()) 0.0 else null }
+        // Only recipes that swap the address and nothing else, and only the validated addresses (no fallback ones).
+        val candidates = engine.generate(p, null, network, ips, here) { rp ->
+            if (rp.needsEndpoint() && rp.parameters.keys == setOf("address") && rp.defaultEndpoints.isEmpty()) 0.0 else null
+        }
             .filter { it.security.passed }.take(BATCH)
         if (candidates.isEmpty()) return working
         val first = probe(candidates.map { it.profile })
@@ -214,6 +228,8 @@ class ConfigRevival(
         const val SLOW_MS = 2_500L
         /** A clean-edge copy replaces a slow config only when it takes at most this share of its time. */
         const val FASTER_RATIO = 0.7
+        /** Added to a revived result whose recipe removed the config's own ECH. */
+        const val ECH_REMOVED = "ECH removed (server name visible)"
         /** Real-request batch size ([com.example.xray.RealDelayProbe.MAX_BATCH]). */
         const val BATCH = 5
         /** Seconds each real request may take (FIX BPB uses the same). */

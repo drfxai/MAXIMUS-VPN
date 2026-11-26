@@ -31,7 +31,19 @@ data class RecoveryProfile(
     val rollbackPolicy: Int = 2,
     /** 0..1: how sure the maintainers are this profile helps; low values are tried after high ones. */
     val confidence: Double = 0.5,
-    val sourceType: SourceType = SourceType.BUILT_IN
+    val sourceType: SourceType = SourceType.BUILT_IN,
+    /** Firewall types this profile is offered on; empty for every network (see [allowedIn]). */
+    val firewalls: Set<NetworkFirewalls.Firewall> = emptySet(),
+    /** Offered only when the phone's network has IPv6 ([RecoveryContext.ipv6] true). */
+    val requiresIpv6: Boolean = false,
+    /** Offered only when the patterniha Xray fork can run the candidate ([RecoveryContext.forkAvailable]). */
+    val requiresFork: Boolean = false,
+    /**
+     * Public CDN addresses an endpoint profile falls back to when no address of its family is validated on this
+     * network yet. Each one is still tried with a real request, and the certificate is still checked against the
+     * config's unchanged SNI, before it is used.
+     */
+    val defaultEndpoints: List<String> = emptyList()
 ) {
     enum class Strategy { FRAGMENT, FINGERPRINT, ECH, ALT_ENDPOINT_V4, ALT_ENDPOINT_V6, ALPN }
 
@@ -49,6 +61,11 @@ data class RecoveryProfile(
         require(expiresAt > createdAt) { "Recovery profile $profileId must expire after it is created" }
         require(confidence in 0.0..1.0)
         require(rollbackPolicy in 1..5)
+        require(defaultEndpoints.isEmpty() || needsEndpoint()) { "Recovery profile $profileId has default endpoints but no endpoint field" }
+        require(defaultEndpoints.all { ip ->
+            RecoverySecurityGate.isIpLiteral(ip) && !RecoverySecurityGate.isPrivateOrReserved(ip) &&
+                (addressFamily == "any" || (if (ip.contains(':')) "ipv6" else "ipv4") == addressFamily)
+        }) { "Recovery profile $profileId has a default endpoint that is not a public address of its family" }
     }
 
     val key: String get() = "$profileId@v$version"
@@ -56,6 +73,15 @@ data class RecoveryProfile(
     fun isExpired(now: Long): Boolean = now >= expiresAt
 
     fun needsEndpoint(): Boolean = parameters.values.any { it == ENDPOINT }
+
+    /** True when the profile is limited to some firewalls, to IPv6 networks or to the fork. */
+    val gated: Boolean get() = firewalls.isNotEmpty() || requiresIpv6 || requiresFork
+
+    /** Whether this profile may be offered in [context]; anything [context] does not know counts as not met. */
+    fun allowedIn(context: RecoveryContext): Boolean =
+        (firewalls.isEmpty() || context.firewall in firewalls) &&
+            (!requiresIpv6 || context.ipv6 == true) &&
+            (!requiresFork || context.forkAvailable)
 
     fun appliesTo(profile: VlessProfile): Boolean =
         profile.protocolType.name.lowercase() in supportedProtocols &&
@@ -68,8 +94,9 @@ data class RecoveryProfile(
         if (needsEndpoint() && endpoint.isNullOrBlank()) return null
         var p = parent
         for ((field, raw) in parameters) {
-            if (field == "echConfigList") {
+            if (field == "echConfigList" && raw.isNotEmpty()) {
                 // ECH hides a server name, so an IP or missing SNI cannot use it; a config with its own ECH keeps it.
+                // An empty value clears ECH instead (recorded in the ledger, see RecoveryLedger.Entry.clearedEch).
                 val sni = parent.sni.ifBlank { parent.host }
                 if (sni.isBlank() || sni.all { it.isDigit() || it == '.' || it == ':' } || parent.echConfigList.isNotBlank()) return null
             }
@@ -120,11 +147,13 @@ object RecoveryProfiles {
 
     private fun p(
         id: String, strategy: RecoveryProfile.Strategy, params: Map<String, String>, confidence: Double,
-        family: String = "any", transports: Set<String> = RecoveryProfile.CDN_TRANSPORTS
+        family: String = "any", transports: Set<String> = RecoveryProfile.CDN_TRANSPORTS,
+        also: Set<RecoveryProfile.Strategy> = emptySet(), firewalls: Set<NetworkFirewalls.Firewall> = emptySet(),
+        ipv6: Boolean = false, fork: Boolean = false, defaults: List<String> = emptyList()
     ) = RecoveryProfile(
         profileId = id, version = 1, createdAt = REVIEWED_AT, expiresAt = REVIEWED_AT + REVIEW_PERIOD_MS,
-        addressFamily = family, networkConditions = setOf(strategy), parameters = params, confidence = confidence,
-        supportedTransports = transports
+        addressFamily = family, networkConditions = setOf(strategy) + also, parameters = params, confidence = confidence,
+        supportedTransports = transports, firewalls = firewalls, requiresIpv6 = ipv6, requiresFork = fork, defaultEndpoints = defaults
     )
 
     /** FIX BPB's tested masks; the cipher list only takes effect with Go's TLS stack ("unsafe" fingerprint). */

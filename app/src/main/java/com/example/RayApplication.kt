@@ -136,6 +136,7 @@ class RayApplication : Application() {
             },
             endpoints = { network -> endpointScores.validated(network) },
             winners = revivalWinners,
+            context = { network -> recoveryContext(network) },
             echCheck = {
                 com.example.vpn.connectivity.EchKeyCheck.check(com.example.vpn.connectivity.RecoveryProfiles.CLOUDFLARE_ECH_DOH) { url ->
                     // On the phone's own network: during a connect this app's traffic is held in the blocking interface.
@@ -183,6 +184,28 @@ class RayApplication : Application() {
                 (found.map { it.ip } + more).distinct().take(8)
             }
         )
+    }
+
+    /**
+     * What recovery may assume about [network]: its firewall type from the network key, whether the phone's own
+     * network has a global IPv6 address (a fresh measurement saying no wins; otherwise the link's addresses), and
+     * whether the patterniha Xray fork is in this build. Cheap: no probe is sent.
+     */
+    fun recoveryContext(network: String?): com.example.vpn.connectivity.RecoveryContext {
+        val ipv6 = runCatching {
+            val measured = com.example.vpn.smart.NetworkEnvironment.freshEvidence(com.example.vpn.smart.NetworkCapabilityDetector.last,
+                com.example.vpn.smart.NetworkIdentity.current(this), System.currentTimeMillis())?.ipv6Available
+            if (measured == false) false
+            else {
+                val cm = getSystemService(android.net.ConnectivityManager::class.java)
+                val physical = cm?.let { com.example.vpn.smart.NetworkCapabilityDetector.physical(it) }
+                val addresses = physical?.let { cm?.getLinkProperties(it) }?.linkAddresses?.map { it.address }
+                if (addresses == null) measured
+                else com.example.vpn.connectivity.RecoveryContext.hasGlobalIpv6(addresses)
+            }
+        }.getOrNull()
+        val fork = runCatching { com.example.vpn.sidecar.Sidecars.isBundled(com.example.vpn.sidecar.ForkXraySidecar) }.getOrDefault(false)
+        return com.example.vpn.connectivity.RecoveryContext(com.example.vpn.connectivity.NetworkFirewalls.detect(network), ipv6, fork)
     }
 
     /** Clean CDN edges per network and whether the network proxies Cloudflare TLS by name. */
