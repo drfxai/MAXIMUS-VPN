@@ -62,7 +62,12 @@ class AdaptivePlanner(
         /** The server address is an IPv6 literal. */
         val ipv6: Boolean = false,
         /** Worked on this network recently (fresh memory); only a nudge. */
-        val provenHere: Boolean = false
+        val provenHere: Boolean = false,
+        /**
+         * Multiplies the probability for this candidate on the current carrier's firewall (fake-SNI recovery:
+         * earlier on Irancell, last on Hamrah-e-Aval, see FakeSniRecovery.firewallFactor). 1 = no preference.
+         */
+        val firewallFactor: Double = 1.0
     ) {
         val domain: FailureDomain get() = FailureDomain.of(family)
     }
@@ -225,6 +230,10 @@ class AdaptivePlanner(
         else if (domainFails > 0) p *= Math.pow(0.6, domainFails.toDouble())
         val familyFails = tracks.values.count { it.candidate.family == c.family && it.candidate.id != c.id && it.outcomes.isNotEmpty() && it.passes == 0 }
         p *= Math.pow(0.7, familyFails.toDouble())
+        if (c.firewallFactor != 1.0) {
+            p *= c.firewallFactor.coerceIn(0.1, 2.0)
+            why += if (c.firewallFactor > 1.0) "this carrier's firewall favours it" else "this carrier's firewall reportedly defeats it"
+        }
         return p.coerceIn(0.01, 0.95) to why
     }
 

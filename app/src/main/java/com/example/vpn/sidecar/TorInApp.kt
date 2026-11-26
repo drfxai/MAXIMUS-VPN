@@ -31,13 +31,22 @@ object TorInApp {
             override val isAlive: Boolean get() = !stopped && SidecarProcess.portOpen(socksPort)
 
             override fun awaitReady(timeoutMs: Long): Boolean {
-                val deadline = TorStartDeadline(System.currentTimeMillis(), timeoutMs)
+                val startedAt = System.currentTimeMillis()
+                val deadline = TorStartDeadline(startedAt, timeoutMs)
                 while (!stopped && !deadline.expired(System.currentTimeMillis())) {
                     var aborted = false
                     progress.newLines().forEach {
                         com.example.xray.XrayLogManager.i("TOR", it)
                         EngineSignals.publish("tor", it)
-                        deadline.saw(it, System.currentTimeMillis())
+                        // Build 177: the connect deadline cut a manual Tor pick at 180 s while Tor was at 30 % and
+                        // still advancing. Each advance that moves Tor's own deadline is announced to the connect
+                        // deadline (a manual pick waits for it; Smart Connect keeps its own limit) and to the stages.
+                        if (deadline.saw(it, System.currentTimeMillis())) {
+                            com.example.vpn.EngineBudgetHint.announceUntil(deadline.readyBy)
+                            val window = (deadline.readyBy - startedAt) / 1000
+                            com.example.vpn.diagnostics.EngineStages.record(TorSidecar.ID, "bootstrap ${deadline.percent}%",
+                                "still advancing: ready within ${window}s of the start (at most ${TorStartDeadline.CAP_MS / 1000}s)")
+                        }
                         // Tor writes "...; aborting" just before it exits: stop waiting for it.
                         if (it.contains("aborting")) aborted = true
                     }
