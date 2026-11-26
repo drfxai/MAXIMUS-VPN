@@ -217,7 +217,7 @@ object RecoveryProfiles {
         p(NetworkFirewalls.MCI_V6_OOB_PROFILE, RecoveryProfile.Strategy.ALT_ENDPOINT_V6, mapOf(
             "dialMode" to MCI_V6_OOB_DIAL_MODE, "fingerprint" to "chrome", "finalMask" to "", "cipherSuites" to "", "echConfigList" to "",
             "address" to RecoveryProfile.ENDPOINT), 0.45, family = "ipv6",
-            also = setOf(RecoveryProfile.Strategy.FINGERPRINT), firewalls = setOf(NetworkFirewalls.Firewall.MCI), ipv6 = true, fork = true,
+            firewalls = setOf(NetworkFirewalls.Firewall.MCI), ipv6 = true, fork = true,
             defaults = listOf(MCI_V6_OOB_IPV6))
     )
 
