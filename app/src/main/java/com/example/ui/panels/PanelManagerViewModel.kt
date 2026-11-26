@@ -824,7 +824,8 @@ class PanelManagerViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 // Edge addresses validated on this network (EndpointScoringEngine) become endpoint alternatives.
                 val endpoints = RayApplication.instance.endpointScores.validated(network)
-                val candidates = recovery.generate(sample, com.example.vpn.diagnostics.FailureStage.TLS_HANDSHAKE_FAILED, network, endpoints)
+                val candidates = recovery.generate(sample, com.example.vpn.diagnostics.FailureStage.TLS_HANDSHAKE_FAILED, network, endpoints,
+                    RayApplication.instance.recoveryContext(network))
                 val tested = recovery.test(candidates) { ps -> com.example.xray.RealDelayProbe.measure(ps, 8).map(::asRecoveryResult) }
                 recordFragmentTrials(plain, tested, network)
                 // Endpoint alternatives that were tried through the proxy refine their own scores.
