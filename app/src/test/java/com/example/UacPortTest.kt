@@ -135,16 +135,26 @@ class UacPortTest {
 
     private fun carriers(list: List<VlessProfile>) = list.map { ProfileExtras.read(it) }
 
-    @Test fun mciSendsTheFullHelloFirstAndAddsTheSniSplitOverIpv4() {
+    @Test fun mciSendsTheFullHelloFirstAndAddsTheSniSplitOnBothFamilies() {
         val auto = ConnectionEngineRunner.candidates(AetherSidecar.profile("auto", "auto"))
         val onMci = carriers(ConnectionEngineRunner.operatorVariants(auto, irancell = false, mci = true))
-        assertEquals(listOf("h2", "h2", "h3", "wireguard"), onMci.map { it.optString("carrier") })
+        // H2 full hello, H2 over IPv6 (IPv6-first step), split H2, H3, WireGuard over IPv6 (first step), WireGuard.
+        assertEquals(listOf("h2", "h2", "h2", "h3", "wireguard", "wireguard"), onMci.map { it.optString("carrier") })
         assertFalse("full ClientHello first", onMci[0].optBoolean("fragment", true))
-        assertTrue(onMci[1].optBoolean(AetherSidecar.SNI_SPLIT)); assertTrue(onMci[1].optBoolean("fragment"))
-        assertEquals("ipv4", onMci[1].optString("family"))
+        assertEquals("ipv6", onMci[1].optString("family")); assertFalse(onMci[1].optBoolean("fragment", true))
+        assertTrue(onMci[2].optBoolean(AetherSidecar.SNI_SPLIT)); assertTrue(onMci[2].optBoolean("fragment"))
+        assertEquals("split H2 is no longer pinned to IPv4 where IPv6 may be present", "auto", onMci[2].optString("family"))
+        assertEquals("ipv6", onMci[4].optString("family"))
+        // A measured IPv4-only link: no IPv6 steps, and everything (the split included) dials IPv4.
+        val v4 = carriers(ConnectionEngineRunner.operatorVariants(ConnectionEngineRunner.candidates(AetherSidecar.profile("auto", "auto"), ipv4Only = true),
+            irancell = false, mci = true))
+        assertEquals(listOf("h2", "h2", "h3", "wireguard"), v4.map { it.optString("carrier") })
+        assertTrue(v4.all { it.optString("family") == "ipv4" })
         val onIrancell = carriers(ConnectionEngineRunner.operatorVariants(auto, irancell = true, mci = false))
         assertTrue("Irancell keeps its fragmented H2", onIrancell[0].optBoolean("fragment", true))
         assertTrue(onIrancell[1].optBoolean(AetherSidecar.SNI_SPLIT))
+        assertEquals("Irancell's split still dials IPv4", "ipv4", onIrancell[1].optString("family"))
+        assertTrue("no IPv6-first steps on Irancell", onIrancell.none { it.optBoolean(ConnectionEngineRunner.V6_FIRST) })
         // Other networks and reverse relays are left alone.
         assertEquals(auto, ConnectionEngineRunner.operatorVariants(auto, irancell = false, mci = false))
         val reverse = ConnectionEngineRunner.candidates(AetherSidecar.profile("auto", "auto", advanced = AetherSettings(tor = "reverse")))

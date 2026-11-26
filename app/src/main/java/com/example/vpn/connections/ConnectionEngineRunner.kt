@@ -300,14 +300,37 @@ object ConnectionEngineRunner {
     val IRANCELL_LADDER = listOf("h3", "wireguard", "h2", "h2-split")
 
     /**
-     * Aether's carrier order on Hamrah-e-Aval (MCC-MNC 43211), from UAC SNI Spoofer's MCI outer plan: MASQUE over
-     * HTTP/2 with the full, unfragmented ClientHello on both address families first ("the same dial that connected
-     * on an MCI modem"), then HTTP/2 with the ClientHello split at the server name over IPv4, then H3, then WireGuard.
+     * Aether's carrier order on Hamrah-e-Aval (MCC-MNC 43211). patterniha (2026-11): MCI's IPv4 is a whitelist and its
+     * IPv6 a blacklist, so WARP over IPv6 goes first: WireGuard over IPv6 ([WIREGUARD_V6]), then MASQUE HTTP/2 over
+     * IPv6 with the full ClientHello ([H2_V6]); both only when the user left the family on Auto and the link was not
+     * measured IPv4-only. Then UAC SNI Spoofer's MCI outer plan: H2 with the full, unfragmented ClientHello on both
+     * address families ("the same dial that connected on an MCI modem"), H2 with the ClientHello split at the server
+     * name (both families; IPv4 only on a measured IPv4-only link), H3, then WireGuard.
      */
-    val MCI_LADDER = listOf("h2", "h2-split", "h3", "wireguard")
+    val MCI_LADDER = listOf(WIREGUARD_V6, H2_V6, "h2", "h2-split", "h3", "wireguard")
+
+    /** Method name of WireGuard over IPv6, the first step of the Hamrah-e-Aval ladder. */
+    const val WIREGUARD_V6 = "wireguard-v6"
+    /** Method name of MASQUE HTTP/2 over IPv6 with the full ClientHello, the second step of the Hamrah-e-Aval ladder. */
+    const val H2_V6 = "h2-v6"
+    /** Extras key marking the Hamrah-e-Aval IPv6-first variants ([WIREGUARD_V6], [H2_V6]). */
+    const val V6_FIRST = "mciV6First"
+    /**
+     * The IPv6-first steps are probes ahead of the known MCI path: each gets a short window so a dead IPv6 route
+     * costs little ("wireguard" answers or fails fast; H2 gets the filtered-link H2 window).
+     */
+    val V6_FIRST_BUDGET_MS = mapOf("wireguard" to 45_000L, "h2" to 60_000L)
 
     /** Method name of MASQUE over HTTP/2 to a gateway remembered as clean on this network ([CleanH2PeerMemory]). */
     const val CLEAN_H2 = "h2-clean"
+    /** Method name of MASQUE over HTTP/3 to a gateway remembered as clean on this network. */
+    const val CLEAN_H3 = "h3-clean"
+    /** Method name of WireGuard to an endpoint remembered as clean on this network. */
+    const val CLEAN_WG = "wireguard-clean"
+    /** Every remembered-endpoint method: short window, no scan, forgotten (not marked failed) when it fails. */
+    val CLEAN_METHODS = setOf(CLEAN_H2, CLEAN_H3, CLEAN_WG)
+    /** Remembered H3 gateways / WireGuard endpoints tried per connect (one each: a UDP dial answers at once or not). */
+    const val CLEAN_UDP_TRIES = 1
     /** Method name of MASQUE over HTTP/2 with the first TLS write split inside the server name. */
     const val H2_SPLIT = "h2-split"
     /** A remembered gateway either answers quickly or not at all: no scan runs behind it. */
@@ -321,22 +344,35 @@ object ConnectionEngineRunner {
 
     /**
      * Operator variants of the automatic Aether carriers. Hamrah-e-Aval: H2 sends the full ClientHello (no
-     * fragment) and an [H2_SPLIT] variant follows it. Irancell: an [H2_SPLIT] variant follows H2. The split
-     * variant fragments the first TLS write inside the server name (Aether's SNI-targeted split, the HTTP/2 form
-     * of UAC's Iran ClientHello split) and dials IPv4 unless the user chose a family. Never for reverse relays.
+     * fragment) and an [H2_SPLIT] variant follows it; with the family on Auto, [WIREGUARD_V6] and [H2_V6] (the same
+     * carriers pinned to IPv6) are added for the IPv6-first steps of [MCI_LADDER]. Irancell: an [H2_SPLIT] variant
+     * follows H2. The split variant fragments the first TLS write inside the server name (Aether's SNI-targeted
+     * split, the HTTP/2 form of UAC's Iran ClientHello split). On Irancell it dials IPv4 unless the user chose a
+     * family; on Hamrah-e-Aval it keeps the family (both, unless [candidates] already pinned IPv4 on a measured
+     * IPv4-only link), since IPv6 is the open side there. Never for reverse relays.
      */
     fun operatorVariants(choices: List<VlessProfile>, irancell: Boolean, mci: Boolean): List<VlessProfile> {
         if (!irancell && !mci) return choices
         return choices.flatMap { candidate ->
             val e = ProfileExtras.read(candidate)
             val options = AetherSettings.read(e)
-            if (e.optString("carrier") != "h2" || options.tor == "reverse" || options.psiphon == "reverse") return@flatMap listOf(candidate)
+            val carrier = e.optString("carrier")
+            val reverse = options.tor == "reverse" || options.psiphon == "reverse"
+            // Family Auto on a link not measured IPv4-only ([candidates] pins IPv4 there): IPv6 can be tried first.
+            val v6 = mci && !reverse && e.optString("family", "auto") == "auto" && options.endpoint.isBlank()
+            if (carrier == "wireguard" && v6) return@flatMap listOf(ipv6First(candidate, fragment = null), candidate)
+            if (carrier != "h2" || reverse) return@flatMap listOf(candidate)
             val split = candidate.copy(extraSettings = org.json.JSONObject(e.toString()).put("fragment", true)
-                .put(AetherSidecar.SNI_SPLIT, true).apply { if (optString("family", "auto") == "auto") put("family", "ipv4") }.toString())
+                .put(AetherSidecar.SNI_SPLIT, true).apply { if (irancell && optString("family", "auto") == "auto") put("family", "ipv4") }.toString())
             val plain = if (mci) candidate.copy(extraSettings = org.json.JSONObject(e.toString()).put("fragment", false).toString()) else candidate
-            listOf(plain, split)
+            if (v6) listOf(plain, ipv6First(candidate, fragment = false), split) else listOf(plain, split)
         }
     }
+
+    /** [candidate] pinned to IPv6 and marked [V6_FIRST]; [fragment] set when given (H2 sends the full hello). */
+    private fun ipv6First(candidate: VlessProfile, fragment: Boolean?): VlessProfile = candidate.copy(extraSettings =
+        org.json.JSONObject(candidate.extraSettings).put("family", "ipv6").put(V6_FIRST, true)
+            .apply { if (fragment != null) put("fragment", fragment) }.toString())
 
     /**
      * MASQUE over HTTP/2 to the gateways remembered as clean on this network (most recent / fastest first), at
@@ -344,18 +380,45 @@ object ConnectionEngineRunner {
      * user endpoint, exit node or reverse/standalone relay; IPv6 gateways are left out on an IPv4-only link.
      */
     fun cleanH2Candidates(choices: List<VlessProfile>, peers: List<CleanH2PeerMemory.Peer>, ipv4Only: Boolean): List<VlessProfile> {
-        val plain = choices.firstOrNull { ProfileExtras.read(it).let { e -> e.optString("carrier") == "h2" && !e.optBoolean(AetherSidecar.SNI_SPLIT) } }
+        val plain = choices.firstOrNull { ProfileExtras.read(it).let { e -> e.optString("carrier") == "h2" && !e.optBoolean(AetherSidecar.SNI_SPLIT) && !e.optBoolean(V6_FIRST) } }
             ?: return emptyList()
         val split = choices.firstOrNull { ProfileExtras.read(it).let { e -> e.optString("carrier") == "h2" && e.optBoolean(AetherSidecar.SNI_SPLIT) } }
         val options = AetherSettings.read(ProfileExtras.read(plain))
         if (options.endpoint.isNotBlank() || options.exitNode.isNotBlank() ||
             options.tor in listOf("reverse", "only") || options.psiphon in listOf("reverse", "only")) return emptyList()
-        return peers.filter { !(ipv4Only && it.address.startsWith("[")) }.take(CLEAN_H2_TRIES).map { peer ->
+        return preferFingerprint(peers.filter { it.carrier == "h2" && !(ipv4Only && it.address.startsWith("[")) }, options.fingerprint)
+            .take(CLEAN_H2_TRIES).map { peer ->
             val base = if (peer.split && split != null) split else plain
             base.copy(extraSettings = org.json.JSONObject(base.extraSettings).put(AetherSidecar.CLEAN_H2_PEER, peer.address)
                 .put("family", if (peer.address.startsWith("[")) "ipv6" else "ipv4").toString())
         }
     }
+
+    /**
+     * MASQUE HTTP/3 to the gateway and WireGuard to the endpoint remembered as clean on this network, at most
+     * [CLEAN_UDP_TRIES] each, with the family they worked on. Same conditions as [cleanH2Candidates]: automatic, no
+     * user endpoint, exit node or reverse/standalone relay; IPv6 endpoints are left out on an IPv4-only link.
+     */
+    fun cleanUdpCandidates(choices: List<VlessProfile>, peers: List<CleanH2PeerMemory.Peer>, ipv4Only: Boolean): List<VlessProfile> =
+        listOf("h3", "wireguard").flatMap { carrier ->
+            val base = choices.firstOrNull { ProfileExtras.read(it).let { e -> e.optString("carrier") == carrier && !e.optBoolean(V6_FIRST) } }
+                ?: return@flatMap emptyList<VlessProfile>()
+            val options = AetherSettings.read(ProfileExtras.read(base))
+            if (options.endpoint.isNotBlank() || options.exitNode.isNotBlank() ||
+                options.tor in listOf("reverse", "only") || options.psiphon in listOf("reverse", "only")) return@flatMap emptyList<VlessProfile>()
+            preferFingerprint(peers.filter { it.carrier == carrier && !(ipv4Only && it.address.startsWith("[")) },
+                if (carrier == "wireguard") "" else options.fingerprint).take(CLEAN_UDP_TRIES).map { peer ->
+                base.copy(extraSettings = org.json.JSONObject(base.extraSettings).put(AetherSidecar.CLEAN_PEER, peer.address)
+                    .put("family", peer.family).toString())
+            }
+        }
+
+    /**
+     * Peers remembered with the fingerprint this attempt will send come first (a gateway that took one ClientHello may
+     * not take another); the rest keep their order. The fingerprint itself always stays the user's setting.
+     */
+    private fun preferFingerprint(peers: List<CleanH2PeerMemory.Peer>, fingerprint: String): List<CleanH2PeerMemory.Peer> =
+        peers.sortedBy { if (it.fingerprint.isBlank() || it.fingerprint == fingerprint) 0 else 1 }
 
     /** Whether [networkKey] (a [com.example.vpn.smart.NetworkIdentity] key such as "cell:43235") is Irancell. */
     fun irancell(networkKey: String?): Boolean =
@@ -386,12 +449,13 @@ object ConnectionEngineRunner {
                 it.value == preferred -> 0
                 it.value in recentlyFailed -> 4
                 // A gateway that carried HTTP/2 here recently, before any scan (UAC's saved clean HTTP/2 list).
-                it.value == CLEAN_H2 -> 1
+                it.value in CLEAN_METHODS -> 1
                 // Irancell ladder: MASQUE over HTTP/3 (QUIC, IPv4) first; Irancell lets WireGuard handshakes
                 // through and then drops the data, so WireGuard goes after it (pattern from UAC SNI Spoofer).
                 irancell && it.value == "h3" -> 2
-                // Hamrah-e-Aval ladder: MASQUE over HTTP/2 with the full ClientHello first (UAC's MCI plan).
-                mci && it.value == "h2" -> 2
+                // Hamrah-e-Aval ladder: WARP over IPv6 first (WireGuard, then H2), then MASQUE over HTTP/2 with the
+                // full ClientHello (UAC's MCI plan); MCI_LADDER orders them.
+                mci && it.value in setOf(WIREGUARD_V6, H2_V6, "h2") -> 2
                 !irancell && !mci && preferWireGuard && it.value == "wireguard" -> 2
                 else -> 3
             }
@@ -419,13 +483,23 @@ object ConnectionEngineRunner {
         engineId == AetherSidecar.ID && automatic && carrier == "wireguard" && handshakePassed &&
             !alreadyQueued && !reverseRelay
 
-    fun candidates(profile: VlessProfile, ipv4Only: Boolean = false): List<VlessProfile> {
+    /**
+     * Serverless's automatic variant order by firewall (patterniha's v65 subscription): oob is the Hamrah-e-Aval
+     * config, fragA/fragB the Irancell ones. Hamrah-e-Aval: oob, fragA, fragB. Irancell and everywhere else: fragA,
+     * fragB, oob (unchanged).
+     */
+    fun serverlessOrder(firewall: com.example.vpn.connectivity.NetworkFirewalls.Firewall): List<String> =
+        if (firewall == com.example.vpn.connectivity.NetworkFirewalls.Firewall.MCI) listOf("oob", "fragA", "fragB")
+        else listOf("fragA", "fragB", "oob")
+
+    fun candidates(profile: VlessProfile, ipv4Only: Boolean = false,
+                   firewall: com.example.vpn.connectivity.NetworkFirewalls.Firewall = com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER): List<VlessProfile> {
         val e = ProfileExtras.read(profile)
         val variants = when {
             AetherSidecar.handles(profile) && e.optString("carrier", "auto") == "auto" -> (if (AetherSettings.read(e).let { it.tor in listOf("reverse", "only") || it.psiphon in listOf("reverse", "only") }) listOf("h2") else listOf("h2", "h3", "wireguard")).map {
                 profile.copy(extraSettings = org.json.JSONObject(e.toString()).put("carrier", it).toString())
             }
-            ServerlessSidecar.handles(profile) && e.optString("variant", "auto") == "auto" -> listOf("fragA", "fragB", "oob").map {
+            ServerlessSidecar.handles(profile) && e.optString("variant", "auto") == "auto" -> serverlessOrder(firewall).map {
                 profile.copy(extraSettings = org.json.JSONObject(e.toString()).put("variant", it).toString())
             }
             else -> listOf(profile)
@@ -440,19 +514,29 @@ object ConnectionEngineRunner {
             }
         } else variants
     }
+    /** Methods whose verified endpoint is remembered, by the carrier it is remembered under. */
+    private val REMEMBERED = mapOf("h2" to "h2", H2_SPLIT to "h2", CLEAN_H2 to "h2", H2_V6 to "h2",
+        "h3" to "h3", CLEAN_H3 to "h3", "wireguard" to "wireguard", WIREGUARD_V6 to "wireguard", CLEAN_WG to "wireguard")
+
     /**
-     * After verified HTTPS over MASQUE HTTP/2 (plain, split or a remembered gateway), keep the gateway in this
-     * network's clean list. A scanned gateway is read from Aether's own last-connection file; relays are skipped
-     * (their gateway was reached through a saved server, not over this network).
+     * After verified HTTPS over MASQUE HTTP/2 (plain, split, IPv6-first or a remembered gateway), MASQUE HTTP/3 or
+     * WireGuard, keep the gateway/endpoint in this network's clean list with its carrier, IP family and the MASQUE
+     * fingerprint it used. A scanned one is read from Aether's own last-connection file; relays and follow-up retries
+     * (MTU, obfuscation) are skipped (a relay's gateway was reached through a saved server, not over this network).
      */
     internal fun rememberCleanH2(name: String, candidate: VlessProfile, networkKey: String?, since: Long,
                                  record: (String, String, String, String) -> Unit) {
-        if (name !in setOf("h2", H2_SPLIT, CLEAN_H2) || networkKey.isNullOrBlank()) return
+        val carrier = REMEMBERED[name] ?: return
+        if (networkKey.isNullOrBlank()) return
         val e = ProfileExtras.read(candidate)
-        val split = e.optBoolean(AetherSidecar.SNI_SPLIT)
-        val peer = e.optString(AetherSidecar.CLEAN_H2_PEER).ifBlank { null } ?: AetherSidecar.lastMasqueH2Peer(since) ?: return
-        CleanH2PeerMemory.remember(networkKey, peer, split = split)
-        record(name, "clean-h2", "SAVED", "${CleanH2PeerMemory.masked(peer)} remembered for this network" + if (split) " (split ClientHello)" else "")
+        val split = carrier == "h2" && e.optBoolean(AetherSidecar.SNI_SPLIT)
+        val given = if (carrier == "h2") e.optString(AetherSidecar.CLEAN_H2_PEER) else e.optString(AetherSidecar.CLEAN_PEER)
+        val peer = given.ifBlank { null } ?: AetherSidecar.lastPeer(carrier, since) ?: return
+        val fingerprint = if (carrier == "wireguard") "" else AetherSettings.read(e).fingerprint
+        CleanH2PeerMemory.remember(networkKey, peer, split = split, carrier = carrier, fingerprint = fingerprint)
+        record(name, "clean-$carrier", "SAVED", "${CleanH2PeerMemory.masked(peer)} remembered for this network " +
+            "(${CleanH2PeerMemory.familyOf(peer)}" + (if (fingerprint.isNotBlank()) ", $fingerprint" else "") +
+            (if (split) ", split ClientHello" else "") + ")")
     }
 
     /**
@@ -536,19 +620,26 @@ object ConnectionEngineRunner {
                 if (LanternRelayHop.requested(it)) H2_LANTERN
                 else if (it.optBoolean(RELAY_FOLLOW_UP)) it.optString("carrier") + "-relay"
                 else if (it.optString(AetherSidecar.CLEAN_H2_PEER).isNotBlank()) CLEAN_H2
+                else if (it.optString(AetherSidecar.CLEAN_PEER).isNotBlank() && it.optString("carrier") == "h3") CLEAN_H3
+                else if (it.optString(AetherSidecar.CLEAN_PEER).isNotBlank() && it.optString("carrier") == "wireguard") CLEAN_WG
                 else if (it.optBoolean(AetherSidecar.SNI_SPLIT) && it.optString("carrier") == "h2") H2_SPLIT
                 else if (it.optBoolean(MTU_FOLLOW_UP)) WIREGUARD_MTU
-                else if (it.optBoolean(NOIZE_FOLLOW_UP)) WIREGUARD_NOIZE else it.optString("carrier")
+                else if (it.optBoolean(NOIZE_FOLLOW_UP)) WIREGUARD_NOIZE
+                else if (it.optBoolean(V6_FIRST) && it.optString("carrier") == "wireguard") WIREGUARD_V6
+                else if (it.optBoolean(V6_FIRST) && it.optString("carrier") == "h2") H2_V6 else it.optString("carrier")
             } else it.optString("variant")
         }
         val cacheScope = scope()
         val networkKey = BuiltinMethodMemory.network()
         val onIrancell = engine.id == AetherSidecar.ID && automatic && irancell(networkKey)
         val onMci = engine.id == AetherSidecar.ID && automatic && mci(networkKey)
-        val carrierChoices = candidates(profile, ipv4Only = ipv4Only).let { list -> if (onIrancell) list.map(::irancellH3) else list }
+        val carrierChoices = candidates(profile, ipv4Only = ipv4Only,
+            firewall = com.example.vpn.connectivity.NetworkFirewalls.detect(networkKey).takeIf { automatic && ServerlessSidecar.handles(profile) }
+                ?: com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER).let { list -> if (onIrancell) list.map(::irancellH3) else list }
             .let { operatorVariants(it, irancell = onIrancell, mci = onMci) }
         val cleanPeers = if (engine.id == AetherSidecar.ID && automatic) CleanH2PeerMemory.peers(networkKey) else emptyList()
-        val cleanChoices = if (engine.id == AetherSidecar.ID && automatic) cleanH2Candidates(carrierChoices, cleanPeers, ipv4Only) else emptyList()
+        val cleanChoices = if (engine.id == AetherSidecar.ID && automatic)
+            cleanH2Candidates(carrierChoices, cleanPeers, ipv4Only) + cleanUdpCandidates(carrierChoices, cleanPeers, ipv4Only) else emptyList()
         val baseChoices = cleanChoices + carrierChoices
         // The obfuscated WireGuard retry is not one of the declared carriers, but once it carried HTTPS on
         // this network it is remembered and tried first next time instead of the plain carrier.
@@ -631,10 +722,13 @@ object ConnectionEngineRunner {
             record(ladderKind, "queue", "SKIP", why)
             throw NoVerifiedPath(listOf("$ladderKind: $why"), null)
         }
-        if (onMci && !relayOnly) record("ladder", "queue", "START", "Hamrah-e-Aval: MASQUE H2 with the full ClientHello first, then H2 with the ClientHello split at the SNI over IPv4, then H3, then WireGuard")
-        if (cleanChoices.isNotEmpty() && !relayOnly) record(CLEAN_H2, "queue", "START", "${cleanPeers.size} clean H2 gateway(s) remembered on this network; trying " +
-            cleanChoices.joinToString(", ") { CleanH2PeerMemory.masked(ProfileExtras.read(it).optString(AetherSidecar.CLEAN_H2_PEER)) } +
-            " before any scan" + (cleanPeers.first().rttMs?.let { " (prewarm: $it ms)" }.orEmpty()))
+        if (onMci && !relayOnly) record("ladder", "queue", "START", "Hamrah-e-Aval: " +
+            (if (choices.any { method(it) == WIREGUARD_V6 }) "WireGuard over IPv6, then MASQUE H2 over IPv6, then " else "") +
+            "MASQUE H2 with the full ClientHello, then H2 with the ClientHello split at the SNI, then H3, then WireGuard")
+        if (cleanChoices.isNotEmpty() && !relayOnly) record(CLEAN_H2, "queue", "START", "${cleanPeers.size} clean gateway(s)/endpoint(s) remembered on this network; trying " +
+            cleanChoices.joinToString(", ") { c -> ProfileExtras.read(c).let { e -> method(c) + " " + CleanH2PeerMemory.masked(
+                e.optString(AetherSidecar.CLEAN_H2_PEER).ifBlank { e.optString(AetherSidecar.CLEAN_PEER) }) } } +
+            " before any scan" + (cleanPeers.firstOrNull { it.carrier == "h2" }?.rttMs?.let { " (prewarm: $it ms)" }.orEmpty()))
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
         val irancellPlan = if (irancellHttp2) IrancellWarp.plan(ordered.map(::method), preferred, manual)
             .map { name -> IrancellWarp.forAttempt(ordered.first { method(it) == name }, manual) } else emptyList()
@@ -656,16 +750,18 @@ object ConnectionEngineRunner {
                 "; carriers without a saved identity are not started")
         }
         val recheckOnly = !irancellHttp2 && engine.id == AetherSidecar.ID && automatic &&
-            quickRecheckOnly(ordered.map(::method).filter { it != CLEAN_H2 }, preferred, recentlyFailed,
+            quickRecheckOnly(ordered.map(::method).filter { it !in CLEAN_METHODS }, preferred, recentlyFailed,
                 warpDataBlocked = BuiltinMethodMemory.warpDataBlocked(cacheScope))
         var handshakeWithoutData = false
         // A remembered gateway that fails is dropped from this network's clean list instead of marking the method
         // failed, so the next remembered gateway is not pushed to the back.
         fun failed(name: String, candidate: VlessProfile) {
-            if (name == CLEAN_H2) {
-                val peer = ProfileExtras.read(candidate).optString(AetherSidecar.CLEAN_H2_PEER)
-                CleanH2PeerMemory.forget(networkKey, peer)
-                record(name, "clean-h2", "FORGET", "${CleanH2PeerMemory.masked(peer)} no longer carries HTTP/2 here")
+            if (name in CLEAN_METHODS) {
+                val e = ProfileExtras.read(candidate)
+                val peer = e.optString(AetherSidecar.CLEAN_H2_PEER).ifBlank { e.optString(AetherSidecar.CLEAN_PEER) }
+                val carrier = e.optString("carrier")
+                CleanH2PeerMemory.forget(networkKey, peer, carrier)
+                record(name, "clean-$carrier", "FORGET", "${CleanH2PeerMemory.masked(peer)} no longer carries $carrier here")
             } else BuiltinMethodMemory.recordFailure(cacheScope, name)
         }
         // WARP data blocked here recently: go straight through the verified saved server when there is one,
@@ -743,6 +839,12 @@ object ConnectionEngineRunner {
         }
         /** A direct carrier ran and carried no HTTPS: queue its follow-ups (or the WARP-data-blocked fast path). */
         fun onNoData(name: String, candidate: VlessProfile, extras: org.json.JSONObject, carrier: String) {
+            // Hamrah-e-Aval's IPv6-first WireGuard is a probe ahead of the known MCI path: a handshake without data on
+            // IPv6 says nothing about H2 over IPv6 or the IPv4 ladder, so it neither ends the ladder nor queues retries.
+            if (name == WIREGUARD_V6) {
+                record(name, "queue", "NEXT", "WireGuard over IPv6 carried no data here; continuing with MASQUE H2 over IPv6")
+                return
+            }
             // Irancell / Cloudflare-filtered: handshake without data is the WARP data block. Remember it now (the
             // next connect goes straight to the relay) and skip the full scans that fail the same way.
             if (!warpBlockFastPath && warpDataBlockedFastPath(engine.id, automatic, carrier, onIrancell, preferWireGuard, reverseRelay)) {
@@ -817,6 +919,7 @@ object ConnectionEngineRunner {
             val deadlineAt = System.currentTimeMillis() + deadline
             val wgContext = context.copy(workDir = java.io.File(context.workDir, "race-wireguard").apply { mkdirs() },
                 socksPort = Sidecars.freeLoopbackPort())
+            val raceStartedAt = System.currentTimeMillis()
             record("ladder", "race", "START h3+wireguard", "first HTTPS-verified carrier wins, the other is stopped; ${deadline / 1000}s deadline")
             fun leg(lane: FirstVerifiedRace.Lane, candidate: VlessProfile, ctx: SidecarContext): RaceLeg {
                 val name = method(candidate)
@@ -889,6 +992,7 @@ object ConnectionEngineRunner {
                 record("ladder", "race", "WIN ${w.name}", outcome.unfinished.takeIf { it.isNotEmpty() }
                     ?.let { "stopped " + it.joinToString(", ") }.orEmpty())
                 record(w.name, "https", "PASS")
+                if (engine.id == AetherSidecar.ID && automatic) rememberCleanH2(w.name, w.candidate, networkKey, raceStartedAt, ::record)
                 if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                 if (scope() == cacheScope) {
                     BuiltinMethodMemory.record(cacheScope, w.name)
@@ -979,7 +1083,7 @@ object ConnectionEngineRunner {
                 !AetherApiBridge.skipAfterBootstrapFailure(it, failedRegistrationKinds)
             }
             try {
-                val scan = if (irancellHttp2 && name != CLEAN_H2) AetherSettings.read(extras).scan else null
+                val scan = if (irancellHttp2 && name !in CLEAN_METHODS) AetherSettings.read(extras).scan else null
                 record(name, "prepare", "START", scan?.let { "gateway scan: $it" }.orEmpty())
                 // Iranian mobile networks: Aether races its account calls through the OOB ClientHello lane (WarpApiLane).
                 val launched = if (engine.id == AetherSidecar.ID && automatic &&
@@ -995,7 +1099,9 @@ object ConnectionEngineRunner {
                 stage = "local proxy did not become ready"
                 val lanternHop = LanternRelayHop.requested(extras)
                 val window = if (lanternHop) minOf(launch.readyTimeoutMs, LANTERN_ATTEMPT_MS)
-                    else if (name == CLEAN_H2) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
+                    else if (name in CLEAN_METHODS) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
+                    else if (automatic && extras.optBoolean(V6_FIRST) && carrier in V6_FIRST_BUDGET_MS)
+                        minOf(launch.readyTimeoutMs, V6_FIRST_BUDGET_MS.getValue(carrier))
                     else if (irancellHttp2 && manual) IrancellWarp.manualAttemptMs(candidate)
                     else if (engine.id == AetherSidecar.ID && manual && !automatic && carrier in setOf("h2", "h3")) {
                         val options = AetherSettings.read(extras)
@@ -1083,7 +1189,7 @@ object ConnectionEngineRunner {
                     return Started(process, launch, candidate, result)
                 }
                 lastCheck = result.takeUnless { it.traffic }
-                if (carrier == "wireguard" || carrier == "wiw") handshakeWithoutData = true
+                if ((carrier == "wireguard" || carrier == "wiw") && name != WIREGUARD_V6) handshakeWithoutData = true
                 val reason = result.failure ?: "engine stopped during check"
                 record(name, "https", "FAIL", reason)
                 attempts += "$name: $reason"
