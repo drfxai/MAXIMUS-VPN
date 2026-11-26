@@ -1660,6 +1660,7 @@
     <string name="bc_registration_summary">Хост API, SNI, отпечаток, ретранслятор, ECH, ключи WARP</string>
     <string name="bc_api">API</string>
     <string name="bc_api_relay_field">Ретранслятор WARP API · адрес https:// вашего Worker, пусто — без него</string>
+    <string name="bc_fingerprint_auto_by_firewall">Авто (по файрволу)</string>
     <string name="bc_tls_fragment">Фрагментация TLS</string>
     <string name="bc_fragment_bytes">Байты · по умолчанию 8-16</string>
     <string name="bc_fragment_delay">Задержка, мс · по умолчанию 2-10</string>

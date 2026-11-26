@@ -361,10 +361,13 @@ object ConnectionEngineRunner {
     fun irancell(networkKey: String?): Boolean =
         com.example.vpn.connectivity.NetworkFirewalls.detect(networkKey) == com.example.vpn.connectivity.NetworkFirewalls.Firewall.IRANCELL
 
-    /** On Irancell MASQUE H3 dials IPv4 only (UAC's Irancell plan); a family the user chose stays theirs. */
-    fun irancellH3(candidate: VlessProfile): VlessProfile {
+    /**
+     * On Irancell MASQUE dials IPv4 only: H3 (UAC's Irancell plan) and H2 (PattNG's default family; `--dual` spent the
+     * short Irancell budget on IPv6 gateways). Automatic carriers only; a family the user chose stays theirs.
+     */
+    fun irancellIpv4(candidate: VlessProfile): VlessProfile {
         val e = ProfileExtras.read(candidate)
-        if (e.optString("carrier") != "h3" || e.optString("family", "auto") != "auto") return candidate
+        if (e.optString("carrier") !in setOf("h2", "h3") || e.optString("family", "auto") != "auto") return candidate
         return candidate.copy(extraSettings = org.json.JSONObject(e.toString()).put("family", "ipv4").toString())
     }
 
@@ -545,7 +548,7 @@ object ConnectionEngineRunner {
         val networkKey = BuiltinMethodMemory.network()
         val onIrancell = engine.id == AetherSidecar.ID && automatic && irancell(networkKey)
         val onMci = engine.id == AetherSidecar.ID && automatic && mci(networkKey)
-        val carrierChoices = candidates(profile, ipv4Only = ipv4Only).let { list -> if (onIrancell) list.map(::irancellH3) else list }
+        val carrierChoices = candidates(profile, ipv4Only = ipv4Only).let { list -> if (onIrancell) list.map(::irancellIpv4) else list }
             .let { operatorVariants(it, irancell = onIrancell, mci = onMci) }
         val cleanPeers = if (engine.id == AetherSidecar.ID && automatic) CleanH2PeerMemory.peers(networkKey) else emptyList()
         val cleanChoices = if (engine.id == AetherSidecar.ID && automatic) cleanH2Candidates(carrierChoices, cleanPeers, ipv4Only) else emptyList()
@@ -662,6 +665,8 @@ object ConnectionEngineRunner {
         // A remembered gateway that fails is dropped from this network's clean list instead of marking the method
         // failed, so the next remembered gateway is not pushed to the back.
         fun failed(name: String, candidate: VlessProfile) {
+            // A fingerprint picked for Auto failed here: the next attempt on this network moves on to the next one.
+            AetherFingerprintBook.record(networkKey, candidate, verified = false)
             if (name == CLEAN_H2) {
                 val peer = ProfileExtras.read(candidate).optString(AetherSidecar.CLEAN_H2_PEER)
                 CleanH2PeerMemory.forget(networkKey, peer)
@@ -889,6 +894,7 @@ object ConnectionEngineRunner {
                 record("ladder", "race", "WIN ${w.name}", outcome.unfinished.takeIf { it.isNotEmpty() }
                     ?.let { "stopped " + it.joinToString(", ") }.orEmpty())
                 record(w.name, "https", "PASS")
+                AetherFingerprintBook.record(networkKey, w.candidate, verified = true)
                 if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                 if (scope() == cacheScope) {
                     BuiltinMethodMemory.record(cacheScope, w.name)
@@ -950,10 +956,12 @@ object ConnectionEngineRunner {
                 queue.clear()
                 if (!queueLantern(LANTERN_QUEUE_REASON)) break
             }
-            val candidate = queue.removeFirst()
+            // A MASQUE fingerprint left at Auto gets this network's pick (AetherFingerprintBook); a user's own is kept.
+            val candidate = queue.removeFirst().let { if (engine.id == AetherSidecar.ID) AetherFingerprintBook.resolve(it, networkKey) else it }
             checkCancellation()
             val extras = ProfileExtras.read(candidate)
             val name = method(candidate)
+            AetherFingerprintBook.picked(candidate)?.let { record(name, "tls", "START", AetherFingerprintBook.describe(networkKey, it)) }
             // Native carrier name: budgets and follow-ups are about the transport, not the label.
             val carrier = if (engine.id == AetherSidecar.ID) extras.optString("carrier") else name
             val raceWith = if (name == "h3") queue.firstOrNull { method(it) == "wireguard" } else null
@@ -1069,6 +1077,7 @@ object ConnectionEngineRunner {
                 checkCancellation()
                 if (result.traffic && process.isAlive) {
                     record(name, "https", "PASS")
+                    AetherFingerprintBook.record(networkKey, candidate, verified = true)
                     if (engine.id == AetherSidecar.ID && automatic) rememberCleanH2(name, candidate, networkKey, attemptStartedAt, ::record)
                     if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                     if (engine.id == AetherSidecar.ID && !extras.optBoolean(RELAY_FOLLOW_UP)) WarpDataPlaneHold.clear(networkKey)

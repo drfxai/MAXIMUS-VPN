@@ -1650,6 +1650,7 @@
     <string name="bc_registration_summary">میزبان API، SNI، اثر انگشت، رله، ECH، کلیدهای WARP</string>
     <string name="bc_api">API</string>
     <string name="bc_api_relay_field">رله WARP API · نشانی https:// Worker شما، خالی برای عدم استفاده</string>
+    <string name="bc_fingerprint_auto_by_firewall">خودکار (بر اساس فایروال)</string>
     <string name="bc_tls_fragment">قطعه‌بندی TLS</string>
     <string name="bc_fragment_bytes">بایت · پیش‌فرض 8-16</string>
     <string name="bc_fragment_delay">تأخیر بر حسب ms · پیش‌فرض 2-10</string>

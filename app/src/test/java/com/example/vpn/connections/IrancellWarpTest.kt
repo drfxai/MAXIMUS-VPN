@@ -3,6 +3,7 @@ package com.example.vpn.connections
 import com.example.vpn.engine.ProfileExtras
 import com.example.vpn.sidecar.AetherSettings
 import com.example.vpn.sidecar.AetherSidecar
+import com.example.vpn.sidecar.AetherTlsProfiles
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -56,7 +57,7 @@ class IrancellWarpTest {
 
     @Test fun realIrancellCandidatesYieldFragmentedHttp2() {
         val auto = ConnectionEngineRunner.candidates(AetherSidecar.profile("auto", "auto"))
-        val variants = ConnectionEngineRunner.operatorVariants(auto.map(ConnectionEngineRunner::irancellH3), irancell = true, mci = false)
+        val variants = ConnectionEngineRunner.operatorVariants(auto.map(ConnectionEngineRunner::irancellIpv4), irancell = true, mci = false)
         val h2 = variants.first { ProfileExtras.read(it).let { e -> e.optString("carrier") == "h2" && !e.optBoolean(AetherSidecar.SNI_SPLIT) } }
         val chosen = IrancellWarp.withNativeApi(h2)
         val e = ProfileExtras.read(chosen)
@@ -94,15 +95,18 @@ class IrancellWarpTest {
         assertFalse(ProfileExtras.read(IrancellWarp.forAttempt(pinnedSplit, manual = true)).optBoolean("rescan"))
     }
 
-    @Test fun irancellAttemptsPreferTheFirefoxFingerprint() {
+    @Test fun irancellAttemptsLeaveTheFingerprintToAutoOrToTheUser() {
         for (manual in listOf(false, true)) {
-            assertEquals("firefox", ProfileExtras.read(IrancellWarp.forAttempt(AetherSidecar.profile("h2"), manual)).optString("fingerprint"))
-            val pinned = AetherSidecar.profile("h2", advanced = AetherSettings(endpoint = "192.0.2.1:443"))
-            assertEquals("firefox", ProfileExtras.read(IrancellWarp.forAttempt(pinned, manual)).optString("fingerprint"))
-            val go = AetherSidecar.profile("h2", advanced = AetherSettings(fingerprint = "go"))
-            assertEquals("go", ProfileExtras.read(IrancellWarp.forAttempt(go, manual)).optString("fingerprint"))
+            // Auto stays Auto here; AetherFingerprintBook picks it per attempt (semi-python first on Irancell).
+            assertEquals(AetherTlsProfiles.AUTO,
+                AetherSettings.read(ProfileExtras.read(IrancellWarp.forAttempt(AetherSidecar.profile("h2"), manual))).fingerprint)
+            // A fingerprint the user chose is sent exactly as chosen, Chrome included (it used to become Firefox).
+            for (own in AetherTlsProfiles.names) {
+                val chosen = AetherSidecar.profile("h2", advanced = AetherSettings(fingerprint = own))
+                assertEquals(own, AetherSettings.read(ProfileExtras.read(IrancellWarp.forAttempt(chosen, manual))).fingerprint)
+            }
         }
-        assertEquals("chrome", ProfileExtras.read(AetherSidecar.profile("h2")).optString("fingerprint", "chrome"))
+        assertEquals(AetherTlsProfiles.AUTO, AetherSettings.read(ProfileExtras.read(AetherSidecar.profile("h2"))).fingerprint)
     }
 
     @Test fun aRouteTheUserChoseIsKept() {

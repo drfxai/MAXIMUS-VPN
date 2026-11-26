@@ -1661,6 +1661,7 @@
     <string name="bc_registration_summary">API host, SNI, fingerprint, relay, ECH, WARP keys</string>
     <string name="bc_api">API</string>
     <string name="bc_api_relay_field">WARP API relay · your Worker https:// address, blank for none</string>
+    <string name="bc_fingerprint_auto_by_firewall">Auto (by firewall)</string>
     <string name="bc_tls_fragment">TLS fragment</string>
     <string name="bc_fragment_bytes">Bytes · default 8-16</string>
     <string name="bc_fragment_delay">Delay ms · default 2-10</string>
