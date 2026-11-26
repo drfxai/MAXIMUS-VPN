@@ -10,6 +10,9 @@ package com.example.vpn.connectivity
  * blocked outright (IPv6 too), and on Hamrah-e-Aval and Rightel ECH with a Chrome fingerprint works.
  * UAC SNI Spoofer (2026-11) adds the exception that a ClientHello split right before the SNI, on Go's TLS
  * stack with a fixed cipher list, still connects on Hamrah-e-Aval ([IranHelloSplit]); it is tried first there.
+ * Since 2026-11 a behaviour probe ([FirewallBehaviour]) can name the firewall type when the network code cannot (Wi-Fi,
+ * fixed ISPs) or names the other operator (regions where one operator's SIM sits behind the other's firewall); it
+ * applies only when its result is confident, and the network code stays the fallback.
  * The preference only orders and skips recipes; every recipe still passes the security gate and a
  * real request, and the ledger's own results on this network outweigh it once there are some.
  */
@@ -23,9 +26,36 @@ object NetworkFirewalls {
 
     private val CODES = mapOf("43235" to Firewall.IRANCELL, "43211" to Firewall.MCI, "43220" to Firewall.RIGHTEL)
 
-    /** The firewall of the network named by a network key such as "cell:43235". */
-    fun detect(networkKey: String?): Firewall =
+    /**
+     * The firewall of the network named by a network key such as "cell:43235": the behaviour probe's confident
+     * result for this network when there is one ([FirewallBehaviour], [FirewallProbe]), else the network code.
+     */
+    fun detect(networkKey: String?): Firewall = detection(networkKey).firewall
+
+    /** The firewall the network code alone names (MCC+MNC of the serving network). */
+    fun byNetworkCode(networkKey: String?): Firewall =
         networkKey?.takeIf { it.startsWith("cell:") }?.let { CODES[it.removePrefix("cell:")] } ?: Firewall.OTHER
+
+    enum class Source { BEHAVIOUR, NETWORK_CODE, NONE }
+
+    /** What [detect] decided and why: [byCode] is the network-code guess, shown next to a behaviour result. */
+    data class Detection(val firewall: Firewall, val source: Source, val byCode: Firewall)
+
+    /**
+     * The behaviour probe's confident firewall for a network key, or null. Set by the app ([FirewallProbe.store]);
+     * null in tests and before the app starts, so detection is the network code alone.
+     */
+    @Volatile var behaviour: ((String?) -> Firewall?)? = null
+
+    fun detection(networkKey: String?): Detection {
+        val code = byNetworkCode(networkKey)
+        val probed = runCatching { behaviour?.invoke(networkKey) }.getOrNull()
+        return when {
+            probed != null -> Detection(probed, Source.BEHAVIOUR, code)
+            code != Firewall.OTHER -> Detection(code, Source.NETWORK_CODE, code)
+            else -> Detection(Firewall.OTHER, Source.NONE, code)
+        }
+    }
 
     /** The profile tuned for Irancell (see [RecoveryProfiles]). */
     const val IRANCELL_PROFILE = "irancell-fragment"

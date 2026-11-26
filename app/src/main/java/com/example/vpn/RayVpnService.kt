@@ -463,6 +463,9 @@ class RayVpnService : VpnService() {
             updateState(_vpnState.value.copy(status = ConnectionStatus.PREPARING, errorMessage = null))
         }
         if (action == null || action == ACTION_CONNECT || action == ACTION_RECONNECT) {
+            // Firewall type by behaviour: a few handshakes on the phone's own network, in the background, at most once
+            // per network per day; never delays this Connect (NetworkFirewalls uses it only when confident).
+            runCatching { com.example.vpn.connectivity.FirewallProbe.atConnect(this, serviceScope) }
             supervisor.requestProtection()
             checkLockdown()
             if (!showForegroundNotification("Protecting traffic while connecting...")) return START_NOT_STICKY
@@ -5235,6 +5238,8 @@ class RayVpnService : VpnService() {
         handoffJob?.cancel()
         handoffJob = serviceScope.launch {
             delay(500)
+            // A firewall-type result measured on another network no longer applies (no new probe here).
+            runCatching { com.example.vpn.connectivity.FirewallProbe.onNetworkChanged(this@RayVpnService) }
             if (!lifecycle.isCurrent(ticket)) return@launch
             val cm = connectivityManager ?: return@launch
             val directDefault = cm.activeNetwork

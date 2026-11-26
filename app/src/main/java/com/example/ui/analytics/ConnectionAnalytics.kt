@@ -130,6 +130,7 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
                     }
                 }
             }
+            item { FirewallTypeCard(c, state.status) }
             item {
                 AnalyticsCard(c, stringResource(R.string.ui_connection_latency), stringResource(R.string.ui_recent_latency_measurements)) {
                     AnalyticsPlot(c, samples, { it.latencyMs }, unit = "ms")
@@ -183,6 +184,54 @@ internal fun ConnectionAnalyticsScreen(model: ConnectionAnalytics, state: Connec
 }
 
 private const val STAGES_SHOWN = 14
+
+/**
+ * Which firewall type the app is using on this network and where that came from: the behaviour probe
+ * ([com.example.vpn.connectivity.FirewallProbe], only when confident) or the mobile network code.
+ */
+@Composable
+private fun FirewallTypeCard(c: LabColors, status: ConnectionStatus) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val view = androidx.compose.runtime.remember(status) {
+        val key = runCatching { com.example.vpn.smart.NetworkKey.current(context) }.getOrNull()
+        val identity = runCatching { com.example.vpn.smart.NetworkIdentity.current(context) }.getOrNull()
+        val detection = com.example.vpn.connectivity.NetworkFirewalls.detection(key)
+        val probe = com.example.vpn.connectivity.FirewallProbe.store?.latest?.takeIf { it.identity == identity }
+        detection to probe
+    }
+    val (detection, probe) = view
+    val firewall = detection.firewall
+    val detected = when (firewall) {
+        com.example.vpn.connectivity.NetworkFirewalls.Firewall.IRANCELL -> stringResource(R.string.ui_firewall_irancell_type)
+        com.example.vpn.connectivity.NetworkFirewalls.Firewall.MCI -> stringResource(R.string.ui_firewall_mci_type)
+        com.example.vpn.connectivity.NetworkFirewalls.Firewall.RIGHTEL -> firewall.title
+        com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER -> stringResource(R.string.ui_firewall_not_known)
+    }
+    val source = when (detection.source) {
+        com.example.vpn.connectivity.NetworkFirewalls.Source.BEHAVIOUR -> stringResource(R.string.ui_firewall_by_behaviour)
+        com.example.vpn.connectivity.NetworkFirewalls.Source.NETWORK_CODE -> stringResource(R.string.ui_firewall_by_network_code)
+        com.example.vpn.connectivity.NetworkFirewalls.Source.NONE -> stringResource(R.string.ui_firewall_no_source)
+    }
+    val probeText = when {
+        probe == null -> stringResource(R.string.ui_firewall_probe_none)
+        probe.verdict == com.example.vpn.connectivity.FirewallBehaviour.Verdict.IRANCELL_LIKE -> stringResource(R.string.ui_firewall_irancell_type)
+        probe.verdict == com.example.vpn.connectivity.FirewallBehaviour.Verdict.MCI_LIKE -> stringResource(R.string.ui_firewall_mci_type)
+        else -> stringResource(R.string.ui_firewall_probe_unknown)
+    }
+    AnalyticsCard(c, stringResource(R.string.ui_firewall_type), stringResource(R.string.ui_firewall_type_hint)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Metric(c, stringResource(R.string.ui_firewall_detected), detected, Modifier.weight(1f))
+            Metric(c, stringResource(R.string.ui_firewall_source), source, Modifier.weight(1f), c.info)
+            Metric(c, stringResource(R.string.ui_firewall_probe), probeText, Modifier.weight(1f), c.okay)
+        }
+        if (detection.source == com.example.vpn.connectivity.NetworkFirewalls.Source.BEHAVIOUR &&
+            detection.byCode != com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER && detection.byCode != firewall) {
+            LabText(stringResource(R.string.ui_firewall_code_differs, detection.byCode.title), c.text2, 12.sp, maxLines = 2)
+        }
+        probe?.let { LabText("${stageTime(it.measuredAt)} · ${it.summary()}", c.text3, 11.sp, maxLines = 2) }
+        LabText(stringResource(R.string.ui_firewall_unverified), c.text3, 11.sp, maxLines = 3)
+    }
+}
 
 private fun stageTime(at: Long): String =
     java.text.SimpleDateFormat("HH:mm:ss", Locale.US).format(java.util.Date(at))

@@ -1747,4 +1747,19 @@
     <string name="ui_connection_stages">Этапы подключения</string>
     <string name="ui_connection_stages_hint">Что делал каждый движок при подключении, новые внизу</string>
     <string name="ui_connection_stages_empty">Этапы появятся здесь, когда начнётся подключение.</string>
+    <string name="ui_firewall_type">Тип фильтрации</string>
+    <string name="ui_firewall_type_hint">Какие рецепты обхода получает эта сеть и откуда это известно</string>
+    <string name="ui_firewall_detected">Используется</string>
+    <string name="ui_firewall_source">Источник</string>
+    <string name="ui_firewall_probe">Проверка</string>
+    <string name="ui_firewall_irancell_type">Как у Irancell</string>
+    <string name="ui_firewall_mci_type">Как у MCI</string>
+    <string name="ui_firewall_not_known">Неизвестно</string>
+    <string name="ui_firewall_by_behaviour">Поведение сети</string>
+    <string name="ui_firewall_by_network_code">Код мобильной сети</string>
+    <string name="ui_firewall_no_source">Нет данных</string>
+    <string name="ui_firewall_probe_none">Ещё не запускалась</string>
+    <string name="ui_firewall_probe_unknown">Неясно</string>
+    <string name="ui_firewall_code_differs">Код мобильной сети указывает на %1$s, но сеть ведёт себя как другой фильтр.</string>
+    <string name="ui_firewall_unverified">Проверка поведения запускается при подключении, не чаще раза в день для каждой сети, и используется только при ясном результате. Её правила ещё не подтверждены на телефонах.</string>
 </resources>

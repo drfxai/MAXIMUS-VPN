@@ -1748,4 +1748,19 @@
     <string name="ui_connection_stages">Connection stages</string>
     <string name="ui_connection_stages_hint">What each engine did while connecting, newest last</string>
     <string name="ui_connection_stages_empty">Stages appear here once a connection starts.</string>
+    <string name="ui_firewall_type">Firewall type</string>
+    <string name="ui_firewall_type_hint">Which filtering recipes this network gets, and how the app knows</string>
+    <string name="ui_firewall_detected">In use</string>
+    <string name="ui_firewall_source">From</string>
+    <string name="ui_firewall_probe">Probe</string>
+    <string name="ui_firewall_irancell_type">Irancell-type</string>
+    <string name="ui_firewall_mci_type">MCI-type</string>
+    <string name="ui_firewall_not_known">Not known</string>
+    <string name="ui_firewall_by_behaviour">Network behaviour</string>
+    <string name="ui_firewall_by_network_code">Mobile network code</string>
+    <string name="ui_firewall_no_source">Nothing to go on</string>
+    <string name="ui_firewall_probe_none">Not run yet</string>
+    <string name="ui_firewall_probe_unknown">Unclear</string>
+    <string name="ui_firewall_code_differs">The mobile network code says %1$s, but this network behaves like the other firewall.</string>
+    <string name="ui_firewall_unverified">The behaviour check runs at Connect, at most once a day per network, and is used only when its result is clear. Its rules are not yet confirmed on phones.</string>
 </resources>
