@@ -56,19 +56,24 @@ object MaximusMeshManager {
     private val _activeRelayFlow = MutableStateFlow<PeerNode?>(null)
     val activeRelayFlow: StateFlow<PeerNode?> = _activeRelayFlow.asStateFlow()
 
+    private val unavailableNoted = AtomicBoolean(false)
+
+    /** The LAN mesh is not available in this build: noted once per process, never "stopped" when it never ran. */
     fun startMesh() {
         stopMesh()
-        XrayLogManager.w("MESH", "LAN mesh disabled until peer authentication and replay protection are implemented")
+        if (GodModeLogOnce.first(unavailableNoted)) {
+            XrayLogManager.w("MESH", "LAN mesh is not available in this build (peer authentication and replay protection are not implemented).")
+        }
     }
 
     fun stopMesh() {
-        isMeshRunning.set(false)
+        val wasRunning = isMeshRunning.getAndSet(false)
         meshJob?.cancel()
         meshJob = null
         activePeers.clear()
         _peersFlow.value = emptyList()
         _activeRelayFlow.value = null
-        XrayLogManager.appendLog("GOD MODE: Maximus Mesh stopped.", "MESH")
+        if (wasRunning) XrayLogManager.appendLog("GOD MODE: Maximus Mesh stopped.", "MESH")
     }
 
     fun isRunning(): Boolean = isMeshRunning.get()

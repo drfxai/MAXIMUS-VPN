@@ -60,13 +60,21 @@ class TorStartDeadline(
     private var deadline = startedAt + baseMs
     private var best = -1
 
-    /** Reads one line from [TorProgress.newLines]; a higher "Tor N%" moves the deadline out. */
-    fun saw(line: String, now: Long) {
-        val percent = percentOf(line) ?: return
-        if (percent <= best) return
+    /** Reads one line from [TorProgress.newLines]; a higher "Tor N%" moves the deadline out. True when it moved. */
+    fun saw(line: String, now: Long): Boolean {
+        val percent = percentOf(line) ?: return false
+        if (percent <= best) return false
         best = percent
+        val before = deadline
         deadline = maxOf(deadline, minOf(now + stallMs, startedAt + capMs))
+        return deadline > before
     }
+
+    /** When this start gives up unless Tor's bootstrap advances again (wall clock). */
+    val readyBy: Long get() = deadline
+
+    /** The highest bootstrap percentage seen, or -1. */
+    val percent: Int get() = best
 
     fun expired(now: Long): Boolean = now >= deadline
 

@@ -129,6 +129,31 @@ object ConnectDeadline {
     fun shownReadyMs(readyMs: Long, manual: Boolean, smartBudgetMs: Long): Long =
         if (manual) readyMs else minOf(readyMs, smartBudgetMs)
 
+    /** Tor's own start deadline at most ([com.example.vpn.sidecar.TorStartDeadline.CAP_MS]) plus the traffic check. */
+    const val TOR_MANUAL_CAP_MS = com.example.vpn.sidecar.TorStartDeadline.CAP_MS + VERIFY_MARGIN_MS
+
+    /**
+     * The "engine starting" stage text, with the number the deadline really applies. A manual Tor pick is limited by
+     * the connect deadline ([manualBudgetMs], 180 s), not by Tor's 120 s readiness window, and both move out while
+     * Tor's bootstrap advances (build 177: "ready within 120s", cut at 180 s at 30 %). Pure.
+     */
+    fun startingText(engineId: String, readyMs: Long, manual: Boolean, smartBudgetMs: Long, manualBudgetMs: Long): String {
+        if (manual && engineId == com.example.vpn.sidecar.TorSidecar.ID) {
+            return "ready within ${maxOf(readyMs, manualBudgetMs) / 1000}s (longer while Tor's bootstrap keeps advancing, " +
+                "at most ${TOR_MANUAL_CAP_MS / 1000}s)"
+        }
+        val shown = shownReadyMs(readyMs, manual, smartBudgetMs)
+        return "ready within ${shown / 1000}s" + if (shown < readyMs) " (Smart Connect's limit; the engine allows ${readyMs / 1000}s)" else ""
+    }
+
+    /** Aether / Serverless: their carrier test runs before the engine is handed over. Pure. */
+    fun carrierTestText(engineId: String, budgetMs: Long): String =
+        "testing carriers" + (if (engineId == com.example.vpn.sidecar.AetherSidecar.ID) " (gateway scan)" else "") +
+            " · ready within ${budgetMs / 1000}s"
+
+    /** The engine came from its carrier test after [elapsedMs]. Pure. */
+    fun carrierChosenText(elapsedMs: Long): String = "carrier chosen by its test after ${elapsedMs / 1000}s"
+
     /**
      * True when the attempt is still waiting for traffic at [now]. A saved config ([engineProfile] false) is timed only
      * while its tunnel is up without traffic.

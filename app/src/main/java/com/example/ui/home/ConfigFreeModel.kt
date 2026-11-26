@@ -15,6 +15,8 @@ internal enum class ConfigFreeStatus(val detail: Int?) {
     VERIFIED(R.string.config_free_verified),
     LIMITED(R.string.config_free_limited),
     INTERRUPTED(R.string.config_free_interrupted),
+    /** The attempt ended FAILED (build 177 said "Connection interrupted" for a pick that never connected). */
+    FAILED(R.string.config_free_failed),
     STOPPING(R.string.config_free_stopping)
 }
 
@@ -36,7 +38,8 @@ internal object ConfigFreeStatusModel {
 
     fun of(requested: Boolean, state: ConnectionState): ConfigFreeStatus = when {
         !requested -> ConfigFreeStatus.READY
-        state.status in setOf(ConnectionStatus.FAILED, ConnectionStatus.DEGRADED) -> ConfigFreeStatus.INTERRUPTED
+        state.status == ConnectionStatus.FAILED -> ConfigFreeStatus.FAILED
+        state.status == ConnectionStatus.DEGRADED -> ConfigFreeStatus.INTERRUPTED
         state.status in setOf(ConnectionStatus.RECONNECTING, ConnectionStatus.SWITCHING,
             ConnectionStatus.NETWORK_CHANGED) -> ConfigFreeStatus.RECONNECTING
         state.status == ConnectionStatus.DISCONNECTING -> ConfigFreeStatus.STOPPING
@@ -57,4 +60,62 @@ internal object ConfigFreeStatusModel {
 internal object ConfigFreePickerCounts {
     fun methods(): Int = ConfigFreeMethod.entries.count { it.aetherTransport == null }
     fun chains(): Int = ConfigFreeMethod.entries.count { it.aetherTransport != null }
+}
+
+/**
+ * Home's headline after a failed Connect: "Connection failed" and the specific reason, shortened to its first clause,
+ * instead of "Not connected / Tap the button to connect" with the reason far below the fold (build 177, B7). Pure.
+ */
+internal object HomeFailure {
+    const val MAX_REASON = 160
+
+    /**
+     * The reason to show under the headline, or null when the state is not a failure with a message. When the message
+     * ends with one of [blockNotices] (traffic blocked by the Kill Switch or the mode, or the block released), that
+     * sentence follows on its own line, so Home always says whether apps have internet (build 177, B2 and B20).
+     */
+    fun reason(state: ConnectionState, blockNotices: List<String> = emptyList()): String? {
+        if (state.status != ConnectionStatus.FAILED) return null
+        val message = state.errorMessage ?: return null
+        val notice = blockNotices.filter { it.isNotBlank() && message.contains(it) }.maxByOrNull { it.length }
+        val rest = if (notice == null) message else message.replace(notice, "").trim()
+        val first = short(rest)
+        return when {
+            notice == null -> first
+            first == null -> notice
+            else -> first + "\n" + notice
+        }
+    }
+
+    /** The message up to its first sentence end (or [MAX_REASON] characters). */
+    fun short(message: String?): String? {
+        val text = message?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val end = Regex("[.!?。](\\s|$)").find(text)?.range?.first?.plus(1) ?: text.length
+        val first = text.substring(0, end).trim()
+        return if (first.length <= MAX_REASON) first else first.take(MAX_REASON - 1).trimEnd() + "…"
+    }
+}
+
+/**
+ * The picker's line under each built-in connection, as a string resource (build 177, B19: the Russian picker showed the
+ * catalogue's English descriptions). [ConfigFreeMethod.description] stays English for logs. Pure.
+ */
+internal object ConfigFreeMethodText {
+    fun description(method: ConfigFreeMethod): Int = when (method) {
+        ConfigFreeMethod.AETHER_WARP -> R.string.picker_desc_aether_warp
+        ConfigFreeMethod.TOR_SNOWFLAKE -> R.string.picker_desc_tor
+        ConfigFreeMethod.SERVERLESS -> R.string.picker_desc_serverless
+        ConfigFreeMethod.PSIPHON -> R.string.picker_desc_psiphon
+        ConfigFreeMethod.SHIROKHORSHID -> R.string.picker_desc_shirokhorshid
+        ConfigFreeMethod.PSIPHON_RADIANCE -> R.string.picker_desc_psiphon_radiance
+        ConfigFreeMethod.RADIANCE -> R.string.picker_desc_radiance
+        ConfigFreeMethod.AETHER_H2 -> R.string.picker_desc_aether_h2
+        ConfigFreeMethod.AETHER_H3 -> R.string.picker_desc_aether_h3
+        ConfigFreeMethod.AETHER_WG -> R.string.picker_desc_aether_wg
+        ConfigFreeMethod.AETHER_GOOL -> R.string.picker_desc_aether_gool
+        ConfigFreeMethod.AETHER_GOOL_CLASSIC -> R.string.picker_desc_aether_wiw
+        ConfigFreeMethod.AETHER_MIM -> R.string.picker_desc_aether_mim
+        ConfigFreeMethod.AETHER_PSIPHON -> R.string.picker_desc_aether_psiphon
+        ConfigFreeMethod.AETHER_TOR -> R.string.picker_desc_aether_tor
+    }
 }
