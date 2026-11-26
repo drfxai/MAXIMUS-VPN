@@ -7,6 +7,7 @@ package com.example.vpn.sidecar
  * support parses the option and rejects the short length (EINVAL); one without it does not know the option
  * (ENOPROTOOPT). ByeDPI runs under the app's own uid, so it gets the same answer.
  *
+ * Android 8.0+ only (the public setsockoptInt); older phones never get the MD5 decoy.
  * Not yet verified on a device: if the check is wrong, the MD5 candidate fails its real request and is not
  * tried again on that network for a few days ([com.example.vpn.smart.FakeSniMemory]).
  */
@@ -28,6 +29,13 @@ object Md5SigSupport {
     fun supported(): Boolean = cached ?: classify(runCatching { probe() }.getOrElse { ENOPROTOOPT }).also { cached = it }
 
     private fun probeErrno(): Int? {
+        // Os.setsockoptInt is public from API 26; on Android 7 the MD5 decoy is simply not offered.
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return ENOPROTOOPT
+        return probeErrnoO()
+    }
+
+    @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.O)
+    private fun probeErrnoO(): Int? {
         val fd = android.system.Os.socket(android.system.OsConstants.AF_INET, android.system.OsConstants.SOCK_STREAM,
             android.system.OsConstants.IPPROTO_TCP)
         return try {
