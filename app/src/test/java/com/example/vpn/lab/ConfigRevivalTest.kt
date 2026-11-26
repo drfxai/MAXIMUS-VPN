@@ -191,10 +191,20 @@ class ConfigRevivalTest {
 
     @Test fun irancellTriesItsOwnFragmentRecipeFirst() {
         val dead = cf("i", "i.example.workers.dev")
-        val first = tried(revival(), dead, "cell:43235").first()
+        val sent = tried(revival(), dead, "cell:43235")
+        val first = sent.first()
+        // patterniha's F&F leads on Irancell: tlshello-0-len, Go TLS with the semi-python ciphers, HTTP/1.1 for WebSocket.
         assertEquals(BpbFix.FINAL_MASK_ORIGINAL, first.finalMask)
-        assertEquals(BpbFix.FIREFOX_CIPHER_SUITES, first.cipherSuites)
+        assertEquals(BpbFix.SEMI_PYTHON_CIPHER_SUITES, first.cipherSuites)
         assertEquals("unsafe", first.fingerprint)
+        assertEquals("http/1.1", first.alpn)
+        assertEquals(dead.address, first.address)
+        // Then the same at patterniha's clean Cloudflare IPv4 (none validated here), then the community Firefox recipe.
+        assertEquals(RecoveryProfiles.IRANCELL_FF_CLEAN_IPV4, sent[1].address)
+        assertEquals(BpbFix.SEMI_PYTHON_CIPHER_SUITES, sent[1].cipherSuites)
+        assertEquals(dead.sni, sent[1].sni)
+        assertEquals(BpbFix.FIREFOX_CIPHER_SUITES, sent[2].cipherSuites)
+        assertEquals(BpbFix.FINAL_MASK_ORIGINAL, sent[2].finalMask)
         // The user's choice wins over the detected network.
         val chosen = tried(revival(), cf("j", "j.example.workers.dev"), "cell:43235", NetworkFirewalls.Firewall.MCI)
         assertTrue(chosen.all { it.finalMask.isBlank() || it.finalMask == IranHelloSplit.MASK })
