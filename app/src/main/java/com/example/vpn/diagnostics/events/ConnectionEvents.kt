@@ -42,6 +42,9 @@ object ConnectionEvents {
                 put("to", new.status.name)
                 if (new.status == ConnectionStatus.CONNECTED) new.verifiedAt?.let { put("verified.at", it.toString()) }
                 if (new.status == ConnectionStatus.FAILED || new.status == ConnectionStatus.DEGRADED) new.errorMessage?.let { put("message", it.take(300)) }
+                // Build 178: a session that went to DISCONNECTING said nothing about who stopped it.
+                if (new.status == ConnectionStatus.DISCONNECTING || new.status == ConnectionStatus.DISCONNECTED)
+                    new.stopReason?.let { put("reason", it.take(200)) }
             }
             // A status is what the app concluded from measurements: an assessment.
             events += ev("connection.state", severity, attrs,
@@ -50,7 +53,8 @@ object ConnectionEvents {
             if (new.status == ConnectionStatus.DISCONNECTED && old.sessionId != null) {
                 events += DiagEvent(timestamp = now, severity = Severity.INFO, name = "session.end", sessionId = old.sessionId,
                     attemptId = old.attemptId, profileRef = refOf(old.activeProfile?.id), engine = old.activeEngineName,
-                    durationMs = old.connectedDurationSeconds * 1000)
+                    durationMs = old.connectedDurationSeconds * 1000,
+                    attributes = (new.stopReason ?: old.stopReason)?.let { mapOf("reason" to it.take(200)) } ?: emptyMap())
             }
         }
         if (new.networkGeneration != old.networkGeneration && new.status != ConnectionStatus.DISCONNECTED) {

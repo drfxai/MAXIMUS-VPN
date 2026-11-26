@@ -107,12 +107,13 @@ class PsiphonSidecarTest {
             assertFalse(direct.has("LimitTunnelProtocols"))
             val chained = PsiphonSidecar.buildConfig(JSONObject(settings), "", 40123, dir, upstreamSocks = 40124)
             assertFalse(chained.has("ConnectionWorkerPoolSize"))
-            // The build's own choices still win.
+            // The build's own choices still win, except EmitDiagnosticNotices: the app reads those notices to see
+            // whether Psiphon dials at all (build 178: the public settings' false made every start look silent).
             val own = PsiphonSidecar.buildConfig(JSONObject(settings).put("ConnectionWorkerPoolSize", 4)
                 .put("EstablishTunnelPausePeriodSeconds", 5).put("EmitDiagnosticNotices", false), "", 40123, dir)
             assertEquals(4, own.getInt("ConnectionWorkerPoolSize"))
             assertEquals(5, own.getInt("EstablishTunnelPausePeriodSeconds"))
-            assertFalse(own.getBoolean("EmitDiagnosticNotices"))
+            assertTrue(own.getBoolean("EmitDiagnosticNotices"))
         } finally {
             dir.deleteRecursively()
         }

@@ -52,8 +52,18 @@ object DiagnosticReportBuilder {
         /** EngineRegistry.statuses on the current network: bundled, configured and what each engine did here. */
         val engines: List<EngineStatus> = emptyList(),
         /** TunPathStatus.view(): whether the app is excluded from its own VPN and what the TUN forwarded. */
-        val tunPath: com.example.vpn.verify.TunPathStatus.View? = null
-    )
+        val tunPath: com.example.vpn.verify.TunPathStatus.View? = null,
+        /**
+         * The engine of the session's last attempt (EngineStages.engineOf its profile) when no engine runs now. Build 178
+         * field report: a failed Aether attempt showed "Engine none".
+         */
+        val lastEngine: String? = null
+    ) {
+        /** The engine line: the running engine, else the last attempt's engine and how it ended. */
+        val engineLabel: String get() = connection.activeEngineName
+            ?: lastEngine?.takeIf { it.isNotBlank() && it != "none" }?.let { "$it (last attempt, ${connection.status.name.lowercase()})" }
+            ?: "none"
+    }
 
     private fun time(ms: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
         .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(ms))
@@ -78,7 +88,9 @@ object DiagnosticReportBuilder {
                 .put("model", i.env.device))
             .put("engine", JSONObject()
                 .put("name", c.activeEngineName ?: JSONObject.NULL)
+                .put("lastAttempt", i.lastEngine?.takeIf { c.activeEngineName == null && it != "none" } ?: JSONObject.NULL)
                 .put("version", i.env.engineVersion))
+            .put("stopReason", c.stopReason ?: JSONObject.NULL)
             .put("session", JSONObject()
                 .put("sessionId", c.sessionId ?: JSONObject.NULL)
                 .put("attemptId", c.attemptId ?: JSONObject.NULL)
@@ -168,7 +180,8 @@ object DiagnosticReportBuilder {
         sb.appendLine("Generated ${time(i.generatedAt)} · report schema $SCHEMA_VERSION")
         sb.appendLine("App ${i.env.appVersion} (${i.env.versionCode}) · build ${i.env.buildCommit} · ${i.env.buildTime}")
         sb.appendLine("Android ${i.env.androidVersion} (API ${i.env.sdkInt}) · ${i.env.device}")
-        sb.appendLine("Engine ${c.activeEngineName ?: "none"} · ${i.env.engineVersion}")
+        sb.appendLine("Engine ${i.engineLabel} · ${i.env.engineVersion}")
+        c.stopReason?.let { sb.appendLine("Last stop: $it") }
         sb.appendLine()
         sb.appendLine("Connection: ${c.statusLabel}" + (c.failureStage?.let { " · stage $it" } ?: ""))
         c.verifiedAt?.let { sb.appendLine("Traffic last verified: ${time(it)}") }

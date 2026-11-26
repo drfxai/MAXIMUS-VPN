@@ -114,7 +114,7 @@ class VpnViewModel(
             onRequestPermission(prepareIntent)
         } else if (targetProfile != null) {
             // Shown on the tap, before the service starts and reaches its own first step.
-            RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null) }
+            RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null, stopReason = null) }
             VpnController.startVpn(context, targetProfile, smart = smart, exact = exact)
         } else {
             viewModelScope.launch {
@@ -179,7 +179,7 @@ class VpnViewModel(
         val profile = com.example.vpn.connections.BuiltinConnections.resolve(context,
             com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod.AETHER_WARP.id)
             ?: com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod.AETHER_WARP.profile()
-        RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null) }
+        RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null, stopReason = null) }
         VpnController.startVpn(context, profile, smart = true, exact = false)
     }
 
@@ -195,16 +195,22 @@ class VpnViewModel(
         )
     }
 
-    fun toggleConnection(context: Context, onRequestPermission: ((Intent) -> Unit)? = null) {
+    fun toggleConnection(context: Context, origin: com.example.vpn.StopOrigin = com.example.vpn.StopOrigin.POWER_BUTTON,
+                         onRequestPermission: ((Intent) -> Unit)? = null) {
         val currentState = connectionState.value
         // FAILED keeps the protective block in place, so the button must release it rather than
         // retry the same failing profile forever.
         if (currentState.isTunnelUp || currentState.isBusy || currentState.status == ConnectionStatus.FAILED) {
+            // A second tap right after the Connect tap is part of that tap (StopGuard, build 178 field report).
+            if (currentState.status != ConnectionStatus.FAILED && com.example.vpn.StopGuard.swallow(origin)) {
+                VpnController.stopVpn(context, origin)
+                return
+            }
             // The button answers on the tap; the service then tears down (it sets the same state itself).
             if (currentState.status != ConnectionStatus.FAILED) {
                 RayVpnService.mutateState { it.copy(status = ConnectionStatus.DISCONNECTING) }
             }
-            VpnController.stopVpn(context)
+            VpnController.stopVpn(context, origin)
         } else {
             if (settingsRepository.getSettings().operationalMode == com.example.data.model.OperationalMode.UNLOCK) {
                 connectUnlock(context) { intent -> onRequestPermission?.invoke(intent) }
@@ -226,11 +232,11 @@ class VpnViewModel(
         val prepareIntent = VpnController.prepareVpn(context)
         if (prepareIntent != null) {
             pendingUnlock = true
-            RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null) }
+            RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null, stopReason = null) }
             onRequestPermission(prepareIntent)
             return
         }
-        RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null) }
+        RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null, stopReason = null) }
         VpnController.startUnlock(context)
     }
 

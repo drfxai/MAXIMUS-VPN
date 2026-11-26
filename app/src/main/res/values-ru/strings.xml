@@ -1877,4 +1877,10 @@
     <string name="ui_firewall_probe_unknown">Неясно</string>
     <string name="ui_firewall_code_differs">Код мобильной сети указывает на %1$s, но сеть ведёт себя как другой фильтр.</string>
     <string name="ui_firewall_unverified">Проверка поведения запускается при подключении, не чаще раза в день для каждой сети, и используется только при ясном результате. Её правила ещё не подтверждены на телефонах.</string>
+    <!-- Build 178 field report -->
+    <string name="picker_aether_cf_filtered">В этой сети Cloudflare фильтруется (cf=0): WARP здесь подключается редко. Выбор запускает одну короткую проверку (до %1$d с); обычно работают Lantern или Serverless.</string>
+    <string name="unlock_error_no_server_retried">В этой сети ни один сервер Unlock DNS не ответил правильно после %1$d проверок. Проверьте серверы заново или добавьте свой DNS.</string>
+    <string name="unlock_notification_rechecking">Серверы Unlock DNS пока не ответили; проверяем ещё раз…</string>
+    <string name="picker_desc_shirokhorshid_radiance">Lantern переносит подключение к Shir o Khorshid (явная цепочка)</string>
+    <string name="picker_desc_aether_lantern">WARP через сеть Lantern, в обход фильтруемых адресов Cloudflare (явная цепочка)</string>
 </resources>

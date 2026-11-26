@@ -32,6 +32,8 @@ object VpnController {
      * Initiates VPN connection with a specific VLESS profile.
      */
     fun startVpn(context: Context, profile: VlessProfile, smart: Boolean = false, force: Boolean = false, exact: Boolean = false) {
+        // A second tap right after this one is read as part of it, not as a Stop (StopGuard).
+        StopGuard.markConnectTap()
         context.stopService(Intent(context, com.example.vpn.share.LocalProxyService::class.java))
         val intent = Intent(context, RayVpnService::class.java).apply {
             action = RayVpnService.ACTION_CONNECT
@@ -51,23 +53,40 @@ object VpnController {
      * Unlock DNS choices itself (see RayVpnService.connectUnlockLocked).
      */
     fun startUnlock(context: Context) {
+        StopGuard.markConnectTap()
         context.stopService(Intent(context, com.example.vpn.share.LocalProxyService::class.java))
         val intent = Intent(context, RayVpnService::class.java).apply { action = RayVpnService.ACTION_CONNECT }
         ContextCompat.startForegroundService(context, intent)
     }
 
     /**
-     * Stops the running VPN connection and tears down the tunnel cleanly.
+     * Stops the running VPN connection and tears down the tunnel cleanly. [origin] says who asked (the service records
+     * it with the session, build 178 field report). Returns false when the tap was read as the tail of the Connect tap
+     * that just started the session ([StopGuard]) and nothing was stopped.
      */
-    fun stopVpn(context: Context) {
+    fun stopVpn(context: Context, origin: StopOrigin = StopOrigin.UNKNOWN): Boolean {
+        val since = StopGuard.sinceConnectTap()
+        // A failed session holds nothing worth protecting from a quick second tap: its Stop always goes through.
+        if (connectionState.value.status != com.example.data.model.ConnectionStatus.FAILED && StopGuard.swallow(origin)) {
+            runCatching {
+                com.example.xray.XrayLogManager.i("VPN", "Stop from ${origin.label} ${since} ms after the Connect tap: read as " +
+                    "the same tap (double tap), the connection keeps going.")
+                com.example.vpn.diagnostics.events.EventLog.event("session.stop_ignored", attributes = mapOf(
+                    "origin" to origin.key, "since.connect.ms" to (since ?: -1L).toString(),
+                    "status" to connectionState.value.status.name, "why" to "double tap within ${StopGuard.DOUBLE_TAP_MS} ms"))
+            }
+            return false
+        }
         val intent = Intent(context, RayVpnService::class.java).apply {
             action = RayVpnService.ACTION_DISCONNECT
+            putExtra(RayVpnService.EXTRA_STOP_ORIGIN, origin.key)
         }
         try {
             context.startService(intent)
         } catch (_: Exception) {
             ContextCompat.startForegroundService(context, intent)
         }
+        return true
     }
 
     /**

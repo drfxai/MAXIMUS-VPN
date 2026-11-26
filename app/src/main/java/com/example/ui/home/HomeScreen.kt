@@ -614,7 +614,7 @@ fun HomeScreen(
                     selectedName = selectedProfile?.takeIf { it.id == connectionState.selectedProfileId }?.name,
                     onStop = {
                         showSearch = false
-                        com.example.vpn.VpnController.stopVpn(context)
+                        com.example.vpn.VpnController.stopVpn(context, com.example.vpn.StopOrigin.SMART_SHEET)
                     },
                     onDismiss = { showSearch = false }
                 )
@@ -644,7 +644,7 @@ fun HomeScreen(
                 isConnected = connectionState.isConnected,
                 tradeSet = topNodes,
                 onConnect = {
-                    vpnViewModel.toggleConnection(context) { onRequestVpnPermission() }
+                    vpnViewModel.toggleConnection(context, com.example.vpn.StopOrigin.TRADE_CARD) { onRequestVpnPermission() }
                 }
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -659,7 +659,7 @@ fun HomeScreen(
                         onRequestVpnPermission()
                     }
                 },
-                onStop = { com.example.vpn.VpnController.stopVpn(context) }
+                onStop = { com.example.vpn.VpnController.stopVpn(context, com.example.vpn.StopOrigin.SMART_BUTTON) }
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -672,7 +672,7 @@ fun HomeScreen(
                         onRequestVpnPermission()
                     }
                 },
-                onStop = { com.example.vpn.VpnController.stopVpn(context) },
+                onStop = { com.example.vpn.VpnController.stopVpn(context, com.example.vpn.StopOrigin.CONFIG_FREE_BUTTON) },
                 onConfigureEngines = onConfigureConnectionEngines,
                 onConfigureAether = onConfigureAether,
                 onConfigureChain = onConfigureChain,
@@ -1421,9 +1421,14 @@ private fun ConfigFreeMethodPicker(
     val context = LocalContext.current
     var transports by rememberSaveable { mutableStateOf(false) }
     var availability by remember { mutableStateOf<Map<ConfigFreeMethod, String?>?>(null) }
+    // Build 178: cf=0 already known on this network: Aether rows say so before a pick starts a scan.
+    var cloudflareFiltered by remember { mutableStateOf(false) }
     var shirokhorshidSettings by remember { mutableStateOf(false) }
     if (shirokhorshidSettings) com.example.ui.connections.ShirokhorshidSettingsDialog(onDismiss = { shirokhorshidSettings = false })
     LaunchedEffect(Unit) {
+        cloudflareFiltered = withContext(Dispatchers.IO) {
+            com.example.vpn.connections.AetherCloudflareNotice.knownFiltered(context)
+        }
         availability = withContext(Dispatchers.IO) {
             ConfigFreeMethod.entries.associateWith { method ->
                 runCatching {
@@ -1491,7 +1496,7 @@ private fun ConfigFreeMethodPicker(
                             Triple(R.string.ui_picker_nested, R.string.ui_picker_nested_hint,
                                 listOf(ConfigFreeMethod.AETHER_GOOL, ConfigFreeMethod.AETHER_GOOL_CLASSIC, ConfigFreeMethod.AETHER_MIM)),
                             Triple(R.string.ui_picker_chains, R.string.ui_picker_chains_hint,
-                                listOf(ConfigFreeMethod.AETHER_PSIPHON, ConfigFreeMethod.AETHER_TOR))
+                                listOf(ConfigFreeMethod.AETHER_PSIPHON, ConfigFreeMethod.AETHER_TOR, ConfigFreeMethod.AETHER_LANTERN))
                         ) else listOf(
                             Triple(R.string.ui_picker_direct_engines, R.string.ui_picker_direct_engines_hint,
                                 listOf(ConfigFreeMethod.AETHER_WARP, ConfigFreeMethod.SERVERLESS)),
@@ -1510,7 +1515,11 @@ private fun ConfigFreeMethodPicker(
                                 entries.forEachIndexed { index, method ->
                                     val problem = methods[method]
                                     if (index > 0) PickerDivider()
-                                    ConfigMethodRow(method.title, problem ?: stringResource(ConfigFreeMethodText.description(method)), method.pickerIcon(), accent,
+                                    val cfWarning = problem == null && cloudflareFiltered &&
+                                        com.example.vpn.connections.AetherCloudflareNotice.appliesTo(method)
+                                    ConfigMethodRow(method.title, problem ?: if (cfWarning) stringResource(R.string.picker_aether_cf_filtered,
+                                            (com.example.vpn.connections.ConnectionEngineRunner.CF_FILTERED_MANUAL_BUDGET_MS / 1000).toInt())
+                                        else stringResource(ConfigFreeMethodText.description(method)), method.pickerIcon(), accent,
                                         if (problem == null) ({ onSelect(method) }) else null,
                                         badge = method.pickerBadge(), chip = when (method) {
                                             ConfigFreeMethod.AETHER_H2 -> "H2"
@@ -1549,7 +1558,7 @@ private fun ConfigFreeMethod.pickerIcon(): androidx.compose.ui.graphics.vector.I
     ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Rounded.Opacity
     ConfigFreeMethod.PSIPHON -> Icons.Filled.Shield
     ConfigFreeMethod.SHIROKHORSHID -> Icons.Filled.WbSunny
-    ConfigFreeMethod.PSIPHON_RADIANCE -> Icons.Rounded.Layers
+    ConfigFreeMethod.PSIPHON_RADIANCE, ConfigFreeMethod.SHIROKHORSHID_RADIANCE, ConfigFreeMethod.AETHER_LANTERN -> Icons.Rounded.Layers
     ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
     ConfigFreeMethod.AETHER_GOOL -> Icons.Rounded.CropFree
     ConfigFreeMethod.AETHER_GOOL_CLASSIC, ConfigFreeMethod.AETHER_MIM -> Icons.Rounded.Layers

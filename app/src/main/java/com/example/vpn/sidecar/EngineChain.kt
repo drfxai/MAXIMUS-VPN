@@ -13,7 +13,7 @@ object EngineChain {
     data class Chain(val hops: List<Hop>)
 
     /** Engine ids that can be chained, in a stable order for the picker. */
-    val CHAINABLE: List<String> = listOf("psiphon", "tor", "masque", "matrix-transport", "aether", ServerlessSidecar.ID, RadianceSidecar.id, SingBoxSidecar.id)
+    val CHAINABLE: List<String> = listOf("psiphon", ShirokhorshidSidecar.ID, "tor", "masque", "matrix-transport", "aether", ServerlessSidecar.ID, RadianceSidecar.id, SingBoxSidecar.id)
 
     private val carrierOnly = setOf("aether", "masque", "matrix-transport", ServerlessSidecar.ID, RadianceSidecar.id)
 
@@ -52,6 +52,7 @@ object EngineChain {
     /** The saved profile that stands for one hop's engine (Psiphon with its region, Tor with its bridges). */
     fun hopProfile(hop: Hop): VlessProfile = when (hop.engineId) {
         "psiphon" -> PsiphonSidecar.profile(hop.region)
+        ShirokhorshidSidecar.ID -> ShirokhorshidSidecar.profile(ShirokhorshidSidecar.Options(region = hop.region))
         "tor" -> TorSidecar.profile(hop.bridges)
         "masque" -> MasqueSidecar.profile()
         "matrix-transport" -> MatrixTransportSidecar.profile("h2")
@@ -90,6 +91,7 @@ object EngineChain {
 
     fun titleOf(id: String): String = when (id) {
         "psiphon" -> "Psiphon"
+        ShirokhorshidSidecar.ID -> "Shir o Khorshid"
         "tor" -> "Tor"
         "masque" -> "WARP MASQUE"
         "matrix-transport" -> "Matrix Transport"

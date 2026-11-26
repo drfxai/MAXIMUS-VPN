@@ -25,6 +25,10 @@ object BuiltinConnections {
             "Community Psiphon fork for Iran: Conduit, CDN fronting"),
         PSIPHON_RADIANCE("config-free-psiphon-radiance", "Psiphon over Lantern",
             "Lantern carries the connection to the Psiphon network"),
+        // Build 178 field report: Shir o Khorshid alone found no tunnel on Irancell while Psiphon over Lantern worked. An
+        // explicit, separately labelled chain; a plain Shir o Khorshid pick never goes through Lantern by itself.
+        SHIROKHORSHID_RADIANCE("config-free-shirokhorshid-radiance", "Shir o Khorshid over Lantern",
+            "Lantern carries the connection to Shir o Khorshid (an explicit chain)"),
         // Build 177 (B14): the Radiance engine ships inside the app; "when the engine is installed" was outdated.
         RADIANCE("config-free-radiance", "Lantern / Radiance", "Lantern network; the engine is built into the app"),
         AETHER_H2("config-free-aether-h2", "MASQUE HTTP/2", "TCP transport", "h2"),
@@ -35,7 +39,11 @@ object BuiltinConnections {
         AETHER_MIM("config-free-aether-mim", "MASQUE-in-MASQUE", "Nested MASQUE transport", "mim"),
         AETHER_PSIPHON("config-free-aether-psiphon", "Aether → Psiphon",
             "Psiphon exits through an Aether carrier", "h2"),
-        AETHER_TOR("config-free-aether-tor", "Aether → Tor", "Tor exits through an Aether carrier", "h2");
+        AETHER_TOR("config-free-aether-tor", "Aether → Tor", "Tor exits through an Aether carrier", "h2"),
+        // Build 178: Cloudflare filtered (cf=0) on every Aether carrier. An explicit pick: WARP MASQUE HTTP/2 dialled through
+        // the Lantern hop, so the phone never reaches a filtered Cloudflare address itself. Never inside a plain Aether pick.
+        AETHER_LANTERN("config-free-aether-lantern", "Aether over Lantern",
+            "WARP through the Lantern network, avoiding filtered Cloudflare addresses (an explicit chain)", "h2");
 
         fun profile(): VlessProfile = when (this) {
             AETHER_WARP -> AetherSidecar.profile()
@@ -47,6 +55,13 @@ object BuiltinConnections {
                 EngineChain.Hop(PsiphonSidecar.ID), EngineChain.Hop(RadianceSidecar.id)
             )), titleOf = EngineChain::titleOf).copy(name = title)
             RADIANCE -> RadianceSidecar.profile()
+            SHIROKHORSHID_RADIANCE -> ChainRunner.profile(EngineChain.Chain(listOf(
+                EngineChain.Hop(ShirokhorshidSidecar.ID), EngineChain.Hop(RadianceSidecar.id)
+            )), titleOf = EngineChain::titleOf).copy(name = title)
+            AETHER_LANTERN -> AetherSidecar.profile(transport = "h2", advanced = AetherSettings(alias = title)).let { p ->
+                p.copy(extraSettings = org.json.JSONObject(p.extraSettings)
+                    .put(com.example.vpn.sidecar.LanternRelayHop.EXTRA, true).toString())
+            }
             else -> AetherSidecar.profile(
                 transport = requireNotNull(aetherTransport),
                 advanced = AetherSettings(
@@ -60,6 +75,7 @@ object BuiltinConnections {
         fun missingDependency(): String? = when (this) {
             AETHER_PSIPHON -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(PSIPHON.profile())
             AETHER_TOR -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(TOR_SNOWFLAKE.profile())
+            AETHER_LANTERN, SHIROKHORSHID_RADIANCE -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(RADIANCE.profile())
             else -> null
         }
     }

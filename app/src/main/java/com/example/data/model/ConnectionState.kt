@@ -110,7 +110,12 @@ data class ConnectionState(
      * The attempt whose filtered-site probe was partial (some filtered sites answered, others did not); shown only while
      * it is still this attempt ([filteredSitesPartial]).
      */
-    val filteredPartialAttempt: String? = null
+    val filteredPartialAttempt: String? = null,
+    /**
+     * Who stopped the session and when (StopGuard.reason), set by the Stop and kept on the DISCONNECTED state until the
+     * next Connect, so diagnostics never show a session that ended with no reason (build 178 field report).
+     */
+    val stopReason: String? = null
 ) {
     /** Some filtered sites are still blocked through this attempt (FilteredSiteProbe PARTIAL). */
     val filteredSitesPartial: Boolean get() = filteredPartialAttempt != null && filteredPartialAttempt == attemptId
