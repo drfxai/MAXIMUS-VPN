@@ -231,7 +231,7 @@ object RecoveryProfiles {
         p(NetworkFirewalls.MCI_V6_CLEAN_PROFILE, RecoveryProfile.Strategy.ALT_ENDPOINT_V6, mapOf(
             "fingerprint" to "chrome", "finalMask" to "", "cipherSuites" to "", "echConfigList" to "",
             "address" to RecoveryProfile.ENDPOINT), 0.5, family = "ipv6",
-            also = setOf(RecoveryProfile.Strategy.FINGERPRINT), firewalls = setOf(NetworkFirewalls.Firewall.MCI), ipv6 = true,
+            firewalls = setOf(NetworkFirewalls.Firewall.MCI), ipv6 = true,
             defaults = listOf(MCI_V6_CLEAN_IPV6)),
         // UAC SNI Spoofer's Iran ClientHello split: the first record ends right before the server name (Go TLS
         // stack + fixed cipher list). No ALPN pin, so it also fits xhttp/gRPC/h2 configs. See [IranHelloSplit].
