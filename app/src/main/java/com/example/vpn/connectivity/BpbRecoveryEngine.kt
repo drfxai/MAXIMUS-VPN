@@ -37,6 +37,9 @@ data class DerivedRecoveryCandidate(
     }
 
     fun isExpired(now: Long) = now >= expiresAt
+
+    /** True when this candidate removes the config's own ECH (its server name is then visible on the wire). */
+    val clearsEch: Boolean get() = transformation.any { it.field == "echConfigList" && it.from.isNotBlank() && it.to.isBlank() }
 }
 
 /**
@@ -77,12 +80,16 @@ class BpbRecoveryEngine(
      * validated alternative addresses (clean-IP hints are not enough). Withdrawn, expired and
      * locally worse profiles are skipped; candidates the gate refuses are returned with the refusal
      * and never tested. [bias] moves a profile up (positive) or down in the order, or skips it (null); see [NetworkFirewalls].
+     * [context] says what is known about the network: profiles limited to a firewall type, to IPv6 or to the fork
+     * ([RecoveryProfile.allowedIn]) are offered only when it says so. An endpoint profile with nothing validated for
+     * its family falls back to its [RecoveryProfile.defaultEndpoints].
      */
     fun generate(
         parent: VlessProfile,
         failure: FailureStage?,
         network: String?,
         endpoints: List<String> = emptyList(),
+        context: RecoveryContext = RecoveryContext.UNKNOWN,
         bias: (RecoveryProfile) -> Double? = { 0.0 }
     ): List<DerivedRecoveryCandidate> {
         if (!isRecoverable(parent)) return emptyList()
@@ -92,6 +99,7 @@ class BpbRecoveryEngine(
         val fp = parent.effectiveFingerprint
         val usable = profiles
             .filter { !it.isExpired(now) && it.networkConditions.any { s -> s in wanted } && it.appliesTo(parent) }
+            .filter { it.allowedIn(context) }
             .filter { !ledger.profileIsWorse(it.key, network) }
             .filter { RecoveryProfile.Strategy.FRAGMENT !in it.networkConditions || !fragmentReverted(it.key, network) }
             .mapNotNull { rp -> bias(rp)?.let { rp to it } }
@@ -100,7 +108,10 @@ class BpbRecoveryEngine(
         val out = mutableListOf<DerivedRecoveryCandidate>()
         for (rp in usable) {
             val targets: List<String?> = if (rp.needsEndpoint()) {
-                endpoints.filter { familyOf(it) == rp.addressFamily && !ledger.isIntercepted(it, network, now) }.distinct().take(2)
+                fun usableHere(list: List<String>) = list.filter {
+                    (rp.addressFamily == "any" || familyOf(it) == rp.addressFamily) && !ledger.isIntercepted(it, network, now)
+                }.distinct().take(2)
+                usableHere(endpoints).ifEmpty { usableHere(rp.defaultEndpoints) }
             } else listOf(null)
             for (endpoint in targets) {
                 if (out.size >= maxCandidates) return out
@@ -152,13 +163,16 @@ class BpbRecoveryEngine(
 
     /**
      * The candidate that recovered [parent] on [network] and has not been withdrawn or expired, rebuilt
-     * fresh on [base] (the parent with its host already resolved, when the caller has that form).
+     * fresh on [base] (the parent with its host already resolved, when the caller has that form). With a
+     * [context], a profile limited to a firewall type, to IPv6 or to the fork is not replayed where it does not apply
+     * (for example after the network lost IPv6).
      */
-    fun active(parent: VlessProfile, network: String?, base: VlessProfile = parent): DerivedRecoveryCandidate? {
+    fun active(parent: VlessProfile, network: String?, base: VlessProfile = parent, context: RecoveryContext? = null): DerivedRecoveryCandidate? {
         val now = clock()
         val entry = ledger.activeFor(parent.effectiveFingerprint, network, now) ?: return null
         val rp = profiles.firstOrNull { it.key == entry.profileKey } ?: return null
         if (rp.isExpired(now)) return null
+        if (context != null && !rp.allowedIn(context)) return null
         val derived = rp.derive(base, entry.endpoint) ?: return null
         val gate = RecoverySecurityGate.check(base, derived)
         if (!gate.passed) return null
@@ -211,13 +225,16 @@ class RecoveryLedger(private val load: () -> String?, private val save: (String)
         val withdrawn: Boolean = false,
         val withdrawnReason: String? = null,
         /** Copied from a sibling config of the same server that passed; untested for this one until used. */
-        val inherited: Boolean = false
+        val inherited: Boolean = false,
+        /** The recipe removed the config's own ECH, so its server name is visible on the wire while it is used. */
+        val clearedEch: Boolean = false
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("f", parentFingerprint); put("k", profileKey); endpoint?.let { put("e", it) }; network?.let { put("n", it) }
             put("c", createdAt); put("x", expiresAt); put("s", successes); put("fl", failures); put("cf", consecutiveFailures)
             lastSuccessAt?.let { put("ls", it) }; put("w", withdrawn); withdrawnReason?.let { put("wr", it) }
             if (inherited) put("i", true)
+            if (clearedEch) put("ce", true)
         }
 
         companion object {
@@ -225,7 +242,7 @@ class RecoveryLedger(private val load: () -> String?, private val save: (String)
                 o.getString("f"), o.getString("k"), o.optString("e").ifBlank { null }, o.optString("n").ifBlank { null },
                 o.optLong("c"), o.optLong("x"), o.optInt("s"), o.optInt("fl"), o.optInt("cf"),
                 if (o.has("ls")) o.optLong("ls") else null, o.optBoolean("w"), o.optString("wr").ifBlank { null },
-                o.optBoolean("i")
+                o.optBoolean("i"), o.optBoolean("ce")
             )
         }
     }
@@ -251,8 +268,9 @@ class RecoveryLedger(private val load: () -> String?, private val save: (String)
         val old = all.firstOrNull { same(it, c.parentFingerprint, c.recoveryProfileKey, c.endpoint, c.networkContext) }
             ?: Entry(c.parentFingerprint, c.recoveryProfileKey, c.endpoint, c.networkContext, now, c.expiresAt)
         all.remove(old)
-        var next = if (success) old.copy(successes = old.successes + 1, consecutiveFailures = 0, lastSuccessAt = now)
-        else old.copy(failures = old.failures + 1, consecutiveFailures = old.consecutiveFailures + 1)
+        val base = if (c.clearsEch) old.copy(clearedEch = true) else old
+        var next = if (success) base.copy(successes = base.successes + 1, consecutiveFailures = 0, lastSuccessAt = now)
+        else base.copy(failures = base.failures + 1, consecutiveFailures = base.consecutiveFailures + 1)
         if (!success && next.successes > 0 && next.consecutiveFailures >= c.rollbackAfter) {
             next = next.copy(withdrawn = true, withdrawnReason = "failed ${next.consecutiveFailures} times after working; back to the original")
         }
@@ -287,6 +305,11 @@ class RecoveryLedger(private val load: () -> String?, private val save: (String)
     fun activeFor(fp: String, network: String?, now: Long): Entry? =
         list().filter { it.parentFingerprint == fp && it.network == network && !it.withdrawn && it.expiresAt > now && (it.successes > 0 || it.inherited) }
             .maxWithOrNull(compareBy({ it.lastSuccessAt ?: 0 }, { it.successes }))
+
+    /** True when a recipe recorded for [fp] on [network] removed the config's own ECH (see [Entry.clearedEch]). */
+    @Synchronized
+    fun clearedEch(fp: String, network: String?): Boolean =
+        list().any { it.parentFingerprint == fp && it.network == network && it.clearedEch }
 
     /** Success rate of a profile on a network across configs, or [prior] when it has no record there. */
     @Synchronized
