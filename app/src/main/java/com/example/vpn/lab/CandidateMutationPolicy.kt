@@ -48,7 +48,7 @@ object CandidateMutationPolicy {
     val APPROVED_TARGET_STRATEGIES = setOf("UseIPv4", "UseIPv6", "UseIPv4v6", "UseIPv6v4")
     val APPROVED_MASKS: Set<String> = BpbFix.MASKS.toSet() + BpbFix.FINAL_MASK_V1 +
         com.example.vpn.connectivity.IranHelloSplit.MASK + com.example.vpn.connectivity.IranHelloSplit.DEEP_MASK
-    val APPROVED_CIPHERS = setOf(BpbFix.CIPHER_SUITES, BpbFix.FIREFOX_CIPHER_SUITES)
+    val APPROVED_CIPHERS = setOf(BpbFix.CIPHER_SUITES, BpbFix.FIREFOX_CIPHER_SUITES, BpbFix.SEMI_PYTHON_CIPHER_SUITES)
 
     data class Verdict(val allowed: Boolean, val reason: String? = null, val changed: Set<Field> = emptySet()) {
         companion object { fun no(why: String) = Verdict(false, why) }

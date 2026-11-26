@@ -47,9 +47,10 @@ Everything else stays refused:
 Before reviving, a run looks at the network the phone is on:
 
 - **Firewall order** (`NetworkFirewalls`). The network key's MCC+MNC names the network, not the SIM.
-  - Irancell (43235): the Irancell recipe first (empty-record fragment, Go TLS, Firefox cipher list), then the other fragment recipes.
-  - Hamrah-e-Aval (43211): ECH first; fragment recipes are skipped, since the community reports fragment fully blocked there, IPv6 too.
+  - Irancell (43235): patterniha's F&F first (`irancell-ff`: tlshello-0-len fragment, Go TLS via the `unsafe` fingerprint with certificate checking on, the semi-python cipher list, ALPN `http/1.1` for WebSocket/HTTPUpgrade and `h2,http/1.1` for XHTTP/gRPC/h2, the config's own ECH removed), then the same at a clean Cloudflare IPv4 (`irancell-ff-ip`: a validated edge, else 188.114.98.0), then the community Irancell recipe (Firefox cipher list) and the other fragment recipes. `bpb-fragment-original` is skipped there, since F&F supersedes it.
+  - Hamrah-e-Aval (43211): with IPv6 on the network, `mci-v6-clean` first (Chrome fingerprint, no fragment, no cipher list, no ECH, a Cloudflare IPv6 edge: a validated one, else 2a06:98c1:3101::6812:202f); then the Iran ClientHello split and ECH. Other fragment recipes are skipped, since the community reports fragment fully blocked there.
   - Hamrah-e-Aval with IPv6 and the patterniha Xray fork in the build: `mci-v6-oob` right after the Iran ClientHello split and before ECH — dialMode `oob6.0` (one TCP out-of-band byte on the first write, IPv6 destinations only), Chrome fingerprint, no fragment/cipher list/ECH, a Cloudflare IPv6 edge (validated, else 2a06:98c1:3120::7). It is tested with a real request through an isolated fork sidecar (`ForkAwareProbe`, `EngineProbe`), never on stock Xray, and connects through `ForkXraySidecar`. Never offered on Irancell, without IPv6, when IPv6 or the firewall is unknown, or without the fork.
+  - Recipes limited to a firewall type or to IPv6 (`RecoveryContext`, `RecoveryProfile.allowedIn`) are never tried when the network's firewall or IPv6 is unknown. A recipe that removed the config's own ECH says so in its result row ("ECH removed") and the recovery ledger records it.
   - Rightel (43220): ECH first, fragment last.
   - Wi-Fi and other networks: the usual order.
   - The user can override the detected network on the page (Auto, Irancell, MCI, Rightel, Other).
@@ -68,6 +69,7 @@ The page shows the network, the resolvers that returned the ECH key and the clea
 - `BpbFix.FINAL_MASK_V1`: the v1 mask.
 - `vpn/connectivity/NetworkFirewalls.kt`, `EchKeyCheck.kt`: network order and the ECH key check.
 - `BpbFix.FIREFOX_CIPHER_SUITES` and the `irancell-fragment` profile.
+- `BpbFix.SEMI_PYTHON_CIPHER_SUITES`, the `irancell-ff`, `irancell-ff-ip` and `mci-v6-clean` profiles, `RecoveryContext.kt` (tests: `FirewallRecipesTest`, `RecoveryContextTest`).
 - Tests: `ConfigRevivalTest`.
 
 ## Not verified

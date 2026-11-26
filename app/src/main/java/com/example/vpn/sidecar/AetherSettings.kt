@@ -15,7 +15,11 @@ data class AetherSettings(
     val fragmentDelay: String = "",
     val ech: Boolean = false,
     val apiSni: String = "",
-    val fingerprint: String = "chrome",
+    /**
+     * MASQUE TLS client profile. [AetherTlsProfiles.AUTO] (the default) lets the app pick it per firewall; a concrete
+     * name the user chose is always sent as it is.
+     */
+    val fingerprint: String = AetherTlsProfiles.AUTO,
     val alias: String = "",
     val exitNode: String = "",
     val exitFinalMask: String = "",
@@ -38,7 +42,7 @@ data class AetherSettings(
         endpoint.isNotBlank() && !socketAddress(endpoint) -> "Endpoint must be an IP and port, for example 162.159.192.1:2408 or [2606:4700::1]:443"
         apiAddress.isNotBlank() && apiAddress !in apiHosts && !ip(apiAddress) -> "API address must be an IP or a supported Cloudflare API name"
         apiHost.isNotBlank() && apiHost !in apiHosts -> "Choose a supported Cloudflare API host"
-        fingerprint !in AetherTlsProfiles.names -> "Unsupported TLS fingerprint"
+        fingerprint !in AetherTlsProfiles.choices -> "Unsupported TLS fingerprint"
         apiSni.isNotBlank() && apiSni !in apiHosts -> "Choose a supported API TLS name"
         apiSni.isNotBlank() && apiHost.isNotBlank() && apiSni != apiHost -> "Cloudflare requires API SNI and host to match"
         tor !in relayModes || psiphon !in relayModes -> "Unsupported Tor or Psiphon mode"
@@ -70,7 +74,8 @@ data class AetherSettings(
         .put("endpoint", endpoint.trim()).put("apiAddress", apiAddress.trim())
         .put("apiHost", apiHost).put("fragmentSize", fragmentSize.trim())
         .put("fragmentDelay", fragmentDelay.trim()).put("ech", ech)
-        .put("apiSni", apiSni).put("fingerprint", fingerprint).put("alias", alias.trim())
+        .put("apiSni", apiSni).put("fingerprint", fingerprint).put(FINGERPRINT_CHOSEN, fingerprint != AetherTlsProfiles.AUTO)
+        .put("alias", alias.trim())
         .put("exitNode", exitNode).put("exitFinalMask", exitFinalMask).put("exitDialMode", exitDialMode.trim())
         .put("tor", tor).put("psiphon", psiphon).put("apiRoute", apiRoute).put("mtu", mtu.trim())
         .put("apiRelay", apiRelay.trim())
@@ -120,6 +125,15 @@ data class AetherSettings(
         const val MTU_RETRY = 1200
         const val MTU_ENV = "AETHER_WG_MTU"
         /**
+         * Written next to the fingerprint since Auto exists. A saved "chrome" without it is the old default, not a
+         * choice (the Irancell attempt already replaced it with Firefox), so it reads back as Auto.
+         */
+        const val FINGERPRINT_CHOSEN = "fingerprintChosen"
+        fun readFingerprint(json: JSONObject): String {
+            val saved = json.optString("fingerprint", AetherTlsProfiles.AUTO).ifBlank { AetherTlsProfiles.AUTO }
+            return if (saved == "chrome" && !json.optBoolean(FINGERPRINT_CHOSEN)) AetherTlsProfiles.AUTO else saved
+        }
+        /**
          * A relay address as the engine accepts it (scripts/connections/aether/maximus_api_lane.rs parse_relay):
          * https://name[:443][/plain-path], a DNS name host, no credentials, query or "..". Blank is valid (no relay).
          */
@@ -154,7 +168,7 @@ data class AetherSettings(
             json.optString("scan", "balanced"), json.optString("noize", "auto"),
             json.optString("endpoint"), json.optString("apiAddress"), json.optString("apiHost"),
             json.optString("fragmentSize"), json.optString("fragmentDelay"), json.optBoolean("ech"),
-            json.optString("apiSni"), json.optString("fingerprint", "chrome"), json.optString("alias"),
+            json.optString("apiSni"), readFingerprint(json), json.optString("alias"),
             json.optString("exitNode"), json.optString("exitFinalMask"), json.optString("exitDialMode"),
             json.optString("tor", "off"), json.optString("psiphon", "off"), json.optString("apiRoute", "auto"),
             json.optString("mtu"), json.optString("apiRelay"))

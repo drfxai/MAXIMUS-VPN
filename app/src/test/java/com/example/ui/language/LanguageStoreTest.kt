@@ -36,7 +36,10 @@ class LanguageStoreTest {
         assertEquals(AppLanguage.RUSSIAN, AppLanguage.defaultFor("ru"))
         assertEquals(AppLanguage.RUSSIAN, AppLanguage.defaultFor("ru-RU"))
         assertEquals(AppLanguage.ENGLISH, AppLanguage.defaultFor("en-US"))
-        assertEquals(AppLanguage.ENGLISH, AppLanguage.defaultFor("fa"))
+        assertEquals(AppLanguage.PERSIAN, AppLanguage.defaultFor("fa"))
+        assertEquals(AppLanguage.PERSIAN, AppLanguage.fromTag("fa-IR"))
+        assertTrue(AppLanguage.PERSIAN.rightToLeft)
+        assertFalse(AppLanguage.RUSSIAN.rightToLeft)
         assertEquals(AppLanguage.ENGLISH, AppLanguage.defaultFor(null))
         assertEquals(AppLanguage.RUSSIAN, AppLanguage.fromTag("ru_RU"))
         assertNull(AppLanguage.fromTag("de"))
@@ -52,5 +55,18 @@ class LanguageStoreTest {
         assertEquals("3 отобранных вручную сервера", ru.resources.getQuantityString(R.plurals.vip_hand_picked_servers, 3, 3))
         assertEquals("5 отобранных вручную серверов", ru.resources.getQuantityString(R.plurals.vip_hand_picked_servers, 5, 5))
         assertEquals("21 отобранный вручную сервер", ru.resources.getQuantityString(R.plurals.vip_hand_picked_servers, 21, 21))
+    }
+
+    @Test
+    fun persianIsSelectableResolvesAndIsRightToLeft() {
+        assertTrue(AppLanguage.PERSIAN in AppLanguage.entries)
+        val fa = LanguageStore.contextFor(context, AppLanguage.PERSIAN)
+        assertEquals("ادامه", fa.getString(R.string.lang_picker_continue))
+        assertEquals(android.view.View.LAYOUT_DIRECTION_RTL, fa.resources.configuration.layoutDirection)
+        LanguageStore.record(prefs, AppLanguage.PERSIAN)
+        assertEquals(AppLanguage.PERSIAN, LanguageStore.storedLanguage(prefs))
+        // The system per-app language list (Android 13+) offers Persian too.
+        val xml = listOf(java.io.File("src/main/res/xml/locales_config.xml"), java.io.File("app/src/main/res/xml/locales_config.xml")).first { it.exists() }
+        AppLanguage.entries.forEach { assertTrue(it.tag, xml.readText().contains("android:name=\"${it.tag}\"")) }
     }
 }

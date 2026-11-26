@@ -1,5 +1,8 @@
 package com.example.ui.settings
 
+import androidx.compose.ui.res.stringResource
+import com.example.R
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
@@ -98,7 +101,7 @@ internal fun SettingsTopBar(title: String, subtitle: String? = null, onBack: () 
         IconButton(onClick = onBack) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
+                contentDescription = stringResource(R.string.ui_back),
                 tint = AppTheme.colors.textPrimary
             )
         }
@@ -320,7 +323,7 @@ internal fun SettingsChoiceRow(
                     Modifier.size(22.dp).clip(CircleShape).background(AppTheme.colors.primary),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Check, contentDescription = "Selected", tint = AppTheme.colors.onPrimary, modifier = Modifier.size(15.dp))
+                    Icon(Icons.Default.Check, contentDescription = stringResource(R.string.a11y_selected), tint = AppTheme.colors.onPrimary, modifier = Modifier.size(15.dp))
                 }
             }
         }

@@ -193,7 +193,7 @@ fun HomeScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Maximus AI Co-Pilot",
+                        contentDescription = stringResource(R.string.a11y_ai_copilot),
                         tint = AppTheme.colors.primary,
                         modifier = Modifier.size(18.dp)
                     )
@@ -239,13 +239,17 @@ fun HomeScreen(
                     else -> AppTheme.colors.primary
                 }
                 val setMode = { nextMode: com.example.data.model.OperationalMode ->
+                    val changed = com.example.vpn.godmode.GodModeLogOnce.changes(settings.operationalMode, nextMode)
                     settingsViewModel.updateSettings(settings.copy(operationalMode = nextMode))
-                    if (nextMode == com.example.data.model.OperationalMode.GOD_MODE) {
-                        com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
-                        com.example.vpn.godmode.MaximusMeshManager.startMesh()
-                    } else {
-                        com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
-                        com.example.vpn.godmode.MaximusMeshManager.stopMesh()
+                    // B16: a re-tap of the selected mode starts or stops nothing (and logs nothing).
+                    if (changed) {
+                        if (nextMode == com.example.data.model.OperationalMode.GOD_MODE) {
+                            com.example.vpn.godmode.PsiphonConduitBridge.enableGodModeBridges()
+                            com.example.vpn.godmode.MaximusMeshManager.startMesh()
+                        } else {
+                            com.example.vpn.godmode.PsiphonConduitBridge.disableGodModeBridges()
+                            com.example.vpn.godmode.MaximusMeshManager.stopMesh()
+                        }
                     }
                 }
                 Row(
@@ -281,13 +285,13 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = settings.operationalMode.displayName,
+                            text = stringResource(com.example.ui.language.UiText.modeTitle(settings.operationalMode)),
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.5.sp,
                             color = AppTheme.colors.textPrimary
                         )
                         Text(
-                            text = if (isUnlock) stringResource(R.string.unlock_mode_subtitle) else settings.operationalMode.subtitle,
+                            text = stringResource(com.example.ui.language.UiText.modeSubtitle(settings.operationalMode)),
                             fontSize = 10.5.sp,
                             color = AppTheme.colors.textMuted,
                             maxLines = 1,
@@ -368,7 +372,9 @@ fun HomeScreen(
                                     letterSpacing = 0.5.sp
                                 )
                                 Text(
-                                    text = stringResource(R.string.ui_bridges_mesh_peers, verifiedBridgesCount, bridges.size, meshPeers.size),
+                                    // B16: bridges and the LAN mesh do not run in this build; "0/0 | 0 Peers" read as a fault.
+                                    text = if (bridges.isEmpty() && meshPeers.isEmpty()) stringResource(R.string.god_bridges_mesh_unavailable)
+                                        else stringResource(R.string.ui_bridges_mesh_peers, verifiedBridgesCount, bridges.size, meshPeers.size),
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFFFCC80)
@@ -376,7 +382,8 @@ fun HomeScreen(
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = stringResource(R.string.ui_t_1_reality_2_cdn_tls),
+                                // B16: the real order (build 177 showed REALITY ➔ CDN ➔ Hysteria2 ➔ WireGuard and connected via Lantern).
+                                text = stringResource(R.string.god_ladder_steps),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = Color(0xFFE0E0E0)
@@ -398,7 +405,7 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(stringResource(R.string.ui_secret_chat), fontSize = 11.sp)
+                            Text(stringResource(R.string.god_secret_chat_preview), fontSize = 11.sp)
                         }
 
                         Button(
@@ -448,13 +455,17 @@ fun HomeScreen(
                 onClick = { vpnViewModel.toggleConnection(context) { onRequestVpnPermission() } }
             )
         }
+        val blockNotices = listOf(stringResource(R.string.connect_failed_block_released),
+            stringResource(R.string.connect_failed_block_kill_switch), stringResource(R.string.connect_failed_block_kept))
+        val failureReason = if (unlockMode) null else HomeFailure.reason(connectionState, blockNotices)
         Text(
             text = when (earthMode) {
                 EarthMode.ON -> stringResource(if (unlockMode) R.string.unlock_state_unlocked else R.string.ui_connected_2)
                 EarthMode.CONNECTING -> stringResource(if (unlockMode) R.string.unlock_state_checking else R.string.ui_finding_a_path)
-                EarthMode.OFF -> stringResource(R.string.ui_not_connected)
+                EarthMode.OFF -> stringResource(if (failureReason != null) R.string.home_failed_title else R.string.ui_not_connected)
             },
-            color = if (earthMode == EarthMode.OFF) AppTheme.colors.textPrimary else earthAccent,
+            color = if (earthMode == EarthMode.OFF && failureReason != null) AppTheme.colors.statusError
+                else if (earthMode == EarthMode.OFF) AppTheme.colors.textPrimary else earthAccent,
             fontSize = 22.sp,
             fontWeight = FontWeight.SemiBold
         )
@@ -480,9 +491,20 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.width(10.dp))
                 LatencyPill(latencyMs = connectionState.pingMs ?: activeProfile?.lastLatencyMs)
             }
+        } else if (earthMode == EarthMode.OFF && failureReason != null) {
+            // B7: the specific reason right under the headline (the full text stays in the error card below).
+            Text(
+                text = failureReason,
+                color = AppTheme.colors.textSecondary,
+                fontSize = 13.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 6,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 24.dp).testTag("home_failure_reason")
+            )
         } else {
             Text(
-                text = if (earthMode == EarthMode.CONNECTING) stringResource(R.string.ui_tap_the_button_to_stop, connectionState.statusLabel) else stringResource(R.string.ui_tap_the_button_to_connect),
+                text = if (earthMode == EarthMode.CONNECTING) stringResource(R.string.ui_tap_the_button_to_stop, stringResource(com.example.ui.language.UiText.status(connectionState))) else stringResource(R.string.ui_tap_the_button_to_connect),
                 color = AppTheme.colors.textSecondary,
                 fontSize = 13.sp
             )
@@ -977,9 +999,15 @@ private fun ActiveConnectionCard(
                 FlagRing(model.flag, if (model.live) toneColor else c.textMuted, pulse = model.live && model.tone == ActiveCardModel.Tone.OK)
                 Spacer(modifier = Modifier.width(11.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = model.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(text = if (model.smartSearch) stringResource(R.string.home_card_smart_title) else model.title,
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val searching = if (model.smartSearch) stringResource(R.string.home_card_smart_searching) else null
                     Text(
-                        text = if (model.live) model.exitIp else ActiveCardModel.offLine(model),
+                        text = when {
+                            model.live -> model.exitIp
+                            searching != null -> searching
+                            else -> ActiveCardModel.offLine(model)
+                        },
                         fontSize = 12.5.sp, color = c.textSecondary,
                         fontFamily = if (model.live) FontFamily.Monospace else FontFamily.Default,
                         maxLines = 1, overflow = TextOverflow.Ellipsis
@@ -996,7 +1024,8 @@ private fun ActiveConnectionCard(
                     }
                 } else {
                     Text(
-                        text = model.status, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textMuted,
+                        text = if (model.smartSearch) stringResource(R.string.home_card_smart_status) else model.status,
+                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textMuted,
                         modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(c.surfaceCardHighlight).padding(horizontal = 9.dp, vertical = 3.dp)
                     )
                 }
@@ -1235,7 +1264,7 @@ private fun ServerSelectorCard(
                 } else {
                     Icon(
                         imageVector = Icons.Default.Public,
-                        contentDescription = "Server",
+                        contentDescription = stringResource(R.string.ui_server),
                         tint = AppTheme.colors.primary,
                         modifier = Modifier.size(18.dp)
                     )
@@ -1244,7 +1273,7 @@ private fun ServerSelectorCard(
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = profile?.name ?: "No Server Selected",
+                    text = profile?.name ?: stringResource(R.string.home_no_server_selected),
                     color = AppTheme.colors.textPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -1254,7 +1283,7 @@ private fun ServerSelectorCard(
                 Text(
                     text = listOfNotNull(
                         exitCountryCode,
-                        profile?.displaySubtitle ?: "Tap to choose a proxy server"
+                        profile?.displaySubtitle ?: stringResource(R.string.home_tap_to_choose_server)
                     ).joinToString(" • "),
                     color = AppTheme.colors.textMuted,
                     fontSize = 11.5.sp,
@@ -1266,7 +1295,7 @@ private fun ServerSelectorCard(
             LatencyPill(latencyMs = pingMs)
             Icon(
                 imageVector = Icons.Default.ChevronRight,
-                contentDescription = "Change Server",
+                contentDescription = stringResource(R.string.a11y_change_server),
                 tint = AppTheme.colors.textMuted,
                 modifier = Modifier.size(18.dp)
             )
@@ -1321,7 +1350,7 @@ private fun ConfigFreeConnectButton(
         ConfigFreeStatus.CHECKING, ConfigFreeStatus.LIMITED, ConfigFreeStatus.NO_TRAFFIC -> if (dark) Color(0xFFFFC568) else Color(0xFF805000)
         ConfigFreeStatus.RECONNECTING -> if (dark) Color(0xFFC8AAFF) else Color(0xFF6533AA)
         ConfigFreeStatus.VERIFIED -> if (dark) Color(0xFF6DF5BC) else Color(0xFF006B4C)
-        ConfigFreeStatus.INTERRUPTED -> if (dark) Color(0xFFFF8888) else Color(0xFFA02336)
+        ConfigFreeStatus.INTERRUPTED, ConfigFreeStatus.FAILED -> if (dark) Color(0xFFFF8888) else Color(0xFFA02336)
         ConfigFreeStatus.STOPPING -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val glow by androidx.compose.animation.animateColorAsState(target, label = "configFreeStatus")
@@ -1354,7 +1383,7 @@ private fun ConfigFreeConnectButton(
             status == ConfigFreeStatus.STOPPING -> stringResource(R.string.ui_disconnecting)
             active && state.status == ConnectionStatus.CONNECTED -> stringResource(R.string.ui_disconnect_2)
             active -> stringResource(R.string.ui_cancel)
-            status == ConfigFreeStatus.INTERRUPTED -> stringResource(R.string.ui_retry_without_a_config)
+            status == ConfigFreeStatus.INTERRUPTED || status == ConfigFreeStatus.FAILED -> stringResource(R.string.ui_retry_without_a_config)
             else -> stringResource(R.string.ui_connect_without_a_config)
         }, fontWeight = FontWeight.SemiBold)
     }
@@ -1481,7 +1510,7 @@ private fun ConfigFreeMethodPicker(
                                 entries.forEachIndexed { index, method ->
                                     val problem = methods[method]
                                     if (index > 0) PickerDivider()
-                                    ConfigMethodRow(method.title, problem ?: method.description, method.pickerIcon(), accent,
+                                    ConfigMethodRow(method.title, problem ?: stringResource(ConfigFreeMethodText.description(method)), method.pickerIcon(), accent,
                                         if (problem == null) ({ onSelect(method) }) else null,
                                         badge = method.pickerBadge(), chip = when (method) {
                                             ConfigFreeMethod.AETHER_H2 -> "H2"

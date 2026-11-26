@@ -41,7 +41,7 @@ object ReportExporter {
             ),
             connection = state,
             networkProfile = network?.key(),
-            networkObservations = network?.observations().orEmpty(),
+            networkObservations = network?.observations().orEmpty() + listOfNotNull(firewallLine()),
             events = EventLog.snapshot(),
             eventLogTruncated = EventLog.truncated,
             tests = Tests.registry.tests.value,
@@ -55,6 +55,15 @@ object ReportExporter {
             tunPath = runCatching { com.example.vpn.verify.TunPathStatus.view() }.getOrNull()
         )
     }
+
+    /** The firewall type in use and its source, plus the latest behaviour probe round (no addresses, no names). */
+    private fun firewallLine(): String? = runCatching {
+        val app = com.example.RayApplication.instance
+        val d = com.example.vpn.connectivity.NetworkFirewalls.detection(com.example.vpn.smart.NetworkKey.current(app))
+        val probe = com.example.vpn.connectivity.FirewallProbe.store?.latest
+        "Firewall type: ${d.firewall.name} (source ${d.source.name.lowercase()}, network code ${d.byCode.name})" +
+            (probe?.let { "; probe ${it.verdict.key}${if (it.confident) " confident" else ""}: ${it.summary()}" } ?: "; probe not run")
+    }.getOrNull()
 
     /** Writes the summary and the JSON report, keeping only the newest [KEEP] exports. */
     suspend fun export(context: Context): Export = withContext(Dispatchers.IO) {

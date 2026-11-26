@@ -202,6 +202,72 @@ internal object SettingsLabels {
         else -> profile.description
     }
 
+    /**
+     * The hub subtitle under each Settings entry, from string resources (build 177, B19: the Russian hub showed
+     * "Balanced · Auto engine", "Hotspot sharing off", "Dark theme" …). [str] reads a resource with its format args
+     * (Resources.getString in the app, a fake in tests). Brand and engine names (Cloudflare DoH, sing-box) stay as they are.
+     */
+    fun hubText(settings: AppSettings, page: SettingsPage, update: UpdateUi, versionName: String,
+                str: (Int, Array<out Any>) -> String): String {
+        fun t(id: Int, vararg args: Any) = str(id, args)
+        return when (page) {
+            SettingsPage.CONNECTION -> "${t(scoringRes(settings.scoringProfile))} · " +
+                (if (settings.preferredEngine == EngineType.AUTO) t(com.example.R.string.settings_hub_auto_engine) else engineShort(settings.preferredEngine))
+            SettingsPage.ROUTING_DNS -> "${t(routingShortRes(settings.routingMode))} · " +
+                (dnsShortOrNull(settings.dnsServer) ?: t(com.example.R.string.settings_hub_custom_dns))
+            SettingsPage.ANTI_CENSORSHIP -> (if (settings.defaultDesyncConfig.enabled)
+                t(com.example.R.string.settings_hub_sni_on, t(desyncRes(settings.defaultDesyncConfig.profile)))
+                else t(com.example.R.string.settings_hub_sni_off)) + " · " +
+                t(if (settings.freeConfigsEnabled) com.example.R.string.settings_hub_free_on else com.example.R.string.settings_hub_free_off)
+            SettingsPage.PRIVACY -> listOfNotNull(
+                if (settings.killSwitchEnabled) t(com.example.R.string.ui_kill_switch) else null,
+                if (settings.autoReconnect) t(com.example.R.string.settings_hub_auto_reconnect) else null,
+                t(if (settings.ipv6Enabled) com.example.R.string.settings_hub_ipv6_routed else com.example.R.string.settings_hub_ipv6_blocked)
+            ).joinToString(" · ")
+            SettingsPage.SHARING -> t(if (settings.hotspotShareEnabled) com.example.R.string.settings_hub_hotspot_on else com.example.R.string.settings_hub_hotspot_off)
+            SettingsPage.APPEARANCE -> t(if (settings.darkTheme) com.example.R.string.settings_hub_dark else com.example.R.string.settings_hub_light)
+            SettingsPage.UPDATES -> when {
+                update.checking -> t(com.example.R.string.settings_hub_update_checking)
+                update.hasUpdate -> t(com.example.R.string.settings_hub_update_available) + (update.latestVersion?.let { " · v$it" } ?: "")
+                update.checkFailed -> t(com.example.R.string.settings_hub_update_unavailable, versionName)
+                update.checked -> t(com.example.R.string.settings_hub_update_current, versionName)
+                else -> t(com.example.R.string.settings_hub_update_default, versionName)
+            }
+            SettingsPage.ENGINES -> t(com.example.R.string.settings_hub_engines)
+            SettingsPage.DIAGNOSTICS -> t(com.example.R.string.settings_hub_diagnostics)
+            SettingsPage.ABOUT -> t(com.example.R.string.settings_hub_about)
+        }
+    }
+
+    fun scoringRes(profile: ScoringProfile): Int = when (profile) {
+        ScoringProfile.BALANCED -> com.example.R.string.settings_scoring_balanced
+        ScoringProfile.GAMING -> com.example.R.string.settings_scoring_gaming
+        ScoringProfile.STREAMING -> com.example.R.string.settings_scoring_streaming
+        ScoringProfile.DOWNLOADING -> com.example.R.string.settings_scoring_downloads
+        ScoringProfile.LOW_LATENCY -> com.example.R.string.settings_scoring_low_latency
+        ScoringProfile.MAX_STABILITY -> com.example.R.string.settings_scoring_max_stability
+    }
+
+    fun routingShortRes(mode: RoutingMode): Int = when (mode) {
+        RoutingMode.RULE_BYPASS_LAN -> com.example.R.string.settings_routing_bypass_lan
+        RoutingMode.GLOBAL -> com.example.R.string.settings_routing_global
+        RoutingMode.BYPASS_SELECTED -> com.example.R.string.settings_routing_custom
+        RoutingMode.IRAN_DIRECT -> com.example.R.string.settings_routing_iran_direct
+        RoutingMode.IRAN_DIRECT_BLOCK_ADS -> com.example.R.string.settings_routing_iran_direct_ads
+    }
+
+    fun desyncRes(profile: DesyncProfile): Int = when (profile) {
+        DesyncProfile.OFF -> com.example.R.string.settings_desync_off
+        DesyncProfile.LIGHT -> com.example.R.string.settings_desync_light
+        DesyncProfile.BALANCED -> com.example.R.string.settings_desync_balanced
+        DesyncProfile.SEVERE -> com.example.R.string.settings_desync_severe
+        DesyncProfile.ADAPTIVE -> com.example.R.string.settings_desync_adaptive
+        DesyncProfile.CUSTOM -> com.example.R.string.settings_desync_custom
+    }
+
+    /** The resolver's brand name, or null for a custom one (the caller localizes "Custom DNS"). */
+    fun dnsShortOrNull(dns: String): String? = dnsShort(dns).takeIf { it != "Custom DNS" }
+
     fun hub(settings: AppSettings, page: SettingsPage, update: UpdateUi, versionName: String): String = when (page) {
         SettingsPage.CONNECTION -> "${scoring(settings.scoringProfile)} · ${engineShort(settings.preferredEngine)}"
         SettingsPage.ROUTING_DNS -> "${routingShort(settings.routingMode)} · ${dnsShort(settings.dnsServer)}"
@@ -211,7 +277,7 @@ internal object SettingsLabels {
             append(if (settings.freeConfigsEnabled) "on" else "off")
         }
         SettingsPage.PRIVACY -> listOfNotNull(
-            if (settings.killSwitchEnabled) "Packet guard" else null,
+            if (settings.killSwitchEnabled) "Kill switch" else null,
             if (settings.autoReconnect) "Auto-reconnect" else null,
             if (settings.ipv6Enabled) "IPv6 routed" else "IPv6 blocked"
         ).joinToString(" · ")

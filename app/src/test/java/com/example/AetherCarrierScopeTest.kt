@@ -238,8 +238,15 @@ class AetherCarrierScopeTest {
         assertEquals(listOf("wireguard", "h2", "h3"), ConnectionEngineRunner.order(all, null, true, setOf("h3"), irancell = true))
         val h3 = com.example.data.model.VlessProfile(id = "a", name = "A", address = "", port = 0, uuid = "",
             extraSettings = org.json.JSONObject().put("carrier", "h3").toString())
-        assertEquals("ipv4", org.json.JSONObject(ConnectionEngineRunner.irancellH3(h3).extraSettings).getString("family"))
+        assertEquals("ipv4", org.json.JSONObject(ConnectionEngineRunner.irancellIpv4(h3).extraSettings).getString("family"))
         val own = h3.copy(extraSettings = org.json.JSONObject().put("carrier", "h3").put("family", "ipv6").toString())
-        assertEquals("ipv6", org.json.JSONObject(ConnectionEngineRunner.irancellH3(own).extraSettings).getString("family"))
+        assertEquals("ipv6", org.json.JSONObject(ConnectionEngineRunner.irancellIpv4(own).extraSettings).getString("family"))
+        // PattNG's default family: H2 dials IPv4 on Irancell too, unless the user chose a family. WireGuard is untouched.
+        val h2 = h3.copy(extraSettings = org.json.JSONObject().put("carrier", "h2").toString())
+        assertEquals("ipv4", org.json.JSONObject(ConnectionEngineRunner.irancellIpv4(h2).extraSettings).getString("family"))
+        val ownH2 = h3.copy(extraSettings = org.json.JSONObject().put("carrier", "h2").put("family", "ipv6").toString())
+        assertEquals("ipv6", org.json.JSONObject(ConnectionEngineRunner.irancellIpv4(ownH2).extraSettings).getString("family"))
+        val wg = h3.copy(extraSettings = org.json.JSONObject().put("carrier", "wireguard").toString())
+        assertEquals(wg, ConnectionEngineRunner.irancellIpv4(wg))
     }
 }

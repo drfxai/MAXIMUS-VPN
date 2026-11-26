@@ -63,6 +63,23 @@ c=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);c.load_cert_chain(sys.argv[1],sys.argv
             wrong = subprocess.run(command[:-1] + ['https://wrong.test:18443/','--resolve','wrong.test:18443:10.221.1.2'], capture_output=True, timeout=30)
             assert wrong.returncode != 0, 'Wrong certificate name accepted'
             print('PASS: wrong certificate name rejected', flush=True)
+            # MD5-signed decoy (--md5sig) at a TTL that reaches the server: the server's kernel must drop the
+            # signed decoy (no key for this peer) and the real ClientHello must still complete verified TLS.
+            native.terminate(); native.wait(timeout=5)
+            capture2 = subprocess.Popen(['ip','netns','exec',router,'tcpdump','--immediate-mode','-U','-i','mfr0','-w',str(root/'md5.pcap'),'tcp','port','18443'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            processes.append(capture2)
+            signed = subprocess.Popen(['ip','netns','exec',client,binary,'--ip','127.0.0.1','--port','19081','--conn-ip','0.0.0.0',
+                '--no-domain','--no-udp','--fake','-1','--ttl','32','--md5sig','--fake-sni','signed-decoy.test','--timeout','8'],env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            processes.append(signed)
+            time.sleep(1)
+            assert signed.poll() is None, signed.stderr.read().decode()
+            response = call(*[('127.0.0.1:19081' if a == '127.0.0.1:19080' else a) for a in command])
+            assert 'Directory listing' in response.stdout
+            capture2.terminate(); capture2.wait(timeout=5)
+            md5_bytes = (root/'md5.pcap').read_bytes()
+            assert b'signed-decoy.test' in md5_bytes, 'No MD5-signed fake SNI observed on wire'
+            assert b'actual.test' in md5_bytes, 'Original TLS handshake missing (MD5 case)'
+            print('PASS: MD5-signed decoy reached the server path and verified TLS stayed intact', flush=True)
         finally:
             for p in reversed(processes):
                 if p.poll() is None:
