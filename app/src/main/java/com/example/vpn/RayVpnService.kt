@@ -3647,6 +3647,14 @@ class RayVpnService : VpnService() {
                 try {
                     val hopReady = process.awaitReady(launch.readyTimeoutMs)
                     val failure = process.startupFailure
+                    // An Aether hop whose fingerprint was left at Auto: its outcome moves this network's pick on, or keeps it.
+                    launch.environment[com.example.vpn.sidecar.AetherSidecar.AUTO_FINGERPRINT_ENV]?.let { picked ->
+                        if (hopReady || !com.example.vpn.sidecar.SidecarProcess.stoppedByApp(failure)) {
+                            val network = com.example.vpn.connections.BuiltinMethodMemory.network()
+                            if (hopReady) com.example.vpn.connections.AetherFingerprintBook.win(network, picked)
+                            else com.example.vpn.connections.AetherFingerprintBook.fail(network, picked)
+                        }
+                    }
                     // Stopped by the app (a deadline, a Stop, a newer Connect): not a crash of the hop. Build 176 reported
                     // "exit 141" here: the stop closes the program's output pipe and its shutdown notice then gets SIGPIPE.
                     if (!hopReady && com.example.vpn.sidecar.SidecarProcess.stoppedByApp(failure))

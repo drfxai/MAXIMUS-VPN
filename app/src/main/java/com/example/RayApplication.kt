@@ -419,6 +419,12 @@ class RayApplication : Application() {
         com.example.vpn.connections.CleanH2PeerMemory.write = { key, value ->
             cleanH2.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
         }
+        // Per-network MASQUE TLS fingerprint for Aether's Auto setting (semi-python/firefox/go/chrome on Irancell).
+        val aetherFingerprints = getSharedPreferences("aether_fingerprints", MODE_PRIVATE)
+        com.example.vpn.connections.AetherFingerprintBook.read = { key -> aetherFingerprints.getString(key, null) }
+        com.example.vpn.connections.AetherFingerprintBook.write = { key, value ->
+            aetherFingerprints.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
+        }
         runCatching { com.example.vpn.connections.AetherPrewarmMonitor.install(this) }
         com.example.xray.RealDelayProbe.observer = com.example.vpn.connectivity.ConnectivityBrain::onProbe
         // Probe targets: the last valid signed manifest, else the built-in list; refreshed in the background.
