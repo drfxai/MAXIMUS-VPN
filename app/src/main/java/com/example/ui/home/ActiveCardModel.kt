@@ -27,7 +27,13 @@ data class ActiveCardModel(
     val download: String,
     val upload: String,
     /** 0 when not measured, else 1 to 4 by ping (see [signalBars]). */
-    val bars: Int = 0
+    val bars: Int = 0,
+    /**
+     * Smart Connect (its button, or the power button with no server) is still searching: the card shows Smart
+     * Connect's own state (localized by the card), never the built-in profile the search starts from as if it were
+     * "Selected in Nodes" (build 177: "Aether / WARP · Selected in Nodes · not tested yet").
+     */
+    val smartSearch: Boolean = false
 ) {
     enum class Tone { OK, WARN, MUTED }
 
@@ -37,6 +43,23 @@ data class ActiveCardModel(
         fun of(state: ConnectionState, selected: VlessProfile?): ActiveCardModel? {
             val up = state.isTunnelUp
             val profile = (if (up) state.activeProfile else null) ?: selected ?: state.activeProfile ?: return null
+            if (!up && state.smartSession && state.isBusy) {
+                return ActiveCardModel(
+                    live = false,
+                    label = "Smart Connect",
+                    configName = null,
+                    flag = flag(null),
+                    title = "Smart Connect",
+                    subtitle = state.recoveryStage ?: "Searching for a connection that works on this network",
+                    exitIp = "Shown once connected",
+                    ping = DASH,
+                    status = "Searching",
+                    tone = Tone.MUTED,
+                    download = DASH,
+                    upload = DASH,
+                    smartSearch = true
+                )
+            }
             if (!up) {
                 return ActiveCardModel(
                     live = false,
@@ -88,7 +111,8 @@ data class ActiveCardModel(
         }
 
         /** The off-state subtitle on one line: where the config comes from and its last test. */
-        fun offLine(model: ActiveCardModel): String = "Selected in Nodes · " + model.subtitle.replaceFirstChar { it.lowercase() }
+        fun offLine(model: ActiveCardModel): String =
+            if (model.smartSearch) model.subtitle else "Selected in Nodes · " + model.subtitle.replaceFirstChar { it.lowercase() }
 
         /** The country's English name, or the code itself when the JVM does not know it. */
         fun countryName(code: String): String =
