@@ -84,7 +84,8 @@ object AetherPrewarm {
             log: (String) -> Unit = { com.example.xray.XrayLogManager.i("BUILTIN", it) },
             event: (String, Map<String, String>) -> Unit = { result, attributes -> runCatching {
                 com.example.vpn.diagnostics.events.EventLog.event("aether.prewarm", attributes = attributes, result = result) } }): Outcome? {
-        val peers = CleanH2PeerMemory.peers(network, now).take(MAX_PEERS)
+        // HTTP/2 gateways only: a TCP connect says nothing about a remembered H3 gateway or WireGuard endpoint.
+        val peers = CleanH2PeerMemory.peers(network, now, carrier = "h2").take(MAX_PEERS)
         skip(network, vpnActive, powerSave, metered, peers.size, now)?.let { skip ->
             if (shouldLogSkip(network, skip, now)) {
                 log("aether/prewarm · ${network ?: "unknown network"} · $reason · skipped: ${skipText(skip)}" + (if (metered) " · metered link" else ""))

@@ -30,7 +30,7 @@ object AetherStartupStall {
     fun applies(engineId: String, automatic: Boolean, carrier: String, method: String, irancellLadder: Boolean,
                 cloudflareFiltered: Boolean, rememberedGateway: Boolean, verifiedHere: Boolean, relay: Boolean): Boolean =
         engineId == AetherSidecar.ID && automatic && carrier in CARRIERS &&
-            method != ConnectionEngineRunner.CLEAN_H2 && !irancellLadder && !cloudflareFiltered &&
+            method !in ConnectionEngineRunner.CLEAN_METHODS && !irancellLadder && !cloudflareFiltered &&
             !rememberedGateway && !verifiedHere && !relay
 
     /** Whether to stop waiting now: [startedAtMs] is when the engine was launched. */
