@@ -458,7 +458,7 @@ internal fun BuiltinConnectionScreen(
             }, Icons.Rounded.PowerSettingsNew,
                 Modifier.weight(1f).height(52.dp),
                 enabled = failed || own && !idle || configurable && bundled && valid) {
-                if (failed || own && !idle) VpnController.stopVpn(context)
+                if (failed || own && !idle) VpnController.stopVpn(context, com.example.vpn.StopOrigin.ENGINE_PAGE)
                 else if (VpnController.connectionState.value.status == ConnectionStatus.DISCONNECTED) {
                     // The user's own pick of this connection: only it runs (ManualEnginePick). A WARP that carries no
                     // traffic here ends with a reason instead of handing over to saved servers or the recovery engines;

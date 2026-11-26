@@ -82,6 +82,8 @@ class RayVpnService : VpnService() {
          * Smart Connect is the separate, explicit search ([EXTRA_SMART]).
          */
         const val EXTRA_EXACT = "com.drfxai.maximusvpn.EXTRA_EXACT"
+        /** Who asked for an ACTION_DISCONNECT ([StopOrigin.key]); absent means [StopOrigin.UNKNOWN]. */
+        const val EXTRA_STOP_ORIGIN = "com.drfxai.maximusvpn.EXTRA_STOP_ORIGIN"
         private const val SUBSCRIPTION_REFRESH_DELAY_MS = 5_000L
         /** How long a connect may spend in the LAB's fast recovery before it reports no verified path. */
         internal const val FAST_RECOVERY_MS = 300_000L
@@ -160,6 +162,25 @@ class RayVpnService : VpnService() {
         private fun stageChange(previous: ConnectionState, next: ConnectionState) {
             if (previous === next) return
             runCatching { com.example.vpn.diagnostics.EngineStages.onStateChange(previous, next) }
+            runCatching { recordEngineOutcome(previous, next) }
+        }
+
+        /**
+         * Every failed attempt of one engine is written to the engine ledger for this network (build 178 field report: after
+         * many Aether, Psiphon, Lantern and Tor attempts the report's engine list said "nothing tested on this network
+         * yet"; only engine start-up failures were recorded). A chain's failure does not say which hop failed: not recorded.
+         */
+        private fun recordEngineOutcome(previous: ConnectionState, next: ConnectionState) {
+            if (next.status != ConnectionStatus.FAILED || previous.status == ConnectionStatus.FAILED) return
+            val profile = next.activeProfile ?: previous.activeProfile ?: return
+            val engine = com.example.vpn.diagnostics.EngineStages.engineOf(profile)
+            if (engine == "none" || "→" in engine) return
+            val id = engine.substringBefore('/')
+            val app = com.example.RayApplication.instance
+            val network = runCatching { com.example.vpn.smart.NetworkIdentity.current(app) }
+                .getOrElse { com.example.vpn.smart.NetworkKey.current(app) }
+            com.example.vpn.engine.registry.EngineLedger.shared.failed(id, network,
+                next.failureStage?.name?.let { "$it: " }.orEmpty() + (next.errorMessage ?: "failed"))
         }
 
         private fun newId(): String = java.util.UUID.randomUUID().toString().take(12)
@@ -471,7 +492,7 @@ class RayVpnService : VpnService() {
             // the previous engine and the connect lock below can take a while, and until now the button
             // looked unresponsive during them.
             smartStarted = intent.getBooleanExtra(EXTRA_SMART, false)
-            updateState(_vpnState.value.copy(status = ConnectionStatus.PREPARING, errorMessage = null))
+            updateState(_vpnState.value.copy(status = ConnectionStatus.PREPARING, errorMessage = null, stopReason = null))
         }
         if (action == null || action == ACTION_CONNECT || action == ACTION_RECONNECT) {
             // Firewall type by behaviour: a few handshakes on the phone's own network, in the background, at most once
@@ -585,6 +606,10 @@ class RayVpnService : VpnService() {
                 // A failover or auto-reconnect that fires from now on belongs to an older intent and is dropped.
                 // Every attempt started before this Stop is fenced off: one still unwinding a blocking step can no
                 // longer change the state, the notification, or hand over to another connect (StopFence).
+                // Build 178 field report: sessions ended 1-11 s after Connect with no reason. Every Stop now says who asked.
+                val stopOrigin = StopOrigin.of(intent?.getStringExtra(EXTRA_STOP_ORIGIN))
+                val stopReason = recordStop(stopOrigin)
+                pendingStopReason = stopReason
                 StopFence.fence(lifecycle.newIntent())
                 connectJob?.cancel()
                 connectJob = null
@@ -593,7 +618,9 @@ class RayVpnService : VpnService() {
                 // Show the stop at once, and end every engine still starting, so the cancelled attempt
                 // unwinds immediately instead of after its current round of tests (see Abandonable).
                 if (_vpnState.value.status != ConnectionStatus.DISCONNECTED) {
-                    updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING))
+                    updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING, stopReason = stopReason))
+                } else {
+                    mutateState { it.copy(stopReason = stopReason) }
                 }
                 com.example.vpn.sidecar.EngineReaper.stopAll()
                 com.example.vpn.sidecar.EngineHandoff.clear()
@@ -3264,9 +3291,12 @@ class RayVpnService : VpnService() {
             // Build 177: Aether sat on "tunnel created" for 93 s and Serverless tested carriers silently for 33.6 s. The
             // carrier test is a stage of its own, with the limit the connect deadline really applies.
             val carrierTestStartedAt = System.currentTimeMillis()
+            // Build 178: the user's own Aether pick with cf=0 known here gets one short check; the stage says so up front.
+            val cfManualBudget = com.example.vpn.connections.ConnectionEngineRunner.cfFilteredManualBudgetMs(engine.id,
+                manual = exactSession, cloudflareBlocked = cfBlocked, relayOnly = false)
             if (managed) com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine starting",
-                ConnectDeadline.carrierTestText(engine.id,
-                    runCatching { ConnectDeadline.budgetMs(profile, manual = exactSession) }.getOrDefault(ConnectDeadline.ENGINE_MS)))
+                ConnectDeadline.carrierTestText(engine.id, cfManualBudget?.let { it + ConnectDeadline.VERIFY_MARGIN_MS }
+                    ?: runCatching { ConnectDeadline.budgetMs(profile, manual = exactSession) }.getOrDefault(ConnectDeadline.ENGINE_MS)))
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,
                 relayExitRoute = relayExitRoute, metered = metered, manual = exactSession, cloudflareBlocked = cfBlocked,
@@ -5114,16 +5144,41 @@ class RayVpnService : VpnService() {
         // Stop whatever ran before (a tunnel and its engines) and release its interface.
         disconnectResources()
         com.example.vpn.unlock.UnlockDns.load(this@RayVpnService)
-        val choice = com.example.vpn.unlock.UnlockDns.state.value
-        val checks = com.example.vpn.unlock.UnlockDns.checkServers(choice.servers)
-        com.example.vpn.unlock.UnlockDns.publishChecks(checks)
-        checks.forEach { c ->
-            XrayLogManager.i("UNLOCK", "${c.ip}: ${c.health.name.lowercase()}" + (c.latencyMs?.let { " $it ms" } ?: "") +
-                (c.reason?.let { " (${it.name.lowercase().replace('_', ' ')})" } ?: "") +
-                (c.shape?.let { " [query shape ${it.key}]" } ?: ""))
+        var choice = com.example.vpn.unlock.UnlockDns.state.value
+        var checks: List<com.example.vpn.unlock.ServerCheck> = emptyList()
+        var found: String? = null
+        // Build 178 field report: one failed check (0.27 s, right after a network change) ended the Connect; the user's
+        // retry 16 s later worked. The servers are checked up to UnlockConnectRetry.ATTEMPTS times before failing.
+        var attempt = 0
+        while (found == null) {
+            attempt++
+            val pause = com.example.vpn.unlock.UnlockConnectRetry.delayBeforeMs(attempt)
+            if (pause > 0) {
+                XrayLogManager.i("UNLOCK", "No Unlock DNS server answered correctly (check ${attempt - 1}/" +
+                    "${com.example.vpn.unlock.UnlockConnectRetry.ATTEMPTS}); checking again in ${pause / 1000}s.")
+                runCatching { com.example.vpn.diagnostics.events.EventLog.event("unlock.retry", attributes = mapOf(
+                    "check" to attempt.toString(), "of" to com.example.vpn.unlock.UnlockConnectRetry.ATTEMPTS.toString(),
+                    "after.ms" to pause.toString())) }
+                runCatching { showForegroundNotification(text.getString(R.string.unlock_notification_rechecking)) }
+                delay(pause)
+                choice = com.example.vpn.unlock.UnlockDns.state.value
+            }
+            checks = com.example.vpn.unlock.UnlockDns.checkServers(choice.servers)
+            com.example.vpn.unlock.UnlockDns.publishChecks(checks)
+            checks.forEach { c ->
+                XrayLogManager.i("UNLOCK", "${c.ip}: ${c.health.name.lowercase()}" + (c.latencyMs?.let { " $it ms" } ?: "") +
+                    (c.reason?.let { " (${it.name.lowercase().replace('_', ' ')})" } ?: "") +
+                    (c.shape?.let { " [query shape ${it.key}]" } ?: ""))
+            }
+            found = com.example.vpn.unlock.UnlockDnsHealth.pick(checks, choice.autoPick, choice.manual)
+            if (found == null && !com.example.vpn.unlock.UnlockConnectRetry.again(attempt)) {
+                return@withContext failed(if (attempt > 1) text.getString(R.string.unlock_error_no_server_retried, attempt)
+                    else text.getString(R.string.unlock_error_no_server))
+            }
         }
-        val server = com.example.vpn.unlock.UnlockDnsHealth.pick(checks, choice.autoPick, choice.manual)
-            ?: return@withContext failed(text.getString(R.string.unlock_error_no_server))
+        if (attempt > 1) runCatching { com.example.vpn.diagnostics.events.EventLog.event("unlock.retry",
+            attributes = mapOf("check" to attempt.toString(), "server" to "answered"), result = "PASS") }
+        val server: String = found ?: return@withContext failed(text.getString(R.string.unlock_error_no_server))
         val latency = checks.firstOrNull { it.ip == server }?.latencyMs
         val tun = try {
             Builder().setSession("Maximus Unlock DNS")
@@ -5214,6 +5269,30 @@ class RayVpnService : VpnService() {
     }
 
     /**
+     * Records who stopped the session (build 178 field report: sessions ended 1-11 s after Connect with no reason):
+     * one "session.stop" event with the origin, the state it left and the time since the Connect tap, the same line
+     * in the app log and the engine's stage timeline. Returns the reason the state carries ([ConnectionState.stopReason]).
+     */
+    /** The reason of the Stop being carried out ([recordStop]); consumed by [disconnectLocked]. */
+    @Volatile private var pendingStopReason: String? = null
+
+    private fun recordStop(origin: StopOrigin): String {
+        val state = _vpnState.value
+        val since = StopGuard.sinceConnectTap()
+        val reason = StopGuard.reason(origin, state.status.name, since)
+        runCatching {
+            val engine = com.example.vpn.diagnostics.EngineStages.engineOf(state.activeProfile)
+            XrayLogManager.i("VPN", "$reason; engine $engine.")
+            com.example.vpn.diagnostics.events.EventLog.event("session.stop", attributes = mapOf(
+                "origin" to origin.key, "from" to state.status.name, "since.connect.ms" to (since ?: -1L).toString(),
+                "engine" to engine, "reason" to reason))
+            if (state.status != ConnectionStatus.DISCONNECTED && state.status != ConnectionStatus.FAILED)
+                com.example.vpn.diagnostics.EngineStages.record(engine, "stopped", reason)
+        }
+        return reason
+    }
+
+    /**
      * The user's Stop. The cancelled attempt normally gives the connect lock back at once; when one of its blocking
      * steps does not answer the cancel (socket I/O ignores Thread.interrupt), the teardown does not wait out that
      * step's own time limit (28 s in the build 171 report) but goes ahead after [StopFence.LOCK_GRACE_MS]. The
@@ -5234,7 +5313,9 @@ class RayVpnService : VpnService() {
         XrayLogManager.appendLog("Initiating clean VPN disconnection...", "VPN")
         pinnedRestartNote = null
         psiphonAvoid = null
-        updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING))
+        // The Stop's reason (set by ACTION_DISCONNECT); a teardown without one (a mode switch) records its own.
+        val stopReason = pendingStopReason.also { pendingStopReason = null } ?: recordStop(StopOrigin.MODE_SWITCH)
+        updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING, stopReason = stopReason))
 
         supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.USER_DISCONNECT)
         disconnectResources()
@@ -5247,7 +5328,8 @@ class RayVpnService : VpnService() {
             downloadBytes = 0,
             uploadSpeedBps = 0,
             downloadSpeedBps = 0,
-            networkGeneration = _vpnState.value.networkGeneration
+            networkGeneration = _vpnState.value.networkGeneration,
+            stopReason = stopReason
         ))
         // Free configs kept only because this session used them can go now.
         serviceScope.launch {
@@ -5435,6 +5517,7 @@ class RayVpnService : VpnService() {
     private fun disconnectPendingIntent(): PendingIntent {
         val disconnectIntent = Intent(this, RayVpnService::class.java).apply {
             action = ACTION_DISCONNECT
+            putExtra(EXTRA_STOP_ORIGIN, StopOrigin.NOTIFICATION.key)
         }
         return PendingIntent.getService(
             this,

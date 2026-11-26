@@ -29,8 +29,16 @@ object RoutePaths {
         val selfExcluded = tun?.selfExcluded == true ||
             bulkTun?.state == TestRegistry.State.NOT_TESTABLE && bulkTun?.result.orEmpty().startsWith(TunCheckPlan.NOT_TESTABLE_SELF_EXCLUDED)
 
+        // Build 178: a failed or stopped session said "no bulk check yet" as if a check were still due.
+        val idle = when (c.status) {
+            com.example.data.model.ConnectionStatus.FAILED ->
+                "the last attempt failed before traffic could be checked" + (c.failureStage?.let { " (${it.name})" } ?: "")
+            com.example.data.model.ConnectionStatus.DISCONNECTED -> "no session is running" +
+                (c.stopReason?.let { " ($it)" } ?: "")
+            else -> null
+        }
         val engine = when {
-            evidence == null -> Path(State.NOT_TESTED, "no bulk check yet")
+            evidence == null -> Path(State.NOT_TESTED, idle ?: "no bulk check yet")
             evidence.bidirectional -> Path(State.VERIFIED, "bulk upload/download ${evidence.path.title}")
             evidence.bindRefused -> Path(State.NOT_TESTABLE, "the app may not use its own VPN network")
             else -> Path(State.FAILED, (if (evidence.bulkStalled) "stalled" else "partial") + " ${evidence.path.title}")
@@ -59,7 +67,7 @@ object RoutePaths {
                     Path(State.NOT_TESTABLE, bulkTun?.result ?: "the app may not use its own VPN network")
                 tunEvidence != null -> Path(State.FAILED, tunEvidence.describe())
                 bulkTun?.state == TestRegistry.State.FAILED -> Path(State.FAILED, bulkTun?.result ?: "bulk.tun failed")
-                else -> Path(State.NOT_TESTED, "no device-path check yet")
+                else -> Path(State.NOT_TESTED, idle ?: "no device-path check yet")
             }
         }
         return Paths(engine, device, selfExcluded)

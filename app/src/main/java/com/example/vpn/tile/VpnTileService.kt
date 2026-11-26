@@ -54,7 +54,7 @@ class VpnTileService : TileService() {
         // Any tunnel, verified or not, and any connect still searching is stopped by a tap (same rule as the
         // in-app button). Stop no longer waits for the connect lock (StopFence), so it is safe while busy.
         if (com.example.vpn.boot.QuickConnect.tapStops(currentState)) {
-            VpnController.stopVpn(applicationContext)
+            VpnController.stopVpn(applicationContext, com.example.vpn.StopOrigin.TILE)
         } else if (currentState.isBusy) {
             // A teardown is already running: never start a second service operation behind it.
             return

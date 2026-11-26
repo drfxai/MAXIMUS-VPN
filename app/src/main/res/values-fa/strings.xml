@@ -1867,4 +1867,8 @@
     <string name="ui_firewall_probe_unknown">نامشخص</string>
     <string name="ui_firewall_code_differs">کد شبکه موبایل %1$s را نشان می‌دهد، اما این شبکه مثل فیلترینگ دیگر رفتار می‌کند.</string>
     <string name="ui_firewall_unverified">بررسی رفتار هنگام اتصال، حداکثر روزی یک بار برای هر شبکه، انجام می‌شود و فقط وقتی نتیجه‌اش روشن باشد به کار می‌رود. قواعد آن هنوز روی گوشی تأیید نشده‌اند.</string>
+    <!-- Build 178 field report -->
+    <string name="picker_aether_cf_filtered">در این شبکه Cloudflare فیلتر است (cf=0) و WARP اینجا به‌ندرت وصل می‌شود. انتخاب آن فقط یک بررسی کوتاه (حداکثر %1$d ثانیه) اجرا می‌کند؛ معمولاً Lantern یا Serverless کار می‌کنند.</string>
+    <string name="unlock_error_no_server_retried">هیچ سرور Unlock DNS در این شبکه پس از %1$d بار بررسی پاسخ درستی نداد. سرورها را دوباره بررسی کنید یا یک DNS سفارشی اضافه کنید.</string>
+    <string name="unlock_notification_rechecking">هنوز هیچ سرور Unlock DNS پاسخ نداده است؛ دوباره بررسی می‌شود…</string>
 </resources>

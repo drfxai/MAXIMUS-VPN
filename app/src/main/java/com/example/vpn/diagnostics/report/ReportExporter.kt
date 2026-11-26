@@ -52,7 +52,12 @@ object ReportExporter {
                 val net = runCatching { com.example.vpn.smart.NetworkIdentity.current(app) }.getOrElse { com.example.vpn.smart.NetworkKey.current(app) }
                 com.example.vpn.engine.registry.EngineRegistry.statuses(net)
             }.getOrDefault(emptyList()),
-            tunPath = runCatching { com.example.vpn.verify.TunPathStatus.view() }.getOrNull()
+            tunPath = runCatching { com.example.vpn.verify.TunPathStatus.view() }.getOrNull(),
+            lastEngine = runCatching {
+                val profile = state.activeProfile ?: state.attemptedProfileId?.let { id ->
+                    com.example.vpn.connections.BuiltinConnections.resolve(com.example.RayApplication.instance, id) }
+                com.example.vpn.diagnostics.EngineStages.engineOf(profile)
+            }.getOrNull()
         )
     }
 

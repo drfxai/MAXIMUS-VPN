@@ -21,7 +21,7 @@ object QuickConnect {
     suspend fun toggle(context: Context): Outcome {
         val state = RayVpnService.vpnState.value
         return when {
-            tapStops(state) -> { VpnController.stopVpn(context); Outcome.STOPPED }
+            tapStops(state) -> if (VpnController.stopVpn(context, com.example.vpn.StopOrigin.WIDGET)) Outcome.STOPPED else Outcome.BUSY
             // Never start a second operation while a teardown owns the service.
             state.isBusy -> Outcome.BUSY
             else -> startSelected(context, reason = "widget")

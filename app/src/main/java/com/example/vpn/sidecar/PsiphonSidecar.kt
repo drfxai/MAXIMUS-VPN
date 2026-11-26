@@ -228,10 +228,19 @@ class PsiphonSidecar(
         }
 
         fun failureAfter(timeoutMs: Long, label: String = "Psiphon"): String {
+            val d = dials()
+            val dialedCount = d.tcp + d.other
+            val regionCount = availableRegions?.size
             val phase = when {
                 stage == 3 -> "server connected but the tunnel did not become ready"
-                stage == 2 -> "server dialing did not establish a tunnel"
-                stage == 1 -> "server candidates found but no tunnel became ready"
+                // Build 178: say how many servers were tried and over which protocols, so "Psiphon is blocked here"
+                // and "Psiphon never tried" read differently.
+                stage == 2 -> "server dialing did not establish a tunnel" + if (dialedCount == 0) "" else
+                    ": dialed $dialedCount server(s) (" + d.byProtocol.entries.joinToString(", ") { "${it.key}×${it.value}" } +
+                    ") and none answered on this network"
+                stage == 1 -> "server candidates found" + (regionCount?.let { " ($it regions)" } ?: "") +
+                    " but no server was dialed yet" + (d.candidates?.let { " ($it allowed by the protocol limits)" } ?: "") +
+                    "; no tunnel became ready"
                 // Build 175 (Shir o Khorshid): an empty region list and no dial at all means the data store held no
                 // server entry and the server list could not be downloaded on this network.
                 noServersKnown -> "no Psiphon servers known yet (empty server list) and the server list could not be " +
@@ -385,6 +394,10 @@ class PsiphonSidecar(
             "LocalSocksProxyUnixPath", "LocalHttpProxyUnixPath", "EgressRegion", "EnableUpgradeDownload",
             "UpgradeDownloadURLs", "UpgradeDownloadClientVersionHeader", "UseNoticeFiles", "DisableTunnels",
             "UpstreamProxyURL", "UpstreamProxyUrl", "ClientPlatform", "ClientAPILevel", "NetworkID", "EmitDiagnosticNetworkParameters", "EmitSensitiveNetworkParameters",
+            // Build 178 field report: the bundled public settings say EmitDiagnosticNotices=false, so no ConnectingServer
+            // notice ever arrived; every start looked "silent" ("no_dials"), any region was cut at 40 s and two 25 s region
+            // starts followed, each restart throwing establishment away. The app reads these notices; it decides them.
+            "EmitDiagnosticNotices",
             // Split tunnel sends "own region" destinations around Psiphon, classified from a lookup on the
             // phone's own (filtered) network. In Iran that returns 10.10.34.x for blocked names such as
             // YouTube's, so nothing may go direct: MAXIMUS sends all app traffic into Psiphon.
@@ -571,7 +584,7 @@ class PsiphonSidecar(
             // Diagnostic notices (ConnectingServer, Warning, Error…) are what explains a start that never gets a
             // tunnel; without them only NetworkID repeats. psiphon-tunnel-core redacts IP addresses in every
             // notice (notice.go outputNotice), and StartupProgress keeps only whitelisted, sanitized fields.
-            if (!config.has("EmitDiagnosticNotices")) config.put("EmitDiagnosticNotices", true)
+            config.put("EmitDiagnosticNotices", true)
             if (tcpOnly) {
                 config.remove("InitialLimitTunnelProtocols")
                 config.remove("InitialLimitTunnelProtocolsCandidateCount")

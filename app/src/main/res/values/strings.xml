@@ -1878,4 +1878,8 @@
     <string name="ui_firewall_probe_unknown">Unclear</string>
     <string name="ui_firewall_code_differs">The mobile network code says %1$s, but this network behaves like the other firewall.</string>
     <string name="ui_firewall_unverified">The behaviour check runs at Connect, at most once a day per network, and is used only when its result is clear. Its rules are not yet confirmed on phones.</string>
+    <!-- Build 178 field report -->
+    <string name="picker_aether_cf_filtered">Cloudflare is filtered on this network (cf=0): WARP rarely connects here. A pick runs one short check (up to %1$d s); Lantern or Serverless usually work.</string>
+    <string name="unlock_error_no_server_retried">No Unlock DNS server answered correctly on this network after %1$d checks. Re-check the servers or add a custom DNS.</string>
+    <string name="unlock_notification_rechecking">No Unlock DNS server answered yet; checking again…</string>
 </resources>

@@ -339,6 +339,13 @@ class RayApplication : Application() {
         instance = this
         // Tor's own process only runs TorService; nothing of the app starts there.
         if (com.example.core.AppProcess.isTorProcess()) return
+        // Build 178: what each engine did on each network survives the app being closed (the report's engine list).
+        runCatching {
+            val ledgerPrefs = getSharedPreferences("engine_ledger", MODE_PRIVATE)
+            com.example.vpn.engine.registry.EngineLedger.shared.store = com.example.vpn.engine.registry.EngineLedger.Store(
+                load = { ledgerPrefs.getString("history", null) },
+                save = { value -> ledgerPrefs.edit().putString("history", value).apply() })
+        }
         com.example.vpn.sidecar.BuiltinExitNode.loadProfile = { id ->
             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { serverRepository.getProfileById(id) }
         }

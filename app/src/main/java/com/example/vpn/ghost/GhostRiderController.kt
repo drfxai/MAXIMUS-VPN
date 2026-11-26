@@ -72,7 +72,7 @@ object GhostRiderController {
      * the app's log is deleted as well.
      */
     fun panic(context: Context) {
-        runCatching { VpnController.stopVpn(context) }
+        runCatching { VpnController.stopVpn(context, com.example.vpn.StopOrigin.GHOST_PANIC) }
         runCatching { com.example.chat.SecretChatManager(context).regenerateAtomicId() }
         // The app's own log is kept on the phone across restarts; panic deletes it too.
         runCatching { com.example.xray.XrayLogManager.wipeDisk() }

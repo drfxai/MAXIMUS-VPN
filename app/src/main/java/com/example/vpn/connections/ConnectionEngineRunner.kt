@@ -201,6 +201,30 @@ object ConnectionEngineRunner {
         if (engineId == AetherSidecar.ID && automatic && metered && (irancell || cloudflareFiltered)) HEAVY_LADDER_BUDGET_MS else null
 
     /**
+     * The user's own Aether pick on a network where Cloudflare is known to be filtered (cf_quick = filtered or a fresh
+     * cf=0 reading). Build 178 field report (Irancell): such picks ran 2-3 minute gateway scans (H2 220 s ladder, MIM,
+     * WireGuard + MTU retry) that all ended "gateway scan completed without a verified endpoint" while the app already
+     * knew cf=0. The pick still runs only Aether, never another engine; it gets one short, honest check.
+     */
+    const val CF_FILTERED_MANUAL_BUDGET_MS = 60_000L
+
+    /** [CF_FILTERED_MANUAL_BUDGET_MS] for the user's own Aether run with Cloudflare filtered here; null otherwise. Pure. */
+    fun cfFilteredManualBudgetMs(engineId: String, manual: Boolean, cloudflareBlocked: Boolean, relayOnly: Boolean): Long? =
+        if (engineId == AetherSidecar.ID && manual && cloudflareBlocked && !relayOnly) CF_FILTERED_MANUAL_BUDGET_MS else null
+
+    /** The whole-run budget: the tighter of the metered ladder budget and the cf=0 manual budget. Pure. */
+    fun effectiveLadderBudgetMs(ladder: Long?, cfManual: Long?): Long? = when {
+        ladder == null -> cfManual
+        cfManual == null -> ladder
+        else -> minOf(ladder, cfManual)
+    }
+
+    /** The stage line shown before a cf=0 manual Aether run starts. Pure. */
+    fun cfFilteredManualNotice(budgetMs: Long): String =
+        "Cloudflare is filtered on this network (cf=0): WARP rarely connects here, so this pick gets one short check " +
+            "(up to ${budgetMs / 1000}s) instead of minutes of gateway scans. Lantern or Serverless usually work on such networks."
+
+    /**
      * WireGuard's handshake passed and no data came back on Irancell or a measured Cloudflare-filtered link: the
      * carrier is dropping WARP data (seen on every WARP carrier there). Record that at once and go straight to
      * WARP through a verified saved server, with at most one cheap follow-up (the MTU retry on the same endpoint),
@@ -735,7 +759,13 @@ object ConnectionEngineRunner {
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
         val irancellPlan = if (irancellHttp2) IrancellWarp.plan(ordered.map(::method), preferred, manual)
             .map { name -> IrancellWarp.forAttempt(ordered.first { method(it) == name }, manual) } else emptyList()
-        val irancellBudgetMs = if (manual) irancellPlan.sumOf(IrancellWarp::manualAttemptMs) else IrancellWarp.BUDGET_MS
+        val cfManualBudget = cfFilteredManualBudgetMs(engine.id, manual, cloudflareBlocked, relayOnly).takeIf { !lanternOnly }
+        if (cfManualBudget != null && !lanternOnly) {
+            record(ladderKind, "cf-filtered", "WARN", cfFilteredManualNotice(cfManualBudget))
+            com.example.vpn.diagnostics.EngineStages.record(engine.id, "cloudflare filtered", cfFilteredManualNotice(cfManualBudget))
+        }
+        val irancellBudgetMs = (if (manual) irancellPlan.sumOf(IrancellWarp::manualAttemptMs) else IrancellWarp.BUDGET_MS)
+            .let { b -> cfManualBudget?.let { minOf(b, it) } ?: b }
         if (irancellHttp2 && irancellPlan.isEmpty()) attempts += "irancell: no MASQUE HTTP/2 carrier available"
         if (irancellHttp2 && !lanternOnly) record("ladder", "queue", "START",
             "Irancell MASQUE HTTP/2: ${irancellPlan.joinToString(", ") { method(it) }.ifEmpty { "none available" }}; " +
@@ -795,7 +825,8 @@ object ConnectionEngineRunner {
         var lanternQueued = lanternOnly
         var noizeQueued = recheckOnly || irancellHttp2 || preferred == WIREGUARD_NOIZE
         var mtuQueued = recheckOnly || irancellHttp2 || preferred == WIREGUARD_MTU
-        val ladderBudget = ladderBudgetMs(engine.id, automatic, metered, onIrancell, preferWireGuard)
+        val ladderBudget = effectiveLadderBudgetMs(ladderBudgetMs(engine.id, automatic, metered, onIrancell, preferWireGuard),
+            cfManualBudget)
         val ladderStartedAt = System.currentTimeMillis()
         var ladderStopped = false
         var warpBlockFastPath = false
