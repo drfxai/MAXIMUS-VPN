@@ -14,6 +14,8 @@ import java.net.IDN
 /** Native retransmission of original bytes after a TTL-limited decoy; the TLS identity is unchanged. */
 object ByedpiSidecar : SidecarEngine {
     const val ID = "byedpi"
+    /** Extra flag: sign the decoy with a TCP-MD5 option (`--md5sig`); only offered where [Md5SigSupport] says yes. */
+    const val KEY_MD5SIG = "fakeMd5sig"
     override val id = ID
     override val binary = "byedpi"
     override fun handles(profile: VlessProfile) = ProfileExtras.read(profile).optString("engine") == ID
@@ -28,6 +30,7 @@ object ByedpiSidecar : SidecarEngine {
         require(p.port in 1..65535 && p.finalMask.isBlank()) { "Use a valid port and disable other fragmentation for this test" }
         val e = ProfileExtras.read(p)
         require(e.optInt("fakeTtl") in 1..32) { "Fake packet TTL must be 1–32" }
+        require(!e.has(KEY_MD5SIG) || e.get(KEY_MD5SIG) is Boolean) { "Invalid MD5 signature flag" }
         domain(e.getString("fakeSni"))
     }
 
@@ -37,12 +40,14 @@ object ByedpiSidecar : SidecarEngine {
         }) { "Invalid decoy SNI" }
     }
 
-    fun enable(p: VlessProfile, decoy: String, ttl: Int): VlessProfile {
+    fun enable(p: VlessProfile, decoy: String, ttl: Int, md5sig: Boolean = false): VlessProfile {
         val extra = ProfileExtras.read(p)
         require(extra.optString("engine").isBlank()) { "An engine is already selected" }
         extra.put("engine", ID).put("fakeSni", domain(decoy)).put("fakeTtl", ttl)
+        if (md5sig) extra.put(KEY_MD5SIG, true)
+        // Without MD5 the fingerprint is the one earlier builds computed, so saved Lab profiles keep their identity.
         val fingerprint = java.security.MessageDigest.getInstance("SHA-256")
-            .digest("${p.effectiveFingerprint}|$ID|${domain(decoy)}|$ttl".toByteArray()).joinToString("") { "%02x".format(it) }
+            .digest("${p.effectiveFingerprint}|$ID|${domain(decoy)}|$ttl${if (md5sig) "|md5sig" else ""}".toByteArray()).joinToString("") { "%02x".format(it) }
         return p.copy(canonicalFingerprint = fingerprint, extraSettings = extra.toString(), lastLatencyMs = null, lastTestedTimestamp = null).also(::validate)
     }
 
@@ -52,7 +57,9 @@ object ByedpiSidecar : SidecarEngine {
         val e = ProfileExtras.read(profile)
         return SidecarLaunch(listOf(context.executable.absolutePath, "--ip", "127.0.0.1", "--port", context.socksPort.toString(),
             "--conn-ip", "0.0.0.0", "--no-domain", "--no-udp", "--max-conn", "64", "--timeout", "4",
-            "--fake", "-1", "--ttl", e.getInt("fakeTtl").toString(), "--fake-sni", domain(e.getString("fakeSni"))),
+            "--fake", "-1", "--ttl", e.getInt("fakeTtl").toString()) +
+            (if (e.optBoolean(KEY_MD5SIG)) listOf("--md5sig") else emptyList()) +
+            listOf("--fake-sni", domain(e.getString("fakeSni"))),
             environment = mapOf("MAXIMUS_PEER_IP" to profile.address, "MAXIMUS_PEER_PORT" to profile.port.toString()), socksAuth = false)
     }
 
@@ -77,7 +84,7 @@ object ByedpiSidecar : SidecarEngine {
     /** Xray still performs encryption/authentication; only its TCP dial goes through ByeDPI. */
     fun wrap(original: VlessProfile, context: SidecarContext): VlessProfile {
         validate(original)
-        val extra = ProfileExtras.read(original).apply { remove("engine"); remove("fakeSni"); remove("fakeTtl") }
+        val extra = ProfileExtras.read(original).apply { remove("engine"); remove("fakeSni"); remove("fakeTtl"); remove(KEY_MD5SIG) }
         val plain = original.copy(extraSettings = extra.toString())
         val out = JSONObject(XrayConfigBuilder.buildJson(plain, AppSettings())).getJSONArray("outbounds").getJSONObject(0)
         val stream = out.getJSONObject("streamSettings")

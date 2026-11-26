@@ -58,7 +58,12 @@ object AetherSidecar : SidecarEngine {
             else -> listOf("--masque", "--h2")
         }
         command += when (e.optString("family", "auto")) { "ipv4" -> "-4"; "ipv6" -> "-6"; else -> "--dual" }
-        command += advanced.arguments(carrier, e.optBoolean("fragment", true))
+        // A fingerprint left at Auto that the session runner did not pick (a chain hop, Aether → Psiphon started
+        // elsewhere): this network's pick from AetherFingerprintBook. A concrete choice is sent as it is.
+        val autoFingerprint = if (advanced.fingerprint == AetherTlsProfiles.AUTO && carrier !in listOf("wireguard", "wiw"))
+            com.example.vpn.connections.AetherFingerprintBook.pick(com.example.vpn.connections.BuiltinMethodMemory.network()) else null
+        val tls = autoFingerprint?.let { advanced.copy(fingerprint = it) } ?: advanced
+        command += tls.arguments(carrier, e.optBoolean("fragment", true))
         // A gateway that carried verified HTTP/2 on this network before (CleanH2PeerMemory): dial it directly,
         // skipping the scan (--peer), and send the HTTP/2 transport to the same address (--h2-peer).
         cleanH2Peer(e, carrier, advanced)?.let { command += listOf("--peer", it, "--h2-peer", it) }
@@ -76,6 +81,8 @@ object AetherSidecar : SidecarEngine {
             "MAXIMUS_SOCKS_PASS" to context.socksPass, "AETHER_TLS_VERIFY" to "1", "RUST_LOG" to "warn",
             "LD_LIBRARY_PATH" to context.executable.parentFile!!.absolutePath)
         environment += advanced.environment(carrier)
+        // Read back by whoever started this launch to record the outcome for the network (the Aether binary ignores it).
+        autoFingerprint?.let { environment[AUTO_FINGERPRINT_ENV] = it }
         // WARP account API lanes (OOB ClientHello, the user's Worker relay) on Iranian mobile networks.
         environment += com.example.vpn.connections.WarpApiLane.environment(e, advanced)
         if (sniSplit(e, carrier)) environment[com.example.vpn.connectivity.IranHelloSplit.AETHER_SNI_SPLIT_ENV] = "1"
@@ -148,6 +155,9 @@ object AetherSidecar : SidecarEngine {
         }
         return (discoverySeconds + MASQUE_STARTUP_SECONDS + 20) * 1_000L
     }
+
+    /** Launch environment: the fingerprint picked for Auto at prepare time ([com.example.vpn.connections.AetherFingerprintBook]). */
+    const val AUTO_FINGERPRINT_ENV = "MAXIMUS_AETHER_AUTO_FINGERPRINT"
 
     /** Extras key: the remembered clean HTTP/2 gateway to dial (set only by the session runner). */
     const val CLEAN_H2_PEER = "cleanH2Peer"

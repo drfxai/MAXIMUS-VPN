@@ -116,6 +116,16 @@ object PsiphonRegionPlan {
         }
     }
 
+    /**
+     * The stage text of one step: "up to 25s", and for any region (no region fixed in the profile, the first and
+     * only step that [anyStalled] can cut) "up to 70s; next region after 40s if no server is dialed". Pure.
+     */
+    fun stepWindowText(step: Step, userRegion: String): String {
+        val upTo = "up to ${step.budgetMs / 1000}s"
+        return if (step.any && userRegion.isBlank() && step.budgetMs > ANY_STALL_MS)
+            "$upTo; next region after ${ANY_STALL_MS / 1000}s if no server is dialed" else upTo
+    }
+
     /** Psiphon listed its available regions and [region] is not one of them: that start can never complete. Pure. */
     fun unavailable(region: String, available: List<String>?): Boolean =
         region.isNotEmpty() && !available.isNullOrEmpty() && available.none { it.equals(region, ignoreCase = true) }

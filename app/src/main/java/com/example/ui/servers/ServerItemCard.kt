@@ -114,7 +114,7 @@ fun ServerItemCard(
                     if (isSelected) {
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
-                            contentDescription = "Selected",
+                            contentDescription = stringResource(R.string.a11y_selected),
                             tint = if (isConnected) AppTheme.colors.statusConnected else AppTheme.colors.primary,
                             modifier = Modifier.size(20.dp)
                         )

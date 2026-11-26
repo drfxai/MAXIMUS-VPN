@@ -61,6 +61,9 @@ import java.net.InetSocketAddress
 class RayVpnService : VpnService() {
 
     companion object {
+        /** Block sentences older builds wrote into a failure message, replaced when the block's state changes. */
+        private val LEGACY_BLOCK_NOTICES = listOf("Traffic stays blocked; disconnect to use the network without the VPN.")
+
         /** Linux TCP_MAXSEG (netinet/tcp.h); android.system.OsConstants does not export it. */
         private const val TCP_MAXSEG = 2
         const val ACTION_CONNECT = "com.drfxai.maximusvpn.ACTION_CONNECT"
@@ -327,6 +330,7 @@ class RayVpnService : VpnService() {
     private val handoffPolicy = com.example.vpn.connectivity.NetworkHandoffPolicy()
     private var settingsObserverJob: Job? = null
     private var lastObservedMode: com.example.data.model.OperationalMode? = null
+    private var lastObservedKillSwitch: Boolean? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -371,6 +375,12 @@ class RayVpnService : VpnService() {
             settingsRepository.settingsFlow.collect { settings ->
                 val prevMode = lastObservedMode
                 lastObservedMode = settings.operationalMode
+                val prevKillSwitch = lastObservedKillSwitch
+                lastObservedKillSwitch = settings.killSwitchEnabled
+                // B21: only a failed Connect's held block is re-evaluated; a running connect is left alone.
+                if (prevKillSwitch == true && !settings.killSwitchEnabled && _vpnState.value.status == ConnectionStatus.FAILED) {
+                    serviceScope.launch { onKillSwitchTurnedOff() }
+                }
                 if (prevMode != null && prevMode != settings.operationalMode && _vpnState.value.isTunnelUp) {
                     handleLiveModeSwitch(prevMode, settings.operationalMode)
                 }
@@ -463,6 +473,9 @@ class RayVpnService : VpnService() {
             updateState(_vpnState.value.copy(status = ConnectionStatus.PREPARING, errorMessage = null))
         }
         if (action == null || action == ACTION_CONNECT || action == ACTION_RECONNECT) {
+            // Firewall type by behaviour: a few handshakes on the phone's own network, in the background, at most once
+            // per network per day; never delays this Connect (NetworkFirewalls uses it only when confident).
+            runCatching { com.example.vpn.connectivity.FirewallProbe.atConnect(this, serviceScope) }
             supervisor.requestProtection()
             checkLockdown()
             if (!showForegroundNotification("Protecting traffic while connecting...")) return START_NOT_STICKY
@@ -747,7 +760,9 @@ class RayVpnService : VpnService() {
                     ConnectDeadline.GiveUpReason.FALLBACKS_USED -> com.example.R.string.connect_deadline_reason_exhausted
                     ConnectDeadline.GiveUpReason.NONE_LEFT -> com.example.R.string.connect_deadline_reason_none_left
                 })
-                val message = getString(com.example.R.string.connect_deadline_failed, name, seconds, why)
+                // Build 177: "Traffic stays blocked" was shown while Daily + Kill Switch off released the block.
+                val message = getString(com.example.R.string.connect_deadline_failed, name, seconds, why,
+                    failureNotice(afterFailedConnect()))
                 XrayLogManager.e("VPN", "[DEADLINE] $engine carried no verified traffic within ${seconds}s; stopping (${decision.reason}).")
                 connectJob?.cancel()
                 com.example.vpn.sidecar.EngineReaper.stopAll()
@@ -1391,17 +1406,23 @@ class RayVpnService : VpnService() {
                 }
                 return hold
             }
+            // Build 177: every manual pick logged "Network: … open" / "Assessment: filtering looks heavy" (flipping
+            // between connects) and a "not tried directly" line per engine. The reading is still kept (metered checks
+            // use it); only Smart Connect, which acts on it, reports it, and only when it changed (SmartSearchLog).
+            val smartReport = SmartSearchLog.reports(exact)
             runCatching { com.example.vpn.smart.NetworkEnvironment.observe(this@RayVpnService, networkMemory, dnsPoisoned || dnsTamperedOn(network)) }
                 .onSuccess { report ->
                     _environment.value = report
-                    XrayLogManager.i("SMART", "Network: ${report.describe()}")
+                    if (!smartReport) return@onSuccess
+                    val fresh = SmartSearchLog.changed(network, report.describe())
+                    if (fresh) XrayLogManager.i("SMART", "Network: ${report.describe()}")
                     // What was measured and what the app concludes from it are separate events.
                     val signals = report.signals.joinToString(",") { it.name }
                     com.example.vpn.diagnostics.events.EventLog.event("network.signals", attributes = mapOf("signals" to signals.ifEmpty { "none" }))
                     com.example.vpn.diagnostics.events.EventLog.event("network.assessment", attributes = mapOf(
                         "level" to report.level.name, "based.on" to signals.ifEmpty { "no failure signals" }
                     ), kind = com.example.vpn.diagnostics.events.DiagEvent.Kind.ASSESSMENT)
-                    if (policy.mode == com.example.data.model.OperationalMode.DAILY && com.example.vpn.smart.NetworkEnvironment.suggestsGodMode(report)) {
+                    if (fresh && policy.mode == com.example.data.model.OperationalMode.DAILY && com.example.vpn.smart.NetworkEnvironment.suggestsGodMode(report)) {
                         XrayLogManager.w("SMART", "Assessment: filtering looks ${report.level.name.lowercase()} " +
                             "(based on: ${report.signals.joinToString { it.name.lowercase().replace('_', ' ') }}); GOD MODE proxies everything and tests every server.")
                     }
@@ -1420,8 +1441,12 @@ class RayVpnService : VpnService() {
                 mutateState { if (it.attemptId == attemptId) it.copy(search = p) else it }
             }
             search = tracker
-            plan.reading?.let { XrayLogManager.i("SMART", "Measured network: ${it.summary()}.") }
-            plan.transportsSkipped.forEach { (t, why) -> XrayLogManager.i("SMART", "${t.title} not tried directly: $why.") }
+            if (smartReport) {
+                plan.reading?.let { XrayLogManager.i("SMART", "Measured network: ${it.summary()}.") }
+                plan.transportsSkipped.forEach { (t, why) -> XrayLogManager.i("SMART", "${t.title} not tried directly: $why.") }
+            } else if (plan.transportsSkipped.isNotEmpty()) {
+                XrayLogManager.i("SMART", SmartSearchLog.manualLine(com.example.core.SecretRedactor.redact(userProfile.name)))
+            }
             if (plan.cloudflareLast) XrayLogManager.i("SMART", "Cloudflare is blocked on this network (cf=0): clean IP for Cloudflare fronts, WARP, MASQUE " +
                 "and Matrix move to the end of the search.")
             var raced = false
@@ -1946,7 +1971,8 @@ class RayVpnService : VpnService() {
                     ConnectionStatus.FAILED,
                     (if (recoveryExhausted) "No verified egress after recovery: $name and every available method were tested on this network and none carried traffic. Other servers or methods may still work."
                     else "No verified path: $name carried no traffic on this network, and no other server or method did.") +
-                        if (release) "" else " Traffic stays blocked; disconnect to use the network without the VPN.",
+                        // B20: which block stays, and why (Kill Switch, or the mode / an automatic start).
+                        if (release) "" else " " + failureNotice(afterFailedConnect()),
                     com.example.vpn.diagnostics.FailureStage.HTTP_REQUEST_FAILED
                 ).copy(canConnectAnyway = true, recoveryStage = ladder.stage.title, recoveryExhausted = recoveryExhausted))
                 if (release) {
@@ -2684,8 +2710,67 @@ class RayVpnService : VpnService() {
      * releases the traffic block so the phone is not left without internet (FailClosedPolicy.mayReleaseAfterFailedConnect);
      * otherwise the block stays and [blockedNotice] says so.
      */
+    /**
+     * What a Connect that fails now leaves behind (released, kept by the Kill Switch, kept by the mode or an automatic
+     * start), the same rule [endFailedSession] applies. The failure text says which one happens (build 177, B2/B20).
+     */
+    private fun afterFailedConnect(): com.example.vpn.safety.FailClosedPolicy.AfterFailure {
+        val settings = runCatching { settingsRepository.getSettings() }.getOrNull()
+            ?: return if (protectionRequested) com.example.vpn.safety.FailClosedPolicy.AfterFailure.MODE_OR_AUTOMATIC
+                else com.example.vpn.safety.FailClosedPolicy.AfterFailure.NO_BLOCK
+        return com.example.vpn.safety.FailClosedPolicy.afterFailedConnect(protectionRequested = protectionRequested,
+            startedByUser = userSession, mode = settings.operationalMode, killSwitchEnabled = settings.killSwitchEnabled)
+    }
+
+    /** The sentence about the traffic block that ends a failure message; empty when no block was requested. */
+    private fun failureNotice(outcome: com.example.vpn.safety.FailClosedPolicy.AfterFailure): String = when (outcome) {
+        com.example.vpn.safety.FailClosedPolicy.AfterFailure.NO_BLOCK -> ""
+        com.example.vpn.safety.FailClosedPolicy.AfterFailure.RELEASED -> getString(com.example.R.string.connect_failed_block_released)
+        com.example.vpn.safety.FailClosedPolicy.AfterFailure.KILL_SWITCH -> getString(com.example.R.string.connect_failed_block_kill_switch)
+        com.example.vpn.safety.FailClosedPolicy.AfterFailure.MODE_OR_AUTOMATIC -> getString(com.example.R.string.connect_failed_block_kept)
+    }
+
+    private fun allFailureNotices(): List<String> = com.example.vpn.safety.FailClosedPolicy.AfterFailure.entries.map { failureNotice(it) } +
+        LEGACY_BLOCK_NOTICES
+
+    /** The FAILED state's message ends with the sentence for [outcome] (one sentence, replacing an older one). */
+    private fun noteBlockInFailure(outcome: com.example.vpn.safety.FailClosedPolicy.AfterFailure) {
+        val notice = runCatching { failureNotice(outcome) }.getOrDefault("")
+        val known = runCatching { allFailureNotices() }.getOrDefault(LEGACY_BLOCK_NOTICES)
+        mutateState { state ->
+            if (state.status != ConnectionStatus.FAILED) state
+            else state.copy(errorMessage = com.example.vpn.safety.FailClosedPolicy.withNotice(state.errorMessage, notice, known))
+        }
+    }
+
+    /**
+     * Build 177 (B21): the Kill Switch turned off while a failed Connect held the traffic block. Daily mode and the
+     * user's own Connect release it, as if the Kill Switch had been off when it failed; other modes keep it.
+     */
+    private suspend fun onKillSwitchTurnedOff() {
+        connectionMutex.withLock {
+            val settings = runCatching { settingsRepository.getSettings() }.getOrNull() ?: return@withLock
+            val holding = _vpnState.value.status == ConnectionStatus.FAILED && protectionRequested && connectJob?.isActive != true
+            if (!com.example.vpn.safety.FailClosedPolicy.releaseOnKillSwitchOff(holdingFailedBlock = holding,
+                    startedByUser = userSession, mode = settings.operationalMode, killSwitchWas = true,
+                    killSwitchNow = settings.killSwitchEnabled)) {
+                if (holding) XrayLogManager.i("VPN", "Kill Switch turned off; the traffic block stays (" +
+                    "${settings.operationalMode.name} mode or an automatic start keeps it until you connect or disconnect).")
+                return@withLock
+            }
+            supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.KILL_SWITCH_OFF_AFTER_FAILURE)
+            XrayLogManager.i("VPN", "Kill Switch turned off after a failed Connect: the traffic block is released (Daily mode); " +
+                "apps use the network directly until you connect again.")
+            disconnectResources()
+            noteBlockInFailure(com.example.vpn.safety.FailClosedPolicy.AfterFailure.RELEASED)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+    }
+
     private fun endFailedSession(blockedNotice: String) {
         val settings = runCatching { settingsRepository.getSettings() }.getOrNull()
+        noteBlockInFailure(afterFailedConnect())
         if (protectionRequested && settings != null && com.example.vpn.safety.FailClosedPolicy.mayReleaseAfterFailedConnect(
                 startedByUser = userSession, mode = settings.operationalMode, killSwitchEnabled = settings.killSwitchEnabled)) {
             supervisor.release(com.example.vpn.safety.MaximusVpnSupervisor.Release.CONNECT_FAILED_BY_USER)
@@ -3159,6 +3244,12 @@ class RayVpnService : VpnService() {
                 com.example.vpn.smart.SmartConnectPlan.cloudflareBlocked(com.example.vpn.smart.NetworkCapabilityDetector.last,
                     relayNetwork, System.currentTimeMillis())
             }.getOrDefault(false)
+            // Build 177: Aether sat on "tunnel created" for 93 s and Serverless tested carriers silently for 33.6 s. The
+            // carrier test is a stage of its own, with the limit the connect deadline really applies.
+            val carrierTestStartedAt = System.currentTimeMillis()
+            if (managed) com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine starting",
+                ConnectDeadline.carrierTestText(engine.id,
+                    runCatching { ConnectDeadline.budgetMs(profile, manual = exactSession) }.getOrDefault(ConnectDeadline.ENGINE_MS)))
             val started = if (managed) com.example.vpn.connections.ConnectionEngineRunner.start(engine, profile, settings, context,
                 ipv4Only = ipv4Only, preferWireGuard = preferWireGuard, relayExitNode = relayExitNode,
                 relayExitRoute = relayExitRoute, metered = metered, manual = exactSession, cloudflareBlocked = cfBlocked,
@@ -3187,15 +3278,17 @@ class RayVpnService : VpnService() {
             // cut the attempt at 40-60 s). A manual pick gets the engine's own window, announced to the deadline
             // (EngineBudgetHint); Smart Connect shows its own, shorter limit.
             fun recordStarting(readyMs: Long) {
-                val shown = ConnectDeadline.shownReadyMs(readyMs, manual = exactSession,
-                    smartBudgetMs = runCatching { ConnectDeadline.budgetMs(profile) }.getOrDefault(ConnectDeadline.ENGINE_MS))
-                if (exactSession && started == null) EngineBudgetHint.announce(readyMs)
+                if (started != null) {
+                    // The carrier test already started the engine (build 177: "ready within 15s" after a silent 33.6 s test).
+                    com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine starting",
+                        ConnectDeadline.carrierChosenText(System.currentTimeMillis() - carrierTestStartedAt))
+                    return
+                }
+                if (exactSession) EngineBudgetHint.announce(readyMs)
                 com.example.vpn.diagnostics.EngineStages.record(engine.id, "engine starting",
-                    "ready within ${shown / 1000}s" + when {
-                        started != null -> " (carrier chosen by its test)"
-                        shown < readyMs -> " (Smart Connect's limit; the engine allows ${readyMs / 1000}s)"
-                        else -> ""
-                    })
+                    ConnectDeadline.startingText(engine.id, readyMs, manual = exactSession,
+                        smartBudgetMs = runCatching { ConnectDeadline.budgetMs(profile) }.getOrDefault(ConnectDeadline.ENGINE_MS),
+                        manualBudgetMs = runCatching { ConnectDeadline.budgetMs(profile, manual = true) }.getOrDefault(ConnectDeadline.ENGINE_MS)))
             }
 
             fun launchProcess() = com.example.vpn.sidecar.EngineReaper.track(
@@ -3253,8 +3346,10 @@ class RayVpnService : VpnService() {
                     }
                     firstStep = false
                     val label = step.region.ifEmpty { "any" } + if (step.tcpOnly) " (TCP only)" else ""
-                    XrayLogManager.i("VPN", "Psiphon: region $label for up to ${step.budgetMs / 1000}s (${step.why}).")
-                    com.example.vpn.diagnostics.EngineStages.record(engine.id, "region $label", "up to ${step.budgetMs / 1000}s (${step.why})")
+                    // Build 177: "region any · up to 70s" moved on at 40 s (anyStalled). Say both numbers.
+                    val window = com.example.vpn.sidecar.PsiphonRegionPlan.stepWindowText(step, userRegion)
+                    XrayLogManager.i("VPN", "Psiphon: region $label for $window (${step.why}).")
+                    com.example.vpn.diagnostics.EngineStages.record(engine.id, "region $label", "$window (${step.why})")
                     com.example.vpn.diagnostics.events.EventLog.event("psiphon.region", attributes = mapOf(
                         "region" to label, "budget.s" to (step.budgetMs / 1000).toString(), "why" to step.why), result = "START")
                     if (!step.any) showForegroundNotification("Psiphon: trying region $label…")
@@ -3552,6 +3647,14 @@ class RayVpnService : VpnService() {
                 try {
                     val hopReady = process.awaitReady(launch.readyTimeoutMs)
                     val failure = process.startupFailure
+                    // An Aether hop whose fingerprint was left at Auto: its outcome moves this network's pick on, or keeps it.
+                    launch.environment[com.example.vpn.sidecar.AetherSidecar.AUTO_FINGERPRINT_ENV]?.let { picked ->
+                        if (hopReady || !com.example.vpn.sidecar.SidecarProcess.stoppedByApp(failure)) {
+                            val network = com.example.vpn.connections.BuiltinMethodMemory.network()
+                            if (hopReady) com.example.vpn.connections.AetherFingerprintBook.win(network, picked)
+                            else com.example.vpn.connections.AetherFingerprintBook.fail(network, picked)
+                        }
+                    }
                     // Stopped by the app (a deadline, a Stop, a newer Connect): not a crash of the hop. Build 176 reported
                     // "exit 141" here: the stop closes the program's output pipe and its shutdown notice then gets SIGPIPE.
                     if (!hopReady && com.example.vpn.sidecar.SidecarProcess.stoppedByApp(failure))
@@ -3823,14 +3926,19 @@ class RayVpnService : VpnService() {
                         // The exit through the engine's own port (the VPN network is not the app's to use here):
                         // until it is known, then on every tenth check. Three misses in a row stop asking.
                         val known = _vpnState.value.exitIp
-                        val exit = if ((known == null && exitTries < 3) || okStreak % 10 == 9) runCatching {
+                        // Read until known, again right after connect, then every tenth check (ExitTrace, build 177).
+                        val exit = if (com.example.vpn.diagnostics.ExitTrace.due(known, exitTries, okStreak)) runCatching {
                             kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
                                 com.example.vpn.diagnostics.LiveTunnelProbe.traceVia(com.example.vpn.verify.RouteDialers.engine(endpoint), probeStepMs())
                             }
                         }.onFailure { if (it is CancellationException) throw it; exitTries++ }.getOrNull() else null
                         if (exit != null) exitTries = 0
-                        com.example.vpn.diagnostics.LiveTunnelProbe.Sample(latency, exit?.country ?: _vpnState.value.exitCountryCode,
-                            exit?.ip ?: known)
+                        com.example.vpn.diagnostics.ExitTrace.changed(_vpnState.value.exitCountryCode, known, exit)?.let {
+                            XrayLogManager.i("VPN", it)
+                        }
+                        // Country and address from the same trace, never one read's country beside another's address.
+                        val (country, ip) = com.example.vpn.diagnostics.ExitTrace.next(_vpnState.value.exitCountryCode, known, exit)
+                        com.example.vpn.diagnostics.LiveTunnelProbe.Sample(latency, country, ip)
                     } else com.example.vpn.diagnostics.LiveTunnelProbe.measure(this@RayVpnService, probeStepMs())
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     if (_vpnState.value.attemptId == attemptId) passEvent("tunnel.recheck", sample.latencyMs)
@@ -3839,7 +3947,8 @@ class RayVpnService : VpnService() {
                     mutateState {
                         com.example.data.model.ConnectionVerification.afterCheck(it, attemptId, true, sample.latencyMs, System.currentTimeMillis(), path =
                             if (engineEndpoint == null) com.example.vpn.verify.ProbePath.TUN else com.example.vpn.verify.ProbePath.ENGINE_PROXY)
-                            .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = sample.country, exitIp = sample.ip ?: s.exitIp) else s }
+                            .let { s -> if (s.attemptId == attemptId) s.copy(exitCountryCode = sample.country,
+                                exitIp = if (engineEndpoint != null) sample.ip else sample.ip ?: s.exitIp) else s }
                     }
                     if (!wasConnected && _vpnState.value.isConnected && _vpnState.value.attemptId == attemptId) {
                         XrayLogManager.i("VPN", "Traffic now goes through the tunnel (${sample.latencyMs} ms): CONNECTED.")
@@ -5235,6 +5344,8 @@ class RayVpnService : VpnService() {
         handoffJob?.cancel()
         handoffJob = serviceScope.launch {
             delay(500)
+            // A firewall-type result measured on another network no longer applies (no new probe here).
+            runCatching { com.example.vpn.connectivity.FirewallProbe.onNetworkChanged(this@RayVpnService) }
             if (!lifecycle.isCurrent(ticket)) return@launch
             val cm = connectivityManager ?: return@launch
             val directDefault = cm.activeNetwork

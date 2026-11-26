@@ -416,7 +416,10 @@ fun MainApp(
             }
             composable(Screen.GodBrowser.route) {
                 com.example.ui.browser.GodBrowserScreen(
-                    onNavigateBack = { navController.popBackStack() }
+                    // Back returns to the GOD mode screen (Home); never ends the app when the stack has nothing below.
+                    onNavigateBack = {
+                        if (!navController.popBackStack()) navController.navigate(Screen.Home.route) { launchSingleTop = true }
+                    }
                 )
             }
             composable(Screen.AiAgent.route) {
