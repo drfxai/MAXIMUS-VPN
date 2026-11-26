@@ -75,8 +75,9 @@ class MciIpv6LadderTest {
         // Other networks never get them.
         assertEquals(0, ConnectionEngineRunner.operatorVariants(ConnectionEngineRunner.candidates(AetherSidecar.profile("auto", "auto")),
             irancell = true, mci = false).count { ProfileExtras.read(it).optBoolean(ConnectionEngineRunner.V6_FIRST) })
-        assertEquals(ConnectionEngineRunner.candidates(AetherSidecar.profile("auto", "auto")),
-            ConnectionEngineRunner.operatorVariants(ConnectionEngineRunner.candidates(AetherSidecar.profile("auto", "auto")), irancell = false, mci = false))
+        // One profile for both sides: VlessProfile.createdAt is the clock, so two profile() calls can differ by a millisecond.
+        val autoCandidates = ConnectionEngineRunner.candidates(AetherSidecar.profile("auto", "auto"))
+        assertEquals(autoCandidates, ConnectionEngineRunner.operatorVariants(autoCandidates, irancell = false, mci = false))
         // The H2 IPv6 step sends the full ClientHello; both steps get short windows.
         val h2v6 = ConnectionEngineRunner.operatorVariants(ConnectionEngineRunner.candidates(AetherSidecar.profile("auto", "auto")), false, true)
             .map { ProfileExtras.read(it) }.first { it.optBoolean(ConnectionEngineRunner.V6_FIRST) && it.optString("carrier") == "h2" }
