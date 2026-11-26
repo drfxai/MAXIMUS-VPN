@@ -30,6 +30,9 @@ object NetworkFirewalls {
 
     private val CODES = mapOf("43235" to Firewall.IRANCELL, "43211" to Firewall.MCI, "43220" to Firewall.RIGHTEL)
 
+    /** patterniha's oob6 recipe for Hamrah-e-Aval IPv6, on the fork only (see [RecoveryProfiles]). */
+    const val MCI_V6_OOB_PROFILE = "mci-v6-oob"
+
     /**
      * The firewall of the network named by a network key such as "cell:43235": the behaviour probe's confident
      * result for this network when there is one ([FirewallBehaviour], [FirewallProbe]), else the network code.
@@ -103,6 +106,8 @@ object NetworkFirewalls {
                 profile.profileId == MCI_V6_CLEAN_PROFILE -> 0.6
                 // UAC SNI Spoofer's main Hamrah-e-Aval recipe: the one fragment that still passes there.
                 profile.profileId == IranHelloSplit.PROFILE_ID -> 0.5
+                // patterniha's oob (fork, IPv6 only): right after UAC's split, ahead of the ECH recipes.
+                profile.profileId == MCI_V6_OOB_PROFILE -> 0.52
                 fragment -> null
                 ech -> 0.4
                 else -> 0.0

@@ -7,7 +7,7 @@ args=parser.parse_args()
 repo=pathlib.Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('traffic', repo/'tools/singbox-validation/check.py')
 traffic=importlib.util.module_from_spec(spec);spec.loader.exec_module(traffic)
-rev='40fd599029e19f439f192b77cf428ac500b3372a'
+rev='7131abd488e066687c77590dcc54697e5c9979ad'
 with tempfile.TemporaryDirectory(prefix='direct-native-') as tmp:
     root=pathlib.Path(tmp); source=root/'source'; source.mkdir()
     subprocess.run(['git','init','-q',str(source)],check=True)

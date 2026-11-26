@@ -66,6 +66,11 @@ data class RecoveryProfile(
             RecoverySecurityGate.isIpLiteral(ip) && !RecoverySecurityGate.isPrivateOrReserved(ip) &&
                 (addressFamily == "any" || (if (ip.contains(':')) "ipv6" else "ipv4") == addressFamily)
         }) { "Recovery profile $profileId has a default endpoint that is not a public address of its family" }
+        parameters["dialMode"]?.let { mode ->
+            // Only the patterniha fork knows dialMode, and it fails every dial on a value it cannot parse.
+            require(requiresFork) { "Recovery profile $profileId sets dialMode but does not require the fork" }
+            require(com.example.vpn.engine.PatternihaFields.validDialMode(mode)) { "Recovery profile $profileId has an invalid dialMode" }
+        }
     }
 
     val key: String get() = "$profileId@v$version"
@@ -113,6 +118,8 @@ data class RecoveryProfile(
                 "cipherSuites" -> p.copy(cipherSuites = value)
                 "echConfigList" -> p.copy(echConfigList = value)
                 "address" -> p.copy(address = value)
+                // Stored where an imported link keeps it; ForkXraySidecar runs any profile that carries a valid one.
+                "dialMode" -> com.example.vpn.engine.ProfileExtras.with(p, com.example.vpn.engine.ProfileExtras.PATT_DIAL_MODE, value.ifEmpty { null })
                 else -> error("unreachable: $field")
             }
         }
@@ -140,9 +147,10 @@ data class RecoveryProfile(
 
         /**
          * The only fields a recovery profile may change. SNI, Host, path, credentials, certificate pins,
-         * security mode and allowInsecure are never among them.
+         * security mode and allowInsecure are never among them. `dialMode` is the patterniha fork's socket option
+         * (TCP out-of-band bytes on the first writes); a profile that sets it must require the fork.
          */
-        val ALLOWED_FIELDS = setOf("finalMask", "fingerprint", "alpn", "cipherSuites", "echConfigList", "address")
+        val ALLOWED_FIELDS = setOf("finalMask", "fingerprint", "alpn", "cipherSuites", "echConfigList", "address", "dialMode")
 
         val CDN_TRANSPORTS = setOf("ws", "httpupgrade", "xhttp", "splithttp", "grpc", "h2", "tcp", "raw")
     }
@@ -243,8 +251,25 @@ object RecoveryProfiles {
         p("alpn-http11", RecoveryProfile.Strategy.ALPN, mapOf("alpn" to "http/1.1"), 0.25,
             transports = setOf("ws", "httpupgrade")),
         p("endpoint-ipv4", RecoveryProfile.Strategy.ALT_ENDPOINT_V4, mapOf("address" to RecoveryProfile.ENDPOINT), 0.55, family = "ipv4"),
-        p("endpoint-ipv6", RecoveryProfile.Strategy.ALT_ENDPOINT_V6, mapOf("address" to RecoveryProfile.ENDPOINT), 0.5, family = "ipv6")
+        p("endpoint-ipv6", RecoveryProfile.Strategy.ALT_ENDPOINT_V6, mapOf("address" to RecoveryProfile.ENDPOINT), 0.5, family = "ipv6"),
+        // patterniha's oob for Hamrah-e-Aval: the fork appends one TCP out-of-band byte to the first write
+        // (dialMode "oob6.0": only when the dialled address is IPv6, so it is a no-op on IPv4), Chrome fingerprint,
+        // no fragment/cipher list/ECH, to a Cloudflare IPv6 edge (validated, else 2a06:98c1:3120::7). It makes
+        // pages.dev/workers.dev reachable without an own domain where Hamrah-e-Aval filters IPv6 by blacklist; on its
+        // IPv4 whitelist or on Irancell it is useless, so it is offered only on Hamrah-e-Aval-type networks with IPv6,
+        // and only when the fork can run it (the candidate is tested and connected through ForkXraySidecar).
+        p(NetworkFirewalls.MCI_V6_OOB_PROFILE, RecoveryProfile.Strategy.ALT_ENDPOINT_V6, mapOf(
+            "dialMode" to MCI_V6_OOB_DIAL_MODE, "fingerprint" to "chrome", "finalMask" to "", "cipherSuites" to "", "echConfigList" to "",
+            "address" to RecoveryProfile.ENDPOINT), 0.45, family = "ipv6",
+            firewalls = setOf(NetworkFirewalls.Firewall.MCI), ipv6 = true, fork = true,
+            defaults = listOf(MCI_V6_OOB_IPV6))
     )
+
+    /** The fork's IPv6-only oob form: one 0x00 out-of-band byte on the first write to an IPv6 address. */
+    const val MCI_V6_OOB_DIAL_MODE = "oob6.0"
+
+    /** The Cloudflare IPv6 edge patterniha's oob recipe uses when none is validated on the network. */
+    const val MCI_V6_OOB_IPV6 = "2a06:98c1:3120::7"
 
     fun byKey(key: String): RecoveryProfile? = BUILT_IN.firstOrNull { it.key == key }
 }

@@ -43,7 +43,8 @@ object RecoverySecurityGate {
             "host" to { it.host }, "path" to { it.path }, "serviceName" to { it.serviceName }, "transport" to { it.transport },
             "encryption" to { it.encryption }, "flow" to { it.flow }, "publicKey" to { it.publicKey }, "shortId" to { it.shortId },
             "pinnedPeerCertSha256" to { it.pinnedPeerCertSha256 }, "verifyPeerCertByName" to { it.verifyPeerCertByName },
-            "extraSettings" to { it.extraSettings }, "profileType" to { it.profileType }
+            // dialMode lives in extraSettings; it is compared on its own below, everything else there must stay.
+            "extraSettings" to { extrasWithoutDialMode(it) }, "profileType" to { it.profileType }
         )
         identity.firstOrNull { (_, get) -> get(parent) != get(derived) }?.let { return refuse("${it.first} may not change") }
 
@@ -52,7 +53,22 @@ object RecoverySecurityGate {
         maskProblem(derived.finalMask)?.let { return refuse(it) }
         if (derived.echConfigList != parent.echConfigList) echProblem(derived)?.let { return refuse(it) }
         if (derived.address != parent.address) endpointProblem(parent, derived)?.let { return refuse(it) }
+        val mode = dialModeOf(derived)
+        if (mode != dialModeOf(parent) && mode.isNotEmpty() && !com.example.vpn.engine.PatternihaFields.validDialMode(mode)) {
+            return refuse("dialMode '${mode.take(32)}' is not a valid fork oob option")
+        }
         return Result.OK
+    }
+
+    private fun dialModeOf(p: VlessProfile): String =
+        com.example.vpn.engine.ProfileExtras.read(p).optString(com.example.vpn.engine.ProfileExtras.PATT_DIAL_MODE)
+
+    /** [VlessProfile.extraSettings] without the fork's dialMode, so a recipe may set that one key and nothing else. */
+    private fun extrasWithoutDialMode(p: VlessProfile): String {
+        val json = com.example.vpn.engine.ProfileExtras.read(p)
+        json.remove(com.example.vpn.engine.ProfileExtras.PATT_DIAL_MODE)
+        // Key order is not part of the value: compare the keys sorted.
+        return json.keys().asSequence().toList().sorted().joinToString("\u0000") { k -> k + "=" + json.opt(k).toString() }
     }
 
     /** Only fragment and noise masks with bounded numbers; null when acceptable. */
