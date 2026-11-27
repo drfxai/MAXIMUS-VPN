@@ -1886,4 +1886,24 @@
     <string name="diag_network_results_empty">در ۲۴ ساعت اخیر هیچ اتصالی در این شبکه امتحان نشده است.</string>
     <string name="unlock_failed_header">Unlock DNS ناموفق بود</string>
     <string name="unlock_error_network_dns">این شبکه DNS ساده را دست‌کاری می‌کند: پس از %1$d بررسی، پاسخ همهٔ سرورهای Unlock DNS در مسیر (UDP و TCP) تغییر کرده بود. Unlock DNS در این شبکه کار نمی‌کند؛ به‌جای آن از یک اتصال VPN استفاده کنید.</string>
+    <string name="ui_smart_sni_section">SNI هوشمند، ECH و IP تمیز</string>
+    <string name="ui_smart_sni">SNI هوشمند</string>
+    <string name="ui_smart_sni_hint">برای هر شبکه (ایرانسل، همراه اول و هر وای‌فای جداگانه) نامی را پیدا می‌کند که فیلتر از آن عبور می‌دهد، آن را به خاطر می‌سپارد و اگر مسدود شود سراغ نام بعدی می‌رود. گواهی‌ها همیشه بررسی می‌شوند.</string>
+    <string name="ui_smart_sni_manual">SNI دستی (اختیاری)</string>
+    <string name="ui_smart_sni_manual_hint">نامی که اینجا وارد کنید همیشه به جای نام خودکار استفاده می‌شود. برای حالت خودکار خالی بگذارید.</string>
+    <string name="ui_smart_ech">ECH هوشمند</string>
+    <string name="ui_smart_ech_hint">نام سرور کانفیگ‌های پشت Cloudflare را با Encrypted Client Hello پنهان می‌کند. کلید از طریق DNS رمزگذاری‌شده دریافت و با تغییر آن توسط Cloudflare به‌روز می‌شود؛ اگر ECH در شبکه‌ای کار نکند، اتصال بدون آن ادامه می‌یابد.</string>
+    <string name="ui_smart_ech_outer">نام بیرونی ECH (اختیاری)</string>
+    <string name="ui_smart_ech_config">ECHConfigList به صورت base64 (اختیاری)</string>
+    <string name="ui_smart_ech_manual_hint">مقدار دستی تا وقتی پاکش نکنید بر مقدار خودکار مقدم است.</string>
+    <string name="ui_clean_ip_scanner">اسکنر IP تمیز</string>
+    <string name="ui_clean_ip_scanner_hint">پیش از اتصال هوشمند، تعداد کمی آدرس تصادفی Cloudflare را (حداکثر ۸ ثانیه) آزمایش می‌کند و بهترین‌ها را برای هر شبکه به خاطر می‌سپارد. آدرس‌ها هرگز در لاگ‌ها نوشته نمی‌شوند.</string>
+    <string name="ui_invalid_domain">نام دامنه معتبر نیست؛ ذخیره نشد.</string>
+    <string name="ui_invalid_ech_config">ECHConfigList معتبر (base64) نیست؛ ذخیره نشد.</string>
+    <string name="ui_lab_smart_title">SNI هوشمند، ECH و IP تمیز</string>
+    <string name="ui_lab_current_sni">SNI فعلی: %1$s</string>
+    <string name="ui_lab_ech_status">ECH: %1$s</string>
+    <string name="ui_lab_scan_clean_ips">اسکن IP تمیز</string>
+    <string name="ui_lab_scanning">در حال اسکن…</string>
+    <string name="ui_lab_scan_result">%1$d آدرس تمیز (%2$d WARP، %3$d CDN)، بهترین %4$s</string>
 </resources>

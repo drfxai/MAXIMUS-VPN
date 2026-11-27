@@ -1897,4 +1897,24 @@
     <string name="diag_network_results_empty">No connection has been tried on this network in the last 24 h.</string>
     <string name="unlock_failed_header">Unlock DNS failed</string>
     <string name="unlock_error_network_dns">This network rewrites plain DNS: the answers of every Unlock DNS server came back changed on the way after %1$d checks, over UDP and TCP. Unlock DNS cannot work on this network; use a VPN connection instead.</string>
+    <string name="ui_smart_sni_section">Smart SNI, ECH and clean IPs</string>
+    <string name="ui_smart_sni">Smart SNI</string>
+    <string name="ui_smart_sni_hint">Finds a server name the filter lets through on each network (Irancell, MCI, each Wi-Fi apart), remembers it and moves to the next one when it gets blocked. Certificates are always checked.</string>
+    <string name="ui_smart_sni_manual">Manual SNI (optional)</string>
+    <string name="ui_smart_sni_manual_hint">A name you set here is always used instead of the automatic one. Leave empty for automatic.</string>
+    <string name="ui_smart_ech">Smart ECH</string>
+    <string name="ui_smart_ech_hint">Hides the server name of Cloudflare-fronted configs with Encrypted Client Hello. The key is fetched over encrypted DNS and refreshed when Cloudflare changes it; if ECH does not work on a network, the connection goes on without it.</string>
+    <string name="ui_smart_ech_outer">ECH outer name (optional)</string>
+    <string name="ui_smart_ech_config">ECHConfigList, base64 (optional)</string>
+    <string name="ui_smart_ech_manual_hint">A manual value wins over the automatic one until you clear it.</string>
+    <string name="ui_clean_ip_scanner">Clean IP scanner</string>
+    <string name="ui_clean_ip_scanner_hint">Before a Smart connect, tests a small random set of Cloudflare addresses (at most 8 seconds) and remembers the best per network. Addresses are never written to the logs.</string>
+    <string name="ui_invalid_domain">Not a valid domain name; not saved.</string>
+    <string name="ui_invalid_ech_config">Not a valid base64 ECHConfigList; not saved.</string>
+    <string name="ui_lab_smart_title">Smart SNI, ECH and clean IPs</string>
+    <string name="ui_lab_current_sni">Current SNI: %1$s</string>
+    <string name="ui_lab_ech_status">ECH: %1$s</string>
+    <string name="ui_lab_scan_clean_ips">Scan clean IPs</string>
+    <string name="ui_lab_scanning">Scanning…</string>
+    <string name="ui_lab_scan_result">%1$d clean addresses (%2$d WARP, %3$d CDN), best %4$s</string>
 </resources>
