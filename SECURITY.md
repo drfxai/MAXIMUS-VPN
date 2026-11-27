@@ -6,7 +6,7 @@ Only the latest release published under [Releases](https://github.com/drfxai/MAX
 
 ## Reporting a vulnerability
 
-Please do **not** open a public issue for security problems. Use GitHub's **Report a vulnerability** button (Security tab → Advisories) to send a private report. Include the app version, Android version and device, steps to reproduce, and any logs with credentials removed.
+Please do **not** open a public issue for security problems. Report privately through GitHub's private vulnerability reporting: [open a private report](https://github.com/drfxai/MAXIMUS-VPN/security/advisories/new) (Security tab → Advisories → **Report a vulnerability**). Only the maintainer can see it. Include the app version, Android version and device, steps to reproduce, and any logs with credentials removed.
 
 ## Scope and known limitations
 

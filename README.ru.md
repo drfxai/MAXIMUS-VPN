@@ -8,12 +8,12 @@
 
 **Сетевой инструментарий для Android. Подключение, диагностика и восстановление — в одном месте.**
 
-[![Release](https://img.shields.io/github/v/release/drfxai/MAXIMUS-VPN?style=flat-square&color=d4a843)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
-[![Android 7+](https://img.shields.io/badge/Android-7.0%2B-38bdb0?style=flat-square)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
-[![Checks](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml/badge.svg)](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml)
-[![License](https://img.shields.io/badge/License-Source--available-d4a843?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/drfxai/MAXIMUS-VPN?style=flat-square&color=d4a843)](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4)
+[![Android 7+](https://img.shields.io/badge/Android-7.0%2B-38bdb0?style=flat-square)](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4)
+[![CI](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml)
+[![License: AGPL-3.0](https://img.shields.io/github/license/drfxai/MAXIMUS-VPN?style=flat-square&color=d4a843)](LICENSE)
 
-### [Скачать для Android ↗](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+### [Скачать V1.0.4 для Android ↗](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4)
 
 Smart Connect · Network LAB · Поиск чистых IP · Инструменты для собственных серверов
 
@@ -21,7 +21,7 @@ Smart Connect · Network LAB · Поиск чистых IP · Инструмен
 
 ## Выбор языка
 
-При первом запуске MAXIMUS предлагает выбрать язык — **English** или **Русский** — ещё до остальных шагов знакомства с приложением. Сменить язык можно в любой момент в разделе **Настройки › Оформление**; на Android 13+ MAXIMUS также доступен в системной настройке языка приложений.
+При первом запуске MAXIMUS предлагает выбрать язык — **English**, **Русский** или **فارسی** — ещё до остальных шагов знакомства с приложением. Сменить язык можно в любой момент в разделе **Настройки › Оформление**; на Android 13+ MAXIMUS также доступен в системной настройке языка приложений.
 
 <p align="center"><img src="docs/assets/language-picker-demo.gif" width="320" alt="Анимированный пример экрана выбора языка MAXIMUS VPN: переключение между английским и русским"></p>
 
@@ -50,7 +50,7 @@ Smart Connect · Network LAB · Поиск чистых IP · Инструмен
 | **Режим Unlock** | DNS против санкций без конфигурации: проверенные серверы открывают сервисы, блокирующие пользователей из Ирана (Gemini, AI Studio, API OpenAI). Меняется только DNS, для заблокированных сайтов по-прежнему нужен туннель. [Подробнее](docs/UNLOCK_DNS.md) |
 | **Network LAB** | Диагностика сети, эксперименты с конфигурациями, проверка сервисов и данные для выбора маршрута. |
 | **Поиск чистых IP** | Отбирает адреса по времени отклика TCP, затем проверяет кандидатов с реальной конфигурацией. |
-| **Несколько движков** | Адаптеры Xray, Mihomo, Psiphon, Tor, WARP/MASQUE, Matrix Transport, dnstt и Slipstream. |
+| **Несколько движков** | Ядра Xray, sing-box и Mihomo; Psiphon и Shir o Khorshid; Lantern; Tor (мосты Snowflake и lyrebird); WARP через Aether (WireGuard, MASQUE, HTTP/2 Matrix Transport, QUIC); прямой доступ Serverless; DNS-туннели (dnstt, Slipstream, CottenDNS); ByeDPI, AmneziaWG и SOAR. |
 | **Ваша инфраструктура** | Установка 3X-UI, сценарии Cloudflare/BPB, импорт конфигураций и управление серверами. |
 | **Управление подключением** | Настройки DNS и маршрутизации, диагностика, управление переключением маршрутов и интеграция с постоянным VPN (Always-on VPN) Android. |
 
@@ -58,19 +58,19 @@ Smart Connect · Network LAB · Поиск чистых IP · Инструмен
 
 <img src="docs/media/smart-connect.webp" alt="Рекламная иллюстрация — Find a better path. Smart Connect + Network LAB." width="100%">
 
-Поддержка транспорта зависит от движка и конфигурации. **WARP поверх TCP использует HTTP/2 через Matrix Transport; WireGuard работает по UDP.** Psiphon требует корректных сетевых настроек; мостам Tor и DNS-туннелям нужна доступная инфраструктура. Наличие движка в приложении или успешное рукопожатие сами по себе не доказывают, что в вашей сети есть доступ в интернет. См. [руководство по движкам](docs/SMART_CONNECT_ENGINE_RECOVERY.md).
+Поддержка транспорта зависит от движка и конфигурации. **WARP поверх TCP использует HTTP/2 через Aether / Matrix Transport; WireGuard работает по UDP.** Psiphon требует корректных сетевых настроек; мостам Tor и DNS-туннелям нужна доступная инфраструктура. Наличие движка в приложении или успешное рукопожатие сами по себе не доказывают, что в вашей сети есть доступ в интернет. См. [руководство по движкам](docs/SMART_CONNECT_ENGINE_RECOVERY.md).
 
 ## Начало работы
 
-1. Скачайте APK со страницы [официальных релизов](https://github.com/drfxai/MAXIMUS-VPN/releases/latest).
+1. Скачайте APK версии V1.0.4 со [страницы официального релиза](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4).
 2. Импортируйте профиль или подписку в разделе **Nodes** либо настройте собственную инфраструктуру в разделе **Panels**.
 3. Откройте **Tunnel**, выберите профиль и подключитесь. Если маршрут нужно исследовать, используйте **LAB**.
 
 | Файл | Выбирайте, если… |
 | :--- | :--- |
-| [ARM64 APK](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) | У вас современный телефон на Android с ARM64. Рекомендуется большинству пользователей. |
-| [Universal APK](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) | Нужна поддержка ARM32 или x86_64, или вы не уверены, какое у вас устройство. |
-| `SHA256SUMS` | Вы хотите проверить скачанные файлы. |
+| [ARM64 APK](https://github.com/drfxai/MAXIMUS-VPN/releases/download/V1.0.4/MAXIMUSVPN-V1.0.4-arm64-v8a.apk) | У вас современный телефон на Android с ARM64. Рекомендуется большинству пользователей. |
+| [Universal APK](https://github.com/drfxai/MAXIMUS-VPN/releases/download/V1.0.4/MAXIMUSVPN-V1.0.4-universal.apk) | Нужна поддержка ARM32 или x86_64, или вы не уверены, какое у вас устройство. |
+| [`SHA256SUMS`](https://github.com/drfxai/MAXIMUS-VPN/releases/download/V1.0.4/SHA256SUMS) | Вы хотите проверить скачанные файлы. |
 
 Требуется Android **7.0 или новее**. Для обновления установите официальный APK поверх текущей версии. Храните резервные копии своих профилей. Чтобы трафик был защищён, даже когда приложение не запущено, включите в Android **Always-on VPN** и **Block connections without VPN** («Постоянная VPN» и «Блокировать соединения без VPN»).
 
@@ -94,6 +94,6 @@ Smart Connect · Network LAB · Поиск чистых IP · Инструмен
 
 Ваша сеть. Ваш контроль.
 
-[Скачать](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) · [English](README.md) · [فارسی](README.fa.md) · [Документация](docs/README.md)
+[Скачать](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4) · [English](README.md) · [فارسی](README.fa.md) · [Документация](docs/README.md)
 
 </div>

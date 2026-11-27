@@ -1,10 +1,10 @@
 # Contributing
 
-Thank you for helping improve MAXIMUS VPN. Read [LICENSE](LICENSE) first: public source access does not grant general permission to reuse, modify or redistribute the code. Obtain the required permission before contributing code or distributing modified builds.
+Thank you for helping improve MAXIMUS VPN. The application code is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only); by contributing you agree that your contribution is offered under the same license. Third-party components keep the licenses listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Report a bug
 
-Search existing issues, then include the application version/build, Android version, device, network type, exact steps and the observed result. Distinguish a failed connection from a check that could not run. Remove private keys, tokens, subscription URLs, account details and server credentials from logs. Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
+Search existing issues, then open one with the bug report template and include the application version/build, Android version, device, network type, exact steps and the observed result. Distinguish a failed connection from a check that could not run. Remove private keys, tokens, subscription URLs, account details and server credentials from logs. Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 
 ## Propose a change
 
