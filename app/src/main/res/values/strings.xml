@@ -1963,7 +1963,7 @@
     <string name="ui_cfr_key_detected">Key detected from clipboard</string>
     <string name="ui_cfr_verifying">Verifying key…</string>
     <string name="ui_cfr_paste_key">Paste key</string>
-    <string name="ui_cfr_no_key_on_clipboard">The clipboard has no Cloudflare key. Copy it on Cloudflare's page first.</string>
+    <string name="ui_cfr_no_key_on_clipboard">The clipboard has no Cloudflare key. Copy it on Cloudflare\'s page first.</string>
     <string name="ui_cfr_missing_permission">This key is missing a permission.</string>
     <string name="ui_cfr_check_valid">Key is valid</string>
     <string name="ui_cfr_check_account">Account found</string>
