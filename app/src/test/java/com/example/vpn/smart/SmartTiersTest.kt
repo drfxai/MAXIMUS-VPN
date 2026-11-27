@@ -58,6 +58,20 @@ class SmartTiersTest {
         assertEquals(ConfigFreeMethod.AETHER_H3.id, udp.last())
     }
 
+    @Test fun cloudflareRelayOnlyWhenReadyAndNeverOnWhitelist() {
+        val relay = ConfigFreeMethod.CLOUDFLARE_RELAY.id
+        // Not ready (no relay, Smart use off or quota nearly used): never a candidate, in any tier.
+        for (s in listOf(SmartTiers.Signals(), SmartTiers.Signals(irancell = true), SmartTiers.Signals(internationalReachable = false, domesticReachable = true)))
+            assertFalse(relay in SmartTiers.candidates(s, normal))
+        // Ready: first on a normal network, after the Lantern group and before short WARP in heavy, not in whitelist.
+        assertEquals(listOf(relay) + normal, SmartTiers.candidates(SmartTiers.Signals(), normal, relay = true))
+        val heavy = SmartTiers.candidates(SmartTiers.Signals(cloudflareFiltered = true, irancell = true), normal, relay = true)
+        assertTrue(heavy.indexOf(ConfigFreeMethod.SHIROKHORSHID_RADIANCE.id) < heavy.indexOf(relay))
+        assertTrue(heavy.indexOf(relay) < heavy.indexOf(ConfigFreeMethod.AETHER_H2.id))
+        assertEquals(ConfigFreeMethod.PERSONAL_ECH.id, heavy.first())
+        assertFalse(relay in SmartTiers.candidates(SmartTiers.Signals(internationalReachable = false, domesticReachable = true), normal, relay = true))
+    }
+
     @Test fun signalsComeFromTheMeasurement() {
         val m = NetworkCapabilityProfile(udpAvailable = false, internationalOk = 0, internationalTried = 3, domesticReachable = true)
         val s = SmartTiers.signals(m, null, cloudflareFiltered = false)

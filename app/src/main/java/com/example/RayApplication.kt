@@ -489,6 +489,8 @@ class RayApplication : Application() {
             com.example.vpn.engine.UniversalImportEngine.importText(link).validProfiles.firstOrNull()
         }
         CoroutineScope(Dispatchers.IO).launch {
+            // Build 181 Phase 7: the user's Cloudflare relay (encrypted store) for the pick and Smart Connect.
+            runCatching { com.example.panels.cloudflare.relay.CloudflareRelayManager.load(this@RayApplication) }
             runCatching { com.example.vpn.smartsni.PersonalEch.reload() }
             runCatching { com.example.panels.servers.ech.ServerEchRotation.runDue(this@RayApplication) }
         }

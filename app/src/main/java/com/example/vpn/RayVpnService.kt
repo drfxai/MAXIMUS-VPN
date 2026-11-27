@@ -791,7 +791,8 @@ class RayVpnService : VpnService() {
         // Build 181 (3.6): Smart Connect's next built-ins follow how hard this network is filtered (SmartTiers).
         val tierSignals = smartTierSignals(network)
         val tier = com.example.vpn.smart.SmartTiers.tier(tierSignals)
-        val tiered = com.example.vpn.smart.SmartTiers.candidates(tierSignals, ConnectDeadline.CANDIDATES)
+        val tiered = com.example.vpn.smart.SmartTiers.candidates(tierSignals, ConnectDeadline.CANDIDATES,
+            relay = com.example.vpn.connections.CloudflareRelayRuntime.smartReady())
         // Build 181 (3.3): Iranian conduits only for a Smart fallback on a whitelist / near-shutdown network (read once).
         com.example.vpn.sidecar.ShirokhorshidSidecar.iranConduitsAllowedOnce =
             !manualPick && com.example.vpn.smart.SmartTiers.allowIranianConduits(tier)
@@ -2455,6 +2456,12 @@ class RayVpnService : VpnService() {
                 com.example.vpn.smartsni.PersonalEch.onResult(com.example.vpn.connections.BuiltinMethodMemory.network(), personalEch,
                     verified = check.first != null) { XrayLogManager.i("SMART", it) }
             }
+            // Build 181 Phase 7: the user's Cloudflare relay: count the connection (quota estimate) and drop a clean edge
+            // that did not carry traffic here, so the next connect rescans.
+            if (currentNetwork && com.example.vpn.connections.CloudflareRelayRuntime.handles(profile)) runCatching {
+                com.example.vpn.connections.CloudflareRelayRuntime.onResult(com.example.vpn.connections.BuiltinMethodMemory.network(),
+                    profile, verified = check.first != null) { XrayLogManager.i("SMART", it) }
+            }
             if (currentNetwork && echDecision != null) runCatching {
                 // A failure with ECH may be a rejected (rotated) key: refreshed and retried once by the next attempt, else plain TLS here.
                 com.example.vpn.smartsni.SmartEch.onResult(com.example.vpn.connections.BuiltinMethodMemory.network(), echDecision,
@@ -3030,7 +3037,8 @@ class RayVpnService : VpnService() {
         verifiedFallback(network, exclude)?.first?.takeIf {
             !ConnectDeadline.ispExit(it.id) && !com.example.vpn.sidecar.ServerlessSidecar.handles(it)
         }?.let { return it }
-        for (id in com.example.vpn.smart.SmartTiers.candidates(smartTierSignals(network), ConnectDeadline.CANDIDATES)) {
+        for (id in com.example.vpn.smart.SmartTiers.candidates(smartTierSignals(network), ConnectDeadline.CANDIDATES,
+                relay = com.example.vpn.connections.CloudflareRelayRuntime.smartReady())) {
             if (id in exclude) continue
             val p = fallbackProfile(id) ?: continue
             if (p.id in exclude || com.example.vpn.sidecar.ServerlessSidecar.handles(p)) continue

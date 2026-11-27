@@ -15,6 +15,10 @@ import com.example.vpn.connectivity.NetworkFirewalls
  *    conduits (Shir o Khorshid, Iranian conduits allowed in this tier), then Lantern.
  *  - NEAR_SHUTDOWN (nothing answers, not even domestic): the same short list, tried slowly, with a clear status.
  *  - Personal server (ECH) (Build 181 Phase 6): first in HEAVY, after Lantern in WHITELIST; only when a server has ECH.
+ *  - Cloudflare relay (Build 181 Phase 7): the user's own Worker, only when connected, left on for Smart Connect and
+ *    below 95 % of the free daily quota ([candidates] `relay`): first on a NORMAL network (own, unshared, fast), after
+ *    the Lantern group in HEAVY (it rides Cloudflare edges, which that tier finds filtered unless a clean edge passes),
+ *    not in WHITELIST (Cloudflare abroad is not on a whitelist).
  *
  * Demoted (moved to the end, never removed): WARP WireGuard / Gool / MASQUE-in-MASQUE / Aether → Tor when Cloudflare is
  * filtered; MASQUE HTTP/3 when UDP is filtered; direct Psiphon on Irancell (every direct and fronted dial failed in b180).
@@ -68,6 +72,8 @@ object SmartTiers {
         ConfigFreeMethod.PSIPHON_RADIANCE,        // over-Lantern chains
         ConfigFreeMethod.AETHER_LANTERN,
         ConfigFreeMethod.SHIROKHORSHID_RADIANCE,
+        // Build 181 Phase 7: the user's own Cloudflare relay through a scanned clean edge (only when [candidates] relay).
+        ConfigFreeMethod.CLOUDFLARE_RELAY,
         ConfigFreeMethod.AETHER_H2,               // short WARP MASQUE HTTP/2 with the SNI pre-check's name
         ConfigFreeMethod.TOR_SNOWFLAKE,           // AMP / SQS / Netlify / CDN77 rendezvous ladder
         ConfigFreeMethod.SHIROKHORSHID,
@@ -85,14 +91,19 @@ object SmartTiers {
         ConfigFreeMethod.PSIPHON
     )
 
-    /** The ordered built-in ids for [s]; [normal] is the pre-Build-181 order, kept for unfiltered networks. Pure. */
-    fun candidates(s: Signals, normal: List<String>): List<String> {
+    /**
+     * The ordered built-in ids for [s]; [normal] is the pre-Build-181 order, kept for unfiltered networks. [relay]: the
+     * user's Cloudflare relay may be used by Smart Connect now (connected, "Used by Smart Connect" on, quota left);
+     * without it the relay is never a candidate. Pure.
+     */
+    fun candidates(s: Signals, normal: List<String>, relay: Boolean = false): List<String> {
+        val relayId = ConfigFreeMethod.CLOUDFLARE_RELAY.id
         val base = when (tier(s)) {
-            Tier.NORMAL -> normal
+            Tier.NORMAL -> if (relay) listOf(relayId) + normal.filter { it != relayId } else normal
             Tier.HEAVY -> HEAVY.map { it.id }
             Tier.WHITELIST, Tier.NEAR_SHUTDOWN -> WHITELIST.map { it.id }
         }
-        return demote(base, s)
+        return demote(if (relay) base else base.filter { it != relayId }, s)
     }
 
     /** Ids that go last on this network (kept, in their order). Pure. */
