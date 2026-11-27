@@ -1824,6 +1824,7 @@
     <string name="picker_desc_aether_warp">تونل Cloudflare با ثبت‌نام روی دستگاه</string>
     <string name="picker_desc_tor">Tor از طریق پل داخلی Snowflake</string>
     <string name="picker_desc_serverless">دسترسی مستقیم با IP خروجی اپراتور شما</string>
+    <string name="picker_desc_serverless_lantern">دسترسی مستقیم؛ سایت‌هایی که پاسخ نمی‌دهند از Lantern عبور می‌کنند</string>
     <string name="picker_desc_psiphon">از تنظیمات شبکه Psiphon استفاده می‌کند</string>
     <string name="picker_desc_shirokhorshid">نسخه مردمی Psiphon برای ایران: Conduit و فرانتینگ CDN</string>
     <string name="picker_desc_psiphon_radiance">Lantern اتصال را به شبکه Psiphon می‌رساند</string>

@@ -131,7 +131,7 @@ object LanternRelayHop {
     fun upstream(user: String, pass: String, port: Int): String = "socks5://$user:$pass@127.0.0.1:$port"
 
     /** Starts Radiance on its own loopback port and work folder and waits until it can carry traffic. */
-    fun start(settings: AppSettings, parent: SidecarContext): BuiltinExitNode.Started {
+    fun start(settings: AppSettings, parent: SidecarContext, checkCloudflare: Boolean = true): BuiltinExitNode.Started {
         val executable = Sidecars.executable(RadianceSidecar) ?: throw BuiltinExitNode.ExitNodeFailure(RUNTIME_MISSING)
         val context = parent.copy(workDir = File(parent.workDir, "lantern-hop").apply { mkdirs() },
             executable = executable, socksPort = Sidecars.freeLoopbackPort(),
@@ -143,7 +143,7 @@ object LanternRelayHop {
         try {
             if (!process.awaitReady(launch.readyTimeoutMs)) throw BuiltinExitNode.ExitNodeFailure(NOT_READY)
             val endpoint = Socks5.Endpoint("127.0.0.1", context.socksPort, context.socksUser, context.socksPass)
-            if (!cloudflareCheck(endpoint)) throw BuiltinExitNode.ExitNodeFailure(CLOUDFLARE_UNREACHABLE)
+            if (checkCloudflare && !cloudflareCheck(endpoint)) throw BuiltinExitNode.ExitNodeFailure(CLOUDFLARE_UNREACHABLE)
             return BuiltinExitNode.Started(process, upstream(context.socksUser, context.socksPass, context.socksPort))
         } catch (e: Throwable) {
             process.stop()

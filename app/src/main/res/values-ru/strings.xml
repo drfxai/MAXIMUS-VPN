@@ -1836,6 +1836,7 @@
     <string name="picker_desc_aether_warp">Туннель Cloudflare с регистрацией на устройстве</string>
     <string name="picker_desc_tor">Tor через встроенный мост Snowflake</string>
     <string name="picker_desc_serverless">Прямой доступ с IP-адресом вашего провайдера</string>
+    <string name="picker_desc_serverless_lantern">Прямой доступ; сайты, которые не отвечают, идут через Lantern</string>
     <string name="picker_desc_psiphon">Использует заданные настройки сети Psiphon</string>
     <string name="picker_desc_shirokhorshid">Форк Psiphon от сообщества для Ирана: Conduit, CDN-фронтинг</string>
     <string name="picker_desc_psiphon_radiance">Lantern доводит подключение до сети Psiphon</string>

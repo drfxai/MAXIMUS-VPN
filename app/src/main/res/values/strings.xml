@@ -1837,6 +1837,7 @@
     <string name="picker_desc_aether_warp">Cloudflare tunnel with on-device registration</string>
     <string name="picker_desc_tor">Tor through the built-in Snowflake bridge</string>
     <string name="picker_desc_serverless">Direct access with your ISP exit IP</string>
+    <string name="picker_desc_serverless_lantern">Direct access; sites that do not answer go through Lantern</string>
     <string name="picker_desc_psiphon">Uses configured Psiphon network settings</string>
     <string name="picker_desc_shirokhorshid">Community Psiphon fork for Iran: Conduit, CDN fronting</string>
     <string name="picker_desc_psiphon_radiance">Lantern carries the connection to the Psiphon network</string>

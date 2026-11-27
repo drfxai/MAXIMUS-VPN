@@ -43,12 +43,19 @@ object BuiltinConnections {
         // Build 178: Cloudflare filtered (cf=0) on every Aether carrier. An explicit pick: WARP MASQUE HTTP/2 dialled through
         // the Lantern hop, so the phone never reaches a filtered Cloudflare address itself. Never inside a plain Aether pick.
         AETHER_LANTERN("config-free-aether-lantern", "Aether over Lantern",
-            "WARP through the Lantern network, avoiding filtered Cloudflare addresses (an explicit chain)", "h2");
+            "WARP through the Lantern network, avoiding filtered Cloudflare addresses (an explicit chain)", "h2"),
+        // Build 181 (3.4): Serverless Direct, and sites that do not answer directly go through Lantern (Xray sockopt
+        // fallback). An explicit, labelled pick; its exit is still the ISP's for everything that works directly.
+        SERVERLESS_LANTERN("config-free-direct-lantern", "Serverless + Lantern",
+            "Direct access; sites that do not answer go through Lantern");
 
         fun profile(): VlessProfile = when (this) {
             AETHER_WARP -> AetherSidecar.profile()
             TOR_SNOWFLAKE -> TorSidecar.profile(name = title)
             SERVERLESS -> ServerlessSidecar.profile()
+            SERVERLESS_LANTERN -> ServerlessSidecar.profile(advanced = AetherSettings(alias = title)).let { p ->
+                p.copy(extraSettings = org.json.JSONObject(p.extraSettings).put(ServerlessSidecar.KEY_LANTERN_FALLBACK, true).toString())
+            }
             PSIPHON -> PsiphonSidecar.profile()
             SHIROKHORSHID -> ShirokhorshidSidecar.profile()
             PSIPHON_RADIANCE -> ChainRunner.profile(EngineChain.Chain(listOf(
@@ -75,7 +82,7 @@ object BuiltinConnections {
         fun missingDependency(): String? = when (this) {
             AETHER_PSIPHON -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(PSIPHON.profile())
             AETHER_TOR -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(TOR_SNOWFLAKE.profile())
-            AETHER_LANTERN, SHIROKHORSHID_RADIANCE -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(RADIANCE.profile())
+            AETHER_LANTERN, SHIROKHORSHID_RADIANCE, SERVERLESS_LANTERN -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(RADIANCE.profile())
             else -> null
         }
     }
@@ -88,6 +95,11 @@ object BuiltinConnections {
             return when (method) {
                 ConfigFreeMethod.AETHER_WARP -> resolve(context, AETHER)?.copy(id = id)
                 ConfigFreeMethod.SERVERLESS -> resolve(context, DIRECT)?.copy(id = id)
+                // The user's Direct settings, plus the Lantern fallback.
+                ConfigFreeMethod.SERVERLESS_LANTERN -> resolve(context, DIRECT)?.let { p ->
+                    p.copy(id = id, name = method.title, extraSettings = org.json.JSONObject(p.extraSettings)
+                        .put(ServerlessSidecar.KEY_LANTERN_FALLBACK, true).toString())
+                } ?: method.profile()
                 ConfigFreeMethod.SHIROKHORSHID -> ShirokhorshidSidecar.profile(ShirokhorshidSettings.load(context)).copy(id = id)
                 else -> method.profile()
             }
