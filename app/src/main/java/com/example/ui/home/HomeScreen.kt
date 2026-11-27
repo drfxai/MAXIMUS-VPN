@@ -117,10 +117,34 @@ fun HomeScreen(
     onConfigureConnectionEngines: () -> Unit = {},
     onConfigureAether: () -> Unit = {},
     onConfigureChain: () -> Unit = {},
-    onOpenAnalytics: () -> Unit = {}
+    onOpenAnalytics: () -> Unit = {},
+    onOpenCloudflareRelay: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val connectionState by vpnViewModel.connectionState.collectAsStateWithLifecycle()
+    // Build 181 Phase 7: once, after the first verified connection, users without a server of their own and without a
+    // relay are offered their own free Cloudflare relay (bottom sheet; also reachable from Panels → Cloudflare).
+    var showRelayPrompt by rememberSaveable { mutableStateOf(false) }
+    val connectedNow = connectionState.status == ConnectionStatus.CONNECTED
+    LaunchedEffect(connectedNow) {
+        if (!connectedNow) return@LaunchedEffect
+        val show = withContext(Dispatchers.IO) {
+            runCatching {
+                val store = com.example.panels.cloudflare.relay.CloudflareRelayStore(context)
+                val ownServer = com.example.panels.servers.ServerStore(context).load().isNotEmpty() ||
+                    com.example.panels.PanelStore(context).load().isNotEmpty()
+                val ok = com.example.panels.cloudflare.relay.CloudflareRelay.shouldPrompt(store.promptShown, connectedVerified = true,
+                    hasOwnServer = ownServer, hasRelay = store.relay() != null)
+                if (ok) store.promptShown = true
+                ok
+            }.getOrDefault(false)
+        }
+        if (show) showRelayPrompt = true
+    }
+    if (showRelayPrompt) com.example.ui.panels.CloudflareRelayPromptSheet(
+        onConnect = { showRelayPrompt = false; onOpenCloudflareRelay() },
+        onLater = { showRelayPrompt = false }
+    )
     val selectedProfile by vpnViewModel.selectedProfile.collectAsStateWithLifecycle()
     val activeProfile = connectionState.activeProfile ?: selectedProfile
     val smartRecommendation by vpnViewModel.smartRecommendation.collectAsStateWithLifecycle()
@@ -1589,6 +1613,7 @@ private fun ConfigFreeMethod.pickerIcon(): androidx.compose.ui.graphics.vector.I
     ConfigFreeMethod.SERVERLESS_LANTERN -> Icons.Rounded.Layers
     ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
     ConfigFreeMethod.PERSONAL_ECH -> Icons.Filled.Shield
+    ConfigFreeMethod.CLOUDFLARE_RELAY -> Icons.Filled.Cloud
     ConfigFreeMethod.AETHER_GOOL -> Icons.Rounded.CropFree
     ConfigFreeMethod.AETHER_GOOL_CLASSIC, ConfigFreeMethod.AETHER_MIM -> Icons.Rounded.Layers
     ConfigFreeMethod.AETHER_PSIPHON -> Icons.Filled.Shield

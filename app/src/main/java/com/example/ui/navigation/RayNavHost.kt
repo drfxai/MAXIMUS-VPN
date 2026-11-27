@@ -251,7 +251,11 @@ fun MainApp(
                     onConfigureConnectionEngines = { navController.navigate("settings/core-engines") },
                     onConfigureAether = { navController.navigate("lab/aether") },
                     onConfigureChain = { navController.navigate("lab/chain") },
-                    onOpenAnalytics = { navController.navigate("analytics") }
+                    onOpenAnalytics = { navController.navigate("analytics") },
+                    onOpenCloudflareRelay = {
+                        com.example.ui.panels.PanelsLaunch.request(com.example.ui.panels.PanelsLaunch.TAB_CLOUDFLARE)
+                        navController.navigate(Screen.Panels.route)
+                    }
                 )
             }
             composable(Screen.Top10.route) {
