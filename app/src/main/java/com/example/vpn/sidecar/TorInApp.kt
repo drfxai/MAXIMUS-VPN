@@ -24,6 +24,7 @@ object TorInApp {
         val notices = java.io.File(app.filesDir, NOTICE_LOG).apply { delete() }
         TorService.getTorrc(app).writeText(torrc.trimEnd() + "\nLog notice file ${notices.absolutePath}\n")
         val progress = TorProgress(notices)
+        SnowflakeRendezvous.reset()
         app.startService(Intent(app, TorService::class.java).setAction(TorService.ACTION_START))
         return object : RunningEngine {
             @Volatile private var stopped = false
@@ -38,6 +39,7 @@ object TorInApp {
                     progress.newLines().forEach {
                         com.example.xray.XrayLogManager.i("TOR", it)
                         EngineSignals.publish("tor", it)
+                        SnowflakeRendezvous.observe(it)
                         // Build 177: the connect deadline cut a manual Tor pick at 180 s while Tor was at 30 % and
                         // still advancing. Each advance that moves Tor's own deadline is announced to the connect
                         // deadline (a manual pick waits for it; Smart Connect keeps its own limit) and to the stages.
@@ -50,10 +52,13 @@ object TorInApp {
                         // Tor writes "...; aborting" just before it exits: stop waiting for it.
                         if (it.contains("aborting")) aborted = true
                     }
-                    if (aborted) return false
-                    if (SidecarProcess.portOpen(socksPort) && TorSidecar.carriesTraffic(socksPort)) return true
+                    if (aborted) { SnowflakeRendezvous.finished(false); return false }
+                    if (SidecarProcess.portOpen(socksPort) && TorSidecar.carriesTraffic(socksPort)) {
+                        SnowflakeRendezvous.finished(true); return true
+                    }
                     Thread.sleep(500)
                 }
+                if (!stopped) SnowflakeRendezvous.finished(false)
                 return false
             }
 
