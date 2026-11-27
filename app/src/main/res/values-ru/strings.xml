@@ -1891,4 +1891,5 @@
     <string name="diag_network_results_title">В этой сети (за 24 ч)</string>
     <string name="diag_network_results_empty">За последние 24 ч в этой сети не было попыток подключения.</string>
     <string name="unlock_failed_header">Unlock DNS не сработал</string>
+    <string name="unlock_error_network_dns">Эта сеть подменяет обычный DNS: после %1$d проверок ответы всех серверов Unlock DNS приходили изменёнными по пути (UDP и TCP). Unlock DNS в этой сети не работает; используйте VPN-подключение.</string>
 </resources>

@@ -3532,6 +3532,47 @@ class RayVpnService : VpnService() {
                         psiphonRegionInUse = Triple(regionNetwork, code, profile.id)
                     }
                 }
+            } else if (com.example.vpn.sidecar.ShirokhorshidFrontedRetry.applies(engine.id, carrierStarted = started != null,
+                    chained = context.upstreamSocks != null,
+                    alreadyFronted = com.example.vpn.sidecar.PsiphonSidecar.isFrontedOnly(runningProfile))) {
+                // Build 179 device test: a server connected, then no tunnel for the whole 120 s. The same pick switches to
+                // the CDN-fronted protocols once, inside its own window (ShirokhorshidFrontedRetry).
+                val window = launch.readyTimeoutMs
+                recordStarting(window)
+                val began = System.currentTimeMillis()
+                process = launchProcess()
+                sidecar = process
+                val notices = { (com.example.vpn.sidecar.EngineReaper.underlying(process) as? com.example.vpn.sidecar.SidecarProcess) }
+                var stage3Since: Long? = null
+                var gaveUp = false
+                ready = process.awaitReadyUnless(window) {
+                    val now = System.currentTimeMillis()
+                    val stage = notices()?.psiphonStage() ?: 0
+                    if (stage >= 3 && stage3Since == null) stage3Since = now
+                    gaveUp = connectionOwner?.isActive != false && com.example.vpn.sidecar.ShirokhorshidFrontedRetry.giveUp(
+                        stage, stage3Since, began, now, window)
+                    gaveUp
+                }
+                if (!ready && gaveUp) {
+                    val elapsed = System.currentTimeMillis() - began
+                    XrayLogManager.w("VPN", "Shir o Khorshid: ${com.example.vpn.sidecar.ShirokhorshidFrontedRetry.TEXT} (after ${elapsed / 1000}s).")
+                    com.example.vpn.diagnostics.EngineStages.record(engine.id, "protocols",
+                        "CDN-fronted only after ${elapsed / 1000}s: a server connected but no tunnel followed")
+                    com.example.vpn.diagnostics.events.EventLog.event("shirokhorshid.fronted", attributes = mapOf(
+                        "why" to "server connected, no tunnel", "after.s" to (elapsed / 1000).toString()))
+                    showForegroundNotification("Shir o Khorshid: trying its CDN-fronted protocols…")
+                    process.stop()
+                    sidecar = null
+                    runningProfile = com.example.vpn.sidecar.PsiphonSidecar.frontedOnly(runningProfile)
+                    runCatching { com.example.vpn.sidecar.ShirokhorshidSidecar.recordFronted(
+                        com.example.vpn.connections.BuiltinMethodMemory.network(), true) }
+                    // A stopped process can still be releasing its listener. Never reuse its port.
+                    engineContext = context.copy(socksPort = com.example.vpn.sidecar.Sidecars.freeLoopbackPort())
+                    launch = engine.prepare(runningProfile, settings, engineContext)
+                    process = launchProcess()
+                    sidecar = process
+                    ready = process.awaitReady(com.example.vpn.sidecar.ShirokhorshidFrontedRetry.frontedWindowMs(window, elapsed))
+                }
             } else {
                 recordStarting(launch.readyTimeoutMs)
                 process = started?.running ?: launchProcess()
@@ -5273,10 +5314,14 @@ class RayVpnService : VpnService() {
             checks.forEach { c ->
                 XrayLogManager.i("UNLOCK", "${c.ip}: ${c.health.name.lowercase()}" + (c.latencyMs?.let { " $it ms" } ?: "") +
                     (c.reason?.let { " (${it.name.lowercase().replace('_', ' ')})" } ?: "") +
-                    (c.shape?.let { " [query shape ${it.key}]" } ?: ""))
+                    (c.shape?.let { " [query shape ${it.key}]" } ?: "") + (if (c.tcp) " [over TCP]" else "") +
+                    (c.detail?.let { ": $it" } ?: ""))
             }
             found = com.example.vpn.unlock.UnlockDnsHealth.pick(checks, choice.autoPick, choice.manual)
             if (found == null && !com.example.vpn.unlock.UnlockConnectRetry.again(attempt)) {
+                // Build 179 device test: every server refused for an answer rewritten on the way is this network's DNS.
+                if (com.example.vpn.unlock.UnlockDnsHealth.networkRewritesDns(checks))
+                    return@withContext failed(text.getString(R.string.unlock_error_network_dns, attempt))
                 return@withContext failed(if (attempt > 1) text.getString(R.string.unlock_error_no_server_retried, attempt)
                     else text.getString(R.string.unlock_error_no_server))
             }

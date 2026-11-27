@@ -706,9 +706,23 @@ class LabController(
             // Direct Psiphon failed to start here recently: Shir o Khorshid (Conduit, CDN fronting) goes before it.
             val psiphonDirectFailed = com.example.vpn.connections.PsiphonChainMemory.failedAt(currentIdentity) != null ||
                 com.example.vpn.engine.registry.EngineLedger.shared.recentFailure(com.example.vpn.sidecar.PsiphonSidecar.ID, currentIdentity) != null
+            // Build 179 device test: what carried verified traffic on this network in the last 24 h (per path, chains
+            // included) goes first, and the explicit Shir o Khorshid over Lantern chain joins the pool only with that
+            // evidence (VerifiedHereOrder).
+            val pathOf: (VlessProfile) -> String = { com.example.vpn.diagnostics.EngineStages.engineOf(it) }
+            val verifiedPaths = runCatching { com.example.vpn.smart.VerifiedHereOrder.verifiedPaths(
+                com.example.vpn.engine.registry.EngineLedger.shared.pathResults(currentIdentity)) }.getOrDefault(emptySet())
+            val evidencedChains = runCatching {
+                com.example.vpn.smart.VerifiedHereOrder.evidenced(listOf(
+                    com.example.vpn.connections.BuiltinConnections.ConfigFreeMethod.SHIROKHORSHID_RADIANCE.profile()
+                        .copy(id = "recovery-shirokhorshid-radiance")), verifiedPaths, pathOf)
+                    .filter { com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
+            }.getOrDefault(emptyList())
+            if (verifiedPaths.isNotEmpty()) XrayLogManager.i("SMART", "Recovery: verified on this network in the last 24 h: " +
+                verifiedPaths.joinToString(", ") { com.example.vpn.engine.registry.NetworkResults.title(it) } + "; these go first.")
             val builtIn = com.example.vpn.smart.RecoveryEngineCatalog.candidates(
                 saved, seedBridges = seeds, tcpOnly = ExperimentPlanner.udpDead(cap), psiphonDirectFailed = psiphonDirectFailed
-            ) + fakeSni
+            ) + evidencedChains + fakeSni
             val poolProfiles = if (rememberedOnly) {
                 val eligible = if (rememberedRadianceOnly) builtIn.filter { com.example.vpn.sidecar.RadianceSidecar.handles(it) } else builtIn
                 com.example.vpn.smart.EngineRouteHints.preferred(context, currentIdentity, eligible)
@@ -727,7 +741,10 @@ class LabController(
                 if (book.eligibility(ref) == com.example.vpn.connectivity.PathEligibility.RECENTLY_FAILED) p.id to "failed a real request on this network moments ago"
                 else engineIds[p.id]?.takeUnless { it == "byedpi" || it == "tor" }?.let { ledger.recentFailure(it, ledgerNetwork) }?.let { p.id to it }
             }.toMap()
-            val pool = FullAnalysis.select(families, plan.copy(budget = MAX_POOL), emptySet())
+            val verifiedFingerprints = runCatching {
+                com.example.vpn.smart.VerifiedHereOrder.evidenced(all.filter { Sidecars.isEngineProfile(it) }, verifiedPaths, pathOf).map { it.effectiveFingerprint }.toSet()
+            }.getOrDefault(emptySet())
+            val pool = FullAnalysis.select(families, plan.copy(budget = MAX_POOL), verifiedFingerprints)
             val byId = pool.associateBy { it.profile.id }
             val now0 = System.currentTimeMillis()
             val memory = tracker.current?.let { LabEvidence.priors(store.evidenceFor(it.contextKey), it.contextKey, now0, BuildConfig.VERSION_CODE) }.orEmpty()
@@ -738,6 +755,7 @@ class LabController(
             val candidates = pool.associate { pk -> pk.profile.id to AdaptivePlanner.Candidate(
                 pk.profile.id, pk.profile.name, pk.family, ipv6 = pk.profile.address.contains(':'),
                 provenHere = engineIds[pk.profile.id]?.let { ledger.verifiedHere(it, ledgerNetwork) } == true,
+                verifiedRecently = pk.profile.effectiveFingerprint in verifiedFingerprints,
                 firewallFactor = if (com.example.vpn.smart.FakeSniRecovery.isCandidate(pk.profile)) fakeFactor else 1.0
             ) }
             planner.add(candidates.values.toList())
@@ -761,9 +779,12 @@ class LabController(
             var irancellWarpTried = false
             val irancellWarp = heldBackAether?.takeIf {
                 !rememberedOnly && com.example.vpn.sidecar.AetherSidecar.handles(it) &&
-                    com.example.vpn.smart.RecoveryEngineCaps.irancellWarpFirst(
+                    com.example.vpn.smart.VerifiedHereOrder.warpFirst(com.example.vpn.smart.RecoveryEngineCaps.irancellWarpFirst(
                         irancell = com.example.vpn.connections.ConnectionEngineRunner.irancell(com.example.vpn.connections.BuiltinMethodMemory.network()),
-                        cloudflareBlocked = cloudflareBlocked, aetherHeldBack = true)
+                        cloudflareBlocked = cloudflareBlocked, aetherHeldBack = true), verifiedPaths).also { first ->
+                        if (!first && verifiedPaths.isNotEmpty() && cloudflareBlocked)
+                            XrayLogManager.i("SMART", com.example.vpn.smart.VerifiedHereOrder.deferredWarpText(verifiedPaths))
+                    }
             }
             if (irancellWarp != null && currentCoroutineContext().isActive) {
                 irancellWarpTried = true

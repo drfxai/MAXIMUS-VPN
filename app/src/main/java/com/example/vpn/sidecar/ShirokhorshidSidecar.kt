@@ -453,3 +453,34 @@ object GeoIpCidrs {
         }
     }
 }
+
+/**
+ * Build 179 device test (Irancell): Shir o Khorshid connected a server and then sat in "the tunnel did not become ready"
+ * for the whole 120 s, and the CDN-fronted-only form (the fork's CDN meek and Psiphon's fronted meek) only ran on the
+ * *next* start. Now the same pick switches to it once, inside its own readiness window, when a server connected and no
+ * tunnel followed within [STAGE3_GRACE_MS] (or by [switchAtMs]). Same engine, so a manual pick may; never inside a chain
+ * (the chain hop has its own TCP limits) or when the start is already CDN-fronted. Pure, so the rules are unit-tested.
+ */
+object ShirokhorshidFrontedRetry {
+    /** A server connected this long ago and still no tunnel: the all-protocols start is given up. */
+    const val STAGE3_GRACE_MS = 25_000L
+    /** What the CDN-fronted start gets at least; the first start is cut so this is left of the window. */
+    const val FRONTED_MIN_MS = 45_000L
+
+    fun applies(engineId: String, carrierStarted: Boolean, chained: Boolean, alreadyFronted: Boolean): Boolean =
+        engineId == ShirokhorshidSidecar.ID && !carrierStarted && !chained && !alreadyFronted
+
+    /** When, after the start, the first start is cut at the latest while a server is connected. */
+    fun switchAtMs(readyTimeoutMs: Long): Long = (readyTimeoutMs - FRONTED_MIN_MS).coerceAtLeast(readyTimeoutMs / 2)
+
+    /** The first start is given up for the CDN-fronted one: a server connected ([stage] 3) and no tunnel followed. */
+    fun giveUp(stage: Int, stage3Since: Long?, startedAt: Long, now: Long, readyTimeoutMs: Long): Boolean =
+        stage >= 3 && stage3Since != null && (now - stage3Since >= STAGE3_GRACE_MS || now - startedAt >= switchAtMs(readyTimeoutMs))
+
+    /** The CDN-fronted start's window: what is left of [readyTimeoutMs], never under a third of [FRONTED_MIN_MS]. */
+    fun frontedWindowMs(readyTimeoutMs: Long, elapsedMs: Long): Long =
+        (readyTimeoutMs - elapsedMs).coerceAtLeast(FRONTED_MIN_MS / 3)
+
+    const val TEXT = "a server connected but no tunnel followed; switching this pick to Shir o Khorshid's CDN-fronted " +
+        "protocols only (same engine) for the rest of its window"
+}

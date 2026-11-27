@@ -248,7 +248,9 @@ class ShapedForwarder(
 
 /** [ShapedForwarder.Transport] on the real wire ([UnlockDnsWire]). */
 class WireTransport(private val protector: UnlockDnsWire.Protector) : ShapedForwarder.Transport {
-    override fun plain(server: String, query: ByteArray, timeoutMs: Int) = UnlockDnsWire.exchange(server, query, timeoutMs, protector)
+    override fun plain(server: String, query: ByteArray, timeoutMs: Int) =
+        if (server in UnlockDnsWire.tcpOnly) UnlockDnsWire.exchangeTcp(server, query, timeoutMs, protector)
+        else UnlockDnsWire.exchange(server, query, timeoutMs, protector)
     override fun shaped(server: String, query: ByteArray, shape: QueryShape, timeoutMs: Int) =
         UnlockDnsWire.exchangeShaped(server, query, shape, timeoutMs, protector)
 }

@@ -1881,4 +1881,5 @@
     <string name="diag_network_results_title">در این شبکه (۲۴ ساعت اخیر)</string>
     <string name="diag_network_results_empty">در ۲۴ ساعت اخیر هیچ اتصالی در این شبکه امتحان نشده است.</string>
     <string name="unlock_failed_header">Unlock DNS ناموفق بود</string>
+    <string name="unlock_error_network_dns">این شبکه DNS ساده را دست‌کاری می‌کند: پس از %1$d بررسی، پاسخ همهٔ سرورهای Unlock DNS در مسیر (UDP و TCP) تغییر کرده بود. Unlock DNS در این شبکه کار نمی‌کند؛ به‌جای آن از یک اتصال VPN استفاده کنید.</string>
 </resources>

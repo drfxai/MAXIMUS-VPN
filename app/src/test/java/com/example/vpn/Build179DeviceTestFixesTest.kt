@@ -17,6 +17,9 @@ import com.example.vpn.engine.registry.EngineLedger
 import com.example.vpn.engine.registry.NetworkResults
 import com.example.vpn.safety.MaximusVpnSupervisor
 import com.example.vpn.sidecar.AetherSidecar
+import com.example.vpn.sidecar.ShirokhorshidFrontedRetry
+import com.example.vpn.sidecar.ShirokhorshidSidecar
+import com.example.vpn.smart.VerifiedHereOrder
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -225,5 +228,45 @@ class Build179DeviceTestFixesTest {
             IrancellWarp.plan(methods, null, manual = true, v6First = true))
         assertEquals(listOf(ConnectionEngineRunner.H2_SPLIT, "h2"), IrancellWarp.plan(methods, null, manual = true))
         assertEquals(listOf(ConnectionEngineRunner.H2_SPLIT), IrancellWarp.plan(methods, null, manual = false, v6First = true))
+    }
+    // Smart Connect: what verified on this network in the last 24 h goes first; WARP is deferred while it did.
+    @Test fun smartConnectPrefersPathsVerifiedHereAndDefersWarp() {
+        val now = 10 * 60_000L
+        val results = listOf(
+            EngineLedger.PathResult("radiance", true, now, null, 1, 0),
+            EngineLedger.PathResult("shirokhorshid→radiance", true, now, null, 1, 0),
+            EngineLedger.PathResult("psiphon", false, now, "x", 0, 1))
+        val verified = VerifiedHereOrder.verifiedPaths(results)
+        assertEquals(setOf("radiance", "shirokhorshid→radiance"), verified)
+        val sok = ConfigFreeMethod.SHIROKHORSHID_RADIANCE.profile()
+        val psiphon = ConfigFreeMethod.PSIPHON.profile()
+        assertEquals(listOf(sok), VerifiedHereOrder.evidenced(listOf(psiphon, sok), verified) { EngineStages.engineOf(it) })
+        assertTrue(VerifiedHereOrder.evidenced(listOf(sok), emptySet()) { EngineStages.engineOf(it) }.isEmpty())
+        assertFalse(VerifiedHereOrder.warpFirst(true, verified))
+        assertTrue(VerifiedHereOrder.warpFirst(true, emptySet()))
+        // Plain Aether verified here says nothing against WARP going first; Aether over Lantern does.
+        assertTrue(VerifiedHereOrder.warpFirst(true, setOf("aether/h2")))
+        assertFalse(VerifiedHereOrder.warpFirst(true, setOf("aether/h2→radiance")))
+        assertFalse(VerifiedHereOrder.warpFirst(false, emptySet()))
+        assertTrue(VerifiedHereOrder.deferredWarpText(verified).contains("Lantern / Radiance"))
+    }
+
+    // Shir o Khorshid: CDN-fronted only on the same pick after "server connected, no tunnel".
+    @Test fun shirOKhorshidSwitchesToCdnFrontedInsideTheSamePick() {
+        assertTrue(ShirokhorshidFrontedRetry.applies(ShirokhorshidSidecar.ID, carrierStarted = false, chained = false, alreadyFronted = false))
+        assertFalse(ShirokhorshidFrontedRetry.applies(ShirokhorshidSidecar.ID, false, chained = true, alreadyFronted = false))
+        assertFalse(ShirokhorshidFrontedRetry.applies(ShirokhorshidSidecar.ID, false, false, alreadyFronted = true))
+        assertFalse(ShirokhorshidFrontedRetry.applies("psiphon", false, false, false))
+        val window = 120_000L
+        assertEquals(75_000L, ShirokhorshidFrontedRetry.switchAtMs(window))
+        // No server connected: never given up early.
+        assertFalse(ShirokhorshidFrontedRetry.giveUp(2, null, 0L, 100_000L, window))
+        // Server connected 10 s ago at 30 s: keep waiting; 25 s after the connect: switch.
+        assertFalse(ShirokhorshidFrontedRetry.giveUp(3, 20_000L, 0L, 30_000L, window))
+        assertTrue(ShirokhorshidFrontedRetry.giveUp(3, 20_000L, 0L, 45_000L, window))
+        // Server connected late: switch at the latest at switchAtMs so the fronted start keeps its window.
+        assertTrue(ShirokhorshidFrontedRetry.giveUp(3, 70_000L, 0L, 75_000L, window))
+        assertEquals(75_000L, ShirokhorshidFrontedRetry.frontedWindowMs(window, 45_000L))
+        assertEquals(15_000L, ShirokhorshidFrontedRetry.frontedWindowMs(window, 119_000L))
     }
 }

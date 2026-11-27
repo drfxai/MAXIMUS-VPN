@@ -48,8 +48,56 @@ class UnlockDnsHealthTest {
         val check = UnlockDnsHealth.check("5.175.161.3", probe)
         assertEquals(ServerHealth.BLOCKED, check.health)
         assertEquals(BlockReason.HIJACKED, check.reason)
-        // A hijacked server is never asked anything else.
-        assertEquals(listOf("5.175.161.3" to control), probe.asked)
+        // A filter address for the control name is checked against the root control once; a hijacked server is never
+        // asked the unlock probe.
+        assertEquals(listOf("5.175.161.3" to control, "5.175.161.3" to UnlockDnsHealth.ROOT_CONTROL_NAME), probe.asked)
+        assertTrue(check.detail.orEmpty(), check.detail.orEmpty().contains("10.10.34.35"))
+    }
+
+    @Test fun aControlNameFilteredOnTheNetworkIsNotTheServersFaultWhenTheRootControlIsCorrect() {
+        // Build 179 device test (Irancell): all four servers were "hijacked" in 33-63 ms because one.one.one.one is
+        // answered with a filter address on this network.
+        val probe = FakeProbe(mapOf(
+            ("143.20.64.55" to control) to Lookup(listOf("10.10.34.35"), 33),
+            ("143.20.64.55" to UnlockDnsHealth.ROOT_CONTROL_NAME) to Lookup(listOf("198.41.0.4"), 35),
+            ("143.20.64.55" to probeName) to Lookup(listOf("143.20.64.10"), 40)
+        ))
+        val check = UnlockDnsHealth.check("143.20.64.55", probe, now = 1L)
+        assertTrue(check.usable)
+        assertFalse(check.tcp)
+        assertTrue(check.detail.orEmpty(), check.detail.orEmpty().contains(UnlockDnsHealth.ROOT_CONTROL_NAME))
+    }
+
+    @Test fun aServerWhoseUdpIsRewrittenOnThePathIsAskedOverTcp() {
+        val tcpProbe = object : UnlockProbe {
+            override fun lookup(server: String, name: String, timeoutMs: Int): Lookup? =
+                if (name == control) Lookup(listOf("10.10.34.35"), 30) else Lookup(listOf("10.10.34.36"), 30)
+            override fun lookupTcp(server: String, name: String, timeoutMs: Int): Lookup? =
+                if (name == control) Lookup(listOf("1.1.1.1", "1.0.0.1"), 80) else Lookup(listOf("143.20.64.10"), 90)
+            override fun reach(ip: String, port: Int, timeoutMs: Int): Long? = if (ip == "143.20.64.10") 40 else null
+        }
+        val check = UnlockDnsHealth.check("143.20.64.55", tcpProbe, now = 1L)
+        assertTrue(check.usable)
+        assertTrue(check.tcp)
+        assertEquals(80L, check.latencyMs)
+    }
+
+    @Test fun theControlVerdictKeepsARealRewriteHijacked() {
+        val root = { listOf("198.41.0.4") }
+        assertEquals(UnlockDnsHealth.ControlVerdict.OK, UnlockDnsHealth.controlVerdict(listOf("1.1.1.1"), null, root))
+        assertEquals(UnlockDnsHealth.ControlVerdict.OK_OVER_TCP,
+            UnlockDnsHealth.controlVerdict(listOf("10.10.34.35"), listOf("1.0.0.1"), root))
+        assertEquals(UnlockDnsHealth.ControlVerdict.OK_BY_ROOT, UnlockDnsHealth.controlVerdict(listOf("10.10.34.35"), null, root))
+        // A public address that is not one.one.one.one's own is a rewrite, whatever the root control says.
+        assertEquals(UnlockDnsHealth.ControlVerdict.HIJACKED, UnlockDnsHealth.controlVerdict(listOf("104.16.1.1"), null, root))
+        assertEquals(UnlockDnsHealth.ControlVerdict.HIJACKED,
+            UnlockDnsHealth.controlVerdict(listOf("10.10.34.35"), null) { listOf("203.0.113.9") })
+        assertEquals(UnlockDnsHealth.ControlVerdict.HIJACKED, UnlockDnsHealth.controlVerdict(listOf("10.10.34.35"), null) { null })
+        val hijacked = ServerCheck("a", ServerHealth.BLOCKED, 30, BlockReason.HIJACKED)
+        val dead = ServerCheck("b", ServerHealth.BLOCKED, null, BlockReason.NO_ANSWER)
+        assertTrue(UnlockDnsHealth.networkRewritesDns(listOf(hijacked, hijacked.copy(ip = "c"))))
+        assertFalse(UnlockDnsHealth.networkRewritesDns(listOf(hijacked, dead)))
+        assertFalse(UnlockDnsHealth.networkRewritesDns(emptyList()))
     }
 
     @Test fun controlAddressesThatAreNotOneOneOneOneAreHijackedEvenWhenPublic() {
