@@ -96,6 +96,47 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var endpointJob: Job? = null
+    private var cleanIpJob: Job? = null
+
+    /** Build 181 Phase 5: Smart SNI and ECH status for the current network (LAB → Transport tools). */
+    fun refreshSmartStatus() = viewModelScope.launch {
+        val (sni, ech, personal) = withContext(Dispatchers.IO) {
+            val net = com.example.vpn.connections.BuiltinMethodMemory.network()
+            Triple(runCatching { com.example.vpn.smartsni.SmartSni.status(net) }.getOrDefault(""),
+                runCatching { com.example.vpn.smartsni.SmartEch.status(net) }.getOrDefault(""),
+                runCatching { com.example.vpn.smartsni.PersonalEch.status(net) }.getOrDefault(""))
+        }
+        local.update { it.copy(transportTools = it.transportTools.copy(smartSni = sni, echStatus = ech, personalEch = personal)) }
+    }
+
+    /** "Scan clean IPs": Smart SNI probe when nothing is known here, the bounded clean-IP scan, and the ECH key. */
+    fun scanCleanIps() {
+        if (cleanIpJob?.isActive == true || _state.value.vpnOn) return
+        cleanIpJob = viewModelScope.launch {
+            local.update { it.copy(transportTools = it.transportTools.copy(cleanIpScanning = true, cleanIpError = "")) }
+            try {
+                val report = withContext(Dispatchers.IO) {
+                    val app = getApplication<Application>()
+                    val net = com.example.vpn.smart.NetworkIdentity.current(app)
+                    val log: (String) -> Unit = { com.example.xray.XrayLogManager.i("CLEANIP", it) }
+                    if (com.example.vpn.smartsni.SmartSniSettings.smartSni && com.example.vpn.smartsni.SmartSni.ranked(net).isEmpty())
+                        com.example.vpn.smartsni.SmartSni.probe(net, edges = com.example.vpn.cleanip.CdnRanges.sample(com.example.vpn.cleanip.Cdn.CLOUDFLARE, 3), log = log)
+                    val r = com.example.vpn.cleanip.SmartIpScan.scan(net, com.example.vpn.smartsni.SmartSni.pick(net), log = log)
+                    if (com.example.vpn.smartsni.SmartSniSettings.smartEch) com.example.vpn.smartsni.SmartEch.refresh(net, log = log)
+                    check(net == com.example.vpn.smart.NetworkIdentity.current(app) && !_state.value.vpnOn) {
+                        "Network changed; results discarded. Run again on the new network."
+                    }
+                    r
+                }
+                local.update { it.copy(transportTools = it.transportTools.copy(cleanIpScan = report)) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { local.update { it.copy(transportTools = it.transportTools.copy(cleanIpError = e.message ?: "Scan failed")) } }
+            finally {
+                local.update { it.copy(transportTools = it.transportTools.copy(cleanIpScanning = false)) }
+                refreshSmartStatus()
+            }
+        }
+    }
 
     fun scanEndpoints(raw: String) {
         if (endpointJob?.isActive == true || _state.value.vpnOn) return
@@ -175,6 +216,7 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
 
     fun open(section: LabSection?) {
         if (section != LabSection.CHAIN) chainTest?.cancel()
+        if (section == LabSection.TRANSPORT_TOOLS) refreshSmartStatus()
         local.update { it.copy(section = section) }
         if (section == LabSection.CHAIN) loadConfigs()
     }
@@ -496,7 +538,7 @@ fun NetworkLabScreen(onNavigateBack: () -> Unit, viewModel: NetworkLabViewModel 
                 onUseRecommended = viewModel::useRecommended, onRevive = viewModel::revive, onStopRevive = viewModel::stopRevive,
                 onFirewall = viewModel::chooseFirewall, onCheckServices = viewModel::checkServices, onStopServices = viewModel::stopServices,
                 onRunShadowLink = viewModel::runShadowLink, onStopShadowLink = viewModel::stopShadowLink,
-                onScanEndpoints = viewModel::scanEndpoints, onStopEndpoints = viewModel::stopEndpoints,
+                onScanEndpoints = viewModel::scanEndpoints, onStopEndpoints = viewModel::stopEndpoints, onScanCleanIps = viewModel::scanCleanIps,
                 onSaveFronted = viewModel::saveFronted, onWarpSplit = viewModel::setWarpSplit,
                 onChainHops = viewModel::chainHops, onTestChain = viewModel::testChain, onCancelChainTest = viewModel::cancelChainTest, onChainRegion = viewModel::chainRegion, onSaveChain = viewModel::saveChain, onPsiphonSettings = viewModel::savePsiphonSettings,
                 onBuiltinConnection = onBuiltinConnection

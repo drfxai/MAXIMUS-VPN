@@ -16,7 +16,15 @@ data class TransportToolsUi(
     val running: Boolean = false,
     val results: List<ReachabilityScanner.Result> = emptyList(),
     val message: String = "",
-    val warpSplit: Boolean = false
+    val warpSplit: Boolean = false,
+    /** Build 181 Phase 5: Smart SNI / ECH status on this network and the last LAB clean-IP scan. */
+    val smartSni: String = "",
+    val echStatus: String = "",
+    /** Build 181 Phase 6: the user's own ECH servers on this network. */
+    val personalEch: String = "",
+    val cleanIpScanning: Boolean = false,
+    val cleanIpScan: com.example.vpn.cleanip.SmartIpScan.Report? = null,
+    val cleanIpError: String = ""
 )
 
 @Composable
@@ -37,6 +45,28 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(vertical = 16.dp)) {
         if (!frontingOnly) {
+            item {
+                Text(stringResource(R.string.ui_lab_smart_title), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.ui_lab_current_sni, ui.smartSni.ifBlank { "…" }))
+                Text(stringResource(R.string.ui_lab_ech_status, ui.echStatus.ifBlank { "…" }))
+                Text(stringResource(R.string.ui_lab_personal_ech, ui.personalEch.ifBlank { "…" }))
+            }
+            item {
+                Button(onClick = actions.onScanCleanIps, enabled = !ui.cleanIpScanning && !state.vpnOn) {
+                    Text(if (ui.cleanIpScanning) stringResource(R.string.ui_lab_scanning) else stringResource(R.string.ui_lab_scan_clean_ips))
+                }
+            }
+            ui.cleanIpScan?.let { r ->
+                val edges = r.warp + r.cdn
+                item { Text(stringResource(R.string.ui_lab_scan_result, r.count, r.warp.size, r.cdn.size, r.bestMs?.let { "$it ms" } ?: "—")) }
+                items(edges.size) { i ->
+                    val e = edges[i]
+                    Text("${e.kind.name} ${e.address} · ${e.medianMs ?: "—"} ms · ${e.lossPercent}%" +
+                        (e.kbps?.takeIf { it > 0 }?.let { " · $it KB/s" } ?: ""), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (ui.cleanIpError.isNotBlank()) item { Text(ui.cleanIpError) }
+            item { HorizontalDivider() }
             item {
                 Text(stringResource(R.string.ui_reachability_allowlist_candidates), style = MaterialTheme.typography.titleMedium)
                 Text(stringResource(R.string.ui_tests_only_the_public_ip))

@@ -7,11 +7,13 @@
 # License: BSD-3-Clause, with GPL-3.0 parts (see THIRD_PARTY_NOTICES.md). It runs as its own process,
 # started by Tor. Source: https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/lyrebird
 set -euo pipefail
+# lyrebird 0.10.0 needs go >= 1.26.10 (its go.mod); common.sh keeps go1.26.8 for the others.
+export GOTOOLCHAIN=go1.26.10
 . "$(dirname "$0")/common.sh"
 
 MODULE=gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/lyrebird
-VERSION=v0.0.0-20260921142919-75ef9b2c1f18   # commit 75ef9b2c1f18 (2026-09-21)
-SUM="h1:yYIGFPSbU7zzI1HCwgIhTuYi5kiOg9JpvvC7WaQ5Xu4="
+VERSION=v0.0.0-20261104192811-59ac7e400c38   # tag 0.10.0, commit 59ac7e400c38 (2026-11-04)
+SUM="h1:h9X9Tz+tNRIp4zjLqPR2KCkVZKZGFIQnQzmIlfEsRBI="
 
 SRC="$(fetch_module "$MODULE" "$VERSION" "$SUM")"
 trap 'rm -rf "$SRC"' EXIT

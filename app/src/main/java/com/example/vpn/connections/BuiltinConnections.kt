@@ -43,13 +43,34 @@ object BuiltinConnections {
         // Build 178: Cloudflare filtered (cf=0) on every Aether carrier. An explicit pick: WARP MASQUE HTTP/2 dialled through
         // the Lantern hop, so the phone never reaches a filtered Cloudflare address itself. Never inside a plain Aether pick.
         AETHER_LANTERN("config-free-aether-lantern", "Aether over Lantern",
-            "WARP through the Lantern network, avoiding filtered Cloudflare addresses (an explicit chain)", "h2");
+            "WARP through the Lantern network, avoiding filtered Cloudflare addresses (an explicit chain)", "h2"),
+        // Build 181 (3.4): Serverless Direct, and sites that do not answer directly go through Lantern (Xray sockopt
+        // fallback). An explicit, labelled pick; its exit is still the ISP's for everything that works directly.
+        SERVERLESS_LANTERN("config-free-direct-lantern", "Serverless + Lantern",
+            "Direct access; sites that do not answer go through Lantern"),
+        // Build 181 (Phase 6): the user's own server with its own ECH key (Panels → My Servers → ECH). A separately
+        // labelled pick; plain TLS to the same server after ECH failed on this network. Never inside another pick.
+        PERSONAL_ECH("config-free-personal-ech", "Personal server (ECH)",
+            "Your own server, with ECH and an outer name that passes this network"),
+        // Build 181 (Phase 7): the user's own relay Worker on their Cloudflare account (Panels → Cloudflare). A separately
+        // labelled pick (VLESS over WebSocket through a scanned clean Cloudflare edge); never inside another pick.
+        CLOUDFLARE_RELAY("config-free-cloudflare-relay", "Cloudflare relay",
+            "Your own relay on your Cloudflare account");
 
         fun profile(): VlessProfile = when (this) {
             AETHER_WARP -> AetherSidecar.profile()
             TOR_SNOWFLAKE -> TorSidecar.profile(name = title)
             SERVERLESS -> ServerlessSidecar.profile()
+            SERVERLESS_LANTERN -> ServerlessSidecar.profile(advanced = AetherSettings(alias = title)).let { p ->
+                p.copy(extraSettings = org.json.JSONObject(p.extraSettings).put(ServerlessSidecar.KEY_LANTERN_FALLBACK, true).toString())
+            }
             PSIPHON -> PsiphonSidecar.profile()
+            // Placeholder until a server has ECH (missingDependency() then explains); resolve() reads the real config.
+            PERSONAL_ECH -> VlessProfile(name = title, address = "127.0.0.1", port = 443, uuid = "00000000-0000-0000-0000-000000000000",
+                security = "tls", sni = "personal-ech.invalid")
+            // Placeholder until a relay is connected (missingDependency() explains); resolve() reads the real one.
+            CLOUDFLARE_RELAY -> VlessProfile(name = title, address = "127.0.0.1", port = 443, uuid = "00000000-0000-0000-0000-000000000000",
+                transport = "ws", security = "tls", sni = "cloudflare-relay.invalid")
             SHIROKHORSHID -> ShirokhorshidSidecar.profile()
             PSIPHON_RADIANCE -> ChainRunner.profile(EngineChain.Chain(listOf(
                 EngineChain.Hop(PsiphonSidecar.ID), EngineChain.Hop(RadianceSidecar.id)
@@ -75,7 +96,11 @@ object BuiltinConnections {
         fun missingDependency(): String? = when (this) {
             AETHER_PSIPHON -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(PSIPHON.profile())
             AETHER_TOR -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(TOR_SNOWFLAKE.profile())
-            AETHER_LANTERN, SHIROKHORSHID_RADIANCE -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(RADIANCE.profile())
+            AETHER_LANTERN, SHIROKHORSHID_RADIANCE, SERVERLESS_LANTERN -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(RADIANCE.profile())
+            PERSONAL_ECH -> if (com.example.vpn.smartsni.PersonalEch.available()) null
+                else "Turn on ECH for your server in Panels → My Servers first."
+            CLOUDFLARE_RELAY -> if (CloudflareRelayRuntime.available()) null
+                else "Connect your Cloudflare account in Panels → Cloudflare first."
             else -> null
         }
     }
@@ -88,7 +113,18 @@ object BuiltinConnections {
             return when (method) {
                 ConfigFreeMethod.AETHER_WARP -> resolve(context, AETHER)?.copy(id = id)
                 ConfigFreeMethod.SERVERLESS -> resolve(context, DIRECT)?.copy(id = id)
+                // The user's Direct settings, plus the Lantern fallback.
+                ConfigFreeMethod.SERVERLESS_LANTERN -> resolve(context, DIRECT)?.let { p ->
+                    p.copy(id = id, name = method.title, extraSettings = org.json.JSONObject(p.extraSettings)
+                        .put(ServerlessSidecar.KEY_LANTERN_FALLBACK, true).toString())
+                } ?: method.profile()
                 ConfigFreeMethod.SHIROKHORSHID -> ShirokhorshidSidecar.profile(ShirokhorshidSettings.load(context)).copy(id = id)
+                // The ECH-enabled server that is not failing here; ECH itself is added at connect (PersonalEch).
+                ConfigFreeMethod.PERSONAL_ECH -> com.example.vpn.smartsni.PersonalEch.profile(BuiltinMethodMemory.network())
+                    ?.copy(id = id, name = method.title)
+                // The relay through this network's best scanned Cloudflare edge (or its own name when none is kept).
+                ConfigFreeMethod.CLOUDFLARE_RELAY -> CloudflareRelayRuntime.profile(BuiltinMethodMemory.network())
+                    ?.copy(id = id, name = method.title)
                 else -> method.profile()
             }
         }

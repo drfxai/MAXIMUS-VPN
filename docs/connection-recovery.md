@@ -12,4 +12,4 @@ This update addresses failures observed on an Android 15 mobile-data connection.
 
 A successful build cannot establish that a public bridge is reachable from every carrier. Snowflake rendezvous and bridge availability still depend on the network. Subscription HTTP 503 is a separate server-side failure; no client update can promise that the subscription service is available. Psiphon still requires valid authorized configuration. The unauthenticated emergency bridge and LAN mesh features remain disabled.
 
-The WebTunnel `addr` behavior is checked against the pinned lyrebird revision `75ef9b2c1f18`, `transports/webtunnel/client.go`: `RemoteAddress` is overridden independently of the URL-derived TLS and HTTP identity.
+The WebTunnel `addr` behavior is checked against the pinned lyrebird revision `59ac7e400c38` (0.10.0), `transports/webtunnel/client.go`: `RemoteAddress` is overridden independently of the URL-derived TLS and HTTP identity.

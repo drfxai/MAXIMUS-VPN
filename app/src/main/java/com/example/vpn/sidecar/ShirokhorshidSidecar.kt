@@ -71,8 +71,12 @@ class ShirokhorshidSidecar(
         val metered = runCatching { Sidecars.psiphonLinkMetered?.invoke() }.getOrNull() == true
         PsiphonSidecar.networkId(link, chained)?.let { base.put("NetworkID", it) }
         val network = runCatching { com.example.vpn.connections.BuiltinMethodMemory.network() }.getOrNull()
+        // Build 181: Iranian conduits only when Smart Connect found a whitelist / near-shutdown network.
+        val allowIran = takeIranConduitsAllowed()
+        if (allowIran) runCatching { com.example.xray.XrayLogManager.i("VPN",
+            "Shir o Khorshid: whitelist / near-shutdown network: conduits inside Iran are allowed for this start.") }
         val config = applyOptions(base, options,
-            rejectCidrs = if (options.avoidIranConduits) runCatching { rejectCidrs() }.getOrDefault(emptyList()) else emptyList(),
+            rejectCidrs = if (options.avoidIranConduits && !allowIran) runCatching { rejectCidrs() }.getOrDefault(emptyList()) else emptyList(),
             remembered = if (options.cdnFronting) runCatching { rememberedEdges(network) }.getOrDefault(emptyList()) else emptyList(),
             chained = chained, fronted = PsiphonSidecar.isFrontedOnly(profile))
         val configFile = File(context.workDir, PsiphonSidecar.CONFIG_FILE)
@@ -116,12 +120,19 @@ class ShirokhorshidSidecar(
         /** User-supplied CDN edges (IPv4 or IPv4 CIDR), in the user's order. Empty: scanner only. */
         val edges: List<String> = emptyList(),
         /** Reject conduits inside Iran (Conduit and Auto modes). */
-        val avoidIranConduits: Boolean = true
+        val avoidIranConduits: Boolean = true,
+        /**
+         * Build 181: a personal pairing ID (InproxyClientPersonalCompartmentID) from a friend's Conduit, so this phone uses
+         * only that friend's conduit(s). Empty: the shared pool. Psiphon then uses only in-proxy protocols.
+         */
+        val personalPairing: String = ""
     ) {
         fun problem(): String? {
             if (!PsiphonSidecar.validRegion(region)) return "The exit country must be a two-letter country code, or Auto."
             if (edges.size > MAX_EDGES) return "At most $MAX_EDGES CDN edge addresses can be used."
             edges.firstOrNull { !validEdge(it) }?.let { return "Not a valid CDN edge address: $it (use an IPv4 address or range such as 23.215.0.0/24)." }
+            if (personalPairing.isNotEmpty() && !validPairingId(personalPairing))
+                return "The personal pairing code is not valid. Paste the code or link your Conduit shares."
             return null
         }
 
@@ -131,6 +142,7 @@ class ShirokhorshidSidecar(
             .put(KEY_CDN, cdnFronting)
             .put(KEY_EDGES, JSONArray(edges))
             .put(KEY_AVOID_IR, avoidIranConduits)
+            .put(KEY_PAIRING, personalPairing)
 
         companion object {
             fun read(profile: VlessProfile): Options = read(ProfileExtras.read(profile))
@@ -141,7 +153,8 @@ class ShirokhorshidSidecar(
                 cdnFronting = extras.optBoolean(KEY_CDN, true),
                 edges = extras.optJSONArray(KEY_EDGES)?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
                     .map { it.trim() }.filter { it.isNotEmpty() },
-                avoidIranConduits = extras.optBoolean(KEY_AVOID_IR, true)
+                avoidIranConduits = extras.optBoolean(KEY_AVOID_IR, true),
+                personalPairing = extras.optString(KEY_PAIRING).trim()
             )
         }
     }
@@ -155,6 +168,38 @@ class ShirokhorshidSidecar(
         const val KEY_CDN = "sokCdn"
         const val KEY_EDGES = "sokEdges"
         const val KEY_AVOID_IR = "sokAvoidIr"
+        const val KEY_PAIRING = "sokPairing"
+
+        /** Psiphon's personal compartment ID: 32 bytes as unpadded standard base64 (inproxy.ID, 43 characters). Pure. */
+        fun validPairingId(value: String): Boolean = value.length == 43 &&
+            Regex("^[A-Za-z0-9+/]{43}$").matches(value) &&
+            // 43 characters carry 258 bits; 32 bytes use 256, so the last character's two low bits are zero.
+            BASE64.indexOf(value.last()) % 4 == 0
+
+        private const val BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+        /**
+         * The pairing ID from what the user pasted: the ID itself, or a share link or message that carries it (the first
+         * 43-character base64 token that decodes to 32 bytes; URL-safe characters and %-escapes are normalised). Null if
+         * none. Pure.
+         */
+        fun parsePairing(text: String): String? {
+            val raw = text.trim()
+            // URLDecoder turns '+' into a space, so the text as pasted is searched first.
+            val decoded = runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
+            return sequenceOf(raw, decoded).flatMap { Regex("[A-Za-z0-9+/_-]{43}").findAll(it) }
+                .map { it.value.replace('-', '+').replace('_', '/') }
+                .firstOrNull { validPairingId(it) }
+        }
+
+        /**
+         * Build 181 (3.3): Smart Connect allows conduits inside Iran for the next start, only on a whitelist or
+         * near-shutdown network ([com.example.vpn.smart.SmartTiers.allowIranianConduits]). Read once by the next start.
+         */
+        @Volatile var iranConduitsAllowedOnce: Boolean = false
+
+        /** Reads and clears [iranConduitsAllowedOnce]. */
+        fun takeIranConduitsAllowed(): Boolean = iranConduitsAllowedOnce.also { iranConduitsAllowedOnce = false }
         const val MAX_EDGES = 64
         /** Read by the ConsoleClient DNS patch shared with Psiphon (scripts/engines/psiphon-link-dns.py). */
         const val LINK_DNS_ENV = "MAXIMUS_PSIPHON_LINK_DNS"
@@ -188,7 +233,7 @@ class ShirokhorshidSidecar(
         private val OWNED_FIELDS = listOf(
             "FrontedMeekCDNScanUseBuiltInSpec", "FrontedMeekCDNScanSpec", "FrontedMeekDialOverrides",
             "FrontedMeekDialOverridesProbability", "InproxyRejectProxyCIDRs", "InproxyRejectProxyCountryCodes",
-            "GeoIPDatabasePath", "LocalProxyUsername", "LocalProxyPassword"
+            "GeoIPDatabasePath", "LocalProxyUsername", "LocalProxyPassword", "InproxyClientPersonalCompartmentID"
         )
 
         private val IPV4 = Regex("^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$")
@@ -249,7 +294,11 @@ class ShirokhorshidSidecar(
                 val edges = (options.edges + remembered).map { it.trim() }.filter { validEdge(it) }.distinct().take(MAX_EDGES)
                 if (edges.isNotEmpty()) config.put("FrontedMeekCDNScanSpec", JSONObject().put("IPCandidates", JSONArray(edges)))
             }
+            val paired = options.personalPairing.isNotEmpty() && validPairingId(options.personalPairing)
+            if (paired) config.put("InproxyClientPersonalCompartmentID", options.personalPairing)
             val limit: List<String>? = when {
+                // A personal pairing uses only in-proxy protocols (the core enforces it too): never limit them away.
+                paired -> CONDUIT_PROTOCOLS
                 fronted && options.mode != Mode.CONDUIT -> (if (cdn) CDN_PROTOCOLS else emptyList()) + PsiphonSidecar.FRONTED_PROTOCOLS
                 options.mode == Mode.AUTO -> null
                 options.mode == Mode.CONDUIT -> CONDUIT_PROTOCOLS
@@ -267,7 +316,7 @@ class ShirokhorshidSidecar(
             if (options.mode == Mode.DIRECT || fronted && options.mode != Mode.CONDUIT) config.put("DisableTactics", true)
             // A fronted start is not pinned to a region: few regions host fronted servers.
             if (fronted && options.mode != Mode.CONDUIT) config.remove("EgressRegion")
-            if (options.mode != Mode.DIRECT && rejectCidrs.isNotEmpty()) {
+            if ((options.mode != Mode.DIRECT || paired) && rejectCidrs.isNotEmpty()) {
                 config.put("InproxyRejectProxyCIDRs", JSONArray(rejectCidrs))
             }
             if (chained) {
@@ -464,6 +513,13 @@ object GeoIpCidrs {
 object ShirokhorshidFrontedRetry {
     /** A server connected this long ago and still no tunnel: the all-protocols start is given up. */
     const val STAGE3_GRACE_MS = 25_000L
+    /**
+     * Build 180 device test (A3): the switch fired at 53 s, because the grace counted from stage 3 (reached ~28 s in).
+     * From [SWITCH_AFTER_START_MS] after the start, a server that has been connected for [STAGE3_MIN_MS] with no tunnel
+     * is enough.
+     */
+    const val SWITCH_AFTER_START_MS = 25_000L
+    const val STAGE3_MIN_MS = 8_000L
     /** What the CDN-fronted start gets at least; the first start is cut so this is left of the window. */
     const val FRONTED_MIN_MS = 45_000L
 
@@ -475,7 +531,13 @@ object ShirokhorshidFrontedRetry {
 
     /** The first start is given up for the CDN-fronted one: a server connected ([stage] 3) and no tunnel followed. */
     fun giveUp(stage: Int, stage3Since: Long?, startedAt: Long, now: Long, readyTimeoutMs: Long): Boolean =
-        stage >= 3 && stage3Since != null && (now - stage3Since >= STAGE3_GRACE_MS || now - startedAt >= switchAtMs(readyTimeoutMs))
+        stage >= 3 && stage3Since != null && (now - stage3Since >= STAGE3_GRACE_MS || now - startedAt >= switchAtMs(readyTimeoutMs) ||
+            now - startedAt >= SWITCH_AFTER_START_MS && now - stage3Since >= STAGE3_MIN_MS)
+
+    /** The first (all-protocols) phase, kept for the final failure text once the fronted phase also fails. Pure. */
+    fun firstPhaseText(elapsedMs: Long, stage3AfterMs: Long?, dials: PsiphonSidecar.StartupDials?): String =
+        "first phase (all protocols, ${elapsedMs / 1000}s" + (stage3AfterMs?.let { "; server connected at ${it / 1000}s" } ?: "") +
+            "): " + (dials?.summary() ?: "no dial counts")
 
     /** The CDN-fronted start's window: what is left of [readyTimeoutMs], never under a third of [FRONTED_MIN_MS]. */
     fun frontedWindowMs(readyTimeoutMs: Long, elapsedMs: Long): Long =

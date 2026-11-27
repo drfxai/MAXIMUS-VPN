@@ -21,7 +21,7 @@ import java.io.File
 object MihomoSidecar : SidecarEngine {
     override val id = "mihomo"
     override val binary = "mihomo"
-    const val VERSION = "v1.19.32"
+    const val VERSION = "v1.19.34"
     private const val NODE = "node"
     private const val UPSTREAM = "maximus-upstream"
 

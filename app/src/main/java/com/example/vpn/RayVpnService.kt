@@ -379,6 +379,9 @@ class RayVpnService : VpnService() {
         com.example.xray.RealDelayProbe.skipUselessRetry = true
         // Clean-IP scans and checks measure the phone's network, not this VPN (or its blocking interface).
         com.example.panels.CleanIpOptimizer.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
+        // Build 181: the Aether MASQUE SNI pre-check measures the phone's network, not this VPN.
+        com.example.vpn.connections.AetherSniProbe.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
+        com.example.vpn.sidecar.WebTunnelEndpoints.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
         // The TLS record-slicing bridge dials the real server outside this VPN, like the probes.
         com.example.vpn.stealth.recordslice.RecordSliceBridges.protect = { socket -> vpnInterface == null || safeProtectSocket(socket) }
         com.example.vpn.stealth.recordslice.RecordSliceBridges.resolve = { host -> bridgeResolve(host) }
@@ -588,7 +591,8 @@ class RayVpnService : VpnService() {
                         ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
                     if (targetProfile != null) {
-                        com.example.vpn.diagnostics.EngineStages.begin(com.example.vpn.diagnostics.EngineStages.engineOf(targetProfile))
+                        // Build 180 (A5): Smart Connect logged "aether/auto · connect requested" though Aether never ran.
+                        com.example.vpn.diagnostics.EngineStages.begin(com.example.vpn.diagnostics.EngineStages.connectLabel(smart, targetProfile))
                         deadlineTried += targetProfile.id
                         connect(targetProfile, smart = smart, startedByUser = true, force = force)
                     } else {
@@ -748,6 +752,17 @@ class RayVpnService : VpnService() {
             ?.takeIf { com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
     }.getOrNull()
 
+    /** What this network's latest measurement says, for [com.example.vpn.smart.SmartTiers] (only a fresh one counts). */
+    private fun smartTierSignals(network: String?): com.example.vpn.smart.SmartTiers.Signals = runCatching {
+        val now = System.currentTimeMillis()
+        val last = com.example.vpn.smart.NetworkCapabilityDetector.last
+        val fresh = network != null && com.example.vpn.smart.SmartConnectPlan.freshReading(last, network, now) != null
+        val cf = network != null && com.example.vpn.connections.CloudflareFilterMemory.knownNow(network,
+            freshFiltered = com.example.vpn.smart.SmartConnectPlan.cloudflareBlocked(last, network, now),
+            freshReachable = fresh && last?.cloudflareReachable == true, now = now)
+        com.example.vpn.smart.SmartTiers.signals(last.takeIf { fresh }, network, cf)
+    }.getOrDefault(com.example.vpn.smart.SmartTiers.Signals())
+
     private suspend fun onConnectDeadline(ticket: Long, state: ConnectionState, budgetMs: Long) {
         if (!lifecycle.isCurrent(ticket) || !StopFence.admits(ticket)) return
         val profile = state.activeProfile
@@ -773,13 +788,23 @@ class RayVpnService : VpnService() {
         val verified = if (manualPick) null else network?.let { net ->
             runCatching { networkMemory.winners.best(net, tried) { id -> !ConnectDeadline.ispExit(id) }?.profileId }.getOrNull()
         }
+        // Build 181 (3.6): Smart Connect's next built-ins follow how hard this network is filtered (SmartTiers).
+        val tierSignals = smartTierSignals(network)
+        val tier = com.example.vpn.smart.SmartTiers.tier(tierSignals)
+        val tiered = com.example.vpn.smart.SmartTiers.candidates(tierSignals, ConnectDeadline.CANDIDATES,
+            relay = com.example.vpn.connections.CloudflareRelayRuntime.smartReady())
+        // Build 181 (3.3): Iranian conduits only for a Smart fallback on a whitelist / near-shutdown network (read once).
+        com.example.vpn.sidecar.ShirokhorshidSidecar.iranConduitsAllowedOnce =
+            !manualPick && com.example.vpn.smart.SmartTiers.allowIranianConduits(tier)
+        if (!manualPick) com.example.vpn.diagnostics.EngineStages.record("smart", "tier",
+            "${tier.title}: next ${tiered.filter { it !in tried }.take(3).joinToString()}")
         val runnable = if (manualPick) emptySet() else
-            (ConnectDeadline.CANDIDATES + listOfNotNull(verified)).filter { fallbackProfile(it) != null }.toSet()
+            (tiered + listOfNotNull(verified)).filter { fallbackProfile(it) != null }.toSet()
         // The user's own pick (not Smart Connect) ends here with a reason: never another engine or chain.
         val decision = ConnectDeadline.decide(
             stopped = !lifecycle.isCurrent(ticket) || !StopFence.admits(ticket), exitLocked = locked,
             fallbacksSoFar = deadlineFallbacks, tried = tried, verifiedHere = verified, runnable = { it in runnable },
-            manualPick = manualPick)
+            candidates = tiered, manualPick = manualPick)
         when (decision) {
             ConnectDeadline.Decision.Stopped -> return
             is ConnectDeadline.Decision.Fallback -> {
@@ -813,6 +838,12 @@ class RayVpnService : VpnService() {
                 val message = getString(com.example.R.string.connect_deadline_failed, name, seconds, why,
                     failureNotice(afterFailedConnect()))
                 XrayLogManager.e("VPN", "[DEADLINE] $engine carried no verified traffic within ${seconds}s; stopping (${decision.reason}).")
+                // Build 181: a near-shutdown network gets a clear status instead of a bare failure.
+                if (!manualPick && tier == com.example.vpn.smart.SmartTiers.Tier.NEAR_SHUTDOWN) {
+                    XrayLogManager.w("VPN", "[SMART] ${com.example.vpn.smart.SmartTiers.nearShutdownStatus()}")
+                    com.example.vpn.diagnostics.EngineStages.record("smart", "near-shutdown",
+                        com.example.vpn.smart.SmartTiers.nearShutdownStatus(), error = true)
+                }
                 connectJob?.cancel()
                 com.example.vpn.sidecar.EngineReaper.stopAll()
                 com.example.vpn.sidecar.EngineHandoff.clear()
@@ -1182,6 +1213,47 @@ class RayVpnService : VpnService() {
         if (!com.example.vpn.sidecar.ForkXraySidecar.applies(profile)) return stock(profile)
         val r = com.example.vpn.lab.EngineProbe.test(this, com.example.vpn.sidecar.ForkXraySidecar, profile, timeoutSec, record = false)
         return com.example.vpn.connectivity.ForkAwareProbe.outcome(r.stage.carriesTraffic, r.notTested, r.latencyMs, r.failure)
+    }
+
+    /**
+     * Build 181 Phase 5 (B): the Smart ECH decision for [profile] when Xray carries it, or null (no ECH added). A manual
+     * ECHConfigList always applies; automatic ECH needs a Cloudflare front and, on a manual pick, ECH that carried
+     * traffic on this network before (a Smart pick tries it). A stale key is fetched by DoH first, and an outer name not
+     * yet seen here gets one short Smart SNI probe (≤3 s), so a blocked outer name is skipped instead of costing an attempt.
+     */
+    /**
+     * Build 181 Phase 6: the decision for a config of the user's own ECH-enabled server when Xray carries it, or null
+     * (not such a config). A decision that does not apply means plain TLS to that server on this network (cooldown).
+     */
+    private fun personalEchFor(profile: VlessProfile): com.example.vpn.smartsni.PersonalEch.Decision? {
+        if (EngineSelectionPolicy.select(profile) != EngineSelectionPolicy.Runtime.XRAY) return null
+        val net = com.example.vpn.connections.BuiltinMethodMemory.network()
+        val d = com.example.vpn.smartsni.PersonalEch.decide(profile, net)
+        if (d.entry == null) return null
+        XrayLogManager.i("SMART", "Personal server ECH: " + if (d.applies) "on, outer name ${d.entry.outer}" else "off (${d.reason})")
+        return d
+    }
+
+    private fun smartEchFor(profile: VlessProfile, smartPick: Boolean): com.example.vpn.smartsni.SmartEch.Decision? {
+        if (EngineSelectionPolicy.select(profile) != EngineSelectionPolicy.Runtime.XRAY) return null
+        val ech = com.example.vpn.smartsni.SmartEch
+        val sni = com.example.vpn.smartsni.SmartSni
+        val net = com.example.vpn.connections.BuiltinMethodMemory.network()
+        val log: (String) -> Unit = { XrayLogManager.i("SMART", it) }
+        if (com.example.vpn.smartsni.SmartSniSettings.manualEchConfig.isBlank()) {
+            if (!com.example.vpn.smartsni.SmartSniSettings.smartEch || profile.echConfigList.isNotBlank() || !ech.cloudflareFronted(profile)) return null
+            if (!smartPick && ech.state(net).okAt <= 0) return null
+            val state = ech.refresh(net, log = log)
+            val outer = state.outer
+            if (outer != null && outer !in sni.ranked(net) && outer !in sni.cooling(net)) {
+                val p = sni.probe(net, listOf(outer), com.example.vpn.cleanip.CdnRanges.sample(com.example.vpn.cleanip.Cdn.CLOUDFLARE, 2), 3_000L, log).firstOrNull()
+                if (p != null && p.verdict !in setOf(com.example.vpn.smartsni.SmartSni.Verdict.PASSED, com.example.vpn.smartsni.SmartSni.Verdict.REACHED, com.example.vpn.smartsni.SmartSni.Verdict.SKIPPED))
+                    sni.rotate(net, outer)
+            }
+        }
+        val d = ech.decide(profile, net)
+        log("Smart ECH: " + if (d.applies) "on, outer name ${d.outer} (${d.reason})" else "off (${d.reason})")
+        return d.takeIf { it.applies }
     }
 
     private suspend fun connectLocked(
@@ -2239,7 +2311,18 @@ class RayVpnService : VpnService() {
             sidecarOwnerFingerprint = requestedProfile.effectiveFingerprint.takeIf { sidecar != null }
             // The app is left out of its own VPN here, so the device (TUN) path cannot be dialed from the app
             // (TunCheckPlan). A byte meter on the TUN → engine hop measures what the TUN forwards for other apps.
-            val xrayProfile = withTunForwardMeter(profile)
+            // Build 181 Phase 5 (B): Smart ECH for a Cloudflare-fronted config carried by Xray itself (no engine program).
+            // Build 181 Phase 6: the user's own server with ECH (Panels → My Servers) wins over Smart ECH for its configs;
+            // after an ECH failure on this network it connects with plain TLS (PersonalEch cooldown).
+            val personalEch = if (amnezia == null && sidecarEngine == null && engineChain == null)
+                runCatching { personalEchFor(profile) }.getOrNull() else null
+            val echDecision = if (personalEch == null && amnezia == null && sidecarEngine == null && engineChain == null)
+                runCatching { smartEchFor(profile, smart) }.getOrNull() else null
+            val xrayProfile = withTunForwardMeter(when {
+                personalEch != null -> com.example.vpn.smartsni.PersonalEch.applyTo(profile, personalEch)
+                echDecision != null -> com.example.vpn.smartsni.SmartEch.applyTo(profile, echDecision)
+                else -> profile
+            })
             val runtime = EngineSelectionPolicy.select(profile)
             val engineId = if (amnezia != null) com.example.vpn.engine.AmneziaNativeEngine.ID
                 else com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
@@ -2369,6 +2452,21 @@ class RayVpnService : VpnService() {
             val currentNetwork = _vpnState.value.networkGeneration == verificationGeneration &&
                 result.second != com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED
             val check = if (currentNetwork) result else null to com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED
+            if (currentNetwork && personalEch != null) runCatching {
+                com.example.vpn.smartsni.PersonalEch.onResult(com.example.vpn.connections.BuiltinMethodMemory.network(), personalEch,
+                    verified = check.first != null) { XrayLogManager.i("SMART", it) }
+            }
+            // Build 181 Phase 7: the user's Cloudflare relay: count the connection (quota estimate) and drop a clean edge
+            // that did not carry traffic here, so the next connect rescans.
+            if (currentNetwork && com.example.vpn.connections.CloudflareRelayRuntime.handles(profile)) runCatching {
+                com.example.vpn.connections.CloudflareRelayRuntime.onResult(com.example.vpn.connections.BuiltinMethodMemory.network(),
+                    profile, verified = check.first != null) { XrayLogManager.i("SMART", it) }
+            }
+            if (currentNetwork && echDecision != null) runCatching {
+                // A failure with ECH may be a rejected (rotated) key: refreshed and retried once by the next attempt, else plain TLS here.
+                com.example.vpn.smartsni.SmartEch.onResult(com.example.vpn.connections.BuiltinMethodMemory.network(), echDecision,
+                    verified = check.first != null) { XrayLogManager.i("SMART", it) }
+            }
             val measurement = if (engineEndpoint == null) com.example.vpn.connectivity.MeasurementType.TUNNEL_TRAFFIC
                 else com.example.vpn.connectivity.MeasurementType.ENGINE_REQUEST
             if (currentNetwork) {
@@ -2939,7 +3037,8 @@ class RayVpnService : VpnService() {
         verifiedFallback(network, exclude)?.first?.takeIf {
             !ConnectDeadline.ispExit(it.id) && !com.example.vpn.sidecar.ServerlessSidecar.handles(it)
         }?.let { return it }
-        for (id in ConnectDeadline.CANDIDATES) {
+        for (id in com.example.vpn.smart.SmartTiers.candidates(smartTierSignals(network), ConnectDeadline.CANDIDATES,
+                relay = com.example.vpn.connections.CloudflareRelayRuntime.smartReady())) {
             if (id in exclude) continue
             val p = fallbackProfile(id) ?: continue
             if (p.id in exclude || com.example.vpn.sidecar.ServerlessSidecar.handles(p)) continue
@@ -3319,7 +3418,10 @@ class RayVpnService : VpnService() {
             else null
             // Same reading for Connect, the Connections page test and the LAB probe (ConnectionEngineRunner.linkHints).
             val hints = com.example.vpn.connections.ConnectionEngineRunner.linkHints(measured)
-            val ipv4Only = hints.ipv4Only
+            // Build 181 (A2): a phone with no global IPv6 address on its link never tries Aether's IPv6 lanes.
+            val ipv4Only = com.example.vpn.connections.ConnectionEngineRunner.noIpv6(hints.ipv4Only,
+                runCatching { com.example.RayApplication.instance.recoveryContext(
+                    com.example.vpn.connections.BuiltinMethodMemory.network()).ipv6 }.getOrNull())
             // Build 167: automatic Aether on a network with no fresh reading. One cheap Cloudflare TLS handshake on the
             // physical link first (≤ ~6 s); a filtered result gets the fixed filtered-link budgets and WireGuard first.
             // Build 171: also for a carrier the user picked (MASQUE HTTP/2) while WARP's data plane is held here, so its
@@ -3463,6 +3565,8 @@ class RayVpnService : VpnService() {
             var regionOutcome: com.example.vpn.sidecar.PsiphonRegionRun.Outcome<RegionStart>? = null
             var process: com.example.vpn.sidecar.RunningEngine
             var ready: Boolean
+            // Shir o Khorshid's all-protocols phase, when the pick switched to CDN-fronted (ShirokhorshidFrontedRetry).
+            var sokFirstPhase: String? = null
             if (psiphonRegional) {
                 val remembered = regionNetwork?.let { net -> runCatching { networkMemory.psiphonRegions.ranked(net) }.getOrNull() }.orEmpty()
                 // The user's own direct pick on a network where the chain over Lantern is the remembered path: one bounded
@@ -3555,7 +3659,9 @@ class RayVpnService : VpnService() {
                 }
                 if (!ready && gaveUp) {
                     val elapsed = System.currentTimeMillis() - began
-                    XrayLogManager.w("VPN", "Shir o Khorshid: ${com.example.vpn.sidecar.ShirokhorshidFrontedRetry.TEXT} (after ${elapsed / 1000}s).")
+                    sokFirstPhase = com.example.vpn.sidecar.ShirokhorshidFrontedRetry.firstPhaseText(elapsed,
+                        stage3Since?.let { it - began }, runCatching { notices()?.psiphonDials() }.getOrNull())
+                    XrayLogManager.w("VPN", "Shir o Khorshid: ${com.example.vpn.sidecar.ShirokhorshidFrontedRetry.TEXT} (after ${elapsed / 1000}s; $sokFirstPhase).")
                     com.example.vpn.diagnostics.EngineStages.record(engine.id, "protocols",
                         "CDN-fronted only after ${elapsed / 1000}s: a server connected but no tunnel followed")
                     com.example.vpn.diagnostics.events.EventLog.event("shirokhorshid.fronted", attributes = mapOf(
@@ -3616,12 +3722,14 @@ class RayVpnService : VpnService() {
             if (!ready) {
                 process.stop()
                 sidecar = null
-                val hint = regionRun?.failure ?: regionRun?.takeIf { userRegion.isEmpty() }?.let { o ->
+                val baseHint = regionRun?.failure ?: regionRun?.takeIf { userRegion.isEmpty() }?.let { o ->
                     "Psiphon brought no tunnel up in ${o.attempts.size} start(s) (regions: " +
                         o.attempts.joinToString(", ") { it.step.region.ifEmpty { "any" } } + ") within " +
                         "${o.attempts.sumOf { it.elapsedMs } / 1000}s: " +
                         (process.startupFailure ?: "no readiness signal") }
                     ?: process.startupFailure ?: "No readiness signal; inspect redacted engine logs"
+                // Build 180 (A3): the fronted phase's text alone hid what the first (all-protocols) phase dialed.
+                val hint = sokFirstPhase?.let { "$baseHint; $it" } ?: baseHint
                 com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "startup failed: $hint")
                 val psiphonDirect = engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
                     com.example.vpn.connections.PsiphonChainMemory.isDirect(profile)
@@ -4641,6 +4749,10 @@ class RayVpnService : VpnService() {
                                  stallBytes: Int? = null) {
         if (_vpnState.value.attemptId != attemptId) return
         networkMemory.freezes.recordStalled(network, stalled.id)
+        // Build 181 Phase 5 (A): an Aether session that stalled mid-session rotates its MASQUE name (6 h cooldown).
+        if (com.example.vpn.sidecar.AetherSidecar.handles(stalled)) runCatching {
+            com.example.vpn.connections.AetherSniProbe.sessionLost(com.example.vpn.connections.BuiltinMethodMemory.network())
+        }.getOrNull()?.let { XrayLogManager.i("SMART", "Smart SNI: MASQUE name $it stopped working mid-session; the next start uses the next name") }
         serviceScope.launch(Dispatchers.IO) {
             val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
             val usable = saved.filter {
@@ -5786,6 +5898,8 @@ class RayVpnService : VpnService() {
         com.example.xray.RealDelayProbe.skipUselessRetry = false
         com.example.xray.RealDelayProbe.retryMemory.reset()
         com.example.panels.CleanIpOptimizer.socketProtector = null
+        com.example.vpn.connections.AetherSniProbe.socketProtector = null
+        com.example.vpn.sidecar.WebTunnelEndpoints.socketProtector = null
         com.example.vpn.stealth.recordslice.RecordSliceBridges.protect = null
         com.example.vpn.stealth.recordslice.RecordSliceBridges.resolve = null
         com.example.vpn.stealth.recordslice.RecordSliceBridges.setMss = null

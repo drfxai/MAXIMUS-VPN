@@ -135,7 +135,7 @@ import com.example.panels.PanelCatalog
 import com.example.panels.PanelStore
 import com.example.panels.PanelType
 
-private object PanelColors {
+internal object PanelColors {
     val Background = Color(0xFF070D18)
     val CardBg = Color(0xFF0C192E)
     val CardBorder = Color(0xFF1B2E4B)
@@ -177,7 +177,7 @@ fun PanelManagerScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by remember { mutableIntStateOf(PanelsLaunch.consume() ?: 0) }
     var selectedPanelId by remember { mutableStateOf<String?>(null) }
     var selectedWorkerTemplate by remember { mutableStateOf(PanelCatalog.cloudflareTemplates.first().id) }
     var selectedRegion by remember { mutableStateOf(CleanIpOptimizer.SCOPE_ALL) }

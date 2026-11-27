@@ -43,9 +43,14 @@ object TokenTemplate {
     fun encode(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
     private val TOKEN = Regex("^[A-Za-z0-9_-]{40}$")
+    /** Cloudflare's scannable user-token format (2026+): cfut_ + 40 characters + an 8-hex checksum (Token formats docs). */
+    private val USER_TOKEN = Regex("^cfut_[A-Za-z0-9]{40}[0-9a-fA-F]{8}$")
 
-    /** True when [text] has the shape of a Cloudflare API token: 40 characters of A-Z, a-z, 0-9, _ and -. */
-    fun looksLikeToken(text: String?): Boolean = text != null && TOKEN.matches(text.trim())
+    /**
+     * True when [text] has the shape of a Cloudflare user API token: the scannable cfut_ format (every token created
+     * since 2026), or the older 40 characters of A-Z, a-z, 0-9, _ and -. Build 181: cfut_ tokens were not recognised.
+     */
+    fun looksLikeToken(text: String?): Boolean = text != null && text.trim().let { TOKEN.matches(it) || USER_TOKEN.matches(it) }
 
     /** "••••Xy9z": enough to recognise a copied token without showing it. */
     fun masked(token: String): String = "••••" + token.trim().takeLast(4)

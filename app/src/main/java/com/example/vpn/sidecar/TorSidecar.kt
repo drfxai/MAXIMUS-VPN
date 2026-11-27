@@ -33,9 +33,14 @@ class TorSidecar(
     override fun problem(profile: VlessProfile): String? = problemOf(profile)
 
     override fun prepare(profile: VlessProfile, settings: AppSettings, context: SidecarContext): SidecarLaunch {
-        val bridges = bridges(profile)
+        val builtIn = extras(profile).optString(KEY_BRIDGES).isBlank()
         val chained = context.upstreamSocks != null
-        val throughProxy = chained && extras(profile).optString(KEY_BRIDGES).isBlank()
+        val throughProxy = chained && builtIn
+        // Build 181: built-in Snowflake races two rendezvous; the pair is remembered so the Tor notices can tell which won.
+        val pair = if (builtIn && !throughProxy) SnowflakeRendezvous.current() else null
+        SnowflakeRendezvous.active = pair
+        val bridges = if (pair != null) SnowflakeRendezvous.lines(pair) else bridges(profile)
+        pair?.let { EngineSignals.publish("tor", "Snowflake rendezvous: ${it.first.label} + ${it.second.label}") }
         val config = if (throughProxy) proxiedTorrc(context) else
             torrc(bridges, context.socksPort, context.executable, context.upstreamSocks)
         PrivateEngineFile.write(File(context.workDir, TORRC), config)
@@ -53,8 +58,19 @@ class TorSidecar(
         }
         // A chained transport delegates DNS to its upstream hop. Direct WebTunnel needs the same
         // poison-resistant resolution as ordinary proxy profiles, while retaining its URL and SNI.
-        val bridges = if (context.upstreamSocks != null) saved else WebTunnelEndpoints.resolve(saved,
+        val resolved = if (context.upstreamSocks != null) saved else WebTunnelEndpoints.resolve(saved,
             privateDns = com.example.vpn.safety.OperatingModePolicy.of(context.mode).privateServerLookup)
+        // Build 181 (3.5): WebTunnel bridges that answer a verified TLS handshake go first (only while the VPN service
+        // runs, which installs the socket protector; a chained Tor reaches its bridges through the hop instead).
+        val bridges = if (context.upstreamSocks == null && WebTunnelEndpoints.socketProtector != null &&
+            resolved.any { it.startsWith("webtunnel ") }) {
+            val (ordered, answered) = WebTunnelEndpoints.precheck(resolved)
+            val total = resolved.count { it.startsWith("webtunnel ") }
+            EngineSignals.publish("tor", "WebTunnel pre-check: $answered of $total bridges answered TLS")
+            runCatching { com.example.xray.XrayLogManager.i("TOR", "WebTunnel pre-check: $answered of $total bridges answered TLS" +
+                if (answered == 0) "; trying all of them anyway" else "; those go first") }
+            ordered
+        } else resolved
         bridges.forEach { EngineSignals.publish("tor-bridge", it) }
         val transports = transportsOf(bridges)
         require(context.upstreamSocks == null || "snowflake" !in transports) {
@@ -85,18 +101,10 @@ class TorSidecar(
         const val READY_TIMEOUT_MS = 120_000L
 
         /**
-         * Tor's built-in Snowflake bridges, as shipped with Snowflake v2.11.0 (client/torrc), the
-         * version lyrebird is built with.
+         * Tor's built-in Snowflake bridges through the CDN77 rendezvous (the only one before Build 181). Since Build 181 a
+         * profile without bridge lines uses [SnowflakeRendezvous]'s ladder (AMP cache, SQS, Netlify, CDN77; two raced).
          */
-        private const val ICE = "stun:stun.antisip.com:3478,stun:stun.epygi.com:3478,stun:stun.uls.co.za:3478," +
-            "stun:stun.voipgate.com:3478,stun:stun.mixvoip.com:3478,stun:stun.nextcloud.com:3478," +
-            "stun:stun.bethesda.net:3478,stun:stun.nextcloud.com:443"
-        val SNOWFLAKE = listOf(
-            "snowflake 192.0.2.3:80 2B280B23E1107BB62ABFC40DDCC8824814F80A72 fingerprint=2B280B23E1107BB62ABFC40DDCC8824814F80A72 " +
-                "url=https://1098762253.rsc.cdn77.org/ fronts=www.cdn77.com,www.phpmyadmin.net ice=$ICE utls-imitate=hellorandomizedalpn",
-            "snowflake 192.0.2.4:80 8838024498816A039FCBBAB14E6F40A0843051FA fingerprint=8838024498816A039FCBBAB14E6F40A0843051FA " +
-                "url=https://1098762253.rsc.cdn77.org/ fronts=www.cdn77.com,www.phpmyadmin.net ice=$ICE utls-imitate=hellorandomizedalpn"
-        )
+        val SNOWFLAKE: List<String> = SnowflakeRendezvous.Method.CDN77.lines()
 
         private val TRANSPORTS = setOf("snowflake", "obfs4", "webtunnel", "meek_lite")
 
@@ -124,7 +132,7 @@ class TorSidecar(
             val lines = extras(profile).optString(KEY_BRIDGES).lines()
                 .map { it.trim().removePrefix("Bridge ").trim() }
                 .filter { it.isNotEmpty() && !it.startsWith("#") }
-            if (lines.isEmpty()) return SNOWFLAKE
+            if (lines.isEmpty()) return SnowflakeRendezvous.lines(SnowflakeRendezvous.current())
             for (line in lines) {
                 val transport = line.substringBefore(' ')
                 require(transport in TRANSPORTS) {

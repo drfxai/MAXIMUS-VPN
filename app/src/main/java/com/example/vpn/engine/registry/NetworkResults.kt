@@ -74,6 +74,18 @@ object NetworkResults {
         return "Verified on this network in the last 24 h: $shown$more."
     }
 
+    /**
+     * Build 180 device test (A6): the LAB tile said "Verified 0 profiles" beside a list of five connections verified
+     * here. With no Lab-verified profile the tile counts the connections verified on this network (24 h). Pure.
+     */
+    fun verifiedMetric(profiles: Int, connectionsHere: Int): String = when {
+        profiles == 1 -> "1 profile"
+        profiles > 1 -> "$profiles profiles"
+        connectionsHere == 1 -> "1 connection"
+        connectionsHere > 1 -> "$connectionsHere connections"
+        else -> "0 profiles"
+    }
+
     /** The Home card's line for a connection that is not running: its last result here, else [fallback]. */
     fun cardLine(result: EngineLedger.PathResult?, now: Long, fallback: String): String = when {
         result == null -> fallback

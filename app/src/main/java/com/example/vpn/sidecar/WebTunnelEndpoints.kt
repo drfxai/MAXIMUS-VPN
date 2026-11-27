@@ -39,6 +39,68 @@ object WebTunnelEndpoints {
         } finally { pool.shutdownNow() }
     }
 
+    /** Build 181 (3.5): the whole WebTunnel pre-check; every bridge is tried at once. */
+    const val PRECHECK_MS = 8_000L
+
+    /** Installed by the VPN service: the pre-check measures the phone's network, never this app's own tunnel. */
+    @Volatile var socketProtector: ((java.net.Socket) -> Boolean)? = null
+
+    /**
+     * Build 181 (3.5): before Tor starts, each pinned WebTunnel bridge gets one verified TLS handshake (system CAs and
+     * the URL's host name, as lyrebird checks it) to its `addr`. Bridges that answer go first, in answer order; the rest
+     * follow, so a slow bridge is still tried. Nothing is sent after the handshake. Returns the reordered lines and how
+     * many answered. Non-WebTunnel lines are kept as they are.
+     */
+    fun precheck(lines: List<String>, timeoutMs: Long = PRECHECK_MS,
+                 handshake: (host: String, ip: String, port: Int, timeoutMs: Int) -> Boolean = ::tlsHandshake): Pair<List<String>, Int> {
+        val web = lines.filter { it.startsWith("webtunnel ") && " addr=" in it }
+        if (web.isEmpty()) return lines to 0
+        val pool = Executors.newFixedThreadPool(minOf(web.size, 8))
+        val answered = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        try {
+            val tasks = web.map { line -> Callable {
+                val target = target(line) ?: return@Callable false
+                val ok = runCatching { handshake(target.first, target.second, target.third, timeoutMs.toInt()) }.getOrDefault(false)
+                if (ok) answered += line
+                ok
+            } }
+            pool.invokeAll(tasks, timeoutMs, TimeUnit.MILLISECONDS)
+        } finally { pool.shutdownNow() }
+        val first = answered.toList()
+        return (first + lines.filter { it !in first }) to first.size
+    }
+
+    /** (URL host, addr IP, addr port) of a pinned WebTunnel line, or null. Pure. */
+    internal fun target(line: String): Triple<String, String, Int>? = runCatching {
+        val parts = line.split(' ')
+        val host = URI(parts.first { it.startsWith("url=") }.removePrefix("url=")).host ?: return null
+        val addr = parts.first { it.startsWith("addr=") }.removePrefix("addr=")
+        val ip = if (addr.startsWith("[")) addr.substringAfter('[').substringBefore(']') else addr.substringBeforeLast(':')
+        val port = addr.substringAfterLast(':').toInt().takeIf { it in 1..65535 } ?: return null
+        Triple(host, ip, port)
+    }.getOrNull()
+
+    private fun tlsHandshake(host: String, ip: String, port: Int, timeoutMs: Int): Boolean {
+        val raw = java.net.Socket()
+        return try {
+            socketProtector?.let { protect -> if (!com.example.vpn.protectTcpSocket(raw, protect)) return false }
+            raw.connect(java.net.InetSocketAddress(InetAddress.getByName(ip), port), timeoutMs)
+            val ssl = (javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory)
+                .createSocket(raw, host, port, true) as javax.net.ssl.SSLSocket
+            ssl.soTimeout = timeoutMs
+            ssl.sslParameters = ssl.sslParameters.apply {
+                serverNames = listOf(javax.net.ssl.SNIHostName(host))
+                endpointIdentificationAlgorithm = "HTTPS"
+            }
+            ssl.use { it.startHandshake() }
+            true
+        } catch (_: Exception) {
+            false
+        } finally {
+            runCatching { raw.close() }
+        }
+    }
+
     internal fun pin(line: String, lookup: (String) -> String): String {
         val parts = line.split(' ')
         if (parts.first() != "webtunnel" || parts.any { it.startsWith("addr=") }) return line

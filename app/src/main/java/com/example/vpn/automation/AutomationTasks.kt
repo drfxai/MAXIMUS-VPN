@@ -169,7 +169,20 @@ class AutomationTasks(
             f.skipped?.let { notes += it }
         }
         sameNetwork(env)
-        TaskResult(found, (listOf("${targets.size} fronted configs") + notes.distinct().take(1)).joinToString(" · "))
+        // Build 181 Phase 5: Smart SNI / clean-IP / ECH key refresh while idle on this network, at most every 30 min.
+        val smart = if (!stopped() && windowIntact() && com.example.vpn.cleanip.SmartIpScan.mayRefresh(
+                com.example.vpn.smartsni.SmartSniSettings.cleanIpScan, idle = !env.vpnActive,
+                com.example.vpn.cleanip.SmartIpScan.lastScanAt(env.network), env.now)) runCatching {
+            val log: (String) -> Unit = { XrayLogManager.i("CLEANIP", it) }
+            if (com.example.vpn.smartsni.SmartSniSettings.smartSni && com.example.vpn.smartsni.SmartSni.ranked(env.network).isEmpty())
+                com.example.vpn.smartsni.SmartSni.probe(env.network, edges = com.example.vpn.cleanip.CdnRanges.sample(com.example.vpn.cleanip.Cdn.CLOUDFLARE, 3), log = log)
+            val report = com.example.vpn.cleanip.SmartIpScan.scan(env.network, com.example.vpn.smartsni.SmartSni.pick(env.network), log = log)
+            if (com.example.vpn.smartsni.SmartSniSettings.smartEch) com.example.vpn.smartsni.SmartEch.refresh(env.network, log = log)
+            report
+        }.getOrNull() else null
+        sameNetwork(env)
+        TaskResult(found + (smart?.count ?: 0), (listOf("${targets.size} fronted configs") + listOfNotNull(smart?.let { "smart scan ${it.count}" }) +
+            notes.distinct().take(1)).joinToString(" · "))
     }
 
     private suspend fun revival(env: AutomationEnv, profiles: List<VlessProfile>): TaskResult = withContext(Dispatchers.IO) {

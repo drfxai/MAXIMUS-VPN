@@ -233,7 +233,10 @@ class PsiphonSidecar(
             val dialedCount = d.tcp + d.other
             val regionCount = availableRegions?.size
             val phase = when {
-                stage == 3 -> "server connected but the tunnel did not become ready"
+                // Build 180 (A4): the stage-3 text lost the dial counts the stage-2 text gives.
+                stage == 3 -> "server connected but the tunnel did not become ready" + if (dialedCount == 0) "" else
+                    " (dialed $dialedCount server(s): " + d.byProtocol.entries.joinToString(", ") { "${it.key}×${it.value}" } +
+                    "; connected ${d.connected})"
                 // Build 178: say how many servers were tried and over which protocols, so "Psiphon is blocked here"
                 // and "Psiphon never tried" read differently.
                 stage == 2 -> "server dialing did not establish a tunnel" + if (dialedCount == 0) "" else

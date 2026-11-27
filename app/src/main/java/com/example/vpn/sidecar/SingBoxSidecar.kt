@@ -14,7 +14,7 @@ import java.io.File
 object SingBoxSidecar : SidecarEngine {
     override val id = "sing-box"
     override val binary = "singbox"
-    const val VERSION = "1.14.4"
+    const val VERSION = "1.14.5"
 
     override fun handles(profile: VlessProfile): Boolean = profile.profileType != ProfileType.XRAY_JSON &&
         (profile.engineType == EngineType.SING_BOX || ProfileExtras.read(profile).optString("engine") == id)
@@ -121,6 +121,10 @@ object SingBoxSidecar : SidecarEngine {
                 tls.put("utls", JSONObject().put("enabled", true).put("fingerprint", p.fingerprint.ifBlank { "chrome" }))
             if (p.security.equals("reality", true)) tls.put("reality", JSONObject().put("enabled", true)
                 .put("public_key", p.publicKey).put("short_id", p.shortId))
+            // Build 181 Phase 5 (B): a config's own base64 ECHConfigList (sing-box 1.14 tls.ech, PEM form).
+            if (!p.security.equals("reality", true) && com.example.vpn.smartsni.SmartEch.validConfigList(p.echConfigList))
+                tls.put("ech", JSONObject().put("enabled", true).put("config", JSONArray(listOf(
+                    "-----BEGIN ECH CONFIGS-----", p.echConfigList.trim(), "-----END ECH CONFIGS-----"))))
             outbound.put("tls", tls)
         }
         if (!p.transport.equals("tcp", true)) {

@@ -86,6 +86,8 @@ object AetherSidecar : SidecarEngine {
         // WARP account API lanes (OOB ClientHello, the user's Worker relay) on Iranian mobile networks.
         environment += com.example.vpn.connections.WarpApiLane.environment(e, advanced)
         if (sniSplit(e, carrier)) environment[com.example.vpn.connectivity.IranHelloSplit.AETHER_SNI_SPLIT_ENV] = "1"
+        // Build 181: the MASQUE TLS name the SNI pre-check picked (Aether --masque-sni); its MASQUE pins still apply.
+        masqueSni(e, carrier)?.let { environment[MASQUE_SNI_ENV] = it }
         if (advanced.psiphon != "off") {
             val binary = Sidecars.ENGINES.first { it.id == PsiphonSidecar.ID }.let(Sidecars::executable)
                 ?: error("The Psiphon runtime is missing")
@@ -174,6 +176,14 @@ object AetherSidecar : SidecarEngine {
     internal fun cleanPeer(e: JSONObject, carrier: String, advanced: AetherSettings): String? =
         e.optString(CLEAN_PEER).takeIf { carrier in listOf("h3", "wireguard") && advanced.endpoint.isBlank() &&
             advanced.exitNode.isBlank() && com.example.vpn.connections.CleanH2PeerMemory.validPeer(it) }
+
+    /** Extras key: the TLS name MASQUE handshakes send ([com.example.vpn.connections.AetherSniProbe]; session runner only). */
+    const val MASQUE_SNI = "masqueSni"
+    const val MASQUE_SNI_ENV = "AETHER_MASQUE_SNI"
+
+    /** The picked MASQUE name for an HTTP/2 or HTTP/3 MASQUE carrier, when it is a valid domain name. Pure. */
+    internal fun masqueSni(e: JSONObject, carrier: String): String? =
+        e.optString(MASQUE_SNI).takeIf { carrier in listOf("h2", "h3") && com.example.vpn.connections.AetherSniProbe.validName(it) }
 
     /** The SNI split only means something with --fragment, on a carrier that speaks TLS over TCP. */
     internal fun sniSplit(e: JSONObject, carrier: String): Boolean =

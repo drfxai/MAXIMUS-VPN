@@ -486,6 +486,13 @@ object MihomoParser {
         if (profile.sni.isNotBlank()) {
             sb.appendLine("    servername: ${yamlQuote(profile.sni)}")
         }
+        // Build 181 Phase 5 (B): a config's own base64 ECHConfigList (Mihomo v1.19 ech-opts).
+        if (hasTls && !profile.security.equals("reality", ignoreCase = true) &&
+            com.example.vpn.smartsni.SmartEch.validConfigList(profile.echConfigList)) {
+            sb.appendLine("    ech-opts:")
+            sb.appendLine("      enable: true")
+            sb.appendLine("      config: ${yamlQuote(profile.echConfigList.trim())}")
+        }
         val isReality = profile.security.equals("reality", ignoreCase = true)
         if (isReality) {
             // Xray REALITY servers v26.9.8+ need an X25519MLKEM768 key share; Mihomo sends it only with the

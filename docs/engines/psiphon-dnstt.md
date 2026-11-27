@@ -97,7 +97,7 @@ which checks it against the Go checksum database, and the scripts also compare t
 
 | Module | Version | Commit | Module hash (h1, sum.golang.org) | go.mod hash |
 |---|---|---|---|---|
-| `github.com/Psiphon-Labs/psiphon-tunnel-core` | `v0.0.14-beta-ios.0.20260928190446-4d6eb0e8a7e9` | `4d6eb0e8a7e91d3f9a615f70ef65668b8b3595ec` | `h1:Ay/hVsv+zLoml03OvdAuzQXQ64t4N9DW0Sc8XG28BNE=` | `h1:KS+6ifNiSmFA5ghD7i4XrrCZCWm27ZCuKrzPpbDpGjw=` |
+| `github.com/Psiphon-Labs/psiphon-tunnel-core` | `v0.0.14-beta-ios.0.20261126204245-9544cec63f8d` | `9544cec63f8d7d1d5a8d284eebd2ebeb560df75f` | `h1:pT4QzCjc6SEz74U4hSz4P/BOPDjsz47nLBD++rohlrg=` | `h1:iEKLFvYV20firYQoiMRZuDyRkV4ADUzOdwbFE/cWfls=` |
 | `www.bamsoftware.com/git/dnstt.git` | `v1.20260501.0` | `0c5c52a57d899c05428c116898941761a2ed83c2` | `h1:8i4tQWwBCrhsn6+c8fpjSIyaa+u0MOvdOa1FIxNOz6M=` | `h1:J4kVFxhn2bZqSqfE9l7keNTtsc+dRR6+uNH4kPu5VIs=` |
 
 Dependencies are pinned by each module's own `go.sum` and checked the same way.
@@ -127,9 +127,9 @@ Every APK that contains `libpsiphon.so` must make its complete corresponding sou
 It is exactly:
 
 1. The module above at the pinned version, downloadable from the Go module proxy:
-   `https://proxy.golang.org/github.com/!psiphon-!labs/psiphon-tunnel-core/@v/v0.0.14-beta-ios.0.20260928190446-4d6eb0e8a7e9.zip`
+   `https://proxy.golang.org/github.com/!psiphon-!labs/psiphon-tunnel-core/@v/v0.0.14-beta-ios.0.20261126204245-9544cec63f8d.zip`
    (or `git clone https://github.com/Psiphon-Labs/psiphon-tunnel-core` and check out commit
-   `4d6eb0e8a7e91d3f9a615f70ef65668b8b3595ec`).
+   `9544cec63f8d7d1d5a8d284eebd2ebeb560df75f`).
 2. Its dependencies, fetched by `go mod download` in that source (versions and hashes in its `go.sum`).
 3. The build script `scripts/engines/psiphon.sh` in this repository, which says how the program was built.
 

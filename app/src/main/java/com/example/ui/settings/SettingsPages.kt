@@ -495,6 +495,8 @@ fun AntiCensorshipSettingsPage(
                     onCheckedChange = actions::setFreeConfigs
                 )
             }
+
+            SmartSniSettingsSection()
         }
     }
 }

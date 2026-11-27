@@ -35,11 +35,11 @@ object EngineRegistry {
     val BYEDPI = EngineDescriptor("byedpi", "Native fake-SNI TCP carrier", "ba532298de7b", "MIT", bundled = true, runtime = null)
     val MIHOMO = EngineDescriptor("mihomo", "Mihomo (separate program)", com.example.vpn.sidecar.MihomoSidecar.VERSION, "GPL-3.0",
         bundled = true, runtime = null)
-    val AMNEZIAWG = EngineDescriptor("amneziawg", "AmneziaWG native", "735cffbcb303", "MIT", bundled = true, runtime = null)
+    val AMNEZIAWG = EngineDescriptor("amneziawg", "AmneziaWG native", "08fe3d33bbb1", "MIT", bundled = true, runtime = null)
     /** WARP needs no engine of its own: a registered device runs on Xray's WireGuard client. */
     val WARP = EngineDescriptor("warp", "Cloudflare WARP (WireGuard on Xray)", "in app", "Proprietary (this app)",
         bundled = true, runtime = null)
-    val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core (separate program)", "4d6eb0e8a7e9", "GPL-3.0",
+    val PSIPHON = EngineDescriptor("psiphon", "Psiphon tunnel-core (separate program)", "9544cec63f8d", "GPL-3.0",
         bundled = true, runtime = null)
     /** Shir o Khorshid, the community Psiphon fork for Iran (separate program, scripts/engines/shirokhorshid.sh). */
     val SHIROKHORSHID = EngineDescriptor("shirokhorshid", "Shir o Khorshid tunnel-core (Psiphon fork, separate program)",
@@ -47,7 +47,7 @@ object EngineRegistry {
     val RADIANCE = EngineDescriptor("radiance", "Lantern / Radiance",
         com.example.vpn.sidecar.RadianceSidecar.REVISION, "GPL-3.0-only", bundled = true, runtime = null)
     val TOR = EngineDescriptor("tor", "Tor (in app) with lyrebird bridges (separate program)",
-        "tor-android 0.4.9.5.1, lyrebird 75ef9b2c1f18", "BSD-3-Clause (Tor, lyrebird), GPL-3.0 parts of lyrebird",
+        "tor-android 0.4.9.6, lyrebird 0.10.0 (59ac7e400c38)", "BSD-3-Clause (Tor, lyrebird), GPL-3.0 parts of lyrebird",
         bundled = true, runtime = null)
     val NAIVE = EngineDescriptor("naive", "NaiveProxy", null, "BSD-3-Clause", bundled = false, runtime = null)
     val DNS_TUNNEL = EngineDescriptor("dns-tunnel", "DNS tunnel (dnstt, separate program)", "v1.20260501.0", "CC0-1.0",
@@ -59,7 +59,7 @@ object EngineRegistry {
     val SLIPSTREAM = EngineDescriptor("slipstream", "Slipstream QUIC DNS tunnel (separate program)",
         "main 397850b1 (2026-04-11)", "Apache-2.0 (slipstream), MIT (picoquic/picotls), Apache-2.0 (OpenSSL)",
         bundled = true, runtime = null)
-    val MASQUE = EngineDescriptor("masque", "Cloudflare WARP over MASQUE (usque, separate program)", "v1.5.0", "MPL-2.0",
+    val MASQUE = EngineDescriptor("masque", "Cloudflare WARP over MASQUE (usque, separate program)", "v4.2.1", "MIT",
         bundled = true, runtime = null)
 
     val MATRIX_TRANSPORT = EngineDescriptor("matrix-transport", "Matrix Transport (Aether-derived, separate program)",
