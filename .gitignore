@@ -38,3 +38,19 @@ __pycache__/
 # Local benchmark output and diagnostic captures
 tools/censorsim/results/
 *.log
+
+# Secrets and environment files (keep the example)
+.env.*
+!.env.example
+*.pem
+*.key
+keystore.properties
+signing.properties
+*.keystore.base64
+google-services.json
+
+# Build outputs and device captures
+*.apk
+*.aab
+logcat*.txt
+field-report*.json

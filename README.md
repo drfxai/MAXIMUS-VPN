@@ -8,20 +8,22 @@
 
 **An Android network toolkit. One place to connect, investigate and recover.**
 
-[![Release](https://img.shields.io/github/v/release/drfxai/MAXIMUS-VPN?style=flat-square&color=d4a843)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
-[![Android 7+](https://img.shields.io/badge/Android-7.0%2B-38bdb0?style=flat-square)](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
-[![Checks](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml/badge.svg)](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml)
-[![License](https://img.shields.io/badge/License-Source--available-d4a843?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/drfxai/MAXIMUS-VPN?style=flat-square&color=d4a843)](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4)
+[![Android 7+](https://img.shields.io/badge/Android-7.0%2B-38bdb0?style=flat-square)](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4)
+[![CI](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/drfxai/MAXIMUS-VPN/actions/workflows/checks.yml)
+[![License: AGPL-3.0](https://img.shields.io/github/license/drfxai/MAXIMUS-VPN?style=flat-square&color=d4a843)](LICENSE)
 
-### [Download for Android ↗](https://github.com/drfxai/MAXIMUS-VPN/releases/latest)
+### [Download V1.0.4 for Android ↗](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4)
 
 Smart Connect · Network LAB · Clean IP discovery · Private server tools
 
 </div>
 
+<div dir="ltr" align="left">
+
 ## Language picker
 
-On first launch MAXIMUS asks which language to use — **English** or **Русский** — before any other onboarding. You can switch at any time in **Settings › Appearance**; Android 13+ also lists MAXIMUS under the system per-app language setting.
+On first launch MAXIMUS asks which language to use — **English**, **Русский** or **فارسی** — before any other onboarding. You can switch at any time in **Settings › Appearance**; Android 13+ also lists MAXIMUS under the system per-app language setting.
 
 <p align="center"><img src="docs/assets/language-picker-demo.gif" width="320" alt="Animated preview of the MAXIMUS VPN first-launch language picker switching between English and Russian"></p>
 
@@ -50,7 +52,7 @@ Actual captures of the published **V1.0.2** APK on Android 15. These show a clea
 | **Unlock mode** | Anti-sanction DNS with no config: health-checked servers make services that block Iranian users (Gemini, AI Studio, OpenAI APIs) reachable; only DNS changes, so filtered sites still need a tunnel. [Details](docs/UNLOCK_DNS.md) |
 | **Network LAB** | Network diagnosis, configuration experiments, service checks and evidence for choosing a route. |
 | **Clean IP discovery** | Uses TCP timing to shortlist addresses, then validates candidates with the actual configuration. |
-| **Multiple engines** | Xray, Mihomo, Psiphon, Tor, WARP/MASQUE, Matrix Transport, dnstt and Slipstream adapters. |
+| **Multiple engines** | Xray, sing-box and Mihomo cores; Psiphon and Shir o Khorshid; Lantern; Tor (Snowflake and lyrebird bridges); WARP through Aether (WireGuard, MASQUE, HTTP/2 Matrix Transport, QUIC); Serverless direct access; DNS tunnels (dnstt, Slipstream, CottenDNS); ByeDPI, AmneziaWG and SOAR. |
 | **Your infrastructure** | 3X-UI installation, Cloudflare/BPB workflows, configuration import and server management. |
 | **Connection controls** | DNS and routing settings, diagnostics, failover controls and Android Always-on VPN integration. |
 
@@ -58,19 +60,19 @@ Actual captures of the published **V1.0.2** APK on Android 15. These show a clea
 
 <img src="docs/media/smart-connect.webp" alt="Promotional artwork — Find a better path. Smart Connect + Network LAB." width="100%">
 
-Transport support depends on the engine and configuration. **WARP over TCP uses Matrix Transport HTTP/2; WireGuard uses UDP.** Psiphon requires valid network settings; Tor bridges and DNS tunnels need reachable infrastructure. A bundled engine or successful handshake alone does not prove internet access on your network. See the [engine guide](docs/SMART_CONNECT_ENGINE_RECOVERY.md).
+Transport support depends on the engine and configuration. **WARP over TCP uses Aether / Matrix Transport HTTP/2; WireGuard uses UDP.** Psiphon requires valid network settings; Tor bridges and DNS tunnels need reachable infrastructure. A bundled engine or successful handshake alone does not prove internet access on your network. See the [engine guide](docs/SMART_CONNECT_ENGINE_RECOVERY.md).
 
 ## Get started
 
-1. Download the APK from [official Releases](https://github.com/drfxai/MAXIMUS-VPN/releases/latest).
+1. Download the V1.0.4 APK from the [official release page](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4).
 2. Import a profile or subscription in **Nodes**, or configure your own infrastructure in **Panels**.
 3. Open **Tunnel**, choose a profile and connect. Use **LAB** when a route needs investigation.
 
 | Download | Choose this when… |
 | :--- | :--- |
-| [ARM64 APK](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) | You use a modern ARM64 Android phone. Recommended for most users. |
-| [Universal APK](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) | You need ARM32 or x86_64 support, or are unsure about your device. |
-| `SHA256SUMS` | You want to check the downloaded files. |
+| [ARM64 APK](https://github.com/drfxai/MAXIMUS-VPN/releases/download/V1.0.4/MAXIMUSVPN-V1.0.4-arm64-v8a.apk) | You use a modern ARM64 Android phone. Recommended for most users. |
+| [Universal APK](https://github.com/drfxai/MAXIMUS-VPN/releases/download/V1.0.4/MAXIMUSVPN-V1.0.4-universal.apk) | You need ARM32 or x86_64 support, or are unsure about your device. |
+| [`SHA256SUMS`](https://github.com/drfxai/MAXIMUS-VPN/releases/download/V1.0.4/SHA256SUMS) | You want to check the downloaded files. |
 
 Android **7.0 or later** is required. To update, install the official APK over your current installation. Keep your profiles backed up. For protection when the app is not running, configure Android **Always-on VPN** and **Block connections without VPN**.
 
@@ -88,12 +90,14 @@ MAXIMUS VPN application code owned by DrFX is offered under the [GNU Affero Gene
 
 Report reproducible bugs through [Issues](https://github.com/drfxai/MAXIMUS-VPN/issues). Remove tokens, private keys, subscription URLs and server credentials from reports. For vulnerabilities, follow [SECURITY.md](SECURITY.md).
 
+</div>
+
 <div align="center">
 
 **MAXIMUS VPN · DrFXAi**
 
 Your network. Your control.
 
-[Download](https://github.com/drfxai/MAXIMUS-VPN/releases/latest) · [Русский](README.ru.md) · [فارسی](README.fa.md) · [Documentation](docs/README.md)
+[Download](https://github.com/drfxai/MAXIMUS-VPN/releases/tag/V1.0.4) · [Русский](README.ru.md) · [فارسی](README.fa.md) · [Documentation](docs/README.md)
 
 </div>

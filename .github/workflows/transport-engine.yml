@@ -21,7 +21,7 @@ jobs:
       matrix:
         abi: [arm64-v8a, armeabi-v7a, x86_64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build dependencies
         run: |
           sudo apt-get update
@@ -54,7 +54,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Execute runtime TLS policy self-test on Android
         if: matrix.abi == 'x86_64'
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 35
           arch: x86_64
@@ -65,7 +65,7 @@ jobs:
             adb shell chmod 755 /data/local/tmp/matrix-transport
             adb shell LD_LIBRARY_PATH=/data/local/tmp /data/local/tmp/matrix-transport --version | grep 'secure-v1'
             adb shell LD_LIBRARY_PATH=/data/local/tmp /data/local/tmp/matrix-transport --self-test | grep 'self-test passed'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: matrix-transport-${{ matrix.abi }}
           path: |

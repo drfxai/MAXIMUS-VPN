@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/drfxai/MAXIMUS-VPN/security/advisories/new
+    about: Report vulnerabilities privately. Do not open a public issue. See SECURITY.md.
+  - name: Security policy
+    url: https://github.com/drfxai/MAXIMUS-VPN/blob/main/SECURITY.md
+    about: Supported versions, scope and how to verify downloads.

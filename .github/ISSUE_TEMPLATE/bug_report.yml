@@ -1,0 +1,128 @@
+name: Bug report
+description: Something in MAXIMUS VPN does not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem.
+
+        > [!WARNING]
+        > **Do not paste personal data.** Remove phone numbers, email addresses, your public IP, device serial numbers, subscription URLs, server addresses, UUIDs, passwords, private keys and tokens before posting. Everything here is public.
+        >
+        > Security problems must **not** be reported here. Follow [SECURITY.md](https://github.com/drfxai/MAXIMUS-VPN/blob/main/SECURITY.md) instead.
+  - type: input
+    id: version
+    attributes:
+      label: App version and build
+      description: Settings › About, or the release you installed.
+      placeholder: "V1.0.4 (Build 180)"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Manufacturer and model. Do not include the serial number.
+      placeholder: "Samsung Galaxy A54"
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android version
+      placeholder: "Android 14"
+    validations:
+      required: true
+  - type: dropdown
+    id: operator
+    attributes:
+      label: Network / operator
+      options:
+        - Irancell (mobile data)
+        - MCI / Hamrah-e Aval (mobile data)
+        - Other mobile operator
+        - Wi-Fi / fixed line
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine or connection
+      description: What you picked in the connection picker.
+      options:
+        - Smart Connect (automatic)
+        - Aether / WARP
+        - Serverless (direct)
+        - Psiphon
+        - Shir o Khorshid
+        - Lantern
+        - A chain (for example Psiphon over Lantern)
+        - Tor
+        - DNS tunnel (dnstt / Slipstream / CottenDNS)
+        - Imported config (Xray / sing-box / Mihomo)
+        - Unlock DNS
+        - Other / not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Daily
+        - Unlock
+        - GOD
+        - Trade
+        - Ghost Rider
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: killswitch
+    attributes:
+      label: Kill Switch
+      options:
+        - "On"
+        - "Off"
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the app on mobile data
+        2. Pick ...
+        3. Tap Connect
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual result
+      description: What you expected, and what happened instead. Say whether the connection failed or a check could not run.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostic report
+      description: |
+        How to export it:
+        1. Reproduce the problem.
+        2. Open **Settings › Diagnostics**.
+        3. Tap **Copy full report** (secrets and server addresses are redacted by the app) or **Export Report**.
+        4. Read the text once more, remove anything personal that remains, then paste it below.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed personal data, credentials and server details from everything above.
+          required: true
