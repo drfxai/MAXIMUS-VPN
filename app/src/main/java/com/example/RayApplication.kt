@@ -451,6 +451,7 @@ class RayApplication : Application() {
             runCatching { com.example.vpn.smart.NetworkIdentity.current(this) }.getOrNull()
         }
         com.example.vpn.connections.BuiltinMethodMemory.read = { key -> builtinMethods.getString(key, null) }
+        com.example.vpn.connections.BuiltinMethodMemory.keys = { builtinMethods.all.keys.toSet() }
         com.example.vpn.connections.BuiltinMethodMemory.write = { key, value ->
             builtinMethods.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
         }

@@ -217,7 +217,12 @@ class SettingsViewModel(
                 "routes" to { app.networkMemory.clear() },
                 "revival winners" to { app.revivalWinners.clear() },
                 "verified resolvers" to { app.resolverPool.clear() },
-                "clean CDN addresses" to { app.cleanIpCache.clear() }
+                "clean CDN addresses" to { app.cleanIpCache.clear() },
+                // Build 181 Phase 5/6: Smart SNI, Smart ECH, clean-IP scanner and personal server ECH memory.
+                "Smart SNI, ECH and clean IPs" to {
+                    com.example.vpn.connections.BuiltinMethodMemory.clearPrefixes()
+                    com.example.vpn.connections.AetherSniProbe.sessionSni = null
+                }
             ))
             if (failed.isEmpty()) XrayLogManager.i("SETTINGS", "Learned network data cleared.")
             else XrayLogManager.w("SETTINGS", "Could not clear learned network data: ${failed.joinToString()}")
