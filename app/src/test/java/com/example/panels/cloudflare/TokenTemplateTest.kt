@@ -64,6 +64,16 @@ class TokenTemplateTest {
         assertFalse(TokenTemplate.looksLikeToken("https://example.com/" + "a".repeat(20)))
     }
 
+    @Test fun scannableUserTokensAreRecognised() {
+        // Build 181: every token made since 2026 is cfut_ + 40 characters + an 8-hex checksum (Cloudflare "Token formats").
+        val token = "cfut_" + "Ab3D".repeat(10) + "9f3c0a1e"
+        assertTrue(TokenTemplate.looksLikeToken(token))
+        assertTrue(TokenTemplate.looksLikeToken(" $token\n"))
+        assertFalse(TokenTemplate.looksLikeToken(token.dropLast(1)))
+        assertFalse(TokenTemplate.looksLikeToken("cfk_" + "Ab3D".repeat(10) + "9f3c0a1e"))
+        assertFalse(TokenTemplate.looksLikeToken("cfat_" + "Ab3D".repeat(10) + "9f3c0a1e"))
+    }
+
     @Test fun maskedShowsOnlyTheLastFour() {
         val token = "a".repeat(36) + "Xy9z"
         val m = TokenTemplate.masked(token)

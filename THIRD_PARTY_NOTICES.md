@@ -612,6 +612,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   runs only with the user's own Worker.
 - The relay Worker script `app/src/main/assets/warp-relay/worker.js` is MAXIMUS's own code; it speaks UAC's relay
   envelope (`{ok, status, body}`) and requires a per-user `RELAY_KEY`.
+- Build 181 (Connect Cloudflare account): the relay Worker `app/src/main/assets/cf-relay/worker.js` is MAXIMUS's own
+  code (VLESS request header over a WebSocket to `cloudflare:sockets` `connect()`, TCP only). The VLESS header layout
+  follows the public Xray-core protocol description; no code from BPB-Worker-Panel, edgetunnel or other Worker
+  projects is included. The app uploads it unchanged (SHA-256 pinned in `CloudflareRelay.WORKER_SHA256`) to the
+  user's own Cloudflare account with a per-user id and path as secret bindings.
 - Not ported (they do not apply to Aether 2.4.0's own gateway prober without rewriting it): the IPv6 MASQUE
   2606:4700:103::/48 seed, the measured IPv4 MASQUE gateway list, the strict v4/v6 fallback, the ECH fallback blob
   and the MASQUE-H2 fingerprint profile option.
