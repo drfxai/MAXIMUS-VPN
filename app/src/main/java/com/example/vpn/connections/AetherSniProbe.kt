@@ -7,9 +7,6 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
-import java.util.concurrent.Callable
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLHandshakeException
@@ -71,10 +68,12 @@ object AetherSniProbe {
      * A random name that is no site (passes a blocklist, gets the edge's own certificate), then the names that got a
      * ServerHello on Irancell in Build 180, then the Zero Trust range (logged only).
      */
-    fun candidates(random: String = randomName()): List<Candidate> = listOf(
+    fun candidates(random: String = randomName(), learned: List<String> = emptyList()): List<Candidate> = listOf(
         Candidate(random, "162.159.198.1"),
         Candidate("www.speedtest.net", "162.159.198.1"),
-        Candidate("x.cloudflare.com", "162.159.192.1"),
+        Candidate("x.cloudflare.com", "162.159.192.1")
+    ) + learned.filter { it !in com.example.vpn.smartsni.SmartSni.LEARNED && validName(it) }.distinct().take(2)
+        .mapIndexed { i, n -> Candidate(n, if (i == 0) "162.159.198.2" else "162.159.192.2") } + listOf(
         Candidate(random, "162.159.198.2"),
         Candidate(random, "162.159.197.1", zeroTrust = true),
         Candidate(random, "162.159.197.3", zeroTrust = true)
@@ -94,15 +93,15 @@ object AetherSniProbe {
         return usable.firstOrNull { outcome(it) == Outcome.PINNED } ?: usable.firstOrNull { outcome(it)?.reached == true }
     }
 
-    /** The fixed names; anything else is a drawn random name. */
-    val FIXED = setOf("www.speedtest.net", "x.cloudflare.com")
+    /** Names kept by name (Smart SNI's pool, Build 181 Phase 5); anything else is a drawn random name. */
+    val FIXED: Set<String> = com.example.vpn.smartsni.SmartSni.POOL.toSet()
 
     /** [RANDOM] for a drawn random name, else the name itself. Pure. */
     @Suppress("UNUSED_PARAMETER")
     fun labelOf(sni: String, order: List<Candidate> = emptyList()): String = if (sni in FIXED) sni else RANDOM
 
-    /** One log line per probe: SNI, endpoint, outcome, time. Pure. */
-    fun describe(r: Result): String = "SNI ${r.candidate.sni} @ ${r.candidate.endpoint}" +
+    /** One log line per probe: SNI, masked endpoint (no full address in logs), outcome, time. Pure. */
+    fun describe(r: Result): String = "SNI ${r.candidate.sni} @ ${CleanH2PeerMemory.masked(r.candidate.endpoint)}" +
         (if (r.candidate.zeroTrust) " (Zero Trust range)" else "") + " · ${r.outcome.label} · ${r.ms} ms" +
         r.detail.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
 
@@ -125,6 +124,10 @@ object AetherSniProbe {
     /** Names (or [RANDOM]) that failed in Aether on [network] within [MEMORY_MS]. */
     fun failed(network: String?, now: Long = System.currentTimeMillis()): Set<String> {
         if (network.isNullOrBlank()) return emptySet()
+        return ownFailed(network, now) + com.example.vpn.smartsni.SmartSni.cooling(network, now).filter { it in FIXED }
+    }
+
+    private fun ownFailed(network: String, now: Long): Set<String> {
         val saved = runCatching { BuiltinMethodMemory.read(failedKey(network)) }.getOrNull() ?: return emptySet()
         val at = saved.substringAfter('@', "").toLongOrNull() ?: return emptySet()
         if (now - at !in 0 until MEMORY_MS) return emptySet()
@@ -134,7 +137,9 @@ object AetherSniProbe {
     /** Aether failed with [sni] picked here: forget the pick, and skip the name next time. A random name counts as [RANDOM]. */
     fun recordFailure(network: String?, sni: String, now: Long = System.currentTimeMillis()) {
         if (network.isNullOrBlank()) return
-        val all = failed(network, now) + (if (sni in FIXED) sni else RANDOM)
+        val all = ownFailed(network, now) + (if (sni in FIXED) sni else RANDOM)
+        // Smart SNI rotation: a named pick goes on the 6 h cooldown and the next ranked name is used.
+        if (sni in FIXED) com.example.vpn.smartsni.SmartSni.rotate(network, sni, now)
         runCatching {
             BuiltinMethodMemory.write(key(network), null)
             BuiltinMethodMemory.write(failedKey(network), all.joinToString(",") + "@$now")
@@ -145,6 +150,7 @@ object AetherSniProbe {
     fun recordSuccess(network: String?, sni: String, now: Long = System.currentTimeMillis()) {
         if (network.isNullOrBlank()) return
         remember(network, sni, now)
+        if (sni in FIXED) com.example.vpn.smartsni.SmartSni.recordSuccess(network, sni, now)
         runCatching { BuiltinMethodMemory.write(failedKey(network), null) }
     }
 
@@ -172,26 +178,24 @@ object AetherSniProbe {
      * traffic with it ([recordSuccess]).
      */
     fun precheck(network: String?, timeoutMs: Long = TIMEOUT_MS, log: (String) -> Unit = {}): String? {
-        remembered(network)?.let { log("SNI pre-check: using $it, which reached a pinned MASQUE certificate here before"); return it }
-        val order = candidates()
-        val pool = Executors.newFixedThreadPool(order.size)
-        val started = System.currentTimeMillis()
-        val results = try {
-            val futures = order.map { c -> c to pool.submit(Callable { handshake(c, timeoutMs.toInt()) }) }
-            futures.map { (c, f) ->
-                val left = (timeoutMs - (System.currentTimeMillis() - started)).coerceAtLeast(1)
-                runCatching { f.get(left, TimeUnit.MILLISECONDS) }.getOrElse {
-                    f.cancel(true); Result(c, Outcome.DROPPED, System.currentTimeMillis() - started, "no answer in ${timeoutMs / 1000}s")
-                }
-            }
-        } finally {
-            pool.shutdownNow()
+        // Build 181 Phase 5: a manual name wins; Smart SNI off leaves Aether's own default name.
+        com.example.vpn.smartsni.SmartSniSettings.manualSni.takeIf { it.isNotBlank() }?.let {
+            log("SNI pre-check: using the manual name $it (Settings → Smart SNI)"); return it
         }
+        if (!com.example.vpn.smartsni.SmartSniSettings.smartSni) { log("SNI pre-check: Smart SNI is off; Aether keeps its default name"); return null }
+        remembered(network)?.let { log("SNI pre-check: using $it, which carried traffic here before"); return it }
+        val order = candidates(learned = com.example.vpn.smartsni.SmartSni.ranked(network))
+        val started = System.currentTimeMillis()
+        // Smart SNI: 3 probes at a time, all within [timeoutMs].
+        val results = com.example.vpn.smartsni.SmartSni.bounded(order, com.example.vpn.smartsni.SmartSni.PARALLEL, timeoutMs,
+            task = { c, left -> handshake(c, left) },
+            missed = { c, late -> Result(c, Outcome.DROPPED, System.currentTimeMillis() - started,
+                if (late) "no answer in ${timeoutMs / 1000}s" else "not probed: time budget") })
         results.forEach { log(describe(it)) }
         val skipped = failed(network)
-        if (skipped.isNotEmpty()) log("SNI pre-check: skipped (failed in Aether here): ${skipped.joinToString()}")
+        if (skipped.isNotEmpty()) log("SNI pre-check: skipped (failed or cooling down here): ${skipped.joinToString()}")
         val pick = choose(results, order, skipped)
-        log(pick?.let { "SNI pre-check: MASQUE will send ${it.sni} (edge answered at ${it.endpoint}; Aether checks the pins)" }
+        log(pick?.let { "SNI pre-check: MASQUE will send ${it.sni} (edge answered; Aether checks the pins)" }
             ?: "SNI pre-check: no name got an answer from the edge; Aether keeps its default name")
         return pick?.sni
     }

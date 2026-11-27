@@ -73,7 +73,7 @@ class AetherSniProbeTest {
         val pick = AetherSniProbe.precheck("cell", timeoutMs = 1_000) { lines += it }
         assertTrue(System.currentTimeMillis() - started < 4_000)
         assertEquals("x.cloudflare.com", pick)
-        assertTrue(lines.any { it.contains("SNI x.cloudflare.com @ 162.159.192.1:443") })
+        assertTrue(lines.any { it.contains("SNI x.cloudflare.com @ 162.159.192.x:443") })
         assertTrue(lines.any { it.contains("Zero Trust range") })
         // not remembered until Aether carried traffic with it
         assertNull(AetherSniProbe.remembered("cell"))
