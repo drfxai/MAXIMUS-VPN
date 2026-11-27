@@ -464,6 +464,13 @@ object GeoIpCidrs {
 object ShirokhorshidFrontedRetry {
     /** A server connected this long ago and still no tunnel: the all-protocols start is given up. */
     const val STAGE3_GRACE_MS = 25_000L
+    /**
+     * Build 180 device test (A3): the switch fired at 53 s, because the grace counted from stage 3 (reached ~28 s in).
+     * From [SWITCH_AFTER_START_MS] after the start, a server that has been connected for [STAGE3_MIN_MS] with no tunnel
+     * is enough.
+     */
+    const val SWITCH_AFTER_START_MS = 25_000L
+    const val STAGE3_MIN_MS = 8_000L
     /** What the CDN-fronted start gets at least; the first start is cut so this is left of the window. */
     const val FRONTED_MIN_MS = 45_000L
 
@@ -475,7 +482,13 @@ object ShirokhorshidFrontedRetry {
 
     /** The first start is given up for the CDN-fronted one: a server connected ([stage] 3) and no tunnel followed. */
     fun giveUp(stage: Int, stage3Since: Long?, startedAt: Long, now: Long, readyTimeoutMs: Long): Boolean =
-        stage >= 3 && stage3Since != null && (now - stage3Since >= STAGE3_GRACE_MS || now - startedAt >= switchAtMs(readyTimeoutMs))
+        stage >= 3 && stage3Since != null && (now - stage3Since >= STAGE3_GRACE_MS || now - startedAt >= switchAtMs(readyTimeoutMs) ||
+            now - startedAt >= SWITCH_AFTER_START_MS && now - stage3Since >= STAGE3_MIN_MS)
+
+    /** The first (all-protocols) phase, kept for the final failure text once the fronted phase also fails. Pure. */
+    fun firstPhaseText(elapsedMs: Long, stage3AfterMs: Long?, dials: PsiphonSidecar.StartupDials?): String =
+        "first phase (all protocols, ${elapsedMs / 1000}s" + (stage3AfterMs?.let { "; server connected at ${it / 1000}s" } ?: "") +
+            "): " + (dials?.summary() ?: "no dial counts")
 
     /** The CDN-fronted start's window: what is left of [readyTimeoutMs], never under a third of [FRONTED_MIN_MS]. */
     fun frontedWindowMs(readyTimeoutMs: Long, elapsedMs: Long): Long =

@@ -326,7 +326,12 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                     Metric(c, "Experiments", if (s.running != null) "1 running" else "$today today")
                     VDivider(c)
                     val verified = s.verified.count { it.state == PromotionState.VERIFIED && !it.disabled }
-                    Metric(c, "Verified", if (verified == 1) "1 profile" else "$verified profiles")
+                    val metricContext = androidx.compose.ui.platform.LocalContext.current
+                    val here = remember(s.plan, s.networkState, verified) {
+                        if (verified > 0) 0 else com.example.vpn.engine.registry.NetworkResults.verified(
+                            com.example.vpn.engine.registry.NetworkResultsReader.current(metricContext)).size
+                    }
+                    Metric(c, "Verified", com.example.vpn.engine.registry.NetworkResults.verifiedMetric(verified, here))
                 }
                 s.networkState?.let { st ->
                     Hairline(c)

@@ -68,6 +68,7 @@ class SidecarProcess(
                             transportStageSinceMs = System.currentTimeMillis()
                         XrayLogManager.i("BUILTIN", "aether · $stage · pending; traffic unverified")
                     }
+                    if (name == AetherSidecar.ID) aetherScanLine(line)?.let { XrayLogManager.i("BUILTIN", "aether · scan · $it") }
                     if (name == AetherSidecar.ID && !ready && startupStage == "scan" &&
                         line.trim() == "MAXIMUS_AETHER_SCAN_EXHAUSTED") {
                         startupFailure = AETHER_SCAN_EXHAUSTED
@@ -212,6 +213,24 @@ class SidecarProcess(
             .removePrefix("MAXIMUS_AETHER_STAGE:")
             .takeIf { line.trim().startsWith("MAXIMUS_AETHER_STAGE:") &&
                 it in setOf("account", "identity", "scan", "transport") }
+
+        private val SCAN_FIELD = Regex("^(candidates|family|sni|result|failed_tcp|failed_tls|failed_h2|failed_timeout|failed_other)=([A-Za-z0-9.\\-]{1,253})$")
+
+        /**
+         * Build 180 (A7): Aether's fixed `MAXIMUS_AETHER_SCAN:` lines (harden-aether.py) as a log line: how many gateways a
+         * scan tried, its family and SNI, and where the failed probes stopped. Only whitelisted key=value pairs pass. Pure.
+         */
+        internal fun aetherScanLine(line: String): String? {
+            val body = line.trim().takeIf { it.startsWith("MAXIMUS_AETHER_SCAN:") }?.removePrefix("MAXIMUS_AETHER_SCAN:") ?: return null
+            val words = body.split(' ').filter { it.isNotBlank() }
+            val start = words.firstOrNull() == "start"
+            val fields = words.drop(if (start) 1 else 0).mapNotNull { w -> SCAN_FIELD.matchEntire(w)?.let { it.groupValues[1] to it.groupValues[2] } }
+            if (fields.isEmpty()) return null
+            val map = fields.toMap()
+            return if (start) "trying ${map["candidates"] ?: "?"} gateway(s) over ${map["family"] ?: "?"}, SNI ${map["sni"] ?: "?"}"
+            else "result ${map["result"] ?: "?"}; failed probes: TCP ${map["failed_tcp"] ?: 0}, TLS/pin ${map["failed_tls"] ?: 0}, " +
+                "HTTP/2 ${map["failed_h2"] ?: 0}, timeout ${map["failed_timeout"] ?: 0}, other ${map["failed_other"] ?: 0}"
+        }
 
         internal fun aetherTimeout(stage: String?, hint: String?, timeoutMs: Long): String {
             val detail = hint?.let { "; $it" }.orEmpty()

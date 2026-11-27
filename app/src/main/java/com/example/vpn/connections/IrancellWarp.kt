@@ -106,7 +106,7 @@ object IrancellWarp {
 
     internal fun manualAttemptMs(candidate: VlessProfile): Long {
         val extras = ProfileExtras.read(candidate)
-        if (extras.optBoolean(ConnectionEngineRunner.V6_FIRST)) return ConnectionEngineRunner.IRANCELL_V6_MS
+        if (extras.optBoolean(ConnectionEngineRunner.V6_FIRST)) return ConnectionEngineRunner.MANUAL_V6_SHARE_MS
         val options = AetherSettings.read(extras)
         if (AetherSidecar.cleanH2Peer(extras, "h2", options) != null)
             return ConnectionEngineRunner.CLEAN_H2_BUDGET_MS

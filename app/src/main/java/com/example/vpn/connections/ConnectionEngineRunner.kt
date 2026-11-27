@@ -180,6 +180,10 @@ object ConnectionEngineRunner {
 
     /** A failed [H2_LANTERN] attempt on [network]: remembered ([LanternRelayMemory]) unless it is not about the network. */
     internal fun rememberLanternFailure(network: String?, reason: String?, record: (String, String, String, String) -> Unit) {
+        if (reason == LanternRelayHop.CLOUDFLARE_UNREACHABLE) LanternRelayHop.lastPreflight?.let {
+            record(H2_LANTERN, "lantern-hop", "NOTE", "Cloudflare preflight through Lantern: " +
+                it.tries.joinToString(", ").ifEmpty { "no try fitted the budget" })
+        }
         if (!LanternRelayMemory.counts(reason)) return
         LanternRelayMemory.record(network)
         record(H2_LANTERN, "lantern-hop", "REMEMBER", "WARP through Lantern failed here; not retried on this network " +
@@ -235,8 +239,25 @@ object ConnectionEngineRunner {
                   manual: Boolean = false): Boolean =
         engineId == AetherSidecar.ID && automatic && cloudflareBlocked && !ipv4Only && (!irancell || manual) && !mci && !relayOnly
 
-    /** The IPv6-first MASQUE H2 attempt of a manual Aether pick on Irancell; the whole run gets this on top of its check. */
+    /** The IPv6-first MASQUE H2 attempt of Aether on Irancell (Smart Connect). */
     const val IRANCELL_V6_MS = 45_000L
+
+    /**
+     * Build 180 device test (A2): Methods → Aether / WARP ran 102.5 s ("105s readiness budget") while the picker promises
+     * "up to 60 s": the IPv6-first lane added 45 s on top of the short check, on a phone with no IPv6 at all. The user's
+     * own pick now keeps the 60 s promise: the IPv6 lane shares that window, capped at this, and is skipped outright when
+     * the phone's link has no global IPv6 address ([noIpv6]).
+     */
+    const val MANUAL_V6_SHARE_MS = 20_000L
+
+    /** The window of one IPv6-first attempt: a share of the 60 s for the user's own pick, else [IRANCELL_V6_MS]. Pure. */
+    fun v6AttemptMs(manual: Boolean): Long = if (manual) MANUAL_V6_SHARE_MS else IRANCELL_V6_MS
+
+    /**
+     * IPv4-only for Aether's purposes: measured so, or the phone's own link has no global IPv6 address right now
+     * ([linkGlobalIpv6] false). Unknown (null) keeps IPv6 possible. Pure.
+     */
+    fun noIpv6(measuredIpv4Only: Boolean, linkGlobalIpv6: Boolean?): Boolean = measuredIpv4Only || linkGlobalIpv6 == false
 
     /** The stage line shown before a cf=0 manual Aether run starts. Pure. */
     fun cfFilteredManualNotice(budgetMs: Long): String =
@@ -534,6 +555,14 @@ object ConnectionEngineRunner {
     const val CLOUDFLARE_FILTERED_HINT = "Cloudflare TLS is filtered on this network: connect with Lantern or Serverless; " +
         "Smart Connect can also try saved servers, Psiphon or Tor"
 
+    /** The hint when the Lantern relay hop itself failed: "connect with Lantern" would point back at the pick. */
+    const val LANTERN_HOP_HINT = "Cloudflare TLS is filtered on this network and Lantern's exit did not reach Cloudflare " +
+        "this time: connect with Lantern alone, or Psiphon / Shir o Khorshid over Lantern; your next Aether over Lantern pick tries again"
+
+    /** [LANTERN_HOP_HINT] when an attempt failed in the Lantern hop, else [CLOUDFLARE_FILTERED_HINT]. Pure. */
+    fun filteredHint(attempts: List<String>): String =
+        if (attempts.any { a -> LanternRelayHop.REASONS.any { a.endsWith(it) } }) LANTERN_HOP_HINT else CLOUDFLARE_FILTERED_HINT
+
     /**
      * The order the methods are tried in: a method verified here first, then WireGuard when Cloudflare TLS
      * is filtered but UDP answers, then the rest, with methods that failed here in the last half hour last.
@@ -736,8 +765,8 @@ object ConnectionEngineRunner {
             manual = manual)
         if (engine.id == AetherSidecar.ID && automatic && manual && onIrancell && cloudflareBlocked && !relayOnly)
             record("ladder", "ipv6-first", if (cfV6) "START" else "SKIP",
-                if (cfV6) "MASQUE H2 over IPv6 first (up to ${IRANCELL_V6_MS / 1000}s), then the IPv4 carriers"
-                else "this link was measured IPv4-only")
+                if (cfV6) "MASQUE H2 over IPv6 first (up to ${v6AttemptMs(manual) / 1000}s), then the IPv4 carriers"
+                else "this link has no IPv6 (measured, or no global IPv6 address on the phone's network)")
         // The IPv6 variants are made before the Irancell IPv4 pin (which only touches a family left on Auto).
         val carrierChoices = candidates(profile, ipv4Only = ipv4Only,
             firewall = com.example.vpn.connectivity.NetworkFirewalls.detect(networkKey).takeIf { automatic && ServerlessSidecar.handles(profile) }
@@ -845,8 +874,7 @@ object ConnectionEngineRunner {
         val irancellPlan = if (irancellHttp2) IrancellWarp.plan(ordered.map(::method), preferred, manual, v6First = cfV6)
             .map { name -> IrancellWarp.forAttempt(ordered.first { method(it) == name }, manual) } else emptyList()
         val cfManualBudget = cfFilteredManualBudgetMs(engine.id, manual, cloudflareBlocked, relayOnly).takeIf { !lanternOnly && !lanternPick }
-            // The IPv6 attempt gets its own window on top of the short check.
-            ?.let { if (cfV6) it + (if (onIrancell) IRANCELL_V6_MS else V6_FIRST_BUDGET_MS.getValue("wireguard")) else it }
+            // Build 181 (A2): the IPv6 attempt shares the short check's window, so the pick keeps its 60 s promise.
         if (cfManualBudget != null && !lanternOnly) {
             record(ladderKind, "cf-filtered", "WARN", cfFilteredManualNotice(cfManualBudget))
             com.example.vpn.diagnostics.EngineStages.record(engine.id, "cloudflare filtered", cfFilteredManualNotice(cfManualBudget))
@@ -1234,7 +1262,8 @@ object ConnectionEngineRunner {
                 val lanternHop = LanternRelayHop.requested(extras)
                 val window = if (lanternHop) minOf(launch.readyTimeoutMs, LANTERN_ATTEMPT_MS)
                     else if (name in CLEAN_METHODS) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
-                    else if (automatic && extras.optBoolean(V6_FIRST) && onIrancell) minOf(launch.readyTimeoutMs, IRANCELL_V6_MS)
+                    else if (automatic && extras.optBoolean(V6_FIRST) && onIrancell) minOf(launch.readyTimeoutMs, v6AttemptMs(manual))
+                    else if (automatic && manual && extras.optBoolean(V6_FIRST)) minOf(launch.readyTimeoutMs, MANUAL_V6_SHARE_MS)
                     else if (automatic && extras.optBoolean(V6_FIRST) && carrier in V6_FIRST_BUDGET_MS)
                         minOf(launch.readyTimeoutMs, V6_FIRST_BUDGET_MS.getValue(carrier))
                     else if (irancellHttp2 && manual) IrancellWarp.manualAttemptMs(candidate)
@@ -1371,7 +1400,7 @@ object ConnectionEngineRunner {
         }
         if (engine.id == AetherSidecar.ID && automatic && handshakeWithoutData)
             BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
-        if (engine.id == AetherSidecar.ID && preferWireGuard) attempts += CLOUDFLARE_FILTERED_HINT
+        if (engine.id == AetherSidecar.ID && preferWireGuard) attempts += filteredHint(attempts)
         // Irancell's single attempt never ran WARP through a saved server: the background relay may, once one is verified.
         val relayDeferred = irancellHttp2 && relayEligible(engine.id, automatic, options, "saved-server") ||
             !relayOnly && relays.isEmpty() && (deferRelay || deferRelayToSavedServer(engine.id, automatic, options,

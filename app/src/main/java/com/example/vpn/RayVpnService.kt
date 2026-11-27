@@ -588,7 +588,8 @@ class RayVpnService : VpnService() {
                         ?: serverRepository.getAllProfilesOnce().firstOrNull()
 
                     if (targetProfile != null) {
-                        com.example.vpn.diagnostics.EngineStages.begin(com.example.vpn.diagnostics.EngineStages.engineOf(targetProfile))
+                        // Build 180 (A5): Smart Connect logged "aether/auto · connect requested" though Aether never ran.
+                        com.example.vpn.diagnostics.EngineStages.begin(com.example.vpn.diagnostics.EngineStages.connectLabel(smart, targetProfile))
                         deadlineTried += targetProfile.id
                         connect(targetProfile, smart = smart, startedByUser = true, force = force)
                     } else {
@@ -3319,7 +3320,10 @@ class RayVpnService : VpnService() {
             else null
             // Same reading for Connect, the Connections page test and the LAB probe (ConnectionEngineRunner.linkHints).
             val hints = com.example.vpn.connections.ConnectionEngineRunner.linkHints(measured)
-            val ipv4Only = hints.ipv4Only
+            // Build 181 (A2): a phone with no global IPv6 address on its link never tries Aether's IPv6 lanes.
+            val ipv4Only = com.example.vpn.connections.ConnectionEngineRunner.noIpv6(hints.ipv4Only,
+                runCatching { com.example.RayApplication.instance.recoveryContext(
+                    com.example.vpn.connections.BuiltinMethodMemory.network()).ipv6 }.getOrNull())
             // Build 167: automatic Aether on a network with no fresh reading. One cheap Cloudflare TLS handshake on the
             // physical link first (≤ ~6 s); a filtered result gets the fixed filtered-link budgets and WireGuard first.
             // Build 171: also for a carrier the user picked (MASQUE HTTP/2) while WARP's data plane is held here, so its
@@ -3463,6 +3467,8 @@ class RayVpnService : VpnService() {
             var regionOutcome: com.example.vpn.sidecar.PsiphonRegionRun.Outcome<RegionStart>? = null
             var process: com.example.vpn.sidecar.RunningEngine
             var ready: Boolean
+            // Shir o Khorshid's all-protocols phase, when the pick switched to CDN-fronted (ShirokhorshidFrontedRetry).
+            var sokFirstPhase: String? = null
             if (psiphonRegional) {
                 val remembered = regionNetwork?.let { net -> runCatching { networkMemory.psiphonRegions.ranked(net) }.getOrNull() }.orEmpty()
                 // The user's own direct pick on a network where the chain over Lantern is the remembered path: one bounded
@@ -3555,7 +3561,9 @@ class RayVpnService : VpnService() {
                 }
                 if (!ready && gaveUp) {
                     val elapsed = System.currentTimeMillis() - began
-                    XrayLogManager.w("VPN", "Shir o Khorshid: ${com.example.vpn.sidecar.ShirokhorshidFrontedRetry.TEXT} (after ${elapsed / 1000}s).")
+                    sokFirstPhase = com.example.vpn.sidecar.ShirokhorshidFrontedRetry.firstPhaseText(elapsed,
+                        stage3Since?.let { it - began }, runCatching { notices()?.psiphonDials() }.getOrNull())
+                    XrayLogManager.w("VPN", "Shir o Khorshid: ${com.example.vpn.sidecar.ShirokhorshidFrontedRetry.TEXT} (after ${elapsed / 1000}s; $sokFirstPhase).")
                     com.example.vpn.diagnostics.EngineStages.record(engine.id, "protocols",
                         "CDN-fronted only after ${elapsed / 1000}s: a server connected but no tunnel followed")
                     com.example.vpn.diagnostics.events.EventLog.event("shirokhorshid.fronted", attributes = mapOf(
@@ -3616,12 +3624,14 @@ class RayVpnService : VpnService() {
             if (!ready) {
                 process.stop()
                 sidecar = null
-                val hint = regionRun?.failure ?: regionRun?.takeIf { userRegion.isEmpty() }?.let { o ->
+                val baseHint = regionRun?.failure ?: regionRun?.takeIf { userRegion.isEmpty() }?.let { o ->
                     "Psiphon brought no tunnel up in ${o.attempts.size} start(s) (regions: " +
                         o.attempts.joinToString(", ") { it.step.region.ifEmpty { "any" } } + ") within " +
                         "${o.attempts.sumOf { it.elapsedMs } / 1000}s: " +
                         (process.startupFailure ?: "no readiness signal") }
                     ?: process.startupFailure ?: "No readiness signal; inspect redacted engine logs"
+                // Build 180 (A3): the fronted phase's text alone hid what the first (all-protocols) phase dialed.
+                val hint = sokFirstPhase?.let { "$baseHint; $it" } ?: baseHint
                 com.example.vpn.engine.registry.EngineLedger.shared.failed(engine.id, ledgerNetwork(), "startup failed: $hint")
                 val psiphonDirect = engine.id == com.example.vpn.sidecar.PsiphonSidecar.ID &&
                     com.example.vpn.connections.PsiphonChainMemory.isDirect(profile)

@@ -317,4 +317,33 @@ class LanternRelayFallbackTest {
         assertFalse(LanternRelayHop.reachesCloudflare(com.example.vpn.verify.Socks5.Endpoint("127.0.0.1", closed, "u", "p"),
             timeoutMs = 1_000) { _, _, _ -> })
     }
+
+    /** Build 180 A1: one slow handshake right after Radiance is ready no longer fails the whole hop. */
+    @Test fun thePreflightRetriesAcrossHostsAndRoundsWithinItsBudget() {
+        val endpoint = com.example.vpn.verify.Socks5.Endpoint("127.0.0.1", 1, "u", "p")
+        var now = 0L
+        val seen = mutableListOf<String>()
+        // First round fails on both hosts, the second round's first host answers.
+        val ok = LanternRelayHop.preflight(endpoint, check = { _, host, t ->
+            seen += host; now += t.toLong(); seen.size == 3 }, sleep = { now += it }, clock = { now })
+        assertTrue(ok.reached)
+        assertEquals(listOf(LanternRelayHop.PREFLIGHT_HOST, "www.cloudflare.com", LanternRelayHop.PREFLIGHT_HOST), seen)
+        assertEquals(listOf("api.cloudflareclient.com:fail", "www.cloudflare.com:fail", "api.cloudflareclient.com:ok"), ok.tries)
+
+        // Never answering: bounded by the budget, not by rounds x hosts x attempt time.
+        now = 0L
+        val failed = LanternRelayHop.preflight(endpoint, check = { _, _, t -> now += t.toLong(); false },
+            sleep = { now += it }, clock = { now })
+        assertFalse(failed.reached)
+        assertTrue("took $now ms", now <= LanternRelayHop.PREFLIGHT_BUDGET_MS)
+        assertTrue(failed.tries.size >= 3)
+        LanternRelayHop.lastPreflight = null
+    }
+
+    @Test fun aLanternHopFailureGetsItsOwnHintNotConnectWithLantern() {
+        val hop = ConnectionEngineRunner.filteredHint(listOf("h2: gateway scan", "h2-lantern: ${LanternRelayHop.CLOUDFLARE_UNREACHABLE}"))
+        assertEquals(ConnectionEngineRunner.LANTERN_HOP_HINT, hop)
+        assertTrue(hop.contains("Lantern alone"))
+        assertEquals(ConnectionEngineRunner.CLOUDFLARE_FILTERED_HINT, ConnectionEngineRunner.filteredHint(listOf("h2: gateway scan")))
+    }
 }

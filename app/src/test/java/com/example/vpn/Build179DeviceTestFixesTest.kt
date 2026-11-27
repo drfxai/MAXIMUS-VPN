@@ -261,8 +261,12 @@ class Build179DeviceTestFixesTest {
         assertEquals(75_000L, ShirokhorshidFrontedRetry.switchAtMs(window))
         // No server connected: never given up early.
         assertFalse(ShirokhorshidFrontedRetry.giveUp(2, null, 0L, 100_000L, window))
-        // Server connected 10 s ago at 30 s: keep waiting; 25 s after the connect: switch.
-        assertFalse(ShirokhorshidFrontedRetry.giveUp(3, 20_000L, 0L, 30_000L, window))
+        // Build 181 (A3): server connected 5 s ago at 30 s: keep waiting; connected 10 s ago at 30 s: switch (was 25 s
+        // after the connect, which fired at 53 s on the Build 180 device test).
+        assertFalse(ShirokhorshidFrontedRetry.giveUp(3, 25_000L, 0L, 30_000L, window))
+        assertTrue(ShirokhorshidFrontedRetry.giveUp(3, 20_000L, 0L, 30_000L, window))
+        // Before 25 s from the start only the 25 s grace counts.
+        assertFalse(ShirokhorshidFrontedRetry.giveUp(3, 5_000L, 0L, 20_000L, window))
         assertTrue(ShirokhorshidFrontedRetry.giveUp(3, 20_000L, 0L, 45_000L, window))
         // Server connected late: switch at the latest at switchAtMs so the fronted start keeps its window.
         assertTrue(ShirokhorshidFrontedRetry.giveUp(3, 70_000L, 0L, 75_000L, window))

@@ -44,12 +44,58 @@ object LanternRelayHop {
     const val PREFLIGHT_TIMEOUT_MS = 12_000
 
     /**
-     * Whether Radiance's exit completes a TLS handshake with Cloudflare ([reachesCloudflare]); replaced in tests.
+     * Whether Radiance's exit completes a TLS handshake with Cloudflare ([preflight]); replaced in tests.
      * Checked once Radiance is ready and before Aether starts, so a Lantern exit that cannot reach Cloudflare costs
-     * at most [PREFLIGHT_TIMEOUT_MS] instead of Aether's whole readiness window
+     * at most [PREFLIGHT_BUDGET_MS] instead of Aether's whole readiness window
      * ([com.example.vpn.connections.ConnectionEngineRunner.LANTERN_ATTEMPT_MS]).
      */
-    @Volatile var cloudflareCheck: (Socks5.Endpoint) -> Boolean = { reachesCloudflare(it) }
+    @Volatile var cloudflareCheck: (Socks5.Endpoint) -> Boolean = { preflight(it).reached }
+
+    /**
+     * Hosts the preflight tries in order: the WARP account API, then Cloudflare's own site (another name on the same
+     * edge, publicly trusted, hostname-verified). Either handshake proves Lantern's exit reaches Cloudflare.
+     */
+    val PREFLIGHT_HOSTS = listOf(PREFLIGHT_HOST, "www.cloudflare.com")
+    const val PREFLIGHT_ATTEMPT_MS = 8_000
+    const val PREFLIGHT_ROUNDS = 3
+    const val PREFLIGHT_PAUSE_MS = 1_500L
+    /** Whole preflight bound: a Lantern exit that cannot reach Cloudflare still costs well under Aether's window. */
+    const val PREFLIGHT_BUDGET_MS = 26_000L
+
+    /** One preflight: whether a handshake completed and each try as "host:ok|fail" (fixed text, no secrets). */
+    data class Preflight(val reached: Boolean, val tries: List<String>)
+
+    /** The last preflight's tries, for the diagnostics log of the Aether over Lantern pick. */
+    @Volatile var lastPreflight: Preflight? = null
+
+    /**
+     * Build 180 on Irancell: Aether over Lantern failed in 22.5 s with "could not reach Cloudflare" while a curl through
+     * Lantern to the same hosts completed TLS, and Build 179 had connected through the same code. One 12 s handshake
+     * right after Radiance reports ready raced Lantern's own outbound selection. The preflight now tries
+     * [PREFLIGHT_HOSTS] in up to [PREFLIGHT_ROUNDS] rounds within [PREFLIGHT_BUDGET_MS], pausing between rounds, and
+     * stops at the first completed handshake. [check], [sleep] and [clock] are replaced in tests.
+     */
+    fun preflight(endpoint: Socks5.Endpoint,
+                  check: (Socks5.Endpoint, String, Int) -> Boolean = { e, host, t -> reachesCloudflare(e, host, t) },
+                  sleep: (Long) -> Unit = { Thread.sleep(it) },
+                  clock: () -> Long = { System.currentTimeMillis() }): Preflight {
+        val start = clock()
+        val tries = mutableListOf<String>()
+        for (round in 0 until PREFLIGHT_ROUNDS) {
+            if (round > 0) {
+                if (clock() - start + PREFLIGHT_PAUSE_MS >= PREFLIGHT_BUDGET_MS) break
+                sleep(PREFLIGHT_PAUSE_MS)
+            }
+            for (host in PREFLIGHT_HOSTS) {
+                val left = PREFLIGHT_BUDGET_MS - (clock() - start)
+                if (left < 1_000) return Preflight(false, tries).also { lastPreflight = it }
+                val ok = check(endpoint, host, minOf(PREFLIGHT_ATTEMPT_MS.toLong(), left).toInt())
+                tries += "$host:${if (ok) "ok" else "fail"}"
+                if (ok) return Preflight(true, tries).also { lastPreflight = it }
+            }
+        }
+        return Preflight(false, tries).also { lastPreflight = it }
+    }
 
     /**
      * SOCKS5 CONNECT to [host]:443 through [endpoint] (the name is resolved on Lantern's side, never on the filtered
