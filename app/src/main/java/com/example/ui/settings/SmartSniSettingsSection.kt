@@ -62,8 +62,8 @@ internal fun SmartSniSettingsSection() {
             null, "AEX+DQBB…", R.string.ui_invalid_ech_config, singleLine = false)
         SettingsDivider(inset = false)
         SettingsSwitchRow(
-            title = stringResource(R.string.ui_clean_ip_scanner),
-            subtitle = stringResource(R.string.ui_clean_ip_scanner_hint),
+            title = stringResource(R.string.ui_smart_clean_ip_scanner),
+            subtitle = stringResource(R.string.ui_smart_clean_ip_scanner_hint),
             icon = Icons.Default.Speed,
             checked = cleanIp,
             onCheckedChange = { cleanIp = it; SmartSniSettings.setFlag(SmartSniSettings.CLEAN_IP_SCAN, it) }

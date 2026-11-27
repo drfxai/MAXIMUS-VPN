@@ -1906,8 +1906,8 @@
     <string name="ui_smart_ech_outer">Внешнее имя ECH (необязательно)</string>
     <string name="ui_smart_ech_config">ECHConfigList в base64 (необязательно)</string>
     <string name="ui_smart_ech_manual_hint">Значение, заданное вручную, важнее автоматического, пока вы его не очистите.</string>
-    <string name="ui_clean_ip_scanner">Сканер чистых IP</string>
-    <string name="ui_clean_ip_scanner_hint">Перед умным подключением проверяет небольшой случайный набор адресов Cloudflare (не дольше 8 секунд) и запоминает лучшие для каждой сети. Адреса никогда не пишутся в журналы.</string>
+    <string name="ui_smart_clean_ip_scanner">Сканер чистых IP</string>
+    <string name="ui_smart_clean_ip_scanner_hint">Перед умным подключением проверяет небольшой случайный набор адресов Cloudflare (не дольше 8 секунд) и запоминает лучшие для каждой сети. Адреса никогда не пишутся в журналы.</string>
     <string name="ui_invalid_domain">Недопустимое доменное имя; не сохранено.</string>
     <string name="ui_invalid_ech_config">Недопустимый ECHConfigList (base64); не сохранено.</string>
     <string name="ui_lab_smart_title">Умный SNI, ECH и чистые IP</string>

@@ -1907,8 +1907,8 @@
     <string name="ui_smart_ech_outer">ECH outer name (optional)</string>
     <string name="ui_smart_ech_config">ECHConfigList, base64 (optional)</string>
     <string name="ui_smart_ech_manual_hint">A manual value wins over the automatic one until you clear it.</string>
-    <string name="ui_clean_ip_scanner">Clean IP scanner</string>
-    <string name="ui_clean_ip_scanner_hint">Before a Smart connect, tests a small random set of Cloudflare addresses (at most 8 seconds) and remembers the best per network. Addresses are never written to the logs.</string>
+    <string name="ui_smart_clean_ip_scanner">Clean IP scanner</string>
+    <string name="ui_smart_clean_ip_scanner_hint">Before a Smart connect, tests a small random set of Cloudflare addresses (at most 8 seconds) and remembers the best per network. Addresses are never written to the logs.</string>
     <string name="ui_invalid_domain">Not a valid domain name; not saved.</string>
     <string name="ui_invalid_ech_config">Not a valid base64 ECHConfigList; not saved.</string>
     <string name="ui_lab_smart_title">Smart SNI, ECH and clean IPs</string>

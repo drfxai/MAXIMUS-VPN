@@ -1896,8 +1896,8 @@
     <string name="ui_smart_ech_outer">نام بیرونی ECH (اختیاری)</string>
     <string name="ui_smart_ech_config">ECHConfigList به صورت base64 (اختیاری)</string>
     <string name="ui_smart_ech_manual_hint">مقدار دستی تا وقتی پاکش نکنید بر مقدار خودکار مقدم است.</string>
-    <string name="ui_clean_ip_scanner">اسکنر IP تمیز</string>
-    <string name="ui_clean_ip_scanner_hint">پیش از اتصال هوشمند، تعداد کمی آدرس تصادفی Cloudflare را (حداکثر ۸ ثانیه) آزمایش می‌کند و بهترین‌ها را برای هر شبکه به خاطر می‌سپارد. آدرس‌ها هرگز در لاگ‌ها نوشته نمی‌شوند.</string>
+    <string name="ui_smart_clean_ip_scanner">اسکنر IP تمیز</string>
+    <string name="ui_smart_clean_ip_scanner_hint">پیش از اتصال هوشمند، تعداد کمی آدرس تصادفی Cloudflare را (حداکثر ۸ ثانیه) آزمایش می‌کند و بهترین‌ها را برای هر شبکه به خاطر می‌سپارد. آدرس‌ها هرگز در لاگ‌ها نوشته نمی‌شوند.</string>
     <string name="ui_invalid_domain">نام دامنه معتبر نیست؛ ذخیره نشد.</string>
     <string name="ui_invalid_ech_config">ECHConfigList معتبر (base64) نیست؛ ذخیره نشد.</string>
     <string name="ui_lab_smart_title">SNI هوشمند، ECH و IP تمیز</string>
