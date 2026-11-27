@@ -21,8 +21,8 @@ import threading
 import time
 import urllib.request
 
-SHA = "699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968"
-URL = "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz"
+SHA = "ca57e405be6b7dc79a0efa91823a0cc4d81138cbe4a9aacbfd749c65e6fca3b2"
+URL = "https://github.com/SagerNet/sing-box/releases/download/v1.14.5/sing-box-1.14.5-linux-amd64.tar.gz"
 
 
 def free_port():
@@ -110,7 +110,7 @@ def main():
                 data = r.read(100 * 1024 * 1024)
             assert hashlib.sha256(data).hexdigest() == SHA, "untrusted native executable archive"
             with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-                member = archive.extractfile("sing-box-1.14.4-linux-amd64/sing-box")
+                member = archive.extractfile("sing-box-1.14.5-linux-amd64/sing-box")
                 assert member is not None
                 binary = root / "sing-box"
                 binary.write_bytes(member.read())

@@ -6,24 +6,24 @@ The Android application bundles the official XTLS/libXray release `v26.11.9` and
 - Xray-core source: https://github.com/XTLS/Xray-core
 - Pinned Android artifact: `libxray-android.zip` from the libXray `v26.11.9` release. CI verifies SHA-256 `1b1aa12124a7112af983a6cea74c77f27aadc6b650acf3c5a57019619ba9fa48` before extracting the AAR.
 - The AAR is downloaded during CI and is not stored in this repository.
-- Mihomo (MetaCubeX) `v1.19.32`, GNU General Public License v3.0. It runs as a separate program
+- Mihomo (MetaCubeX) `v1.19.34`, GNU General Public License v3.0. It runs as a separate program
   (`libmihomo.so`, an executable), started by the app and reached only over a local SOCKS port; it is
   not linked into the app. The exact source it is built from is
-  https://github.com/MetaCubeX/mihomo/tree/v1.19.32 (Go module `github.com/metacubex/mihomo@v1.19.32`,
-  checksum `h1:uD7ZC3P77isWD554NNvtee65L+99+/C5hyc+Lk8rVEk=`), built by `scripts/engines/mihomo.sh`.
+  https://github.com/MetaCubeX/mihomo/tree/v1.19.34 (Go module `github.com/metacubex/mihomo@v1.19.34`,
+  checksum `h1:+nkzw4xRehvk2ldLHMelXszd0ES1ysE/ArL92KPfQno=`), built by `scripts/engines/mihomo.sh`.
   You may obtain, modify and redistribute that program under the GPL-3.0; the full license text is at
   https://www.gnu.org/licenses/gpl-3.0.txt. On request, the corresponding source for any release is
   provided by the MAXIMUS VPN maintainer.
-- Psiphon tunnel-core, commit `4d6eb0e8a7e91d3f9a615f70ef65668b8b3595ec` (Go module
-  `github.com/Psiphon-Labs/psiphon-tunnel-core@v0.0.14-beta-ios.0.20260928190446-4d6eb0e8a7e9`,
-  checksum `h1:Ay/hVsv+zLoml03OvdAuzQXQ64t4N9DW0Sc8XG28BNE=`), GNU General Public License v3.0. Like
+- Psiphon tunnel-core, commit `9544cec63f8d7d1d5a8d284eebd2ebeb560df75f` (Go module
+  `github.com/Psiphon-Labs/psiphon-tunnel-core@v0.0.14-beta-ios.0.20261126204245-9544cec63f8d`,
+  checksum `h1:pT4QzCjc6SEz74U4hSz4P/BOPDjsz47nLBD++rohlrg=`), GNU General Public License v3.0. Like
   Mihomo it runs as a separate program (`libpsiphon.so`) reached over a local SOCKS port; its source is
-  https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/4d6eb0e8a7e91d3f9a615f70ef65668b8b3595ec and
+  https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/9544cec63f8d7d1d5a8d284eebd2ebeb560df75f and
   it is built by `scripts/engines/psiphon.sh`. The same source offer as for Mihomo applies. Psiphon's
   network settings are issued by Psiphon Inc. and are not part of this repository.
 - Shir o Khorshid tunnel-core (شیر و خورشید, the community Psiphon fork for Iran), commit
   `520f37c980df6909830ad541b42c305e648ed60d` of https://github.com/shirokhorshid/psiphon-tunnel-core (branch
-  `shirokhorshid`, which merges Psiphon tunnel-core `4d6eb0e8` above), GNU General Public License v3.0. It runs as a
+  `shirokhorshid`, which merges Psiphon tunnel-core `4d6eb0e8`), GNU General Public License v3.0. It runs as a
   separate program (`libshirokhorshid.so`) reached over a local SOCKS port, built by
   `scripts/engines/shirokhorshid.sh` from the repository's own `vendor/` directory with one MAXIMUS change to
   ConsoleClient (`scripts/engines/psiphon-link-dns.py`: use the phone's link DNS servers). The complete corresponding
@@ -36,15 +36,15 @@ The Android application bundles the official XTLS/libXray release `v26.11.9` and
   (`libdnstt.so`); source https://www.bamsoftware.com/git/dnstt.git, built by `scripts/engines/dnstt.sh` with
   `scripts/engines/dnstt-query-rate.patch` (a query rate cap) and `scripts/engines/dnstt-multipath.patch` (several
   resolvers, backup domains) applied. The Install Center's dnstt-server adds `scripts/server-tools/dnstt-server-domains.patch`.
-- usque `v1.5.0` (Diniboy1123), Mozilla Public License 2.0. A Cloudflare WARP client over MASQUE
+- usque `v4.2.1` (Diniboy1123, commit `6aa03fc97d12848dce34eedbd187fb1077b5d1ea`), MIT License. A Cloudflare WARP client over MASQUE
   (WireGuard inside HTTP/3). Runs as a separate program (`libusque.so`) reached over a local SOCKS port;
-  source https://github.com/Diniboy1123/usque/tree/v1.5.0, built by `scripts/engines/usque.sh`.
-- Tor, from the Guardian Project's tor-android `0.4.9.5.1` (`info.guardianproject:tor-android`, with
+  source https://github.com/Diniboy1123/usque/tree/v4.2.1, built by `scripts/engines/usque.sh`.
+- Tor, from the Guardian Project's tor-android `0.4.9.6` (AAR sha256 `45dfecd0ef3acd82bbab41ff733db3e3853e5fe417266cb578d2d46e2274a0bc`) (`info.guardianproject:tor-android`, with
   `jtorctl 0.4.5.7`), BSD 3-Clause License; source https://github.com/guardianproject/tor-android and
   https://gitlab.torproject.org/tpo/core/tor.
-- lyrebird (The Tor Project), commit `75ef9b2c1f18` (Go module
-  `gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/lyrebird@v0.0.0-20260921142919-75ef9b2c1f18`,
-  checksum `h1:yYIGFPSbU7zzI1HCwgIhTuYi5kiOg9JpvvC7WaQ5Xu4=`), BSD 3-Clause License, with parts under the
+- lyrebird (The Tor Project), tag 0.10.0, commit `59ac7e400c38` (Go module
+  `gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/lyrebird@v0.0.0-20261104192811-59ac7e400c38`,
+  checksum `h1:h9X9Tz+tNRIp4zjLqPR2KCkVZKZGFIQnQzmIlfEsRBI=`), BSD 3-Clause License, with parts under the
   GNU General Public License v3.0 (see its LICENSE-GPL3.txt). Runs as a separate program
   (`liblyrebird.so`) started by Tor; built by `scripts/engines/lyrebird.sh`. Its built-in Snowflake bridge
   lines come from Snowflake v2.11.0. The same source offer as for Mihomo applies.
@@ -743,15 +743,15 @@ The MAXIMUS integration is original code; no Hashem Pro panel code or licensing 
 The separate native fake-SNI helper is built from hufrea/byedpi at ba532298de7b28cfe854aea83d061369d13ca290 (MIT). MAXIMUS restricts its outgoing TCP destination to the selected endpoint. The complete license is included in assets/licenses/byedpi-MIT.txt.
 
 
-## sing-box 1.14.4
+## sing-box 1.14.5
 
 The APK distributes the unmodified official Android sing-box executable as a separate
 program, reached through an authenticated loopback SOCKS connection. It is not linked
 into the application. Copyright SagerNet and contributors; GPL-3.0-or-later.
 
-- Exact upstream source: https://github.com/SagerNet/sing-box/tree/c005f35300ce76427dc285481ec5695f5b179cd2
-- Corresponding source download: https://github.com/SagerNet/sing-box/archive/c005f35300ce76427dc285481ec5695f5b179cd2.tar.gz
-- Official executables: https://github.com/SagerNet/sing-box/releases/tag/v1.14.4
+- Exact upstream source: https://github.com/SagerNet/sing-box/tree/a6844a780ba173e189a018d0ac62df67cd50b8e9
+- Corresponding source download: https://github.com/SagerNet/sing-box/archive/a6844a780ba173e189a018d0ac62df67cd50b8e9.tar.gz
+- Official executables: https://github.com/SagerNet/sing-box/releases/tag/v1.14.5
 - License in the APK: assets/licenses/sing-box-GPL-3.0.txt
 - Asset SHA-256 verification: scripts/engines/singbox.sh. No local modifications.
 
@@ -811,7 +811,7 @@ The application's license does not restrict recipients' rights in this separate 
 ## Lantern Radiance
 
 The Android release build script fetches [Radiance](https://github.com/getlantern/radiance) at
-`aced057665daaa4821e9f45e6133257969f4a8e7` under GPL-3.0. The separate executable is built with
+`051b4de9077337cd81fea5b6c1ab50e602959387` under GPL-3.0. The separate executable is built with
 Radiance's SOCKS-only mode, the entry point and loopback authentication change under
 `scripts/radiance/`. The APK bundles the executable and its corresponding source is supplied as `Radiance-source.tar.gz`.
 
@@ -826,7 +826,7 @@ under GPL-3.0. Network availability depends on the upstream service.
 
 ## AmneziaWG userspace executable
 
-The Android release builds [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go/tree/735cffbcb3030644c519b2934bf2e199f19bbc98) from the pinned upstream revision.
+The Android release builds [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go/tree/08fe3d33bbb116be09a6183d02609311b8b0c9e8) from the pinned upstream revision.
 The executable retains upstream's MIT license. The corresponding copyright and permission notice is included in this repository at `app/src/main/assets/licenses/amneziawg-go.LICENSE`.
 
 ## Free config list sources (tools/aggregator/sources/sources.json, 2026-11-22)

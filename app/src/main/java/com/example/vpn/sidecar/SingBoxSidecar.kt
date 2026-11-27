@@ -14,7 +14,7 @@ import java.io.File
 object SingBoxSidecar : SidecarEngine {
     override val id = "sing-box"
     override val binary = "singbox"
-    const val VERSION = "1.14.4"
+    const val VERSION = "1.14.5"
 
     override fun handles(profile: VlessProfile): Boolean = profile.profileType != ProfileType.XRAY_JSON &&
         (profile.engineType == EngineType.SING_BOX || ProfileExtras.read(profile).optString("engine") == id)

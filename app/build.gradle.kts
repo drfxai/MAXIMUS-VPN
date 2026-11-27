@@ -197,9 +197,10 @@ dependencies {
   implementation("com.github.mwiede:jsch:2.28.7")
   implementation(libs.snakeyaml)
   // Tor for the Tor engine (BSD-3-Clause); its bridges run in lyrebird, built by scripts/engines/lyrebird.sh.
-  // 0.4.9.5.1 is the newest release that builds against compileSdk 36. It is plain Java, so its
+  // 0.4.9.6 is the newest release whose AAR still declares minCompileSdk=36 (0.4.9.6.2 and later need 37;
+  // Maven Central AAR sha256 45dfecd0ef3acd82bbab41ff733db3e3853e5fe417266cb578d2d46e2274a0bc). It is plain Java, so its
   // newer Kotlin standard library is left out to keep the app's own.
-  implementation("info.guardianproject:tor-android:0.4.9.5.1") { exclude(group = "org.jetbrains.kotlin") }
+  implementation("info.guardianproject:tor-android:0.4.9.6") { exclude(group = "org.jetbrains.kotlin") }
   implementation("info.guardianproject:jtorctl:0.4.5.7")
   implementation(libs.zxing.core)
   implementation(libs.retrofit)

@@ -96,7 +96,7 @@ internal object SettingsLabels {
 
     fun engineTitle(engine: EngineType): String = when (engine) {
         EngineType.AUTO -> "Auto (smart select)"
-        EngineType.SING_BOX -> "sing-box 1.14.4"
+        EngineType.SING_BOX -> "sing-box 1.14.5"
         EngineType.MIHOMO -> "Mihomo / Clash Meta"
         EngineType.XRAY -> "Xray-core"
     }

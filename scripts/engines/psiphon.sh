@@ -9,9 +9,9 @@ set -euo pipefail
 . "$(dirname "$0")/common.sh"
 
 MODULE=github.com/Psiphon-Labs/psiphon-tunnel-core
-VERSION=v0.0.14-beta-ios.0.20260928190446-4d6eb0e8a7e9   # commit 4d6eb0e8a7e9 (2026-09-28)
-SUM="h1:Ay/hVsv+zLoml03OvdAuzQXQ64t4N9DW0Sc8XG28BNE="
-REV=4d6eb0e8a7e91d3f9a615f70ef65668b8b3595ec
+VERSION=v0.0.14-beta-ios.0.20261126204245-9544cec63f8d   # commit 9544cec63f8d (master, 2026-11-26)
+SUM="h1:pT4QzCjc6SEz74U4hSz4P/BOPDjsz47nLBD++rohlrg="
+REV=9544cec63f8d7d1d5a8d284eebd2ebeb560df75f
 
 SRC="$(fetch_module "$MODULE" "$VERSION" "$SUM")"
 trap 'rm -rf "$SRC"' EXIT
