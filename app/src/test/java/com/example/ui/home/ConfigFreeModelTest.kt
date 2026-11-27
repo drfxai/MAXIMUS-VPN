@@ -9,8 +9,8 @@ import org.junit.Test
 class ConfigFreeModelTest {
     @Test fun tabsCountTheConnectionsTheyList() {
         // Methods: Aether / WARP, Serverless, Tor, Psiphon, Shir o Khorshid, Psiphon over Lantern, Shir o Khorshid over
-        // Lantern, Lantern.
-        assertEquals(8, ConfigFreePickerCounts.methods())
+        // Lantern, Lantern, Serverless + Lantern (Build 181).
+        assertEquals(9, ConfigFreePickerCounts.methods())
         // Aether & chains: H2, H3, WireGuard, Gool, Gool Classic, MASQUE-in-MASQUE, Aether → Psiphon, Aether → Tor,
         // Aether over Lantern.
         // It read "1": 10 (with the two setup cards) cut to one digit by the label.
