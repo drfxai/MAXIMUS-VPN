@@ -454,6 +454,28 @@ class RayApplication : Application() {
         com.example.vpn.connections.BuiltinMethodMemory.write = { key, value ->
             builtinMethods.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
         }
+        // Build 181 Phase 5: Smart SNI / Smart ECH / clean-IP scanner settings, and Smart ECH's DoH key fetch on the
+        // phone's own network (pinned IP-literal resolvers, verified TLS: HttpsURLConnection's default trust and host check).
+        val smartSni = getSharedPreferences("smart_sni", MODE_PRIVATE)
+        com.example.vpn.smartsni.SmartSniSettings.read = { key -> smartSni.getString(key, null) }
+        com.example.vpn.smartsni.SmartSniSettings.write = { key, value ->
+            smartSni.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
+        }
+        com.example.vpn.smartsni.SmartEch.doh = { url ->
+            require(url.startsWith("https://")) { "DoH must be HTTPS" }
+            val physical = getSystemService(android.net.ConnectivityManager::class.java)
+                ?.let { com.example.vpn.smart.NetworkCapabilityDetector.physical(it) }
+            val c = (physical?.openConnection(java.net.URL(url)) ?: java.net.URL(url).openConnection()) as javax.net.ssl.HttpsURLConnection
+            try {
+                c.connectTimeout = 4000; c.readTimeout = 4000
+                c.setRequestProperty("Accept", "application/dns-message")
+                if (c.responseCode == 200) c.inputStream.use { s ->
+                    val buf = ByteArray(8192); var n = 0
+                    while (n < buf.size) { val r = s.read(buf, n, buf.size - n); if (r < 0) break; n += r }
+                    buf.copyOf(n)
+                } else null
+            } finally { c.disconnect() }
+        }
         // Per-network clean MASQUE HTTP/2 gateways (UAC SNI Spoofer's clean-H2 list) and their screen-on prewarm.
         val cleanH2 = getSharedPreferences("aether_clean_h2", MODE_PRIVATE)
         com.example.vpn.connections.CleanH2PeerMemory.read = { key -> cleanH2.getString(key, null) }

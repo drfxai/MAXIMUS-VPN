@@ -1214,6 +1214,34 @@ class RayVpnService : VpnService() {
         return com.example.vpn.connectivity.ForkAwareProbe.outcome(r.stage.carriesTraffic, r.notTested, r.latencyMs, r.failure)
     }
 
+    /**
+     * Build 181 Phase 5 (B): the Smart ECH decision for [profile] when Xray carries it, or null (no ECH added). A manual
+     * ECHConfigList always applies; automatic ECH needs a Cloudflare front and, on a manual pick, ECH that carried
+     * traffic on this network before (a Smart pick tries it). A stale key is fetched by DoH first, and an outer name not
+     * yet seen here gets one short Smart SNI probe (≤3 s), so a blocked outer name is skipped instead of costing an attempt.
+     */
+    private fun smartEchFor(profile: VlessProfile, smartPick: Boolean): com.example.vpn.smartsni.SmartEch.Decision? {
+        if (EngineSelectionPolicy.select(profile) != EngineSelectionPolicy.Runtime.XRAY) return null
+        val ech = com.example.vpn.smartsni.SmartEch
+        val sni = com.example.vpn.smartsni.SmartSni
+        val net = com.example.vpn.connections.BuiltinMethodMemory.network()
+        val log: (String) -> Unit = { XrayLogManager.i("SMART", it) }
+        if (com.example.vpn.smartsni.SmartSniSettings.manualEchConfig.isBlank()) {
+            if (!com.example.vpn.smartsni.SmartSniSettings.smartEch || profile.echConfigList.isNotBlank() || !ech.cloudflareFronted(profile)) return null
+            if (!smartPick && ech.state(net).okAt <= 0) return null
+            val state = ech.refresh(net, log = log)
+            val outer = state.outer
+            if (outer != null && outer !in sni.ranked(net) && outer !in sni.cooling(net)) {
+                val p = sni.probe(net, listOf(outer), com.example.vpn.cleanip.CdnRanges.sample(com.example.vpn.cleanip.Cdn.CLOUDFLARE, 2), 3_000L, log).firstOrNull()
+                if (p != null && p.verdict !in setOf(com.example.vpn.smartsni.SmartSni.Verdict.PASSED, com.example.vpn.smartsni.SmartSni.Verdict.REACHED, com.example.vpn.smartsni.SmartSni.Verdict.SKIPPED))
+                    sni.rotate(net, outer)
+            }
+        }
+        val d = ech.decide(profile, net)
+        log("Smart ECH: " + if (d.applies) "on, outer name ${d.outer} (${d.reason})" else "off (${d.reason})")
+        return d.takeIf { it.applies }
+    }
+
     private suspend fun connectLocked(
         userProfile: VlessProfile,
         smart: Boolean = false,
@@ -2269,7 +2297,10 @@ class RayVpnService : VpnService() {
             sidecarOwnerFingerprint = requestedProfile.effectiveFingerprint.takeIf { sidecar != null }
             // The app is left out of its own VPN here, so the device (TUN) path cannot be dialed from the app
             // (TunCheckPlan). A byte meter on the TUN → engine hop measures what the TUN forwards for other apps.
-            val xrayProfile = withTunForwardMeter(profile)
+            // Build 181 Phase 5 (B): Smart ECH for a Cloudflare-fronted config carried by Xray itself (no engine program).
+            val echDecision = if (amnezia == null && sidecarEngine == null && engineChain == null)
+                runCatching { smartEchFor(profile, smart) }.getOrNull() else null
+            val xrayProfile = withTunForwardMeter(if (echDecision != null) com.example.vpn.smartsni.SmartEch.applyTo(profile, echDecision) else profile)
             val runtime = EngineSelectionPolicy.select(profile)
             val engineId = if (amnezia != null) com.example.vpn.engine.AmneziaNativeEngine.ID
                 else com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
@@ -2399,6 +2430,11 @@ class RayVpnService : VpnService() {
             val currentNetwork = _vpnState.value.networkGeneration == verificationGeneration &&
                 result.second != com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED
             val check = if (currentNetwork) result else null to com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED
+            if (currentNetwork && echDecision != null) runCatching {
+                // A failure with ECH may be a rejected (rotated) key: refreshed and retried once by the next attempt, else plain TLS here.
+                com.example.vpn.smartsni.SmartEch.onResult(com.example.vpn.connections.BuiltinMethodMemory.network(), echDecision,
+                    verified = check.first != null) { XrayLogManager.i("SMART", it) }
+            }
             val measurement = if (engineEndpoint == null) com.example.vpn.connectivity.MeasurementType.TUNNEL_TRAFFIC
                 else com.example.vpn.connectivity.MeasurementType.ENGINE_REQUEST
             if (currentNetwork) {
@@ -4680,6 +4716,10 @@ class RayVpnService : VpnService() {
                                  stallBytes: Int? = null) {
         if (_vpnState.value.attemptId != attemptId) return
         networkMemory.freezes.recordStalled(network, stalled.id)
+        // Build 181 Phase 5 (A): an Aether session that stalled mid-session rotates its MASQUE name (6 h cooldown).
+        if (com.example.vpn.sidecar.AetherSidecar.handles(stalled)) runCatching {
+            com.example.vpn.connections.AetherSniProbe.sessionLost(com.example.vpn.connections.BuiltinMethodMemory.network())
+        }.getOrNull()?.let { XrayLogManager.i("SMART", "Smart SNI: MASQUE name $it stopped working mid-session; the next start uses the next name") }
         serviceScope.launch(Dispatchers.IO) {
             val saved = runCatching { serverRepository.getAllProfilesOnce() }.getOrDefault(emptyList())
             val usable = saved.filter {

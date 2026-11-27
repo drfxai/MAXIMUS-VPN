@@ -150,8 +150,24 @@ object AetherSniProbe {
     fun recordSuccess(network: String?, sni: String, now: Long = System.currentTimeMillis()) {
         if (network.isNullOrBlank()) return
         remember(network, sni, now)
+        sessionSni = network to sni
         if (sni in FIXED) com.example.vpn.smartsni.SmartSni.recordSuccess(network, sni, now)
         runCatching { BuiltinMethodMemory.write(failedKey(network), null) }
+    }
+
+    /** The network and name of the MASQUE session that last carried verified traffic (Smart SNI mid-session rotation). */
+    @Volatile var sessionSni: Pair<String, String>? = null
+
+    /**
+     * A running Aether session on [network] stopped carrying traffic (Smart failover moves on): its picked name goes
+     * on Smart SNI's cooldown there and the next start uses the next name. Returns the name rotated away, or null.
+     */
+    fun sessionLost(network: String?, now: Long = System.currentTimeMillis()): String? {
+        val (net, sni) = sessionSni ?: return null
+        if (network.isNullOrBlank() || net != network) return null
+        sessionSni = null
+        recordFailure(network, sni, now)
+        return sni
     }
 
     /** The remembered name for [network] (still fresh), or null. */

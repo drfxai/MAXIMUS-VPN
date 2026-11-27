@@ -784,9 +784,23 @@ object ConnectionEngineRunner {
         // Build 181 (3.2): Cloudflare filtered here: a ≤10 s pre-check picks the TLS name the MASQUE handshakes send
         // (a name the filter lets through); Aether still enforces its MASQUE certificate pins on its own handshake.
         // Only while the VPN service runs (it installs the protector): never from unit tests or without a phone network.
+        // Build 181 Phase 5 (C): a Smart (automatic, not the user's own run) start with no fresh clean WARP gateways here
+        // scans them (≤8 s) beside the SNI pre-check; the best join the remembered clean peers below.
+        val scanLines = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val warpScan = if (engine.id == AetherSidecar.ID && automatic && !manual && !relayOnly && AetherSniProbe.socketProtector != null &&
+                (cloudflareBlocked || onIrancell) && com.example.vpn.cleanip.SmartIpScan.needsScan(networkKey, com.example.vpn.cleanip.SmartIpScan.Kind.WARP))
+            java.util.concurrent.FutureTask(java.util.concurrent.Callable {
+                com.example.vpn.cleanip.SmartIpScan.scan(networkKey, com.example.vpn.smartsni.SmartSni.pick(networkKey),
+                    setOf(com.example.vpn.cleanip.SmartIpScan.Kind.WARP)) { scanLines += it }
+            }).also { Thread(it, "smart-ip-scan").apply { isDaemon = true }.start() } else null
         val masqueSni = if (AetherSniProbe.socketProtector != null && masqueSniPrecheck(engine.id, relayOnly, cloudflareBlocked, onIrancell,
                 ProfileExtras.read(profile).optString("carrier", "auto")))
             AetherSniProbe.precheck(networkKey) { line -> record("ladder", "sni-precheck", "INFO", line) } else null
+        if (warpScan != null) {
+            runCatching { warpScan.get(com.example.vpn.cleanip.SmartIpScan.BUDGET_MS + 1_000L, java.util.concurrent.TimeUnit.MILLISECONDS) }
+                .onFailure { warpScan.cancel(true); record("ladder", "clean-ip-scan", "SKIP", "no result within the scan budget") }
+            synchronized(scanLines) { scanLines.toList() }.forEach { record("ladder", "clean-ip-scan", "INFO", it) }
+        }
         // The IPv6 variants are made before the Irancell IPv4 pin (which only touches a family left on Auto).
         val carrierChoices = candidates(profile, ipv4Only = ipv4Only,
             firewall = com.example.vpn.connectivity.NetworkFirewalls.detect(networkKey).takeIf { automatic && ServerlessSidecar.handles(profile) }
@@ -794,7 +808,12 @@ object ConnectionEngineRunner {
             .let { operatorVariants(it, irancell = onIrancell, mci = onMci, cfV6 = cfV6) }
             .let { list -> if (onIrancell) list.map(::irancellIpv4) else list }
             .let { list -> if (masqueSni != null) list.map { withMasqueSni(it, masqueSni) } else list }
-        val cleanPeers = if (engine.id == AetherSidecar.ID && automatic) CleanH2PeerMemory.peers(networkKey) else emptyList()
+        val cleanPeers = if (engine.id == AetherSidecar.ID && automatic) CleanH2PeerMemory.peers(networkKey).let { saved ->
+            // Smart clean-IP scan results (answered a ClientHello, not yet verified) come after the verified ones.
+            if (!com.example.vpn.smartsni.SmartSniSettings.cleanIpScan) saved
+            else saved + com.example.vpn.cleanip.SmartIpScan.warpPeers(networkKey).filter { a -> saved.none { it.address == a } }
+                .take(2).map { CleanH2PeerMemory.Peer(it, at = System.currentTimeMillis()) }
+        } else emptyList()
         val cleanChoices = if (engine.id == AetherSidecar.ID && automatic)
             cleanH2Candidates(carrierChoices, cleanPeers, ipv4Only) + cleanUdpCandidates(carrierChoices, cleanPeers, ipv4Only) else emptyList()
         val baseChoices = cleanChoices + carrierChoices
@@ -942,6 +961,7 @@ object ConnectionEngineRunner {
                 val peer = e.optString(AetherSidecar.CLEAN_H2_PEER).ifBlank { e.optString(AetherSidecar.CLEAN_PEER) }
                 val carrier = e.optString("carrier")
                 CleanH2PeerMemory.forget(networkKey, peer, carrier)
+                com.example.vpn.cleanip.SmartIpScan.drop(networkKey, peer)
                 record(name, "clean-$carrier", "FORGET", "${CleanH2PeerMemory.masked(peer)} no longer carries $carrier here")
             } else BuiltinMethodMemory.recordFailure(cacheScope, name)
         }
