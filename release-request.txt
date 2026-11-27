@@ -1,3 +1,5 @@
+V1.0.4 signed Android rebuild after PR #297 (841cfe2eb5d909ed70f06b117329f9c7f425243d); version stays V1.0.4.
+Build 180 (#297): Build 179 device test fixes (Irancell) (N1-N13: manual pick check failure, hold, network results, labels, tests; Smart Connect prefers paths verified here, Shir o Khorshid CDN-fronted retry in the same pick, Unlock DNS control check over TCP/root; test updates; fix unescaped apostrophe in unlock_error_network_dns; hold doc).
 V1.0.4 signed Android rebuild after PR #296 (dac0796103ce2c4d723dd256d5242a05f263eb39); version stays V1.0.4.
 Build 179 (#296): Build 178 field-report fixes (stop origin + 2 s double-tap guard, Psiphon diagnostic notices always on, short cf=0 manual Aether check, Unlock DNS re-checks, per-network 24 h engine history in diagnostics) and priority engines (Psiphon CDN-fronted meek step, Shir o Khorshid CDN-fronted after a failed start, Aether WARP over IPv6 first with cf=0, new explicit picks Shir o Khorshid over Lantern and Aether over Lantern).
 V1.0.4 signed Android rebuild after PR #293 (09788cac7f537b9dd54261d1466dfc14a1d9ad63); version stays V1.0.4.
