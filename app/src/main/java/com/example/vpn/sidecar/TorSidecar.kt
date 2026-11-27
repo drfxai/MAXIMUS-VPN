@@ -58,8 +58,19 @@ class TorSidecar(
         }
         // A chained transport delegates DNS to its upstream hop. Direct WebTunnel needs the same
         // poison-resistant resolution as ordinary proxy profiles, while retaining its URL and SNI.
-        val bridges = if (context.upstreamSocks != null) saved else WebTunnelEndpoints.resolve(saved,
+        val resolved = if (context.upstreamSocks != null) saved else WebTunnelEndpoints.resolve(saved,
             privateDns = com.example.vpn.safety.OperatingModePolicy.of(context.mode).privateServerLookup)
+        // Build 181 (3.5): WebTunnel bridges that answer a verified TLS handshake go first (only while the VPN service
+        // runs, which installs the socket protector; a chained Tor reaches its bridges through the hop instead).
+        val bridges = if (context.upstreamSocks == null && WebTunnelEndpoints.socketProtector != null &&
+            resolved.any { it.startsWith("webtunnel ") }) {
+            val (ordered, answered) = WebTunnelEndpoints.precheck(resolved)
+            val total = resolved.count { it.startsWith("webtunnel ") }
+            EngineSignals.publish("tor", "WebTunnel pre-check: $answered of $total bridges answered TLS")
+            runCatching { com.example.xray.XrayLogManager.i("TOR", "WebTunnel pre-check: $answered of $total bridges answered TLS" +
+                if (answered == 0) "; trying all of them anyway" else "; those go first") }
+            ordered
+        } else resolved
         bridges.forEach { EngineSignals.publish("tor-bridge", it) }
         val transports = transportsOf(bridges)
         require(context.upstreamSocks == null || "snowflake" !in transports) {

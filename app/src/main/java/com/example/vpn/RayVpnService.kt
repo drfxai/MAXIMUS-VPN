@@ -381,6 +381,7 @@ class RayVpnService : VpnService() {
         com.example.panels.CleanIpOptimizer.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
         // Build 181: the Aether MASQUE SNI pre-check measures the phone's network, not this VPN.
         com.example.vpn.connections.AetherSniProbe.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
+        com.example.vpn.sidecar.WebTunnelEndpoints.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
         // The TLS record-slicing bridge dials the real server outside this VPN, like the probes.
         com.example.vpn.stealth.recordslice.RecordSliceBridges.protect = { socket -> vpnInterface == null || safeProtectSocket(socket) }
         com.example.vpn.stealth.recordslice.RecordSliceBridges.resolve = { host -> bridgeResolve(host) }
@@ -5825,6 +5826,7 @@ class RayVpnService : VpnService() {
         com.example.xray.RealDelayProbe.retryMemory.reset()
         com.example.panels.CleanIpOptimizer.socketProtector = null
         com.example.vpn.connections.AetherSniProbe.socketProtector = null
+        com.example.vpn.sidecar.WebTunnelEndpoints.socketProtector = null
         com.example.vpn.stealth.recordslice.RecordSliceBridges.protect = null
         com.example.vpn.stealth.recordslice.RecordSliceBridges.resolve = null
         com.example.vpn.stealth.recordslice.RecordSliceBridges.setMss = null
