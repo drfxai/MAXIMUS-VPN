@@ -11,7 +11,7 @@ import java.io.File
 object RadianceSidecar : SidecarEngine {
     override val id = "radiance"
     override val binary = "radiance"
-    const val REVISION = "aced057665da"
+    const val REVISION = "051b4de90773"
 
     override fun handles(profile: VlessProfile): Boolean =
         ProfileExtras.read(profile).optString("engine") == id

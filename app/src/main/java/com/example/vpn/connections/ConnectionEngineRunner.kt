@@ -169,17 +169,35 @@ object ConnectionEngineRunner {
             relayExitNode.isNullOrBlank() && !relayOnly && options.exitNode.isBlank() &&
             options.tor == "off" && options.psiphon == "off"
 
+    /**
+     * Build 181 (3.2): run the MASQUE SNI pre-check for this start: Aether, Cloudflare measured as filtered here (or
+     * Irancell), a carrier that can be MASQUE (auto, h2, h3), not the background relay retry. Pure.
+     */
+    fun masqueSniPrecheck(engineId: String, relayOnly: Boolean, cloudflareBlocked: Boolean, irancell: Boolean, carrier: String): Boolean =
+        engineId == AetherSidecar.ID && !relayOnly && (cloudflareBlocked || irancell) && carrier in listOf("auto", "h2", "h3")
+
+    /** [candidate] with the MASQUE TLS name [sni] when it is a MASQUE carrier (h2, h3); others unchanged. Pure. */
+    fun withMasqueSni(candidate: VlessProfile, sni: String): VlessProfile {
+        val e = org.json.JSONObject(candidate.extraSettings)
+        if (e.optString("carrier") !in listOf("h2", "h3") || !AetherSniProbe.validName(sni)) return candidate
+        return candidate.copy(extraSettings = e.put(AetherSidecar.MASQUE_SNI, sni).toString())
+    }
+
     /** [candidate] (an HTTP/2 carrier) as MASQUE HTTP/2 through the Lantern hop: no split hello, no remembered gateway. */
     fun lanternRelayed(candidate: VlessProfile): VlessProfile = candidate.copy(extraSettings =
         org.json.JSONObject(candidate.extraSettings).put("carrier", "h2").put(LanternRelayHop.EXTRA, true)
             .put(RELAY_FOLLOW_UP, true).apply {
                 remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP); remove("rescan")
-                remove(AetherSidecar.SNI_SPLIT); remove(AetherSidecar.CLEAN_H2_PEER)
+                remove(AetherSidecar.SNI_SPLIT); remove(AetherSidecar.CLEAN_H2_PEER); remove(AetherSidecar.MASQUE_SNI)
                 remove(BuiltinExitNode.EXIT_ENDPOINT); remove(BuiltinExitNode.EXIT_VARIANT)
             }.toString())
 
     /** A failed [H2_LANTERN] attempt on [network]: remembered ([LanternRelayMemory]) unless it is not about the network. */
     internal fun rememberLanternFailure(network: String?, reason: String?, record: (String, String, String, String) -> Unit) {
+        if (reason == LanternRelayHop.CLOUDFLARE_UNREACHABLE) LanternRelayHop.lastPreflight?.let {
+            record(H2_LANTERN, "lantern-hop", "NOTE", "Cloudflare preflight through Lantern: " +
+                it.tries.joinToString(", ").ifEmpty { "no try fitted the budget" })
+        }
         if (!LanternRelayMemory.counts(reason)) return
         LanternRelayMemory.record(network)
         record(H2_LANTERN, "lantern-hop", "REMEMBER", "WARP through Lantern failed here; not retried on this network " +
@@ -235,8 +253,25 @@ object ConnectionEngineRunner {
                   manual: Boolean = false): Boolean =
         engineId == AetherSidecar.ID && automatic && cloudflareBlocked && !ipv4Only && (!irancell || manual) && !mci && !relayOnly
 
-    /** The IPv6-first MASQUE H2 attempt of a manual Aether pick on Irancell; the whole run gets this on top of its check. */
+    /** The IPv6-first MASQUE H2 attempt of Aether on Irancell (Smart Connect). */
     const val IRANCELL_V6_MS = 45_000L
+
+    /**
+     * Build 180 device test (A2): Methods → Aether / WARP ran 102.5 s ("105s readiness budget") while the picker promises
+     * "up to 60 s": the IPv6-first lane added 45 s on top of the short check, on a phone with no IPv6 at all. The user's
+     * own pick now keeps the 60 s promise: the IPv6 lane shares that window, capped at this, and is skipped outright when
+     * the phone's link has no global IPv6 address ([noIpv6]).
+     */
+    const val MANUAL_V6_SHARE_MS = 20_000L
+
+    /** The window of one IPv6-first attempt: a share of the 60 s for the user's own pick, else [IRANCELL_V6_MS]. Pure. */
+    fun v6AttemptMs(manual: Boolean): Long = if (manual) MANUAL_V6_SHARE_MS else IRANCELL_V6_MS
+
+    /**
+     * IPv4-only for Aether's purposes: measured so, or the phone's own link has no global IPv6 address right now
+     * ([linkGlobalIpv6] false). Unknown (null) keeps IPv6 possible. Pure.
+     */
+    fun noIpv6(measuredIpv4Only: Boolean, linkGlobalIpv6: Boolean?): Boolean = measuredIpv4Only || linkGlobalIpv6 == false
 
     /** The stage line shown before a cf=0 manual Aether run starts. Pure. */
     fun cfFilteredManualNotice(budgetMs: Long): String =
@@ -534,6 +569,14 @@ object ConnectionEngineRunner {
     const val CLOUDFLARE_FILTERED_HINT = "Cloudflare TLS is filtered on this network: connect with Lantern or Serverless; " +
         "Smart Connect can also try saved servers, Psiphon or Tor"
 
+    /** The hint when the Lantern relay hop itself failed: "connect with Lantern" would point back at the pick. */
+    const val LANTERN_HOP_HINT = "Cloudflare TLS is filtered on this network and Lantern's exit did not reach Cloudflare " +
+        "this time: connect with Lantern alone, or Psiphon / Shir o Khorshid over Lantern; your next Aether over Lantern pick tries again"
+
+    /** [LANTERN_HOP_HINT] when an attempt failed in the Lantern hop, else [CLOUDFLARE_FILTERED_HINT]. Pure. */
+    fun filteredHint(attempts: List<String>): String =
+        if (attempts.any { a -> LanternRelayHop.REASONS.any { a.endsWith(it) } }) LANTERN_HOP_HINT else CLOUDFLARE_FILTERED_HINT
+
     /**
      * The order the methods are tried in: a method verified here first, then WireGuard when Cloudflare TLS
      * is filtered but UDP answers, then the rest, with methods that failed here in the last half hour last.
@@ -736,15 +779,41 @@ object ConnectionEngineRunner {
             manual = manual)
         if (engine.id == AetherSidecar.ID && automatic && manual && onIrancell && cloudflareBlocked && !relayOnly)
             record("ladder", "ipv6-first", if (cfV6) "START" else "SKIP",
-                if (cfV6) "MASQUE H2 over IPv6 first (up to ${IRANCELL_V6_MS / 1000}s), then the IPv4 carriers"
-                else "this link was measured IPv4-only")
+                if (cfV6) "MASQUE H2 over IPv6 first (up to ${v6AttemptMs(manual) / 1000}s), then the IPv4 carriers"
+                else "this link has no IPv6 (measured, or no global IPv6 address on the phone's network)")
+        // Build 181 (3.2): Cloudflare filtered here: a ≤10 s pre-check picks the TLS name the MASQUE handshakes send
+        // (a name the filter lets through); Aether still enforces its MASQUE certificate pins on its own handshake.
+        // Only while the VPN service runs (it installs the protector): never from unit tests or without a phone network.
+        // Build 181 Phase 5 (C): a Smart (automatic, not the user's own run) start with no fresh clean WARP gateways here
+        // scans them (≤8 s) beside the SNI pre-check; the best join the remembered clean peers below.
+        val scanLines = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val warpScan = if (engine.id == AetherSidecar.ID && automatic && !manual && !relayOnly && AetherSniProbe.socketProtector != null &&
+                (cloudflareBlocked || onIrancell) && com.example.vpn.cleanip.SmartIpScan.needsScan(networkKey, com.example.vpn.cleanip.SmartIpScan.Kind.WARP))
+            java.util.concurrent.FutureTask(java.util.concurrent.Callable {
+                com.example.vpn.cleanip.SmartIpScan.scan(networkKey, com.example.vpn.smartsni.SmartSni.pick(networkKey),
+                    setOf(com.example.vpn.cleanip.SmartIpScan.Kind.WARP)) { scanLines += it }
+            }).also { Thread(it, "smart-ip-scan").apply { isDaemon = true }.start() } else null
+        val masqueSni = if (AetherSniProbe.socketProtector != null && masqueSniPrecheck(engine.id, relayOnly, cloudflareBlocked, onIrancell,
+                ProfileExtras.read(profile).optString("carrier", "auto")))
+            AetherSniProbe.precheck(networkKey) { line -> record("ladder", "sni-precheck", "INFO", line) } else null
+        if (warpScan != null) {
+            runCatching { warpScan.get(com.example.vpn.cleanip.SmartIpScan.BUDGET_MS + 1_000L, java.util.concurrent.TimeUnit.MILLISECONDS) }
+                .onFailure { warpScan.cancel(true); record("ladder", "clean-ip-scan", "SKIP", "no result within the scan budget") }
+            synchronized(scanLines) { scanLines.toList() }.forEach { record("ladder", "clean-ip-scan", "INFO", it) }
+        }
         // The IPv6 variants are made before the Irancell IPv4 pin (which only touches a family left on Auto).
         val carrierChoices = candidates(profile, ipv4Only = ipv4Only,
             firewall = com.example.vpn.connectivity.NetworkFirewalls.detect(networkKey).takeIf { automatic && ServerlessSidecar.handles(profile) }
                 ?: com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER)
             .let { operatorVariants(it, irancell = onIrancell, mci = onMci, cfV6 = cfV6) }
             .let { list -> if (onIrancell) list.map(::irancellIpv4) else list }
-        val cleanPeers = if (engine.id == AetherSidecar.ID && automatic) CleanH2PeerMemory.peers(networkKey) else emptyList()
+            .let { list -> if (masqueSni != null) list.map { withMasqueSni(it, masqueSni) } else list }
+        val cleanPeers = if (engine.id == AetherSidecar.ID && automatic) CleanH2PeerMemory.peers(networkKey).let { saved ->
+            // Smart clean-IP scan results (answered a ClientHello, not yet verified) come after the verified ones.
+            if (!com.example.vpn.smartsni.SmartSniSettings.cleanIpScan) saved
+            else saved + com.example.vpn.cleanip.SmartIpScan.warpPeers(networkKey).filter { a -> saved.none { it.address == a } }
+                .take(2).map { CleanH2PeerMemory.Peer(it, at = System.currentTimeMillis()) }
+        } else emptyList()
         val cleanChoices = if (engine.id == AetherSidecar.ID && automatic)
             cleanH2Candidates(carrierChoices, cleanPeers, ipv4Only) + cleanUdpCandidates(carrierChoices, cleanPeers, ipv4Only) else emptyList()
         val baseChoices = cleanChoices + carrierChoices
@@ -845,8 +914,7 @@ object ConnectionEngineRunner {
         val irancellPlan = if (irancellHttp2) IrancellWarp.plan(ordered.map(::method), preferred, manual, v6First = cfV6)
             .map { name -> IrancellWarp.forAttempt(ordered.first { method(it) == name }, manual) } else emptyList()
         val cfManualBudget = cfFilteredManualBudgetMs(engine.id, manual, cloudflareBlocked, relayOnly).takeIf { !lanternOnly && !lanternPick }
-            // The IPv6 attempt gets its own window on top of the short check.
-            ?.let { if (cfV6) it + (if (onIrancell) IRANCELL_V6_MS else V6_FIRST_BUDGET_MS.getValue("wireguard")) else it }
+            // Build 181 (A2): the IPv6 attempt shares the short check's window, so the pick keeps its 60 s promise.
         if (cfManualBudget != null && !lanternOnly) {
             record(ladderKind, "cf-filtered", "WARN", cfFilteredManualNotice(cfManualBudget))
             com.example.vpn.diagnostics.EngineStages.record(engine.id, "cloudflare filtered", cfFilteredManualNotice(cfManualBudget))
@@ -883,11 +951,17 @@ object ConnectionEngineRunner {
         fun failed(name: String, candidate: VlessProfile) {
             // A fingerprint picked for Auto failed here: the next attempt on this network moves on to the next one.
             AetherFingerprintBook.record(networkKey, candidate, verified = false)
+            // Build 181: a picked MASQUE name that failed (another site's certificate breaks the pin) is skipped next time.
+            ProfileExtras.read(candidate).optString(AetherSidecar.MASQUE_SNI).takeIf { it.isNotBlank() }?.let {
+                AetherSniProbe.recordFailure(networkKey, it)
+                record(name, "sni", "FORGET", "MASQUE name $it failed here; the next pre-check skips it")
+            }
             if (name in CLEAN_METHODS) {
                 val e = ProfileExtras.read(candidate)
                 val peer = e.optString(AetherSidecar.CLEAN_H2_PEER).ifBlank { e.optString(AetherSidecar.CLEAN_PEER) }
                 val carrier = e.optString("carrier")
                 CleanH2PeerMemory.forget(networkKey, peer, carrier)
+                com.example.vpn.cleanip.SmartIpScan.drop(networkKey, peer)
                 record(name, "clean-$carrier", "FORGET", "${CleanH2PeerMemory.masked(peer)} no longer carries $carrier here")
             } else BuiltinMethodMemory.recordFailure(cacheScope, name)
         }
@@ -1125,6 +1199,8 @@ object ConnectionEngineRunner {
                     ?.let { "stopped " + it.joinToString(", ") }.orEmpty())
                 record(w.name, "https", "PASS")
                 AetherFingerprintBook.record(networkKey, w.candidate, verified = true)
+                ProfileExtras.read(w.candidate).optString(AetherSidecar.MASQUE_SNI).takeIf { it.isNotBlank() }
+                    ?.let { AetherSniProbe.recordSuccess(networkKey, it) }
                 if (engine.id == AetherSidecar.ID && automatic) rememberCleanH2(w.name, w.candidate, networkKey, raceStartedAt, ::record)
                 if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                 if (scope() == cacheScope) {
@@ -1234,7 +1310,8 @@ object ConnectionEngineRunner {
                 val lanternHop = LanternRelayHop.requested(extras)
                 val window = if (lanternHop) minOf(launch.readyTimeoutMs, LANTERN_ATTEMPT_MS)
                     else if (name in CLEAN_METHODS) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
-                    else if (automatic && extras.optBoolean(V6_FIRST) && onIrancell) minOf(launch.readyTimeoutMs, IRANCELL_V6_MS)
+                    else if (automatic && extras.optBoolean(V6_FIRST) && onIrancell) minOf(launch.readyTimeoutMs, v6AttemptMs(manual))
+                    else if (automatic && manual && extras.optBoolean(V6_FIRST)) minOf(launch.readyTimeoutMs, MANUAL_V6_SHARE_MS)
                     else if (automatic && extras.optBoolean(V6_FIRST) && carrier in V6_FIRST_BUDGET_MS)
                         minOf(launch.readyTimeoutMs, V6_FIRST_BUDGET_MS.getValue(carrier))
                     else if (irancellHttp2 && manual) IrancellWarp.manualAttemptMs(candidate)
@@ -1311,6 +1388,7 @@ object ConnectionEngineRunner {
                 if (result.traffic && process.isAlive) {
                     record(name, "https", "PASS")
                     AetherFingerprintBook.record(networkKey, candidate, verified = true)
+                    extras.optString(AetherSidecar.MASQUE_SNI).takeIf { it.isNotBlank() }?.let { AetherSniProbe.recordSuccess(networkKey, it) }
                     if (engine.id == AetherSidecar.ID && automatic) rememberCleanH2(name, candidate, networkKey, attemptStartedAt, ::record)
                     if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                     if (engine.id == AetherSidecar.ID && !extras.optBoolean(RELAY_FOLLOW_UP)) WarpDataPlaneHold.clear(networkKey)
@@ -1371,7 +1449,7 @@ object ConnectionEngineRunner {
         }
         if (engine.id == AetherSidecar.ID && automatic && handshakeWithoutData)
             BuiltinMethodMemory.recordWarpDataBlocked(cacheScope)
-        if (engine.id == AetherSidecar.ID && preferWireGuard) attempts += CLOUDFLARE_FILTERED_HINT
+        if (engine.id == AetherSidecar.ID && preferWireGuard) attempts += filteredHint(attempts)
         // Irancell's single attempt never ran WARP through a saved server: the background relay may, once one is verified.
         val relayDeferred = irancellHttp2 && relayEligible(engine.id, automatic, options, "saved-server") ||
             !relayOnly && relays.isEmpty() && (deferRelay || deferRelayToSavedServer(engine.id, automatic, options,

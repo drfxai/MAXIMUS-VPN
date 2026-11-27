@@ -58,7 +58,8 @@ object ConnectDeadline {
     )
 
     /** Profile ids whose exit is the phone's own ISP address. */
-    private val ISP_EXIT_IDS = setOf(BuiltinConnections.ConfigFreeMethod.SERVERLESS.id, BuiltinConnections.DIRECT)
+    private val ISP_EXIT_IDS = setOf(BuiltinConnections.ConfigFreeMethod.SERVERLESS.id, BuiltinConnections.DIRECT,
+        BuiltinConnections.ConfigFreeMethod.SERVERLESS_LANTERN.id)
 
     fun ispExit(profileId: String?): Boolean = profileId != null && profileId in ISP_EXIT_IDS
 

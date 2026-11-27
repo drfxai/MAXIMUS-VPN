@@ -19,7 +19,7 @@ import (
 
 func run(ctx context.Context) error {
     if len(os.Args) == 2 && os.Args[1] == "--version" {
-        fmt.Println("Radiance aced057665da")
+        fmt.Println("Radiance 051b4de90773")
         return nil
     }
     address, err := netip.ParseAddrPort(os.Getenv("RADIANCE_SOCKS_ADDRESS"))

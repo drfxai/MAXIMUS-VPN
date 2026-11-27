@@ -3,7 +3,7 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-revision=735cffbcb3030644c519b2934bf2e199f19bbc98
+revision=08fe3d33bbb116be09a6183d02609311b8b0c9e8
 source_dir="$(mktemp -d)"
 trap 'rm -rf "$source_dir"' EXIT
 

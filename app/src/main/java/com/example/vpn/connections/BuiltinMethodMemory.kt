@@ -5,6 +5,21 @@ object BuiltinMethodMemory {
     @Volatile var read: (String) -> String? = { null }
     @Volatile var write: (String, String?) -> Unit = { _, _ -> }
     @Volatile var network: () -> String? = { null }
+    /** Every stored key (installed by RayApplication), for [clearPrefixes]. */
+    @Volatile var keys: () -> Set<String> = { emptySet() }
+
+    /**
+     * Build 181: the per-network memory of Smart SNI, Smart ECH, the clean-IP scanner, the Aether MASQUE name and the
+     * personal server's ECH cooldown (Settings → "Learned network data" → Clear).
+     */
+    val SMART_PREFIXES = listOf("smartSni#", "smartEch#", "smartIp#", "aetherMasqueSni#", "personalEch#")
+
+    /** Removes every key starting with one of [prefixes]; returns how many were removed. */
+    fun clearPrefixes(prefixes: List<String> = SMART_PREFIXES): Int {
+        val doomed = keys().filter { k -> prefixes.any { k.startsWith(it) } }
+        doomed.forEach { write(it, null) }
+        return doomed.size
+    }
     const val TTL_MS = 6 * 60 * 60 * 1000L
 
     fun preferred(scope: String?, methods: List<String>, now: Long = System.currentTimeMillis()): String? {

@@ -73,6 +73,10 @@ object EngineStages {
         // A new Connect ("preparing") names only the engine it starts: build 177 logged "shirokhorshid · preparing"
         // for an Aether connect because the previous session's profile was still the fallback.
         val engine = engineOf(if (next.status == ConnectionStatus.PREPARING) next.activeProfile else next.activeProfile ?: previous.activeProfile)
+        // Build 180 (A5): the Connect tap publishes "preparing" on a copy of the last state, so it still names the previous
+        // session's engine ("aether/h2→tor · preparing" before an Aether over Lantern pick). That line is left out;
+        // begin() names the engine this Connect starts a moment later.
+        if (staleConnectTap(previous, next)) return
         if (next.status != previous.status) {
             val detail = when (next.status) {
                 in ERROR_STATUSES -> next.errorMessage ?: next.failureStage?.name
@@ -87,6 +91,15 @@ object EngineStages {
             record(engine, "recovery", next.recoveryStage, now = now)
         }
     }
+
+    /** A "preparing" state that still carries the previous session's profile unchanged. Pure. */
+    fun staleConnectTap(previous: ConnectionState, next: ConnectionState): Boolean =
+        next.status == ConnectionStatus.PREPARING && previous.status != ConnectionStatus.PREPARING &&
+            next.activeProfile != null && next.activeProfile === previous.activeProfile
+
+    /** The engine name a new Connect's timeline starts with: "smart" for Smart Connect, whose first engine is not known yet. */
+    fun connectLabel(smart: Boolean, profile: VlessProfile?): String = if (smart) SMART else engineOf(profile)
+    const val SMART = "smart"
 
     /** Words for a status, as the analytics screen lists it. */
     fun stageName(status: ConnectionStatus): String = when (status) {

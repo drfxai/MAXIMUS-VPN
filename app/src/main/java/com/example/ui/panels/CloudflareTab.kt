@@ -91,7 +91,7 @@ import com.example.panels.cloudflare.TokenTemplate
 import kotlinx.coroutines.delay
 
 /** Cloudflare tab palette: the Panels screen's navy with Cloudflare orange as the accent. */
-private object Cf {
+internal object Cf {
     val Orange = Color(0xFFF38020)
     val Amber = Color(0xFFFBAD41)
     val Card = Color(0xFF0C1526)
@@ -136,6 +136,9 @@ internal fun CloudflareTab(
     initialLoginExpanded: Boolean = false
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // Build 181 Phase 7: the user's own relay (Connect Cloudflare account) comes first; BPB panels follow.
+        CloudflareRelaySection()
+
         CloudflareHero(
             panelCount = panels.size,
             tokenReady = token.isNotBlank(),
@@ -222,7 +225,7 @@ private fun SmartDomainsEntry(onOpen: () -> Unit) {
 }
 
 @Composable
-private fun CfCard(modifier: Modifier = Modifier, borderColor: Color = Cf.CardBorder, content: @Composable ColumnScope.() -> Unit) {
+internal fun CfCard(modifier: Modifier = Modifier, borderColor: Color = Cf.CardBorder, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -280,7 +283,7 @@ private fun CloudflareHero(panelCount: Int, tokenReady: Boolean, busy: Boolean) 
 }
 
 @Composable
-private fun StatusChip(text: String, color: Color) {
+internal fun StatusChip(text: String, color: Color) {
     Row(
         modifier = Modifier
             .clip(CircleShape)
@@ -523,7 +526,7 @@ private val CfStepColors = StepColors(
 
 /** A full-width orange action: filled while it is the next step, outlined after. */
 @Composable
-private fun CfOrangeButton(text: String, icon: ImageVector, filled: Boolean, onClick: () -> Unit) {
+internal fun CfOrangeButton(text: String, icon: ImageVector, filled: Boolean, onClick: () -> Unit) {
     if (filled) {
         Button(
             onClick = onClick,
@@ -551,7 +554,7 @@ private fun CfOrangeButton(text: String, icon: ImageVector, filled: Boolean, onC
 }
 
 @Composable
-private fun StepBadge(number: Int, done: Boolean, active: Boolean) {
+internal fun StepBadge(number: Int, done: Boolean, active: Boolean) {
     Box(
         modifier = Modifier
             .size(28.dp)
@@ -627,7 +630,7 @@ private fun StepRow(
 }
 
 @Composable
-private fun CfField(
+internal fun CfField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,

@@ -318,5 +318,82 @@ async fn maximus_h2_tcp_connect(peer: SocketAddr) -> std::io::Result<TcpStream> 
     let _ = socket.set_recv_buffer_size(MAXIMUS_H2_SOCKET_BUFFER);
     socket.connect(peer).await
 }''')
+# Build 180 device test (A7): a gateway scan only said "completed without a verified endpoint". Count the endpoints a
+# scan tries and the stage each failed probe stopped at (TCP connect, TLS/pin, HTTP/2 CONNECT, timeout), and name the
+# SNI and address family, as fixed MAXIMUS_AETHER_SCAN lines. Counts and stage words only: no endpoint address or key.
+replace('prober.rs', '    let ironclad = mode == ScanMode::Ironclad;\n', r"""    maximus_scan_reset();
+    eprintln!("MAXIMUS_AETHER_SCAN:start candidates={} family={} sni={}", candidates.len(), effective_ip.label(),
+        maximus_sni_label(&probe.sni));
+    let ironclad = mode == ScanMode::Ironclad;
+""")
+replace('prober.rs', '        None => Err(AetherError::NoCleanEndpoint),\n', r"""        None => {
+            maximus_scan_report("none");
+            Err(AetherError::NoCleanEndpoint)
+        }
+""")
+replace('prober.rs', '            log::info!("[+] best gateway {}:{} rtt={:?}", pr.ip, pr.port, pr.rtt);\n',
+        '            log::info!("[+] best gateway {}:{} rtt={:?}", pr.ip, pr.port, pr.rtt);\n            maximus_scan_report("found");\n')
+replace('prober.rs', 'log::trace!("h2 probe {ip}:{port} -> {e}");', 'maximus_note_fail(&e);\n                log::trace!("h2 probe {ip}:{port} -> {e}");')
+replace('prober.rs', 'log::trace!("probe {ip}:{port} -> {e}");', 'maximus_note_fail(&e);\n            log::trace!("probe {ip}:{port} -> {e}");')
+replace('prober.rs', 'log::trace!("[-] ironclad {ip}:{port} failed real http check: {e}");',
+        'maximus_note_fail(&e);\n                log::trace!("[-] ironclad {ip}:{port} failed real http check: {e}");')
+with (src / 'prober.rs').open('a') as output:
+    output.write(r"""
+// MAXIMUS: per-scan failure stage counters (see harden-aether.py, Build 181 A7).
+static MAXIMUS_FAIL_TCP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static MAXIMUS_FAIL_TLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static MAXIMUS_FAIL_H2: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static MAXIMUS_FAIL_TIMEOUT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static MAXIMUS_FAIL_OTHER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn maximus_scan_reset() {
+    for counter in [&MAXIMUS_FAIL_TCP, &MAXIMUS_FAIL_TLS, &MAXIMUS_FAIL_H2, &MAXIMUS_FAIL_TIMEOUT, &MAXIMUS_FAIL_OTHER] {
+        counter.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The stage a failed probe stopped at, from its error text: 0 TCP, 1 TLS or pin, 2 HTTP/2 or MASQUE, 3 timeout, 4 other.
+fn maximus_fail_stage(text: &str) -> usize {
+    let t = text.to_ascii_lowercase();
+    if t.contains("timed out") || t.contains("timeout") || t.contains("deadline") || t.contains("elapsed") {
+        3
+    } else if t.contains("pin") || t.contains("certificate") || t.contains("tls") || t.contains("handshake") || t.contains("ssl") {
+        1
+    } else if t.contains("refused") || t.contains("unreachable") || t.contains("reset") || t.contains("connect") || t.contains("broken pipe") {
+        0
+    } else if t.contains("status") || t.contains("h2") || t.contains("http") || t.contains("capsule") || t.contains("stream") {
+        2
+    } else {
+        4
+    }
+}
+
+fn maximus_note_fail<E: std::fmt::Display>(error: &E) {
+    let counter = match maximus_fail_stage(&error.to_string()) {
+        0 => &MAXIMUS_FAIL_TCP,
+        1 => &MAXIMUS_FAIL_TLS,
+        2 => &MAXIMUS_FAIL_H2,
+        3 => &MAXIMUS_FAIL_TIMEOUT,
+        _ => &MAXIMUS_FAIL_OTHER,
+    };
+    counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The SNI as a label: a DNS name is shown, anything else (unexpected) only as "custom".
+fn maximus_sni_label(sni: &str) -> String {
+    if !sni.is_empty() && sni.len() <= 253 && sni.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
+        sni.to_string()
+    } else {
+        "custom".to_string()
+    }
+}
+
+fn maximus_scan_report(result: &str) {
+    let load = |c: &std::sync::atomic::AtomicUsize| c.load(std::sync::atomic::Ordering::Relaxed);
+    eprintln!("MAXIMUS_AETHER_SCAN:result={} failed_tcp={} failed_tls={} failed_h2={} failed_timeout={} failed_other={}",
+        result, load(&MAXIMUS_FAIL_TCP), load(&MAXIMUS_FAIL_TLS), load(&MAXIMUS_FAIL_H2),
+        load(&MAXIMUS_FAIL_TIMEOUT), load(&MAXIMUS_FAIL_OTHER));
+}
+""")
 (root / 'MAXIMUS_POLICY').write_text('WARP API: CA + hostname on every lane (direct, OOB, relay); MASQUE: mandatory upstream SPKI pins\n')
 print('Aether authenticated registration and gateway pin policy applied')

@@ -147,7 +147,12 @@ class ThreeXUiConfigGenerator(
         customUuid: String? = null,
         customRemark: String? = null,
         customHostOrSni: String? = null,
-        customPath: String? = null
+        customPath: String? = null,
+        /**
+         * Build 181 Phase 6: a TLS inbound may use the self-signed panel certificate when clients pin it (its SHA-256 is
+         * recorded at install time). Verified TLS by pinning, the same as Hysteria2; no certificate check is skipped.
+         */
+        allowPinnedPanelCert: Boolean = false
     ): InboundGenerationResult {
         require(panel.host.isNotBlank() && (panel.password.isNotBlank() || panel.apiToken.isNotBlank())) {
             "A configured 3X-UI server panel with valid access details is required."
@@ -197,13 +202,16 @@ class ThreeXUiConfigGenerator(
                     "Use Reality (recommended) or None behind a CDN, or install a certificate in 3X-UI first."
             }
             // The self-signed certificate Maximus creates for the panel itself is only trusted by
-            // pinning; VPN clients would reject it, so a TLS inbound built on it never connects.
-            require(!cert.first.contains(SELF_SIGNED_CERT_DIR)) {
+            // pinning; VPN clients would reject it, so a TLS inbound built on it never connects
+            // unless the client pins it (allowPinnedPanelCert, with the recorded fingerprint).
+            require(!cert.first.contains(SELF_SIGNED_CERT_DIR) ||
+                (allowPinnedPanelCert && PinnedTls.normalize(panel.certSha256).matches(Regex("[0-9a-f]{64}")))) {
                 "This server only has the self-signed panel certificate, which VPN clients do not trust. " +
                     "Use Reality (recommended) or None behind a CDN, or install a domain certificate in 3X-UI first."
             }
             cert
         } else null
+        val tlsPin = if (tlsCert != null && tlsCert.first.contains(SELF_SIGNED_CERT_DIR)) PinnedTls.normalize(panel.certSha256) else ""
 
         val candidates = freePorts(api, panel, protocol, effectiveSecurity, customPort)
 
@@ -307,6 +315,8 @@ class ThreeXUiConfigGenerator(
                                 .put("certificateFile", tlsCert?.first.orEmpty())
                                 .put("keyFile", tlsCert?.second.orEmpty())
                         ))
+                        // The panel's share links carry the pin (pcs) for a pinned self-signed certificate.
+                        .apply { if (tlsPin.isNotBlank()) put("settings", JSONObject().put("pinnedPeerCertSha256", tlsPin).put("fingerprint", "chrome")) }
                 )
                 ThreeXUiSecurity.NONE -> Unit
             }
@@ -365,6 +375,7 @@ class ThreeXUiConfigGenerator(
                 fingerprint = if (effectiveSecurity != ThreeXUiSecurity.NONE) "chrome" else "",
                 publicKey = realityPublic,
                 shortId = realityShortId,
+                pinnedPeerCertSha256 = tlsPin,
                 spiderX = if (effectiveSecurity == ThreeXUiSecurity.REALITY) "/" else "",
                 protocolType = ProtocolType.VLESS,
                 profileType = ProfileType.VLESS,
@@ -745,7 +756,7 @@ class ThreeXUiConfigGenerator(
 
         const val DEFAULT_REALITY_SNI = "www.microsoft.com"
         /** Where PanelProvisioner stores the pinned self-signed panel certificate. */
-        private const val SELF_SIGNED_CERT_DIR = "/etc/x-ui/maximus-tls/"
+        internal const val SELF_SIGNED_CERT_DIR = "/etc/x-ui/maximus-tls/"
         private const val MAX_PORT_ATTEMPTS = 4
         /** Transports Cloudflare's CDN can carry, so they get CDN ports and a path/host in the link. */
         private val CDN_PROTOCOLS = setOf(ThreeXUiProtocol.WEBSOCKET, ThreeXUiProtocol.XHTTP, ThreeXUiProtocol.HTTPUPGRADE)

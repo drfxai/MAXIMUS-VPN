@@ -45,13 +45,16 @@ fun ShirokhorshidSettingsDialog(onDismiss: () -> Unit) {
     var cdn by remember { mutableStateOf(initial.cdnFronting) }
     var edgesText by remember { mutableStateOf(initial.edges.joinToString("\n")) }
     var avoidIran by remember { mutableStateOf(initial.avoidIranConduits) }
+    var pairingText by remember { mutableStateOf(initial.personalPairing) }
 
     val regionCode = region.trim().uppercase()
     val regionOk = com.example.vpn.sidecar.PsiphonSidecar.validRegion(regionCode)
     val edges = ShirokhorshidSidecar.parseEdges(edgesText)
     val badEdge = edges.firstOrNull { !ShirokhorshidSidecar.validEdge(it) }
-    val options = ShirokhorshidSidecar.Options(mode, regionCode, cdn, edges.take(ShirokhorshidSidecar.MAX_EDGES), avoidIran)
-    val valid = regionOk && badEdge == null && options.problem() == null
+    val pairing = if (pairingText.isBlank()) "" else ShirokhorshidSidecar.parsePairing(pairingText)
+    val options = ShirokhorshidSidecar.Options(mode, regionCode, cdn, edges.take(ShirokhorshidSidecar.MAX_EDGES), avoidIran,
+        personalPairing = pairing.orEmpty())
+    val valid = regionOk && badEdge == null && pairing != null && options.problem() == null
     val colors = MaterialTheme.colorScheme
 
     AlertDialog(
@@ -113,6 +116,19 @@ fun ShirokhorshidSettingsDialog(onDismiss: () -> Unit) {
                 SwitchRow(stringResource(R.string.ui_shirokhorshid_avoid_iran),
                     stringResource(R.string.ui_shirokhorshid_avoid_iran_detail),
                     avoidIran, enabled = mode != ShirokhorshidSidecar.Mode.DIRECT) { avoidIran = it }
+                // Build 181: a friend's Conduit personal pairing code (InproxyClientPersonalCompartmentID).
+                OutlinedTextField(
+                    value = pairingText,
+                    onValueChange = { pairingText = it.take(2_000) },
+                    label = { Text(stringResource(R.string.ui_shirokhorshid_pairing)) },
+                    supportingText = {
+                        Text(stringResource(if (pairing == null) R.string.ui_shirokhorshid_pairing_invalid
+                            else R.string.ui_shirokhorshid_pairing_hint))
+                    },
+                    isError = pairing == null,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("sok_pairing")
+                )
             }
         },
         confirmButton = {

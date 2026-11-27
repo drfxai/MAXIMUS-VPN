@@ -129,5 +129,8 @@ internal object ConfigFreeMethodText {
         ConfigFreeMethod.AETHER_TOR -> R.string.picker_desc_aether_tor
         ConfigFreeMethod.SHIROKHORSHID_RADIANCE -> R.string.picker_desc_shirokhorshid_radiance
         ConfigFreeMethod.AETHER_LANTERN -> R.string.picker_desc_aether_lantern
+        ConfigFreeMethod.SERVERLESS_LANTERN -> R.string.picker_desc_serverless_lantern
+        ConfigFreeMethod.PERSONAL_ECH -> R.string.picker_desc_personal_ech
+        ConfigFreeMethod.CLOUDFLARE_RELAY -> R.string.picker_desc_cloudflare_relay
     }
 }

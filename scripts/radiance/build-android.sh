@@ -8,7 +8,7 @@ export GOTOOLCHAIN=go1.26.10
 export CXX="${CC%clang}clang++"
 test -x "$CXX"
 
-rev=aced057665daaa4821e9f45e6133257969f4a8e7
+rev=051b4de9077337cd81fea5b6c1ab50e602959387
 source_dir="$(mktemp -d)"
 trap 'rm -rf "$source_dir"' EXIT
 git -C "$source_dir" init -q

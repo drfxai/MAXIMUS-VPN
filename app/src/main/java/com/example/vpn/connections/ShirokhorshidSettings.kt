@@ -13,6 +13,7 @@ object ShirokhorshidSettings {
     private const val CDN = "cdn"
     private const val EDGES = "edges"
     private const val AVOID_IR = "avoidIranConduits"
+    private const val PAIRING = "personalPairing"
 
     fun load(context: Context): ShirokhorshidSidecar.Options =
         read(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))
@@ -29,7 +30,8 @@ object ShirokhorshidSettings {
             cdnFronting = prefs.getBoolean(CDN, true),
             edges = (0 until edges.length()).map { edges.optString(it) }.filter { ShirokhorshidSidecar.validEdge(it) }
                 .distinct().take(ShirokhorshidSidecar.MAX_EDGES),
-            avoidIranConduits = prefs.getBoolean(AVOID_IR, true)
+            avoidIranConduits = prefs.getBoolean(AVOID_IR, true),
+            personalPairing = prefs.getString(PAIRING, "").orEmpty().trim().takeIf { ShirokhorshidSidecar.validPairingId(it) }.orEmpty()
         ).let { if (it.problem() == null) it else it.copy(region = "") }
     }.getOrDefault(ShirokhorshidSidecar.Options())
 
@@ -41,6 +43,7 @@ object ShirokhorshidSettings {
             .putString(EDGES, JSONArray(options.edges.filter { ShirokhorshidSidecar.validEdge(it) }.distinct()
                 .take(ShirokhorshidSidecar.MAX_EDGES)).toString())
             .putBoolean(AVOID_IR, options.avoidIranConduits)
+            .putString(PAIRING, options.personalPairing.takeIf { ShirokhorshidSidecar.validPairingId(it) }.orEmpty())
             .apply()
     }
 }

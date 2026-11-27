@@ -117,10 +117,34 @@ fun HomeScreen(
     onConfigureConnectionEngines: () -> Unit = {},
     onConfigureAether: () -> Unit = {},
     onConfigureChain: () -> Unit = {},
-    onOpenAnalytics: () -> Unit = {}
+    onOpenAnalytics: () -> Unit = {},
+    onOpenCloudflareRelay: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val connectionState by vpnViewModel.connectionState.collectAsStateWithLifecycle()
+    // Build 181 Phase 7: once, after the first verified connection, users without a server of their own and without a
+    // relay are offered their own free Cloudflare relay (bottom sheet; also reachable from Panels → Cloudflare).
+    var showRelayPrompt by rememberSaveable { mutableStateOf(false) }
+    val connectedNow = connectionState.status == ConnectionStatus.CONNECTED
+    LaunchedEffect(connectedNow) {
+        if (!connectedNow) return@LaunchedEffect
+        val show = withContext(Dispatchers.IO) {
+            runCatching {
+                val store = com.example.panels.cloudflare.relay.CloudflareRelayStore(context)
+                val ownServer = com.example.panels.servers.ServerStore(context).load().isNotEmpty() ||
+                    com.example.panels.PanelStore(context).load().isNotEmpty()
+                val ok = com.example.panels.cloudflare.relay.CloudflareRelay.shouldPrompt(store.promptShown, connectedVerified = true,
+                    hasOwnServer = ownServer, hasRelay = store.relay() != null)
+                if (ok) store.promptShown = true
+                ok
+            }.getOrDefault(false)
+        }
+        if (show) showRelayPrompt = true
+    }
+    if (showRelayPrompt) com.example.ui.panels.CloudflareRelayPromptSheet(
+        onConnect = { showRelayPrompt = false; onOpenCloudflareRelay() },
+        onLater = { showRelayPrompt = false }
+    )
     val selectedProfile by vpnViewModel.selectedProfile.collectAsStateWithLifecycle()
     val activeProfile = connectionState.activeProfile ?: selectedProfile
     val smartRecommendation by vpnViewModel.smartRecommendation.collectAsStateWithLifecycle()
@@ -1524,10 +1548,12 @@ private fun ConfigFreeMethodPicker(
                                 listOf(ConfigFreeMethod.AETHER_PSIPHON, ConfigFreeMethod.AETHER_TOR, ConfigFreeMethod.AETHER_LANTERN))
                         ) else listOf(
                             Triple(R.string.ui_picker_direct_engines, R.string.ui_picker_direct_engines_hint,
-                                listOf(ConfigFreeMethod.AETHER_WARP, ConfigFreeMethod.SERVERLESS)),
+                                listOf(ConfigFreeMethod.AETHER_WARP, ConfigFreeMethod.SERVERLESS, ConfigFreeMethod.SERVERLESS_LANTERN,
+                                    ConfigFreeMethod.PERSONAL_ECH)),
                             Triple(R.string.ui_picker_relay_networks, R.string.ui_picker_relay_networks_hint,
                                 ConfigFreeMethod.entries.filter { it.aetherTransport == null &&
-                                    it != ConfigFreeMethod.AETHER_WARP && it != ConfigFreeMethod.SERVERLESS })
+                                    it != ConfigFreeMethod.AETHER_WARP && it != ConfigFreeMethod.SERVERLESS &&
+                                    it != ConfigFreeMethod.SERVERLESS_LANTERN && it != ConfigFreeMethod.PERSONAL_ECH })
                         )
                         // Anything in the catalogue that no group names still gets a row, at the end of its tab.
                         val grouped = groups.flatMap { it.third }.toSet()
@@ -1583,8 +1609,11 @@ private fun ConfigFreeMethod.pickerIcon(): androidx.compose.ui.graphics.vector.I
     ConfigFreeMethod.TOR_SNOWFLAKE -> Icons.Rounded.Opacity
     ConfigFreeMethod.PSIPHON -> Icons.Filled.Shield
     ConfigFreeMethod.SHIROKHORSHID -> Icons.Filled.WbSunny
-    ConfigFreeMethod.PSIPHON_RADIANCE, ConfigFreeMethod.SHIROKHORSHID_RADIANCE, ConfigFreeMethod.AETHER_LANTERN -> Icons.Rounded.Layers
+    ConfigFreeMethod.PSIPHON_RADIANCE, ConfigFreeMethod.SHIROKHORSHID_RADIANCE, ConfigFreeMethod.AETHER_LANTERN,
+    ConfigFreeMethod.SERVERLESS_LANTERN -> Icons.Rounded.Layers
     ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
+    ConfigFreeMethod.PERSONAL_ECH -> Icons.Filled.Shield
+    ConfigFreeMethod.CLOUDFLARE_RELAY -> Icons.Filled.Cloud
     ConfigFreeMethod.AETHER_GOOL -> Icons.Rounded.CropFree
     ConfigFreeMethod.AETHER_GOOL_CLASSIC, ConfigFreeMethod.AETHER_MIM -> Icons.Rounded.Layers
     ConfigFreeMethod.AETHER_PSIPHON -> Icons.Filled.Shield
