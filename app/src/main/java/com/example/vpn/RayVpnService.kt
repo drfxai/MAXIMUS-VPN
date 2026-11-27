@@ -379,6 +379,8 @@ class RayVpnService : VpnService() {
         com.example.xray.RealDelayProbe.skipUselessRetry = true
         // Clean-IP scans and checks measure the phone's network, not this VPN (or its blocking interface).
         com.example.panels.CleanIpOptimizer.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
+        // Build 181: the Aether MASQUE SNI pre-check measures the phone's network, not this VPN.
+        com.example.vpn.connections.AetherSniProbe.socketProtector = { socket -> vpnInterface == null || safeProtectSocket(socket) }
         // The TLS record-slicing bridge dials the real server outside this VPN, like the probes.
         com.example.vpn.stealth.recordslice.RecordSliceBridges.protect = { socket -> vpnInterface == null || safeProtectSocket(socket) }
         com.example.vpn.stealth.recordslice.RecordSliceBridges.resolve = { host -> bridgeResolve(host) }
@@ -749,6 +751,17 @@ class RayVpnService : VpnService() {
             ?.takeIf { com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
     }.getOrNull()
 
+    /** What this network's latest measurement says, for [com.example.vpn.smart.SmartTiers] (only a fresh one counts). */
+    private fun smartTierSignals(network: String?): com.example.vpn.smart.SmartTiers.Signals = runCatching {
+        val now = System.currentTimeMillis()
+        val last = com.example.vpn.smart.NetworkCapabilityDetector.last
+        val fresh = network != null && com.example.vpn.smart.SmartConnectPlan.freshReading(last, network, now) != null
+        val cf = network != null && com.example.vpn.connections.CloudflareFilterMemory.knownNow(network,
+            freshFiltered = com.example.vpn.smart.SmartConnectPlan.cloudflareBlocked(last, network, now),
+            freshReachable = fresh && last?.cloudflareReachable == true, now = now)
+        com.example.vpn.smart.SmartTiers.signals(last.takeIf { fresh }, network, cf)
+    }.getOrDefault(com.example.vpn.smart.SmartTiers.Signals())
+
     private suspend fun onConnectDeadline(ticket: Long, state: ConnectionState, budgetMs: Long) {
         if (!lifecycle.isCurrent(ticket) || !StopFence.admits(ticket)) return
         val profile = state.activeProfile
@@ -774,13 +787,19 @@ class RayVpnService : VpnService() {
         val verified = if (manualPick) null else network?.let { net ->
             runCatching { networkMemory.winners.best(net, tried) { id -> !ConnectDeadline.ispExit(id) }?.profileId }.getOrNull()
         }
+        // Build 181 (3.6): Smart Connect's next built-ins follow how hard this network is filtered (SmartTiers).
+        val tierSignals = smartTierSignals(network)
+        val tier = com.example.vpn.smart.SmartTiers.tier(tierSignals)
+        val tiered = com.example.vpn.smart.SmartTiers.candidates(tierSignals, ConnectDeadline.CANDIDATES)
+        if (!manualPick) com.example.vpn.diagnostics.EngineStages.record("smart", "tier",
+            "${tier.title}: next ${tiered.filter { it !in tried }.take(3).joinToString()}")
         val runnable = if (manualPick) emptySet() else
-            (ConnectDeadline.CANDIDATES + listOfNotNull(verified)).filter { fallbackProfile(it) != null }.toSet()
+            (tiered + listOfNotNull(verified)).filter { fallbackProfile(it) != null }.toSet()
         // The user's own pick (not Smart Connect) ends here with a reason: never another engine or chain.
         val decision = ConnectDeadline.decide(
             stopped = !lifecycle.isCurrent(ticket) || !StopFence.admits(ticket), exitLocked = locked,
             fallbacksSoFar = deadlineFallbacks, tried = tried, verifiedHere = verified, runnable = { it in runnable },
-            manualPick = manualPick)
+            candidates = tiered, manualPick = manualPick)
         when (decision) {
             ConnectDeadline.Decision.Stopped -> return
             is ConnectDeadline.Decision.Fallback -> {
@@ -814,6 +833,12 @@ class RayVpnService : VpnService() {
                 val message = getString(com.example.R.string.connect_deadline_failed, name, seconds, why,
                     failureNotice(afterFailedConnect()))
                 XrayLogManager.e("VPN", "[DEADLINE] $engine carried no verified traffic within ${seconds}s; stopping (${decision.reason}).")
+                // Build 181: a near-shutdown network gets a clear status instead of a bare failure.
+                if (!manualPick && tier == com.example.vpn.smart.SmartTiers.Tier.NEAR_SHUTDOWN) {
+                    XrayLogManager.w("VPN", "[SMART] ${com.example.vpn.smart.SmartTiers.nearShutdownStatus()}")
+                    com.example.vpn.diagnostics.EngineStages.record("smart", "near-shutdown",
+                        com.example.vpn.smart.SmartTiers.nearShutdownStatus(), error = true)
+                }
                 connectJob?.cancel()
                 com.example.vpn.sidecar.EngineReaper.stopAll()
                 com.example.vpn.sidecar.EngineHandoff.clear()
@@ -2940,7 +2965,7 @@ class RayVpnService : VpnService() {
         verifiedFallback(network, exclude)?.first?.takeIf {
             !ConnectDeadline.ispExit(it.id) && !com.example.vpn.sidecar.ServerlessSidecar.handles(it)
         }?.let { return it }
-        for (id in ConnectDeadline.CANDIDATES) {
+        for (id in com.example.vpn.smart.SmartTiers.candidates(smartTierSignals(network), ConnectDeadline.CANDIDATES)) {
             if (id in exclude) continue
             val p = fallbackProfile(id) ?: continue
             if (p.id in exclude || com.example.vpn.sidecar.ServerlessSidecar.handles(p)) continue
@@ -5796,6 +5821,7 @@ class RayVpnService : VpnService() {
         com.example.xray.RealDelayProbe.skipUselessRetry = false
         com.example.xray.RealDelayProbe.retryMemory.reset()
         com.example.panels.CleanIpOptimizer.socketProtector = null
+        com.example.vpn.connections.AetherSniProbe.socketProtector = null
         com.example.vpn.stealth.recordslice.RecordSliceBridges.protect = null
         com.example.vpn.stealth.recordslice.RecordSliceBridges.resolve = null
         com.example.vpn.stealth.recordslice.RecordSliceBridges.setMss = null
