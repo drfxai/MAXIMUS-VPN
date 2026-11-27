@@ -227,13 +227,14 @@ object AetherSniProbe {
             } catch (e: Exception) {
                 return done(Outcome.TCP, e.javaClass.simpleName)
             }
-            val context = SSLContext.getInstance("TLSv1.3").apply { init(null, arrayOf(trust), SecureRandom()) }
+            val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), SecureRandom()) }
             val ssl = context.socketFactory.createSocket(raw, c.sni, c.port, true) as SSLSocket
             ssl.soTimeout = timeoutMs
             ssl.sslParameters = ssl.sslParameters.apply {
                 serverNames = listOf(SNIHostName(c.sni))
-                protocols = arrayOf("TLSv1.3")
-                applicationProtocols = arrayOf("h2")
+                // TLS 1.3 like MASQUE where the phone has it (Android 10+); older phones use their default.
+                if ("TLSv1.3" in ssl.supportedProtocols) protocols = arrayOf("TLSv1.3")
+                if (android.os.Build.VERSION.SDK_INT >= 29) applicationProtocols = arrayOf("h2")
             }
             try {
                 ssl.startHandshake()
