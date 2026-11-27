@@ -206,6 +206,60 @@ class XuiApiClient(
         return null
     }
 
+    // ---- Build 181 Phase 6: ECH on the user's own server ---------------------------------------------------------
+
+    /**
+     * A new ECH key pair made by the panel's own Xray (`xray tls ech --serverName [outer]`): (echServerKeys,
+     * echConfigList), both base64. The private half is in echServerKeys: never log the result.
+     */
+    fun newEchCert(outer: String): Pair<String, String> {
+        val res = request("POST", "/panel/api/server/getNewEchCert", form = mapOf("sni" to outer))
+        if (!res.optBoolean("success", false))
+            throw XuiApiException(res.optString("msg").ifBlank { "This 3X-UI version cannot create ECH keys; update the panel" })
+        val obj = res.optJSONObject("obj") ?: throw XuiApiException("3X-UI did not return ECH keys")
+        val keys = obj.optString("echServerKeys")
+        val list = obj.optString("echConfigList")
+        if (keys.isBlank() || list.isBlank()) throw XuiApiException("3X-UI returned empty ECH keys")
+        return keys.trim() to list.trim()
+    }
+
+    /**
+     * Saves [inbound] (as read from [listInbounds], with changes) under its id. 3X-UI binds stringified settings; the
+     * nested form is tried when the panel rejects that shape.
+     */
+    fun updateInbound(id: Int, inbound: JSONObject) {
+        require(id > 0) { "Unknown inbound" }
+        var firstError: String? = null
+        for (stringified in listOf(true, false)) {
+            val res = try {
+                request("POST", "/panel/api/inbounds/update/$id", com.example.panels.servers.ech.ServerEch.updatePayload(inbound, stringified))
+            } catch (e: XuiApiException) {
+                if (e.httpCode == 400 || e.httpCode == 422) { if (firstError == null) firstError = e.message; continue }
+                throw e
+            }
+            if (res.optBoolean("success", false)) return
+            if (firstError == null) firstError = res.optString("msg").ifBlank { "3X-UI rejected the inbound change" }
+        }
+        throw XuiApiException(firstError ?: "3X-UI rejected the inbound change")
+    }
+
+    /** The inbound with [id] as the panel stores it now, or null. */
+    fun inbound(id: Int): JSONObject? {
+        val list = listInbounds()
+        return (0 until list.length()).mapNotNull { list.optJSONObject(it) }.firstOrNull { it.optInt("id") == id }
+    }
+
+    /** Xray's state on the server ("running", "stop", "error"), or "" when the panel does not say. */
+    fun xrayState(): String = runCatching {
+        request("GET", "/panel/api/server/status").optJSONObject("obj")?.optJSONObject("xray")?.optString("state").orEmpty()
+    }.getOrDefault("")
+
+    /** Restarts Xray on the server so a changed inbound takes effect. */
+    fun restartXray() {
+        val res = request("POST", "/panel/api/server/restartXrayService", JSONObject())
+        if (!res.optBoolean("success", false)) throw XuiApiException(res.optString("msg").ifBlank { "Xray did not restart" })
+    }
+
     /** All share links currently exported by the panel (best effort). */
     fun allLinks(): List<String> = runCatching {
         val res = request("GET", "/panel/api/inbounds/allLinks")
@@ -215,7 +269,7 @@ class XuiApiClient(
 
     // ---- transport ----------------------------------------------------------------------------
 
-    private fun request(method: String, path: String, body: JSONObject? = null): JSONObject {
+    private fun request(method: String, path: String, body: JSONObject? = null, form: Map<String, String>? = null): JSONObject {
         val authAttempts = buildList {
             if (apiToken.isNotBlank()) add("token")
             if (username.isNotBlank() && password.isNotBlank()) add("session")
@@ -226,7 +280,7 @@ class XuiApiClient(
         for (mode in authAttempts) {
             try {
                 if (mode == "session") ensureSession()
-                val res = execute(method, path, body, bearer = mode == "token")
+                val res = execute(method, path, body, bearer = mode == "token", form = form)
                 return res
             } catch (e: XuiApiException) {
                 // 401/403/404 on an authenticated route means "not logged in / token not accepted".
@@ -319,11 +373,12 @@ class XuiApiClient(
             .any { text.contains(it, ignoreCase = true) }
     }
 
-    private fun execute(method: String, path: String, body: JSONObject?, bearer: Boolean): JSONObject {
+    private fun execute(method: String, path: String, body: JSONObject?, bearer: Boolean, form: Map<String, String>? = null): JSONObject {
         val builder = Request.Builder().url(url(path)).header("Accept", "application/json")
         if (bearer) builder.header("Authorization", "Bearer $apiToken")
         else if (method != "GET" && csrfToken.isNotBlank()) builder.header(CSRF_HEADER, csrfToken)
         if (method == "GET") builder.get()
+        else if (form != null) builder.post(FormBody.Builder().apply { form.forEach { (k, v) -> add(k, v) } }.build())
         else builder.post((body ?: JSONObject()).toString().toRequestBody(jsonType))
         try {
             http.newCall(builder.build()).execute().use { resp ->
