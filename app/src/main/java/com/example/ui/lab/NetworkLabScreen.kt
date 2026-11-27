@@ -100,12 +100,13 @@ class NetworkLabViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Build 181 Phase 5: Smart SNI and ECH status for the current network (LAB → Transport tools). */
     fun refreshSmartStatus() = viewModelScope.launch {
-        val (sni, ech) = withContext(Dispatchers.IO) {
+        val (sni, ech, personal) = withContext(Dispatchers.IO) {
             val net = com.example.vpn.connections.BuiltinMethodMemory.network()
-            runCatching { com.example.vpn.smartsni.SmartSni.status(net) }.getOrDefault("") to
-                runCatching { com.example.vpn.smartsni.SmartEch.status(net) }.getOrDefault("")
+            Triple(runCatching { com.example.vpn.smartsni.SmartSni.status(net) }.getOrDefault(""),
+                runCatching { com.example.vpn.smartsni.SmartEch.status(net) }.getOrDefault(""),
+                runCatching { com.example.vpn.smartsni.PersonalEch.status(net) }.getOrDefault(""))
         }
-        local.update { it.copy(transportTools = it.transportTools.copy(smartSni = sni, echStatus = ech)) }
+        local.update { it.copy(transportTools = it.transportTools.copy(smartSni = sni, echStatus = ech, personalEch = personal)) }
     }
 
     /** "Scan clean IPs": Smart SNI probe when nothing is known here, the bounded clean-IP scan, and the ECH key. */

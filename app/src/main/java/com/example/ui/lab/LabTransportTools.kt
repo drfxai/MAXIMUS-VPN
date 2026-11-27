@@ -20,6 +20,8 @@ data class TransportToolsUi(
     /** Build 181 Phase 5: Smart SNI / ECH status on this network and the last LAB clean-IP scan. */
     val smartSni: String = "",
     val echStatus: String = "",
+    /** Build 181 Phase 6: the user's own ECH servers on this network. */
+    val personalEch: String = "",
     val cleanIpScanning: Boolean = false,
     val cleanIpScan: com.example.vpn.cleanip.SmartIpScan.Report? = null,
     val cleanIpError: String = ""
@@ -47,6 +49,7 @@ internal fun TransportToolsPage(state: NetworkLabUiState, actions: NetworkLabAct
                 Text(stringResource(R.string.ui_lab_smart_title), style = MaterialTheme.typography.titleMedium)
                 Text(stringResource(R.string.ui_lab_current_sni, ui.smartSni.ifBlank { "…" }))
                 Text(stringResource(R.string.ui_lab_ech_status, ui.echStatus.ifBlank { "…" }))
+                Text(stringResource(R.string.ui_lab_personal_ech, ui.personalEch.ifBlank { "…" }))
             }
             item {
                 Button(onClick = actions.onScanCleanIps, enabled = !ui.cleanIpScanning && !state.vpnOn) {

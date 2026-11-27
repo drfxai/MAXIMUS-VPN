@@ -530,7 +530,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             advice = ToolAdvisor.suggest(s, f).map { AdviceUi(it.toolId, s.id, s.displayName, s.location, it.reason) },
             busy = st.busy, error = st.error,
             logsTitle = st.logsFor(id)?.first.orEmpty(),
-            logs = st.logsFor(id)?.second
+            logs = st.logsFor(id)?.second,
+            ech = echUi(s)
         )
     }
 
@@ -854,6 +855,64 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(logsServerId = s.id, logs = "Server diagnostics unavailable" to listOf(detail)) }
             }
         }
+    }
+
+    // ------------------------------------------------------------ Build 181 Phase 6: ECH on this server
+
+    private val ech by lazy { com.example.panels.servers.ech.ServerEchManager(getApplication(), manager) }
+
+    /** Outer-name suggestions for the current network (Smart SNI), best first. */
+    fun echSuggestions(): List<String> = runCatching {
+        ech.suggestions(com.example.vpn.connections.BuiltinMethodMemory.network())
+    }.getOrDefault(emptyList())
+
+    private val echQuiet = object : ActionProgress {
+        override fun step(index: Int) = Unit
+        override fun log(line: String) = com.example.xray.XrayLogManager.i("SERVER-ECH", line)
+    }
+
+    fun enableEch(id: String, outer: String, createInbound: Boolean, onDone: () -> Unit = {}) =
+        serverAction(id, "Turning ECH on (backup first)…") { s ->
+            val rotateDays = s.tool(ServerToolCatalog.XUI)?.settings?.get(com.example.panels.servers.ech.ServerEch.K_ROTATE_DAYS)?.toIntOrNull() ?: 0
+            val out = withContext(Dispatchers.IO) { ech.enable(s, outer, rotateDays, createInbound, echQuiet) }
+            out.createdProfile?.let { storeProfile(null, it) }
+            save(out.server)
+            emit(ServersEvent.Message(out.summary))
+            onDone()
+        }
+
+    fun rotateEch(id: String) = serverAction(id, "Making a new ECH key…") { s ->
+        val out = withContext(Dispatchers.IO) { ech.rotate(s, echQuiet) }
+        save(out.server)
+        emit(ServersEvent.Message(out.summary))
+    }
+
+    fun disableEch(id: String) = serverAction(id, "Turning ECH off…") { s ->
+        val out = withContext(Dispatchers.IO) { ech.disable(s, echQuiet) }
+        save(out.server)
+        emit(ServersEvent.Message(out.summary))
+    }
+
+    /** Cycles automatic rotation: off → 7 days → 30 days → off. */
+    fun cycleEchRotation(id: String) {
+        val s = server(id) ?: return
+        val now = echUi(s)?.rotateDays ?: 0
+        val choices = com.example.panels.servers.ech.ServerEch.ROTATE_CHOICES
+        val next = choices[(choices.indexOf(now).coerceAtLeast(0) + 1) % choices.size]
+        runCatching { save(ech.setRotation(s, next)) }.onFailure { e -> _state.update { it.copy(error = e.message.orEmpty()) } }
+    }
+
+    private fun echUi(s: ManagedServer): EchCardUi? {
+        val t = s.tool(ServerToolCatalog.XUI) ?: return null
+        val r = com.example.panels.servers.ech.ServerEch.record(t.settings)
+        return EchCardUi(
+            linked = t.panelId != null,
+            on = r != null,
+            outer = r?.outer.orEmpty(),
+            ports = r?.inbounds?.joinToString(", ") { it.port.toString() }.orEmpty(),
+            madeText = r?.at?.takeIf { it > 0 }?.let { ago(it) }.orEmpty(),
+            rotateDays = r?.rotateDays ?: t.settings[com.example.panels.servers.ech.ServerEch.K_ROTATE_DAYS]?.toIntOrNull() ?: 0
+        )
     }
 
     fun panelIdFor(id: String): String? = server(id)?.tool(ServerToolCatalog.XUI)?.panelId

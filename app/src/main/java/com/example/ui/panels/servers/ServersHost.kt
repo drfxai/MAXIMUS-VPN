@@ -93,6 +93,7 @@ private sealed interface Confirm {
     data class PasswordOff(val serverId: String) : Confirm
     data class RemoveTunnel(val iranId: String) : Confirm
     data class Reseed(val iranId: String) : Confirm
+    data class DisableEch(val serverId: String) : Confirm
 }
 
 /**
@@ -112,6 +113,7 @@ internal fun ServersOverlay(
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     var quickHiddify by remember { mutableStateOf<String?>(null) }
     var telegramHiddify by remember { mutableStateOf<String?>(null) }
+    var enableEch by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
     val copy: (String) -> Unit = {
         clipboard.setText(AnnotatedString(it))
         Toast.makeText(context, context.getString(R.string.ui_copied), Toast.LENGTH_SHORT).show()
@@ -194,12 +196,21 @@ internal fun ServersOverlay(
                     onInstall = { vm.openWizard(it, id) },
                     onInstallCenter = { vm.close(); onInstallCenter() },
                     onRemove = { confirm = Confirm.Remove(id) },
-                    onOpenTunnel = { vm.tunnelIranIdFor(id)?.let { tid -> vm.close(); vm.tunnel.openDetail(tid) } }
+                    onOpenTunnel = { vm.tunnelIranIdFor(id)?.let { tid -> vm.close(); vm.tunnel.openDetail(tid) } },
+                    onEnableEch = { enableEch = id to vm.echSuggestions() },
+                    onRotateEch = { vm.rotateEch(id) },
+                    onEchRotation = { vm.cycleEchRotation(id) },
+                    onDisableEch = { confirm = Confirm.DisableEch(id) }
                 )
             )
         }
     }
     quickHiddify?.let { id -> HiddifyQuickDialog(vm, id, state.busy.isNotBlank()) { quickHiddify = null } }
+    enableEch?.let { (id, suggestions) ->
+        EnableEchDialog(suggestions, state.busy.isNotBlank(), state.busy, state.error,
+            onConfirm = { outer, create -> vm.enableEch(id, outer, create) { enableEch = null } },
+            onDismiss = { enableEch = null })
+    }
     telegramHiddify?.let { id -> HiddifyTelegramDialog(vm, id, state.busy.isNotBlank(), copy) { telegramHiddify = null } }
     regionHopServer?.let { id ->
         com.example.ui.panels.RegionHopDialog(vm, state, id) { regionHopServer = null }
@@ -267,6 +278,11 @@ private fun ConfirmHost(vm: ServersViewModel, confirm: Confirm?, dismiss: () -> 
             stringResource(R.string.ui_remove_this_tunnel),
             stringResource(R.string.ui_it_is_stopped_and_deleted_2),
             "Remove", { vm.tunnel.remove(c.iranId) }, dismiss
+        )
+        is Confirm.DisableEch -> ConfirmDialog(
+            stringResource(R.string.ui_server_ech_turn_off_q),
+            stringResource(R.string.ui_server_ech_turn_off_text),
+            stringResource(R.string.ui_server_ech_off_action), { vm.disableEch(c.serverId) }, dismiss
         )
         is Confirm.Reseed -> ConfirmDialog(
             stringResource(R.string.ui_move_the_ports_now),

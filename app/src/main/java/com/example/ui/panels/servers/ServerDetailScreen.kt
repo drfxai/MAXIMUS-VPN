@@ -108,7 +108,21 @@ data class ServerDetailUi(
     val busy: String = "",
     val error: String = "",
     val logsTitle: String = "",
-    val logs: List<String>? = null
+    val logs: List<String>? = null,
+    /** Build 181 Phase 6: ECH on this server's 3X-UI TLS inbounds; null without 3X-UI. */
+    val ech: EchCardUi? = null
+)
+
+/** Build 181 Phase 6: what the ECH card shows. */
+data class EchCardUi(
+    /** The server's 3X-UI panel is saved on this phone (ECH is set up through its API). */
+    val linked: Boolean,
+    val on: Boolean,
+    val outer: String = "",
+    val ports: String = "",
+    /** "2 d ago" */
+    val madeText: String = "",
+    val rotateDays: Int = 0
 )
 
 data class ServerDetailActions(
@@ -138,7 +152,11 @@ data class ServerDetailActions(
     val onDismissFound: () -> Unit = {},
     val onInstall: (String) -> Unit,
     val onInstallCenter: () -> Unit,
-    val onRemove: () -> Unit
+    val onRemove: () -> Unit,
+    val onEnableEch: () -> Unit = {},
+    val onRotateEch: () -> Unit = {},
+    val onEchRotation: () -> Unit = {},
+    val onDisableEch: () -> Unit = {}
 )
 
 @Composable
@@ -228,6 +246,8 @@ internal fun ServerDetailScreen(ui: ServerDetailUi, actions: ServerDetailActions
                 )
             }
         }
+
+        ui.ech?.let { e -> EchCard(e, actions, idle) }
 
         if (ui.tools.any { it.id == ServerToolCatalog.XUI }) {
             SectionLabel("Optional after 3X-UI")
@@ -436,6 +456,96 @@ private fun ToolBlock(t: ToolRowUi, actions: ServerDetailActions, idle: Boolean)
             }
         }
     }
+}
+
+/**
+ * Build 181 Phase 6: ECH on this server's TLS inbounds (3X-UI). Off: one row to turn it on. On: the outer name and
+ * ports, a new key, automatic rotation, and turning it off.
+ */
+@Composable
+private fun EchCard(e: EchCardUi, actions: ServerDetailActions, idle: Boolean) {
+    SectionLabel(stringResource(R.string.ui_server_ech))
+    GroupCard {
+        ListRow(
+            stringResource(R.string.ui_server_ech_title),
+            subtitle = when {
+                !e.linked -> stringResource(R.string.ui_server_ech_not_linked)
+                e.on -> stringResource(R.string.ui_server_ech_on_detail, e.outer, e.ports)
+                else -> stringResource(R.string.ui_server_ech_off_hint)
+            },
+            subtitleMono = e.on,
+            leading = { IconTile(Icons.Rounded.Lock, 32.dp) },
+            trailing = {
+                when {
+                    e.on -> Badge(stringResource(R.string.ui_on), Tone.GOOD, dot = true)
+                    e.linked -> TextAction(stringResource(R.string.ui_server_ech_enable), actions.onEnableEch, enabled = idle)
+                    else -> Badge(stringResource(R.string.ui_off))
+                }
+            }
+        )
+        if (e.on) {
+            RowDivider(58.dp)
+            ListRow(
+                stringResource(R.string.ui_server_ech_new_key),
+                subtitle = if (e.madeText.isNotBlank()) stringResource(R.string.ui_server_ech_made, e.madeText) else "",
+                leading = { IconTile(Icons.Rounded.VpnKey, 32.dp) },
+                trailing = { TextAction(stringResource(R.string.ui_server_ech_rotate_now), actions.onRotateEch, enabled = idle) }
+            )
+            RowDivider(58.dp)
+            ListRow(
+                stringResource(R.string.ui_server_ech_rotate_auto),
+                subtitle = if (e.rotateDays > 0) stringResource(R.string.ui_server_ech_rotate_days, e.rotateDays)
+                    else stringResource(R.string.ui_off),
+                leading = { IconTile(Icons.Rounded.RestartAlt, 32.dp) },
+                trailing = { TextAction(stringResource(R.string.ui_server_ech_change), actions.onEchRotation, enabled = idle) }
+            )
+            RowDivider(58.dp)
+            ListRow(
+                stringResource(R.string.ui_server_ech_turn_off),
+                subtitle = stringResource(R.string.ui_server_ech_turn_off_detail),
+                leading = { IconTile(Icons.Rounded.Stop, 32.dp) },
+                trailing = { TextAction(stringResource(R.string.ui_server_ech_off_action), actions.onDisableEch, Sv.Red, enabled = idle) }
+            )
+        }
+    }
+}
+
+/** Build 181 Phase 6: turning ECH on: the outer name (Smart SNI suggestions, editable) and whether to create a TLS inbound. */
+@Composable
+internal fun EnableEchDialog(suggestions: List<String>, busy: Boolean, busyText: String, error: String,
+                             onConfirm: (outer: String, createInbound: Boolean) -> Unit, onDismiss: () -> Unit) {
+    var outer by remember(suggestions) { mutableStateOf(suggestions.firstOrNull().orEmpty()) }
+    var create by remember { mutableStateOf(true) }
+    val problem = com.example.panels.servers.ech.ServerEch.outerProblem(outer)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text(stringResource(R.string.ui_server_ech_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(stringResource(R.string.ui_server_ech_dialog_text), color = Sv.TextSoft, fontSize = 13.sp)
+                SvField(outer, { outer = it.trim() }, stringResource(R.string.ui_server_ech_outer_name), mono = true,
+                    supporting = if (outer.isNotBlank() && problem != null) problem else null)
+                if (suggestions.size > 1) {
+                    Text(stringResource(R.string.ui_server_ech_suggestions), color = Sv.Muted, fontSize = 12.sp)
+                    suggestions.forEach { s -> TextAction(s, { outer = s }, enabled = !busy) }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = create, onCheckedChange = { create = it }, enabled = !busy)
+                    Text(stringResource(R.string.ui_server_ech_create_inbound), color = Sv.Text, fontSize = 13.sp)
+                }
+                if (busy) Text(busyText, color = Sv.TextSoft, fontSize = 13.sp)
+                if (error.isNotBlank()) Text(error, color = Sv.Red, fontSize = 13.sp)
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { onConfirm(outer, create) }, enabled = !busy && problem == null) {
+                Text(stringResource(R.string.ui_server_ech_confirm))
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.ui_cancel)) }
+        }
+    )
 }
 
 /** A Hiddify that is on the server but not added on this phone. Adding it changes nothing there. */
