@@ -397,6 +397,9 @@
     <string name="ui_shirokhorshid_edges_invalid">آدرس یا بازه IPv4 نیست: %1$s</string>
     <string name="ui_shirokhorshid_avoid_iran">نادیده‌گرفتن داوطلبان Conduit در ایران</string>
     <string name="ui_shirokhorshid_avoid_iran_detail">رله Conduit را که آدرس آن در فهرست داخلی ایران است رد می‌کند.</string>
+    <string name="ui_shirokhorshid_pairing">اتصال شخصی (Conduit)</string>
+    <string name="ui_shirokhorshid_pairing_hint">اختیاری. کد یا پیوند اتصال شخصی را از Conduit یک دوست بچسبانید؛ شیر و خورشید فقط از همان Conduit استفاده می‌کند.</string>
+    <string name="ui_shirokhorshid_pairing_invalid">این کد اتصال نیست. کد یا پیوندی را که برنامه Conduit می‌دهد بچسبانید.</string>
     <string name="ui_shirokhorshid_remembered">لبه‌های یافت‌شده در این شبکه: %1$d</string>
     <string name="ui_shirokhorshid_save">ذخیره</string>
     <string name="ui_close">بستن</string>

@@ -791,6 +791,9 @@ class RayVpnService : VpnService() {
         val tierSignals = smartTierSignals(network)
         val tier = com.example.vpn.smart.SmartTiers.tier(tierSignals)
         val tiered = com.example.vpn.smart.SmartTiers.candidates(tierSignals, ConnectDeadline.CANDIDATES)
+        // Build 181 (3.3): Iranian conduits only for a Smart fallback on a whitelist / near-shutdown network (read once).
+        com.example.vpn.sidecar.ShirokhorshidSidecar.iranConduitsAllowedOnce =
+            !manualPick && com.example.vpn.smart.SmartTiers.allowIranianConduits(tier)
         if (!manualPick) com.example.vpn.diagnostics.EngineStages.record("smart", "tier",
             "${tier.title}: next ${tiered.filter { it !in tried }.take(3).joinToString()}")
         val runnable = if (manualPick) emptySet() else

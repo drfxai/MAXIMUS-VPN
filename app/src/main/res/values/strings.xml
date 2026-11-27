@@ -405,6 +405,9 @@
     <string name="ui_shirokhorshid_edges_invalid">Not an IPv4 address or range: %1$s</string>
     <string name="ui_shirokhorshid_avoid_iran">Skip Conduit volunteers in Iran</string>
     <string name="ui_shirokhorshid_avoid_iran_detail">Rejects a Conduit relay whose address is in the bundled Iran list.</string>
+    <string name="ui_shirokhorshid_pairing">Personal pairing (Conduit)</string>
+    <string name="ui_shirokhorshid_pairing_hint">Optional. Paste the pairing code or link from a friend\'s Conduit: Shir o Khorshid then uses only that conduit.</string>
+    <string name="ui_shirokhorshid_pairing_invalid">This is not a pairing code. Paste the code or the link the Conduit app shares.</string>
     <string name="ui_shirokhorshid_remembered">Edges found on this network: %1$d</string>
     <string name="ui_shirokhorshid_save">Save</string>
     <string name="ui_close">Close</string>

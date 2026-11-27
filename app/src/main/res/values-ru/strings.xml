@@ -408,6 +408,9 @@
     <string name="ui_shirokhorshid_edges_invalid">Это не адрес и не диапазон IPv4: %1$s</string>
     <string name="ui_shirokhorshid_avoid_iran">Пропускать добровольцев Conduit в Иране</string>
     <string name="ui_shirokhorshid_avoid_iran_detail">Отклоняет ретранслятор Conduit, если его адрес есть во встроенном списке Ирана.</string>
+    <string name="ui_shirokhorshid_pairing">Личная привязка (Conduit)</string>
+    <string name="ui_shirokhorshid_pairing_hint">Необязательно. Вставьте код или ссылку привязки из Conduit друга: тогда Shir o Khorshid использует только этот Conduit.</string>
+    <string name="ui_shirokhorshid_pairing_invalid">Это не код привязки. Вставьте код или ссылку, которую даёт приложение Conduit.</string>
     <string name="ui_shirokhorshid_remembered">Узлов найдено в этой сети: %1$d</string>
     <string name="ui_shirokhorshid_save">Сохранить</string>
     <string name="ui_close">Закрыть</string>
