@@ -31,7 +31,8 @@ object VpnController {
     /**
      * Initiates VPN connection with a specific VLESS profile.
      */
-    fun startVpn(context: Context, profile: VlessProfile, smart: Boolean = false, force: Boolean = false, exact: Boolean = false) {
+    fun startVpn(context: Context, profile: VlessProfile, smart: Boolean = false, force: Boolean = false, exact: Boolean = false,
+                 powerButton: Boolean = false) {
         // A second tap right after this one is read as part of it, not as a Stop (StopGuard).
         StopGuard.markConnectTap()
         context.stopService(Intent(context, com.example.vpn.share.LocalProxyService::class.java))
@@ -44,6 +45,8 @@ object VpnController {
             putExtra(RayVpnService.EXTRA_FORCE, force)
             // The power button: only [profile], as saved (see RayVpnService.EXTRA_EXACT).
             putExtra(RayVpnService.EXTRA_EXACT, exact)
+            // Who started it: the power button, or a pick in a list (build 179, N2).
+            putExtra(RayVpnService.EXTRA_POWER_BUTTON, powerButton)
         }
         ContextCompat.startForegroundService(context, intent)
     }
@@ -64,7 +67,9 @@ object VpnController {
      * it with the session, build 178 field report). Returns false when the tap was read as the tail of the Connect tap
      * that just started the session ([StopGuard]) and nothing was stopped.
      */
-    fun stopVpn(context: Context, origin: StopOrigin = StopOrigin.UNKNOWN): Boolean {
+    fun stopVpn(context: Context, origin: StopOrigin = StopOrigin.UNKNOWN,
+                /** The state the user stopped from, before the UI showed "Stopping" (build 179, N8). */
+                fromStatus: ConnectionStatus = connectionState.value.status): Boolean {
         val since = StopGuard.sinceConnectTap()
         // A failed session holds nothing worth protecting from a quick second tap: its Stop always goes through.
         if (connectionState.value.status != com.example.data.model.ConnectionStatus.FAILED && StopGuard.swallow(origin)) {
@@ -80,6 +85,7 @@ object VpnController {
         val intent = Intent(context, RayVpnService::class.java).apply {
             action = RayVpnService.ACTION_DISCONNECT
             putExtra(RayVpnService.EXTRA_STOP_ORIGIN, origin.key)
+            putExtra(RayVpnService.EXTRA_STOP_FROM, fromStatus.name)
         }
         try {
             context.startService(intent)

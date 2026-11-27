@@ -101,10 +101,15 @@ class StopIsInstantTest {
         assertTrue(SmartButtonState.ON.tapStops)
     }
 
-    @Test fun aPowerButtonSessionLeavesTheSmartButtonOff() {
+    @Test fun aPowerButtonSessionShowsTheUsersPickOnTheSmartButton() {
+        // Build 179 device test (N9): during the user's own pick the button offered "Auto Connect" as if nothing ran.
         for (s in listOf(ConnectionStatus.PREPARING, ConnectionStatus.VERIFYING, ConnectionStatus.CONNECTED, ConnectionStatus.DEGRADED)) {
+            assertEquals(SmartButtonState.MANUAL, SmartButtonState.of(ConnectionState(status = s)))
+        }
+        for (s in listOf(ConnectionStatus.DISCONNECTED, ConnectionStatus.FAILED, ConnectionStatus.DISCONNECTING)) {
             assertEquals(SmartButtonState.OFF, SmartButtonState.of(ConnectionState(status = s)))
         }
+        assertTrue(SmartButtonState.MANUAL.tapStops)
     }
 
     @Test fun aLeftBehindCallKnowsItWasStoppedSoItsTestsSendNothingMore() = runBlocking {

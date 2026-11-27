@@ -225,8 +225,18 @@ object ConnectionEngineRunner {
      * Pure.
      */
     fun cfV6First(engineId: String, automatic: Boolean, cloudflareBlocked: Boolean, ipv4Only: Boolean,
-                  irancell: Boolean, mci: Boolean, relayOnly: Boolean): Boolean =
-        engineId == AetherSidecar.ID && automatic && cloudflareBlocked && !ipv4Only && !irancell && !mci && !relayOnly
+                  irancell: Boolean, mci: Boolean, relayOnly: Boolean,
+                  /**
+                   * Build 179 device test: the IPv6-first attempt never ran on Irancell, the network it was added for: this
+                   * gate excluded Irancell and the Irancell ladder pinned every carrier to IPv4. The user's own Aether pick
+                   * on Irancell now tries MASQUE H2 over IPv6 first (capped at [IRANCELL_V6_MS]); Smart Connect keeps its
+                   * single short IPv4 attempt there.
+                   */
+                  manual: Boolean = false): Boolean =
+        engineId == AetherSidecar.ID && automatic && cloudflareBlocked && !ipv4Only && (!irancell || manual) && !mci && !relayOnly
+
+    /** The IPv6-first MASQUE H2 attempt of a manual Aether pick on Irancell; the whole run gets this on top of its check. */
+    const val IRANCELL_V6_MS = 45_000L
 
     /** The stage line shown before a cf=0 manual Aether run starts. Pure. */
     fun cfFilteredManualNotice(budgetMs: Long): String =
@@ -283,6 +293,50 @@ object ConnectionEngineRunner {
     fun explicitH2FastFail(engineId: String, automatic: Boolean, relayOnly: Boolean, cloudflareBlocked: Boolean,
                            carrier: String, held: Boolean): Boolean =
         engineId == AetherSidecar.ID && !automatic && !relayOnly && cloudflareBlocked && held && carrier == "h2"
+
+    /**
+     * Build 179 device test (N3): a WARP failure anywhere (Smart Connect included) held every manual WARP pick for 30 min
+     * with no way to try anyway. The hold no longer refuses the user's own pick; it only steers Smart Connect and the
+     * background relays. Pure.
+     */
+    fun holdRefuses(manual: Boolean): Boolean = !manual
+
+    fun manualPickDespiteHold(elapsedMs: Long): String =
+        "WARP found no gateway on this network ${elapsedMs / 60_000} min ago; your own pick runs anyway " +
+            "(the pause only applies to Smart Connect and background relays)"
+
+    /** The least time the HTTPS check gets after a carrier started, even when the run's budget is nearly used. */
+    const val VERIFY_MIN_MS = 8_000L
+
+    /** How long the HTTPS check may take with [leftMs] of the run's budget left (null: no budget). Pure. */
+    fun verifyWindowMs(leftMs: Long?): Long? = leftMs?.let { maxOf(VERIFY_MIN_MS, it) }
+
+    /** [block] within [timeoutMs] (null: no limit); a check still running then counts as a timed-out failure. */
+    fun boundedCheck(timeoutMs: Long?, block: () -> AccessProbe.Result): AccessProbe.Result {
+        if (timeoutMs == null) return block()
+        val pool = java.util.concurrent.Executors.newSingleThreadExecutor()
+        return try {
+            val future = pool.submit(java.util.concurrent.Callable { block() })
+            try {
+                future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            } catch (_: java.util.concurrent.TimeoutException) {
+                future.cancel(true)
+                AccessProbe.Result(failure = "HTTPS check did not finish within the ${timeoutMs / 1000}s left of this pick's budget")
+            } catch (e: java.util.concurrent.ExecutionException) {
+                throw e.cause ?: e
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    /**
+     * The line when the run's budget is used. Build 179 device test (N13): a manual WireGuard pick logged "falling back to
+     * saved servers" although nothing else ran (a manual pick never starts another connection). Pure.
+     */
+    fun budgetStopText(budgetMs: Long, dropped: List<String>, manual: Boolean): String =
+        "${budgetMs / 1000}s Aether budget on this filtered link used; skipping " + dropped.joinToString(", ") +
+            if (manual) "; your pick ends here (nothing else is started)" else "; falling back to saved servers"
 
     fun verifiedFallbackMessage(verified: String): String =
         "Cloudflare is filtered on this network and $verified carried verified traffic here recently: " +
@@ -678,11 +732,18 @@ object ConnectionEngineRunner {
         val onIrancell = engine.id == AetherSidecar.ID && automatic && irancell(networkKey)
         val onMci = engine.id == AetherSidecar.ID && automatic && mci(networkKey)
         // Build 178: Cloudflare filtered here, IPv6 not ruled out, not an operator ladder: WARP over IPv6 goes first.
-        val cfV6 = cfV6First(engine.id, automatic, cloudflareBlocked, ipv4Only, irancell = onIrancell, mci = onMci, relayOnly = relayOnly)
+        val cfV6 = cfV6First(engine.id, automatic, cloudflareBlocked, ipv4Only, irancell = onIrancell, mci = onMci, relayOnly = relayOnly,
+            manual = manual)
+        if (engine.id == AetherSidecar.ID && automatic && manual && onIrancell && cloudflareBlocked && !relayOnly)
+            record("ladder", "ipv6-first", if (cfV6) "START" else "SKIP",
+                if (cfV6) "MASQUE H2 over IPv6 first (up to ${IRANCELL_V6_MS / 1000}s), then the IPv4 carriers"
+                else "this link was measured IPv4-only")
+        // The IPv6 variants are made before the Irancell IPv4 pin (which only touches a family left on Auto).
         val carrierChoices = candidates(profile, ipv4Only = ipv4Only,
             firewall = com.example.vpn.connectivity.NetworkFirewalls.detect(networkKey).takeIf { automatic && ServerlessSidecar.handles(profile) }
-                ?: com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER).let { list -> if (onIrancell) list.map(::irancellIpv4) else list }
+                ?: com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER)
             .let { operatorVariants(it, irancell = onIrancell, mci = onMci, cfV6 = cfV6) }
+            .let { list -> if (onIrancell) list.map(::irancellIpv4) else list }
         val cleanPeers = if (engine.id == AetherSidecar.ID && automatic) CleanH2PeerMemory.peers(networkKey) else emptyList()
         val cleanChoices = if (engine.id == AetherSidecar.ID && automatic)
             cleanH2Candidates(carrierChoices, cleanPeers, ipv4Only) + cleanUdpCandidates(carrierChoices, cleanPeers, ipv4Only) else emptyList()
@@ -747,7 +808,10 @@ object ConnectionEngineRunner {
         // names what works here; it never switches by itself. UDP carriers (H3, WireGuard) still run.
         // The explicit "Aether over Lantern" pick dials WARP through Lantern: the filtered direct path is not its path.
         val lanternPick = engine.id == AetherSidecar.ID && LanternRelayHop.requested(ProfileExtras.read(profile))
-        if (!lanternPick && explicitH2FastFail(engine.id, automatic, relayOnly, cloudflareBlocked,
+        // Build 179 device test (N3): the user's own pick always runs; the hold only steers Smart Connect and the relays.
+        val heldAtPick = if (manual) WarpDataPlaneHold.heldAt(networkKey) else null
+        if (heldAtPick != null) record(ladderKind, "warp-data", "NOTE", manualPickDespiteHold(System.currentTimeMillis() - heldAtPick))
+        if (!manual && !lanternPick && explicitH2FastFail(engine.id, automatic, relayOnly, cloudflareBlocked,
                 carrier = ProfileExtras.read(profile).optString("carrier"), held = WarpDataPlaneHold.blocked(networkKey))) {
             val why = WarpDataPlaneHold.fastFailMessage(networkKey, verified = verifiedAlternative)
             record(method(profile), "warp-data", "SKIP", why)
@@ -756,8 +820,8 @@ object ConnectionEngineRunner {
         // Build 170 (Irancell, cf_quick = filtered): the user's own Aether run repeated both 45 s gateway scans three
         // times inside the hold, each ending TLS_HANDSHAKE_FAILED. With Cloudflare still filtered the direct scans are
         // skipped: WARP goes through Lantern when it can, otherwise the run fails at once and names what works here.
-        val lanternOnly = held && manual && cloudflareBlocked && !relayOnly && lanternChoice != null
-        if (held && manual && cloudflareBlocked && !relayOnly && lanternChoice == null) {
+        val lanternOnly = holdRefuses(manual) && held && manual && cloudflareBlocked && !relayOnly && lanternChoice != null
+        if (holdRefuses(manual) && held && manual && cloudflareBlocked && !relayOnly && lanternChoice == null) {
             val why = WarpDataPlaneHold.fastFailMessage(networkKey, lanternFailedAt = lanternFailedAt, verified = verifiedAlternative)
             record(ladderKind, "warp-data", "SKIP", why)
             throw NoVerifiedPath(listOf(why), null)
@@ -778,11 +842,11 @@ object ConnectionEngineRunner {
                 e.optString(AetherSidecar.CLEAN_H2_PEER).ifBlank { e.optString(AetherSidecar.CLEAN_PEER) }) } } +
             " before any scan" + (cleanPeers.firstOrNull { it.carrier == "h2" }?.rttMs?.let { " (prewarm: $it ms)" }.orEmpty()))
         val ordered = choices.sortedBy { rank.indexOf(method(it)) }
-        val irancellPlan = if (irancellHttp2) IrancellWarp.plan(ordered.map(::method), preferred, manual)
+        val irancellPlan = if (irancellHttp2) IrancellWarp.plan(ordered.map(::method), preferred, manual, v6First = cfV6)
             .map { name -> IrancellWarp.forAttempt(ordered.first { method(it) == name }, manual) } else emptyList()
         val cfManualBudget = cfFilteredManualBudgetMs(engine.id, manual, cloudflareBlocked, relayOnly).takeIf { !lanternOnly && !lanternPick }
             // The IPv6 attempt gets its own window on top of the short check.
-            ?.let { if (cfV6) it + V6_FIRST_BUDGET_MS.getValue("wireguard") else it }
+            ?.let { if (cfV6) it + (if (onIrancell) IRANCELL_V6_MS else V6_FIRST_BUDGET_MS.getValue("wireguard")) else it }
         if (cfManualBudget != null && !lanternOnly) {
             record(ladderKind, "cf-filtered", "WARN", cfFilteredManualNotice(cfManualBudget))
             com.example.vpn.diagnostics.EngineStages.record(engine.id, "cloudflare filtered", cfFilteredManualNotice(cfManualBudget))
@@ -887,8 +951,12 @@ object ConnectionEngineRunner {
             val endpoint = Socks5.Endpoint("127.0.0.1", ctx.socksPort,
                 ctx.socksUser.takeIf { launch.socksAuth }, ctx.socksPass.takeIf { launch.socksAuth })
             val generation = process.transportGeneration
-            val first = AccessProbe.check(endpoint, checkDns,
-                diagnoseAddress = engine.id == AetherSidecar.ID && !reserveForNextRelay)
+            // Build 179 device test (N12): Gool Classic passed startup at 47 s and its HTTPS check ran to 74.6 s against a
+            // 60 s limit. The check gets what is left of the run's budget (at least VERIFY_MIN_MS), never more.
+            val left = ladderBudget?.let { it - (System.currentTimeMillis() - ladderStartedAt) }
+            val first = boundedCheck(verifyWindowMs(left)) {
+                AccessProbe.check(endpoint, checkDns, diagnoseAddress = engine.id == AetherSidecar.ID && !reserveForNextRelay)
+            }
             check()
             return if (engine.id == AetherSidecar.ID && first.traffic) {
                 record(name, "https", "RECHECK", "checking that the same transport keeps carrying traffic")
@@ -1100,8 +1168,7 @@ object ConnectionEngineRunner {
                 ladderStopped = true
                 val dropped = queue.filterNot { ProfileExtras.read(it).optBoolean(RELAY_FOLLOW_UP) }
                 queue.removeAll(dropped)
-                record("ladder", "budget", "STOP", "${ladderBudget / 1000}s Aether budget on this metered filtered link used; skipping " +
-                    dropped.joinToString(", ") { method(it) } + "; falling back to saved servers")
+                record("ladder", "budget", "STOP", budgetStopText(ladderBudget, dropped.map { method(it) }, manual))
                 queueRelays("Aether budget used; trying WARP through a verified saved server once")
                 warpInWarpQueued = true; noizeQueued = true; mtuQueued = true
             }
@@ -1167,6 +1234,7 @@ object ConnectionEngineRunner {
                 val lanternHop = LanternRelayHop.requested(extras)
                 val window = if (lanternHop) minOf(launch.readyTimeoutMs, LANTERN_ATTEMPT_MS)
                     else if (name in CLEAN_METHODS) minOf(launch.readyTimeoutMs, CLEAN_H2_BUDGET_MS)
+                    else if (automatic && extras.optBoolean(V6_FIRST) && onIrancell) minOf(launch.readyTimeoutMs, IRANCELL_V6_MS)
                     else if (automatic && extras.optBoolean(V6_FIRST) && carrier in V6_FIRST_BUDGET_MS)
                         minOf(launch.readyTimeoutMs, V6_FIRST_BUDGET_MS.getValue(carrier))
                     else if (irancellHttp2 && manual) IrancellWarp.manualAttemptMs(candidate)

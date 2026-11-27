@@ -98,6 +98,18 @@ object UnlockDnsWire {
         return null
     }
 
+    /**
+     * Servers whose UDP answers are rewritten on this network while their TCP/53 answers are their own (a health check's
+     * [ServerCheck.tcp]): app questions to them go over TCP only. Replaced on every health check.
+     */
+    @Volatile var tcpOnly: Set<String> = emptySet()
+
+    /** [query] to [server] over TCP/53 only. */
+    fun exchangeTcp(server: String, query: ByteArray, timeoutMs: Int, protector: Protector): Exchange? {
+        val address = runCatching { InetAddress.getByName(server) }.getOrNull() ?: return null
+        return tcp(address, query, timeoutMs, protector) { reply -> reply.takeIf { DnsResponse.isResponseTo(query, it) } }
+    }
+
     private fun tcp(server: InetAddress, query: ByteArray, timeoutMs: Int, protector: Protector,
                     accept: (ByteArray) -> ByteArray?): Exchange? {
         try {
@@ -130,6 +142,14 @@ object UnlockDnsWire {
                 else exchangeShaped(server, query, shape, minOf(timeoutMs, UnlockDnsShaping.ATTEMPT_TIMEOUT_MS), protector)) ?: return null
             val ips = ResolverScanner.aRecords(query, answer.response, answer.response.size) ?: return null
             return Lookup(ips, answer.ms, answer.intercepted)
+        }
+
+        override fun lookupTcp(server: String, name: String, timeoutMs: Int): Lookup? {
+            if (shape != null) return null
+            val query = ResolverReach.query(random.nextInt(0x10000), name)
+            val answer = exchangeTcp(server, query, timeoutMs, protector) ?: return null
+            val ips = ResolverScanner.aRecords(query, answer.response, answer.response.size) ?: return null
+            return Lookup(ips, answer.ms, intercepted = false)
         }
 
         override fun reach(ip: String, port: Int, timeoutMs: Int): Long? {

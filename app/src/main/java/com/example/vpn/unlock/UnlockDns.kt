@@ -148,7 +148,13 @@ object UnlockDns {
      * is retried with each shape ([UnlockDnsHealth.checkShaped]); a shape that passes is remembered for this
      * network + server and used first for that server, and a server that passes plain again forgets it.
      */
-    fun checkServers(servers: List<String>): List<ServerCheck> {
+    fun checkServers(servers: List<String>): List<ServerCheck> =
+        checkServersInner(servers).also { checks ->
+            // Build 179: a server whose UDP answers are rewritten on the way is asked over TCP (ServerCheck.tcp).
+            UnlockDnsWire.tcpOnly = checks.filter { it.tcp && it.usable }.map { it.ip }.toSet()
+        }
+
+    private fun checkServersInner(servers: List<String>): List<ServerCheck> {
         val plain = probe()
         if (!_state.value.shaping) return UnlockDnsHealth.checkAll(servers, plain)
         cachedNetwork = null

@@ -48,6 +48,8 @@ class FailoverManager(
     private val passive: PassiveHealth? = null,
     /** True while the session must stay on the config the user picked (the power button): nothing is switched. */
     private val staysOnSelected: () -> Boolean = { false },
+    /** How the pinned session was started, for the log: "the power button" or "your own pick" (build 179, N2). */
+    private val pinnedBy: () -> String = { "the power button" },
     /** Keystore-backed evidence, injected for JVM tests; corruption fails closed for private nodes. */
     private val managedRecordsProvider: () -> List<ManagedNodeRecord> = {
         runCatching { SmartNodeStore(RayApplication.instance).all() }.getOrDefault(emptyList())
@@ -365,7 +367,7 @@ class FailoverManager(
             if (restart == null) {
                 pinnedWarn.admit()?.let { note ->
                     XrayLogManager.w("FAILOVER", "$name stopped carrying traffic. Staying on it: it was " +
-                        "connected with the power button. Use Smart Connect to search for another.$note")
+                        "connected with ${pinnedBy()}. Use Smart Connect to search for another.$note")
                 }
                 return
             }
@@ -374,7 +376,7 @@ class FailoverManager(
                 is PinnedRecovery.Decision.Restart -> {
                     pinnedWarn.reset()
                     val reason = "$name stopped carrying traffic; restarting it (restart ${d.attempt}). It was connected " +
-                        "with the power button, so no other config is started."
+                        "with ${pinnedBy()}, so no other config is started."
                     XrayLogManager.w("FAILOVER", reason)
                     _failoverEvents.value = reason
                     restart(degradedProfile, reason, d.attempt)
@@ -382,8 +384,8 @@ class FailoverManager(
                 is PinnedRecovery.Decision.Wait -> pinnedWarn.admit()?.let { note ->
                     val next = d.nextRestartInMs?.let { "it is restarted again in about ${(it + 999) / 1000} s" }
                         ?: "it is restarted if the next checks fail too"
-                    XrayLogManager.w("FAILOVER", "$name stopped carrying traffic. Staying on it: it was connected with the " +
-                        "power button; $next. Use Smart Connect to search for another.$note")
+                    XrayLogManager.w("FAILOVER", "$name stopped carrying traffic. Staying on it: it was connected with " +
+                        "${pinnedBy()}; $next. Use Smart Connect to search for another.$note")
                 }
             }
             return

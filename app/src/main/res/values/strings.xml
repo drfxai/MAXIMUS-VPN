@@ -1561,7 +1561,7 @@
     <string name="ui_subscription_https_url">Subscription HTTPS URL</string>
     <string name="ui_add_sync">Add &amp; Sync</string>
     <string name="ui_no_tested_nodes_available">No Tested Nodes Available</string>
-    <string name="ui_run_a_benchmark_from_the">Add or import nodes in the Nodes tab, then run Benchmark Lab there to rank them.</string>
+    <string name="ui_run_a_benchmark_from_the">Add or import nodes in the Nodes tab, then tap Ping All there to test and rank them.</string>
     <string name="ui_opening_vip">Opening VIP</string>
     <string name="ui_getting_the_vip_servers">Getting the VIP servers…</string>
     <string name="ui_no_vip_servers_yet">No VIP servers yet</string>
@@ -1884,4 +1884,13 @@
     <string name="unlock_notification_rechecking">No Unlock DNS server answered yet; checking again…</string>
     <string name="picker_desc_shirokhorshid_radiance">Lantern carries the connection to Shir o Khorshid (an explicit chain)</string>
     <string name="picker_desc_aether_lantern">WARP through the Lantern network, avoiding filtered Cloudflare addresses (an explicit chain)</string>
+    <string name="ui_verified_by_your_connections">Verified here by your connections</string>
+    <string name="home_last_tried">Last tried</string>
+    <string name="home_clear_selection_desc">Clear the selected server</string>
+    <string name="ui_your_pick_running">Your pick is running</string>
+    <string name="home_no_traffic_yet">No traffic yet</string>
+    <string name="diag_network_results_title">On this network (last 24 h)</string>
+    <string name="diag_network_results_empty">No connection has been tried on this network in the last 24 h.</string>
+    <string name="unlock_failed_header">Unlock DNS failed</string>
+    <string name="unlock_error_network_dns">This network rewrites plain DNS: the answers of every Unlock DNS server came back changed on the way after %1$d checks, over UDP and TCP. Unlock DNS cannot work on this network; use a VPN connection instead.</string>
 </resources>

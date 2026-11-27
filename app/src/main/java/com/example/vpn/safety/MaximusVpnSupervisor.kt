@@ -49,12 +49,21 @@ class MaximusVpnSupervisor(private val log: (String) -> Unit = {}) {
     }
 
     fun release(reason: Release) {
-        if (protectionRequested) log("Traffic protection released: ${reason.name.lowercase().replace('_', ' ')}")
+        if (protectionRequested) log("Traffic protection released: ${describe(reason)}")
         protectionRequested = false
         lastRelease = reason
     }
 
     companion object {
+        /**
+         * The log's reason. Build 179 device test (N13): every failed pick logged "connect failed by user", which reads as
+         * if the user made it fail. Pure.
+         */
+        fun describe(reason: Release): String = when (reason) {
+            Release.CONNECT_FAILED_BY_USER -> "your Connect failed (Daily mode, Kill Switch off)"
+            else -> reason.name.lowercase().replace('_', ' ')
+        }
+
         fun lockdownOf(sdkInt: Int, alwaysOn: () -> Boolean, lockdown: () -> Boolean): Lockdown = when {
             sdkInt < 29 -> Lockdown.UNKNOWN
             runCatching(lockdown).getOrDefault(false) -> Lockdown.ON

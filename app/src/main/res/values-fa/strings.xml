@@ -1553,7 +1553,7 @@
     <string name="ui_subscription_https_url">نشانی HTTPS اشتراک</string>
     <string name="ui_add_sync">افزودن و همگام‌سازی</string>
     <string name="ui_no_tested_nodes_available">هیچ نود آزمایش‌شده‌ای در دسترس نیست</string>
-    <string name="ui_run_a_benchmark_from_the">در زبانه «نودها» نود اضافه یا وارد کنید، سپس برای رتبه‌بندی، «آزمایشگاه بنچمارک» را همان‌جا اجرا کنید.</string>
+    <string name="ui_run_a_benchmark_from_the">در زبانه «نودها» نود اضافه یا وارد کنید، سپس همان‌جا «پینگ همه» را بزنید تا آزمایش و رتبه‌بندی شوند.</string>
     <string name="ui_opening_vip">در حال باز کردن VIP</string>
     <string name="ui_getting_the_vip_servers">در حال دریافت سرورهای VIP…</string>
     <string name="ui_no_vip_servers_yet">هنوز سرور VIP وجود ندارد</string>
@@ -1873,4 +1873,13 @@
     <string name="unlock_notification_rechecking">هنوز هیچ سرور Unlock DNS پاسخ نداده است؛ دوباره بررسی می‌شود…</string>
     <string name="picker_desc_shirokhorshid_radiance">Lantern اتصال به شیر و خورشید را حمل می‌کند (زنجیرهٔ صریح)</string>
     <string name="picker_desc_aether_lantern">WARP از طریق شبکهٔ Lantern، بدون عبور از نشانی‌های فیلترشدهٔ Cloudflare (زنجیرهٔ صریح)</string>
+    <string name="ui_verified_by_your_connections">تأییدشده در این شبکه با اتصال‌های شما</string>
+    <string name="home_last_tried">آخرین تلاش</string>
+    <string name="home_clear_selection_desc">پاک کردن سرور انتخاب‌شده</string>
+    <string name="ui_your_pick_running">انتخاب شما در حال اجراست</string>
+    <string name="home_no_traffic_yet">هنوز ترافیکی عبور نکرده</string>
+    <string name="diag_network_results_title">در این شبکه (۲۴ ساعت اخیر)</string>
+    <string name="diag_network_results_empty">در ۲۴ ساعت اخیر هیچ اتصالی در این شبکه امتحان نشده است.</string>
+    <string name="unlock_failed_header">Unlock DNS ناموفق بود</string>
+    <string name="unlock_error_network_dns">این شبکه DNS ساده را دست‌کاری می‌کند: پس از %1$d بررسی، پاسخ همهٔ سرورهای Unlock DNS در مسیر (UDP و TCP) تغییر کرده بود. Unlock DNS در این شبکه کار نمی‌کند؛ به‌جای آن از یک اتصال VPN استفاده کنید.</string>
 </resources>

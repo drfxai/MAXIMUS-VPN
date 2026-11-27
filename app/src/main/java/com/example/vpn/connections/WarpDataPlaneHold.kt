@@ -11,9 +11,8 @@ import com.example.vpn.sidecar.SidecarProcess
  * "Aether gateway scan did not reach a serving tunnel within 19s"; an identical ladder ran again 23 s later on the same
  * network, and the background wireguard-relay started on the metered link two minutes after. For [HOLD_MS] after such
  * a failure, automatic Aether ladders (Smart Connect, the LAB recovery's Irancell WARP attempt, the deferred Aether run)
- * and the background relay are skipped on that network. A user's own run still starts, but while Cloudflare is still
- * filtered it skips the direct gateway scans: WARP through Lantern when it can, otherwise it stops at once with
- * [fastFailMessage] (ConnectionEngineRunner.start).
+ * and the background relay are skipped on that network. Build 179 device test (N3): the user's own pick is never
+ * refused by the hold (it runs its full ladder and notes the hold); [fastFailMessage] is kept for the Smart Connect paths.
  *
  * This is not [WarpRegistrationMemory]: registration succeeded, so that memory is cleared and the saved identity kept.
  * Kept in memory and in [BuiltinMethodMemory]'s store (survives a service restart); cleared when a WARP carrier carries

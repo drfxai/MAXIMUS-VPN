@@ -31,6 +31,11 @@ interface UnlockProbe {
     fun lookup(server: String, name: String, timeoutMs: Int): Lookup?
     /** Connect time to [ip]:443 in ms, or null when the connection did not open. */
     fun reach(ip: String, port: Int, timeoutMs: Int): Long?
+    /**
+     * The A answer for [name] from [server] over TCP/53 only, or null (not supported, or nothing usable). Build 179:
+     * a UDP answer rewritten on the path is checked against the server's own answer over TCP.
+     */
+    fun lookupTcp(server: String, name: String, timeoutMs: Int): Lookup? = null
 }
 
 data class ServerCheck(
@@ -41,7 +46,11 @@ data class ServerCheck(
     val reason: BlockReason? = null,
     val checkedAt: Long = 0L,
     /** The query shape this server passed with (its plain questions failed); null for plain. */
-    val shape: QueryShape? = null
+    val shape: QueryShape? = null,
+    /** Its UDP answers are rewritten on the path but its TCP/53 answers are its own: it is asked over TCP (build 179). */
+    val tcp: Boolean = false,
+    /** What the check saw, for the log ("control name answered 10.10.34.35"); never shown as a server's fault alone. */
+    val detail: String? = null
 ) {
     val usable: Boolean get() = health == ServerHealth.HEALTHY || health == ServerHealth.SLOW
 }
@@ -73,20 +82,82 @@ object UnlockDnsHealth {
     fun hijacked(ips: List<String>): Boolean =
         ips.isEmpty() || ips.any(ResolverScanner::poisoned) || ips.any { it !in CONTROL_ANSWERS }
 
+    /**
+     * A second control name whose address never changes and that no filter list carries (a root server): used only when
+     * [CONTROL_NAME] came back as a national filter address, to tell "this name is filtered on this network" from "this
+     * server rewrites answers".
+     */
+    const val ROOT_CONTROL_NAME = "a.root-servers.net"
+    val ROOT_CONTROL_ANSWERS = setOf("198.41.0.4")
+
+    /** Every address is a filter or bogon answer (10.10.34.x and the like): the name is filtered here, not rewritten. */
+    fun filtered(ips: List<String>): Boolean = ips.isNotEmpty() && ips.all(ResolverScanner::poisoned)
+
+    enum class ControlVerdict { OK, OK_OVER_TCP, OK_BY_ROOT, HIJACKED }
+
+    /**
+     * Build 179 device test (Irancell): all four Unlock servers were "hijacked" in 33-63 ms, which was the network, not
+     * the servers: one.one.one.one is answered with a filter address on the way. The control now passes when
+     * - the UDP answer is the name's own ([OK]);
+     * - the server's own answer over TCP/53 is ([OK_OVER_TCP]): UDP is rewritten on the path, so the server is asked
+     *   over TCP;
+     * - the control name only came back as a filter address (UDP and TCP) and the root control ([ROOT_CONTROL_NAME])
+     *   answers exactly ([OK_BY_ROOT]).
+     * Any other public address for the control name is a rewrite: [HIJACKED]. Pure.
+     */
+    fun controlVerdict(udp: List<String>, tcp: List<String>?, root: () -> List<String>?): ControlVerdict = when {
+        !hijacked(udp) -> ControlVerdict.OK
+        tcp != null && !hijacked(tcp) -> ControlVerdict.OK_OVER_TCP
+        filtered(udp) && (tcp == null || tcp.isEmpty() || filtered(tcp)) &&
+            root()?.let { it.isNotEmpty() && it.all { a -> a in ROOT_CONTROL_ANSWERS } } == true -> ControlVerdict.OK_BY_ROOT
+        else -> ControlVerdict.HIJACKED
+    }
+
+    /** The log's account of a control answer that was not the name's own. */
+    fun controlDetail(udp: List<String>, tcp: List<String>?): String =
+        "$CONTROL_NAME answered " + udp.take(3).joinToString(", ").ifEmpty { "nothing" } + " over UDP" +
+            (tcp?.let { " and " + it.take(3).joinToString(", ").ifEmpty { "nothing" } + " over TCP" } ?: "") +
+            if (filtered(udp)) " (a filter address: this network rewrites or filters plain DNS)" else " (not its own address)"
+
     fun check(ip: String, probe: UnlockProbe, now: Long = System.currentTimeMillis()): ServerCheck {
-        fun blocked(reason: BlockReason, ms: Long? = null) = ServerCheck(ip, ServerHealth.BLOCKED, ms, reason, now)
+        fun blocked(reason: BlockReason, ms: Long? = null, detail: String? = null) =
+            ServerCheck(ip, ServerHealth.BLOCKED, ms, reason, now, detail = detail)
         val control = probe.lookup(ip, CONTROL_NAME, LOOKUP_TIMEOUT_MS) ?: return blocked(BlockReason.NO_ANSWER)
         if (control.intercepted) return blocked(BlockReason.INTERCEPTED, control.ms)
-        if (hijacked(control.ips)) return blocked(BlockReason.HIJACKED, control.ms)
-        val unlock = probe.lookup(ip, UNLOCK_PROBE, LOOKUP_TIMEOUT_MS)
+        var overTcp = false
+        var detail: String? = null
+        var controlMs = control.ms
+        if (hijacked(control.ips)) {
+            val tcp = probe.lookupTcp(ip, CONTROL_NAME, LOOKUP_TIMEOUT_MS)
+            val verdict = controlVerdict(control.ips, tcp?.ips) {
+                probe.lookup(ip, ROOT_CONTROL_NAME, LOOKUP_TIMEOUT_MS)?.takeIf { !it.intercepted }?.ips
+            }
+            detail = controlDetail(control.ips, tcp?.ips)
+            when (verdict) {
+                ControlVerdict.HIJACKED -> return blocked(BlockReason.HIJACKED, control.ms, detail)
+                ControlVerdict.OK_OVER_TCP -> { overTcp = true; controlMs = tcp?.ms ?: control.ms; detail += "; the server's own answer over TCP is correct, so it is asked over TCP" }
+                ControlVerdict.OK_BY_ROOT -> detail += "; $ROOT_CONTROL_NAME answered correctly, so the server is not rewriting answers"
+                ControlVerdict.OK -> Unit
+            }
+        }
+        val unlock = if (overTcp) probe.lookupTcp(ip, UNLOCK_PROBE, LOOKUP_TIMEOUT_MS) else probe.lookup(ip, UNLOCK_PROBE, LOOKUP_TIMEOUT_MS)
         if (unlock == null || unlock.intercepted || unlock.ips.isEmpty() || unlock.ips.any(ResolverScanner::poisoned)) {
-            return blocked(if (unlock?.intercepted == true) BlockReason.INTERCEPTED else BlockReason.NO_UNLOCK_ANSWER, control.ms)
+            return blocked(if (unlock?.intercepted == true) BlockReason.INTERCEPTED else BlockReason.NO_UNLOCK_ANSWER, controlMs, detail)
         }
         val reachable = unlock.ips.distinct().take(REACH_TRIES).any { probe.reach(it, 443, REACH_TIMEOUT_MS) != null }
-        val latency = minOf(control.ms, unlock.ms)
-        if (!reachable) return blocked(BlockReason.UNLOCK_UNREACHABLE, latency)
-        return ServerCheck(ip, if (latency > SLOW_MS) ServerHealth.SLOW else ServerHealth.HEALTHY, latency, null, now)
+        val latency = minOf(controlMs, unlock.ms)
+        if (!reachable) return blocked(BlockReason.UNLOCK_UNREACHABLE, latency, detail)
+        return ServerCheck(ip, if (latency > SLOW_MS) ServerHealth.SLOW else ServerHealth.HEALTHY, latency, null, now,
+            tcp = overTcp, detail = detail)
     }
+
+    /**
+     * Every server was refused for an answer rewritten on the way (or intercepted): the failure says it is this network's
+     * DNS, not the servers. Pure.
+     */
+    fun networkRewritesDns(checks: List<ServerCheck>): Boolean =
+        checks.isNotEmpty() && checks.none { it.usable } &&
+            checks.all { it.reason == BlockReason.HIJACKED || it.reason == BlockReason.INTERCEPTED }
 
     /** Block reasons a query shape can change: something on the path answered the plain question. */
     val SHAPEABLE = setOf(BlockReason.HIJACKED, BlockReason.INTERCEPTED, BlockReason.NO_UNLOCK_ANSWER)

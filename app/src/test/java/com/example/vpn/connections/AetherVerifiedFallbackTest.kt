@@ -103,13 +103,15 @@ class AetherVerifiedFallbackTest {
         assertTrue(attempted.toString(), attempted.isNotEmpty())
     }
 
-    @Test fun theUsersOwnHttp2PickInsideTheHoldFailsAtOnceAndNamesTheVerifiedConnection() {
+    @Test fun theUsersOwnHttp2PickInsideTheHoldStillRuns() {
+        // Build 179 device test (N3): the hold only steers Smart Connect and the background relays; the user's own pick
+        // always runs (it used to be refused for 30 min after any WARP failure, Smart Connect's included).
         WarpDataPlaneHold.record(network)
         val failure = run(profile = explicitH2(), manual = true, handOver = false)
-        assertTrue(attempted.toString(), attempted.isEmpty())
-        val message = failure.message.orEmpty()
-        assertTrue(message, message.startsWith("Aether skipped: Cloudflare TLS is filtered"))
-        assertTrue(message, message.contains("Connect with Chain (51 KB/s) instead: it worked on this network recently."))
+        assertTrue(attempted.toString(), attempted.contains("h2"))
+        assertFalse(failure.message.orEmpty(), failure.message.orEmpty().startsWith("Aether skipped"))
+        // A start failure that is not a gateway-scan failure says nothing new about the hold.
+        assertTrue(WarpDataPlaneHold.blocked(network))
     }
 
     @Test fun theUsersOwnHttp2PickStillRunsOutsideTheHoldOrWithCloudflareReachable() {

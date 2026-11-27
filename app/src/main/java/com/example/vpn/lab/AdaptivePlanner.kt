@@ -64,6 +64,11 @@ class AdaptivePlanner(
         /** Worked on this network recently (fresh memory); only a nudge. */
         val provenHere: Boolean = false,
         /**
+         * Build 179 device test: carried verified traffic on this network in the last 24 h (the engine ledger's per-path
+         * history, chains included). A stronger nudge than [provenHere], still never live evidence.
+         */
+        val verifiedRecently: Boolean = false,
+        /**
          * Multiplies the probability for this candidate on the current carrier's firewall (fake-SNI recovery:
          * earlier on Irancell, last on Hamrah-e-Aval, see FakeSniRecovery.firewallFactor). 1 = no preference.
          */
@@ -214,6 +219,7 @@ class AdaptivePlanner(
             else -> 0.5
         }
         if (c.provenHere) { p += 0.15; why += "worked here recently" }
+        if (c.verifiedRecently) { p += com.example.vpn.smart.VerifiedHereOrder.NUDGE; why += "verified on this network in the last 24 h" }
         priors.memory[c.family]?.let { m -> p += 0.15 * m.coerceIn(-1.0, 1.0); if (m > 0) why += "fresh memory favours it" }
         if (c.family in priors.ai) { p += 0.1; why += "AI checkpoint ranked it" }
         if (c.family.udp) {
