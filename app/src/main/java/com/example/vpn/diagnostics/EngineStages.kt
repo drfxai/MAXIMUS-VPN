@@ -114,7 +114,15 @@ object EngineStages {
         if (chain != null) return chain.hops.joinToString("→") { it.engineId }
         val id = com.example.vpn.sidecar.EngineUdp.engineId(profile)
         if (id.isBlank()) return "xray"
-        if (id == com.example.vpn.sidecar.AetherSidecar.ID) return "$id/${com.example.vpn.sidecar.EngineUdp.aetherCarrier(profile)}"
+        if (id == com.example.vpn.sidecar.AetherSidecar.ID) {
+            val base = "$id/${com.example.vpn.sidecar.EngineUdp.aetherCarrier(profile)}"
+            // Build 179 (N7): "Aether over Lantern" was logged as plain "aether/h2"; a hop after Aether is named as a chain.
+            val extras = runCatching { com.example.vpn.engine.ProfileExtras.read(profile) }.getOrNull() ?: return base
+            if (com.example.vpn.sidecar.LanternRelayHop.requested(extras)) return "$base→${com.example.vpn.sidecar.RadianceSidecar.id}"
+            if (extras.optString("psiphon", "off") != "off") return "$base→${com.example.vpn.sidecar.PsiphonSidecar.ID}"
+            if (extras.optString("tor", "off") != "off") return "$base→${com.example.vpn.sidecar.TorSidecar.ID}"
+            return base
+        }
         return id
     }
 

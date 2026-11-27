@@ -52,6 +52,14 @@ object StopGuard {
 
     fun swallow(origin: StopOrigin, now: Long = System.currentTimeMillis()): Boolean = swallow(origin, connectTapAt, now)
 
+    /**
+     * The state a Stop came from. Build 179 device test (N8): the UI shows "Stopping" (DISCONNECTING) on the tap, before
+     * the service reads its state, so every stop was logged "while disconnecting" though the session was connected. The
+     * UI's own reading ([uiFrom]) wins over a DISCONNECTING the UI itself set. Pure.
+     */
+    fun fromStatus(service: String, uiFrom: String?): String =
+        if (service == "DISCONNECTING" && !uiFrom.isNullOrBlank()) uiFrom else service
+
     /** The diagnostics line for a Stop: who asked, from which state and how long after the Connect tap. */
     fun reason(origin: StopOrigin, fromStatus: String, sinceConnectMs: Long?): String =
         "Stopped by ${origin.label} while ${fromStatus.lowercase().replace('_', ' ')}" +
@@ -63,4 +71,13 @@ object StopGuard {
     internal fun resetForTest() {
         connectTapAt = 0L
     }
+}
+
+/**
+ * How a pinned session (only the chosen connection runs) was started, for the failover log. Build 179 device test (N2):
+ * a Psiphon pick from the list was logged "it was connected with the power button". Pure.
+ */
+object ConnectOrigin {
+    fun pinnedBy(powerButton: Boolean): String = if (powerButton) "the power button" else "your own pick"
+    fun configOf(powerButton: Boolean): String = if (powerButton) "the power button's config" else "your own pick"
 }

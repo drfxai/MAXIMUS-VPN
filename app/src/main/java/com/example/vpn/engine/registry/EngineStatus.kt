@@ -215,7 +215,39 @@ class EngineLedger(private val clock: () -> Long = System::currentTimeMillis) {
         }
     }
 
+    /**
+     * Build 179 device test (N4): seven picks carried traffic on Irancell and the LAB still said "Nothing verified on this
+     * network yet", Diagnostics named only the active engine and the Home card said "not tested yet" for picks that had
+     * just failed. Each connection the user (or Smart Connect) ran is also kept under its path key ([pathKey]: the engine,
+     * the carrier and every hop of a chain, so "Psiphon over Lantern" is not "Psiphon"), and [pathResults] lists the last
+     * outcome of each on a network within [HISTORY_MS] for those screens.
+     */
+    @Synchronized fun pathVerified(path: String, network: String) = add(PATH_PREFIX + path, Event(network, Kind.VERIFIED, clock(), null))
+    @Synchronized fun pathFailed(path: String, network: String, reason: String?) =
+        add(PATH_PREFIX + path, Event(network, Kind.FAILED, clock(), reason?.take(160)))
+
+    data class PathResult(val path: String, val verified: Boolean, val at: Long, val reason: String?,
+                          val verifiedCount: Int, val failedCount: Int)
+
+    /** The last outcome of every path tried on [network] within [HISTORY_MS], newest first. */
+    @Synchronized
+    fun pathResults(network: String): List<PathResult> {
+        ensureLoaded()
+        val now = clock()
+        return events.entries.filter { it.key.startsWith(PATH_PREFIX) }.mapNotNull { (key, list) ->
+            val here = list.filter { it.network == network && it.kind != Kind.STARTED && now - it.at in 0 until HISTORY_MS }
+            val last = here.lastOrNull() ?: return@mapNotNull null
+            PathResult(key.removePrefix(PATH_PREFIX), last.kind == Kind.VERIFIED, last.at, last.reason,
+                here.count { it.kind == Kind.VERIFIED }, here.count { it.kind == Kind.FAILED })
+        }.sortedByDescending { it.at }
+    }
+
+    /** The last outcome of [path] on [network] within [HISTORY_MS], or null. */
+    fun pathResult(path: String, network: String): PathResult? = pathResults(network).firstOrNull { it.path == path }
+
     companion object {
+        /** Key prefix of the per-connection history ([pathVerified]); never an engine id. */
+        const val PATH_PREFIX = "path:"
         /** Evidence older than this is not used for a live state. */
         const val FRESH_MS = 10 * 60_000L
         /** Outcomes kept per network (and across restarts) for the report's history line. */

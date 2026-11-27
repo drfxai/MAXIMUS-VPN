@@ -38,6 +38,7 @@ class VpnViewModel(
     /** How the connect waiting for the VPN permission was asked for: Smart Connect, or the power button. */
     private var pendingSmart = false
     private var pendingExact = false
+    private var pendingPowerButton = false
     /** The connect waiting for the VPN permission is Unlock mode's (no profile). */
     private var pendingUnlock = false
 
@@ -47,6 +48,8 @@ class VpnViewModel(
     ) { profiles, settings ->
         if (profiles.isEmpty()) return@combine null
         val targetId = settings.selectedProfileId
+        // The user cleared the selection on Home (build 179, N9): nothing is selected until they pick again.
+        if (targetId == com.example.ui.home.HomeSelection.CLEARED) return@combine null
         profiles.firstOrNull { it.id == targetId } ?: profiles.first()
     }.stateIn(
         scope = viewModelScope,
@@ -102,6 +105,8 @@ class VpnViewModel(
         smart: Boolean = false,
         /** The power button: only [profile], as saved (see RayVpnService.EXTRA_EXACT). */
         exact: Boolean = false,
+        /** Started by the power button itself, not a pick in a list (build 179, N2: the log blamed the power button). */
+        powerButton: Boolean = false,
         onRequestPermission: (Intent) -> Unit
     ) {
         val targetProfile = profile ?: selectedProfile.value ?: smartRecommendation.value?.profile
@@ -111,16 +116,17 @@ class VpnViewModel(
             prepareConnect(targetProfile)
             pendingSmart = smart
             pendingExact = exact
+            pendingPowerButton = powerButton
             onRequestPermission(prepareIntent)
         } else if (targetProfile != null) {
             // Shown on the tap, before the service starts and reaches its own first step.
             RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else s.copy(status = ConnectionStatus.PREPARING, errorMessage = null, stopReason = null) }
-            VpnController.startVpn(context, targetProfile, smart = smart, exact = exact)
+            VpnController.startVpn(context, targetProfile, smart = smart, exact = exact, powerButton = powerButton)
         } else {
             viewModelScope.launch {
                 val fallback = serverRepository.getAllProfilesOnce().firstOrNull()
                 if (fallback != null) {
-                    VpnController.startVpn(context, fallback, smart = smart, exact = exact)
+                    VpnController.startVpn(context, fallback, smart = smart, exact = exact, powerButton = powerButton)
                 } else {
                     connectWithoutServer(context)
                 }
@@ -145,12 +151,14 @@ class VpnViewModel(
             _pendingProfile.value = null
             val smart = pendingSmart
             val exact = pendingExact
+            val powerButton = pendingPowerButton
             pendingSmart = false
             pendingExact = false
+            pendingPowerButton = false
 
             if (profileToConnect != null) {
                 XrayLogManager.i("VPN", "Permission granted by user. Explicitly starting VPN tunnel for '${profileToConnect.name}'")
-                VpnController.startVpn(context, profileToConnect, smart = smart, exact = exact)
+                VpnController.startVpn(context, profileToConnect, smart = smart, exact = exact, powerButton = powerButton)
             } else {
                 XrayLogManager.w("VPN", "Permission granted but no profile available.")
                 connectWithoutServer(context)
@@ -206,11 +214,12 @@ class VpnViewModel(
                 VpnController.stopVpn(context, origin)
                 return
             }
-            // The button answers on the tap; the service then tears down (it sets the same state itself).
+            // The button answers on the tap; the service then tears down (it sets the same state itself). The state the
+            // stop came from goes with it (build 179, N8: every stop was logged "while disconnecting").
             if (currentState.status != ConnectionStatus.FAILED) {
                 RayVpnService.mutateState { it.copy(status = ConnectionStatus.DISCONNECTING) }
             }
-            VpnController.stopVpn(context, origin)
+            VpnController.stopVpn(context, origin, fromStatus = currentState.status)
         } else {
             if (settingsRepository.getSettings().operationalMode == com.example.data.model.OperationalMode.UNLOCK) {
                 connectUnlock(context) { intent -> onRequestPermission?.invoke(intent) }
@@ -221,7 +230,7 @@ class VpnViewModel(
             // off, only that config is started. Smart Connect stays the separate button that compares paths.
             val targetProfile = selectedProfile.value ?: smartRecommendation.value?.profile
             startOrRequestPermission(context, targetProfile,
-                exact = com.example.vpn.safety.PowerButtonPolicy.exact(settingsRepository.getSettings())) { intent ->
+                exact = com.example.vpn.safety.PowerButtonPolicy.exact(settingsRepository.getSettings()), powerButton = true) { intent ->
                 onRequestPermission?.invoke(intent)
             }
         }
@@ -278,6 +287,17 @@ class VpnViewModel(
         startOrRequestPermission(context, lead, smart = true) { intent ->
             onRequestPermission?.invoke(intent)
         }
+    }
+
+    /**
+     * Build 179 device test (N9): Home's card stayed on "MASQUE HTTP/3 · Selected in Nodes" with no way back to
+     * "No server selected". Clears the Nodes selection and the last tried connection while nothing is running.
+     */
+    fun clearSelection() {
+        val state = connectionState.value
+        if (state.isTunnelUp || state.isBusy) return
+        settingsRepository.setSelectedProfileId(com.example.ui.home.HomeSelection.CLEARED)
+        RayVpnService.mutateState { s -> if (s.isTunnelUp || s.isBusy) s else com.example.ui.home.HomeSelection.cleared(s) }
     }
 
     fun selectServer(profile: VlessProfile) {

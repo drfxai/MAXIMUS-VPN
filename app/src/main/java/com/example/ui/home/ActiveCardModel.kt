@@ -33,14 +33,24 @@ data class ActiveCardModel(
      * Connect's own state (localized by the card), never the built-in profile the search starts from as if it were
      * "Selected in Nodes" (build 177: "Aether / WARP · Selected in Nodes · not tested yet").
      */
-    val smartSearch: Boolean = false
+    val smartSearch: Boolean = false,
+    /**
+     * Build 179 device test (N9): nothing is selected in Nodes; the card shows the connection tried last, labelled as
+     * such, never as "Selected in Nodes" (the power button said no server was selected while the card claimed one).
+     */
+    val lastTried: Boolean = false,
+    /** The off card can be cleared back to "No server selected" (build 179: no way to clear it). */
+    val clearable: Boolean = false
 ) {
     enum class Tone { OK, WARN, MUTED }
 
     companion object {
         const val DASH = "—"
 
-        fun of(state: ConnectionState, selected: VlessProfile?): ActiveCardModel? {
+        fun of(state: ConnectionState, selected: VlessProfile?,
+               /** This connection's last result on the current network (EngineLedger.pathResult), if any. */
+               result: (VlessProfile) -> com.example.vpn.engine.registry.EngineLedger.PathResult? = { null },
+               now: Long = System.currentTimeMillis()): ActiveCardModel? {
             val up = state.isTunnelUp
             val profile = (if (up) state.activeProfile else null) ?: selected ?: state.activeProfile ?: return null
             if (!up && state.smartSession && state.isBusy) {
@@ -61,13 +71,19 @@ data class ActiveCardModel(
                 )
             }
             if (!up) {
+                val lastTried = selected == null
+                val fallback = profile.lastLatencyMs?.takeIf { it > 0 }?.let { "Last test $it ms" } ?: "Not tested yet"
                 return ActiveCardModel(
                     live = false,
-                    label = "Selected in Nodes",
+                    label = if (lastTried) LAST_TRIED else SELECTED,
                     configName = null,
                     flag = flag(profile.countryCode),
                     title = profile.name,
-                    subtitle = profile.lastLatencyMs?.takeIf { it > 0 }?.let { "Last test $it ms" } ?: "Not tested yet",
+                    // Build 179 (N4): "not tested yet" was shown for a pick that had just failed here.
+                    subtitle = com.example.vpn.engine.registry.NetworkResults.cardLine(
+                        runCatching { result(profile) }.getOrNull(), now, fallback),
+                    lastTried = lastTried,
+                    clearable = !state.isBusy,
                     exitIp = "Shown once connected",
                     ping = DASH,
                     status = "Off",
@@ -112,7 +128,10 @@ data class ActiveCardModel(
 
         /** The off-state subtitle on one line: where the config comes from and its last test. */
         fun offLine(model: ActiveCardModel): String =
-            if (model.smartSearch) model.subtitle else "Selected in Nodes · " + model.subtitle.replaceFirstChar { it.lowercase() }
+            if (model.smartSearch) model.subtitle else model.label + " · " + model.subtitle.replaceFirstChar { it.lowercase() }
+
+        const val SELECTED = "Selected in Nodes"
+        const val LAST_TRIED = "Last tried"
 
         /** The country's English name, or the code itself when the JVM does not know it. */
         fun countryName(code: String): String =

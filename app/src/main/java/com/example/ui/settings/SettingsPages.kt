@@ -1014,7 +1014,24 @@ fun DiagnosticsSettingsPage(
     Column {
         SettingsTopBar(stringResource(R.string.ui_diagnostics), onBack = onBack)
         SettingsPageColumn {
-            SettingsSectionLabel(stringResource(R.string.ui_engine), first = true)
+            // Build 179 device test (N4): Diagnostics named only the active engine; what each connection did on this
+            // network (the 24 h engine ledger) is listed first.
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val results = remember { com.example.vpn.engine.registry.NetworkResultsReader.current(context) }
+            val now = remember { System.currentTimeMillis() }
+            SettingsSectionLabel(stringResource(R.string.diag_network_results_title), first = true)
+            SettingsGroup(modifier = Modifier.testTag("diag_network_results")) {
+                if (results.isEmpty()) {
+                    SettingsFootnote(stringResource(R.string.diag_network_results_empty), modifier = Modifier.padding(16.dp))
+                } else results.take(12).forEachIndexed { i, r ->
+                    if (i > 0) SettingsDivider()
+                    EngineInventoryRow(com.example.vpn.engine.registry.NetworkResults.title(r.path),
+                        com.example.vpn.engine.registry.NetworkResults.line(r, now).substringAfter(" · ") +
+                            (r.reason?.takeIf { !r.verified }?.let { " · " + it.take(120) } ?: ""))
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            SettingsSectionLabel(stringResource(R.string.ui_engine))
             SettingsGroup {
                 SettingsNavRow(
                     title = stringResource(R.string.ui_live_logs_telemetry),

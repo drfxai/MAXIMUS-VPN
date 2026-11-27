@@ -80,10 +80,13 @@ class Build177LocalizationTest {
         val text = en.getString(R.string.ui_run_a_benchmark_from_the)
         assertFalse(text.contains("Benchmark tab"))
         assertTrue(text.contains(en.getString(R.string.nav_nodes)))
-        assertTrue(text.contains(en.getString(R.string.ui_benchmark_lab)))
-        // Russian inflects the lab's name ("Лабораторию тестов"); the tab name is quoted as is.
+        // Build 179 device test: Nodes has no "Benchmark Lab"; the button that tests and ranks nodes there is Ping All.
+        assertFalse(text.contains(en.getString(R.string.ui_benchmark_lab)))
+        assertTrue(text.contains(en.getString(R.string.ui_ping_all)))
         assertTrue(ru.getString(R.string.ui_run_a_benchmark_from_the).contains("«" + ru.getString(R.string.nav_nodes) + "»"))
-        assertTrue(fa.getString(R.string.ui_run_a_benchmark_from_the).contains(fa.getString(R.string.ui_benchmark_lab)))
+        assertTrue(ru.getString(R.string.ui_run_a_benchmark_from_the).contains(ru.getString(R.string.ui_ping_all)))
+        assertTrue(fa.getString(R.string.ui_run_a_benchmark_from_the).contains(fa.getString(R.string.ui_ping_all)))
+        assertFalse(fa.getString(R.string.ui_run_a_benchmark_from_the).contains(fa.getString(R.string.ui_benchmark_lab)))
     }
 
     @Test fun b20_everyFailureNoticeIsTranslated() {

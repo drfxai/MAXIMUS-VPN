@@ -429,7 +429,9 @@ fun HomeScreen(
         // The Earth: shows the connection's state and the route; the power button sits on its edge.
         val earthMode = when {
             connectionState.isConnected -> EarthMode.ON
-            connectionState.isBusy -> EarthMode.CONNECTING
+            // Build 179 device test (N1): a tunnel that is up without traffic holds the phone's traffic; it was shown as
+            // "Not connected" while every request was blocked.
+            connectionState.isBusy || HomeFailure.holdsTraffic(connectionState) -> EarthMode.CONNECTING
             else -> EarthMode.OFF
         }
         val earthAccent = when (earthMode) {
@@ -457,12 +459,15 @@ fun HomeScreen(
         }
         val blockNotices = listOf(stringResource(R.string.connect_failed_block_released),
             stringResource(R.string.connect_failed_block_kill_switch), stringResource(R.string.connect_failed_block_kept))
-        val failureReason = if (unlockMode) null else HomeFailure.reason(connectionState, blockNotices)
+        // Build 179 device test (N10): Unlock's failure was only below the fold; the header now says it.
+        val failureReason = if (unlockMode) HomeFailure.unlockReason(connectionState) else HomeFailure.reason(connectionState, blockNotices)
         Text(
             text = when (earthMode) {
                 EarthMode.ON -> stringResource(if (unlockMode) R.string.unlock_state_unlocked else R.string.ui_connected_2)
-                EarthMode.CONNECTING -> stringResource(if (unlockMode) R.string.unlock_state_checking else R.string.ui_finding_a_path)
-                EarthMode.OFF -> stringResource(if (failureReason != null) R.string.home_failed_title else R.string.ui_not_connected)
+                EarthMode.CONNECTING -> stringResource(if (unlockMode) R.string.unlock_state_checking
+                    else if (HomeFailure.holdsTraffic(connectionState)) R.string.home_no_traffic_yet else R.string.ui_finding_a_path)
+                EarthMode.OFF -> stringResource(if (failureReason != null && unlockMode) R.string.unlock_failed_header
+                    else if (failureReason != null) R.string.home_failed_title else R.string.ui_not_connected)
             },
             color = if (earthMode == EarthMode.OFF && failureReason != null) AppTheme.colors.statusError
                 else if (earthMode == EarthMode.OFF) AppTheme.colors.textPrimary else earthAccent,
@@ -473,7 +478,7 @@ fun HomeScreen(
         if (earthMode == EarthMode.ON && unlockMode) {
             val server = unlock.active
             if (server != null) UnlockStatusPill(server, unlock.activeMs ?: connectionState.pingMs)
-        } else if (earthMode == EarthMode.OFF && unlockMode) {
+        } else if (earthMode == EarthMode.OFF && unlockMode && failureReason == null) {
             Text(
                 text = stringResource(R.string.unlock_tap_to_connect),
                 color = AppTheme.colors.textSecondary,
@@ -648,9 +653,14 @@ fun HomeScreen(
                 }
             )
             Spacer(modifier = Modifier.height(16.dp))
-        } else ActiveCardModel.of(connectionState, selectedProfile)?.let { model ->
+        } else ActiveCardModel.of(connectionState, selectedProfile, result = { p ->
+            // Build 179 (N4): this connection's last result on the current network, from the 24 h engine ledger.
+            com.example.vpn.engine.registry.NetworkResultsReader.current(context)
+                .firstOrNull { it.path == com.example.vpn.diagnostics.EngineStages.engineOf(p) }
+        })?.let { model ->
             ActiveConnectionCard(
                 model = model,
+                onClear = { vpnViewModel.clearSelection() },
                 downloadBps = connectionState.downloadSpeedBps,
                 uploadBps = connectionState.uploadSpeedBps,
                 buttonState = SmartButtonState.of(connectionState),
@@ -979,7 +989,8 @@ private fun ActiveConnectionCard(
     uploadBps: Long,
     buttonState: SmartButtonState,
     onSmartConnect: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onClear: () -> Unit = {}
 ) {
     val c = AppTheme.colors
     val toneColor = when (model.tone) {
@@ -1006,6 +1017,8 @@ private fun ActiveConnectionCard(
                         text = when {
                             model.live -> model.exitIp
                             searching != null -> searching
+                            model.lastTried -> stringResource(R.string.home_last_tried) + " · " +
+                                model.subtitle.replaceFirstChar { it.lowercase() }
                             else -> ActiveCardModel.offLine(model)
                         },
                         fontSize = 12.5.sp, color = c.textSecondary,
@@ -1023,6 +1036,17 @@ private fun ActiveConnectionCard(
                         Text(text = model.status, fontSize = 11.5.sp, color = toneColor)
                     }
                 } else {
+                    // Build 179 device test (N9): the selection (or the last tried connection) can be cleared back to
+                    // "No server selected".
+                    if (model.clearable && !model.smartSearch) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = stringResource(R.string.home_clear_selection_desc),
+                            tint = c.textMuted,
+                            modifier = Modifier.padding(end = 6.dp).size(28.dp).clip(CircleShape)
+                                .clickable(onClick = onClear).padding(6.dp).testTag("home_card_clear")
+                        )
+                    }
                     Text(
                         text = if (model.smartSearch) stringResource(R.string.home_card_smart_status) else model.status,
                         fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textMuted,
@@ -1159,12 +1183,12 @@ private fun SmartConnectButton(state: SmartButtonState, onClick: () -> Unit) {
     val dark = AppTheme.colors.isDark
     val target = when (state) {
         SmartButtonState.OFF -> if (dark) Color(0xFFD0BCFF) else Color(0xFF6D28D9)
-        SmartButtonState.CONNECTING -> if (dark) Color(0xFFFFB703) else Color(0xFFD97706)
+        SmartButtonState.CONNECTING, SmartButtonState.MANUAL -> if (dark) Color(0xFFFFB703) else Color(0xFFD97706)
         SmartButtonState.ON -> if (dark) Color(0xFF00F59B) else Color(0xFF059669)
     }
     val content = when (state) {
         SmartButtonState.OFF -> if (dark) Color(0xFF21134A) else Color.White
-        SmartButtonState.CONNECTING -> if (dark) Color(0xFF2A1A00) else Color.White
+        SmartButtonState.CONNECTING, SmartButtonState.MANUAL -> if (dark) Color(0xFF2A1A00) else Color.White
         SmartButtonState.ON -> if (dark) Color(0xFF00281A) else Color.White
     }
     val fill by androidx.compose.animation.animateColorAsState(target, label = "smartFill")
@@ -1205,7 +1229,7 @@ private fun SmartConnectButton(state: SmartButtonState, onClick: () -> Unit) {
                     trackColor = content.copy(alpha = 0.25f)
                 )
                 SmartButtonState.OFF -> Icon(imageVector = Icons.Default.Bolt, contentDescription = null, tint = content, modifier = Modifier.size(15.dp))
-                SmartButtonState.ON -> Box(Modifier.size(8.dp).clip(CircleShape).background(content))
+                SmartButtonState.ON, SmartButtonState.MANUAL -> Box(Modifier.size(8.dp).clip(CircleShape).background(content))
             }
             Spacer(modifier = Modifier.width(8.dp))
             Text(
@@ -1213,6 +1237,7 @@ private fun SmartConnectButton(state: SmartButtonState, onClick: () -> Unit) {
                     SmartButtonState.OFF -> stringResource(R.string.ui_auto_connect)
                     SmartButtonState.CONNECTING -> stringResource(R.string.ui_connecting_2)
                     SmartButtonState.ON -> stringResource(R.string.ui_auto_connect_on)
+                    SmartButtonState.MANUAL -> stringResource(R.string.ui_your_pick_running)
                 },
                 color = content,
                 fontSize = 13.sp,

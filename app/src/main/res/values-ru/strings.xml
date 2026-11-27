@@ -1564,7 +1564,7 @@
     <string name="ui_subscription_https_url">HTTPS-адрес подписки</string>
     <string name="ui_add_sync">Добавить и синхронизировать</string>
     <string name="ui_no_tested_nodes_available">Нет проверенных узлов</string>
-    <string name="ui_run_a_benchmark_from_the">Добавьте или импортируйте узлы на вкладке «Узлы», затем запустите там «Лабораторию тестов», чтобы ранжировать их.</string>
+    <string name="ui_run_a_benchmark_from_the">Добавьте или импортируйте узлы на вкладке «Узлы», затем нажмите там «Пинг всех», чтобы проверить и ранжировать их.</string>
     <string name="ui_opening_vip">Открытие VIP</string>
     <string name="ui_getting_the_vip_servers">Получение VIP-серверов…</string>
     <string name="ui_no_vip_servers_yet">VIP-серверов пока нет</string>
@@ -1883,4 +1883,12 @@
     <string name="unlock_notification_rechecking">Серверы Unlock DNS пока не ответили; проверяем ещё раз…</string>
     <string name="picker_desc_shirokhorshid_radiance">Lantern переносит подключение к Shir o Khorshid (явная цепочка)</string>
     <string name="picker_desc_aether_lantern">WARP через сеть Lantern, в обход фильтруемых адресов Cloudflare (явная цепочка)</string>
+    <string name="ui_verified_by_your_connections">Подтверждено вашими подключениями</string>
+    <string name="home_last_tried">Последняя попытка</string>
+    <string name="home_clear_selection_desc">Сбросить выбранный сервер</string>
+    <string name="ui_your_pick_running">Работает ваш выбор</string>
+    <string name="home_no_traffic_yet">Трафика пока нет</string>
+    <string name="diag_network_results_title">В этой сети (за 24 ч)</string>
+    <string name="diag_network_results_empty">За последние 24 ч в этой сети не было попыток подключения.</string>
+    <string name="unlock_failed_header">Unlock DNS не сработал</string>
 </resources>

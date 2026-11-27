@@ -13,7 +13,9 @@ object AetherCloudflareNotice {
         val key = com.example.vpn.smart.NetworkIdentity.current(context)
         com.example.vpn.smart.SmartConnectPlan.cloudflareBlocked(
             com.example.vpn.smart.NetworkCapabilityDetector.last, key, now) ||
-            WarpDataPlaneHold.blocked(BuiltinMethodMemory.network(), now)
+            WarpDataPlaneHold.blocked(BuiltinMethodMemory.network(), now) ||
+            // Build 179 (N11): the same memory the run itself reads, so the picker never promises a check that is skipped.
+            CloudflareFilterMemory.knownAt(key, now) != null
     }.getOrDefault(false)
 
     /** Picker rows the notice applies to: Aether itself and every WARP transport or nested Aether method. Pure. */

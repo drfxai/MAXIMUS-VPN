@@ -155,6 +155,11 @@ object ConnectDeadline {
         "testing carriers" + (if (engineId == com.example.vpn.sidecar.AetherSidecar.ID) " (gateway scan)" else "") +
             " · ready within ${budgetMs / 1000}s"
 
+    /** The carrier test of a cf=0 short check: its limit is stated once, by the check's own stage line. Pure. */
+    fun carrierTestShortCheckText(engineId: String): String =
+        "testing carriers" + (if (engineId == com.example.vpn.sidecar.AetherSidecar.ID) " (gateway scan)" else "") +
+            " · one short check (Cloudflare is filtered here; its limit follows)"
+
     /** The engine came from its carrier test after [elapsedMs]. Pure. */
     fun carrierChosenText(elapsedMs: Long): String = "carrier chosen by its test after ${elapsedMs / 1000}s"
 
@@ -204,4 +209,42 @@ object ConnectDeadline {
             ?: return Decision.GiveUp(GiveUpReason.NONE_LEFT)
         return Decision.Fallback(next, "next built-in connection")
     }
+}
+
+/**
+ * The user's own pick of an engine whose first traffic check failed before it ever carried traffic.
+ *
+ * Build 179 device test (Irancell, Kill Switch off): Psiphon reported a tunnel at 7 s, the check failed at 28 s
+ * (PROXY_HANDSHAKE_FAILED) and the session went to "tunnel up, no traffic" with the failover watchdog: three more
+ * checks, a wait, a restart, a second 95 s start. For 2.5 minutes the VPN held every app's traffic while Home said
+ * "Not connected", and the pick failed at 168 s against "ready within 95s". Now, at once: one restart of the same engine
+ * when enough of the pick's own deadline is left for it ([MIN_RETRY_MS]), otherwise the pick fails and (Daily, Kill
+ * Switch off) the traffic block is released. The deadline itself stays anchored at the Connect tap ([anchoredSince]).
+ * Pure, so the rules are unit-tested.
+ */
+object ManualCheckFailure {
+    enum class Decision { RETRY_SAME_ENGINE, FAIL_NOW, WATCH }
+
+    /** Less than this left of the pick's deadline: no restart, the pick fails now. */
+    const val MIN_RETRY_MS = 40_000L
+    const val MAX_RETRIES = 1
+
+    fun decide(manual: Boolean, engineProfile: Boolean, neverVerified: Boolean, retriesSoFar: Int,
+               elapsedMs: Long, budgetMs: Long): Decision = when {
+        !manual || !engineProfile || !neverVerified -> Decision.WATCH
+        retriesSoFar < MAX_RETRIES && budgetMs - elapsedMs >= MIN_RETRY_MS -> Decision.RETRY_SAME_ENGINE
+        else -> Decision.FAIL_NOW
+    }
+
+    /**
+     * When a restarted attempt of the same manual pick is timed from: the first attempt's start, so a restart never
+     * resets the deadline (build 179: 168 s). A new pick, or Smart Connect, starts its own clock.
+     */
+    fun anchoredSince(manual: Boolean, sameProfile: Boolean, anchorSince: Long?, now: Long): Long =
+        if (manual && sameProfile && anchorSince != null) anchorSince else now
+
+    fun message(name: String, stage: String, seconds: Long, retried: Boolean): String =
+        "$name carried no traffic: the traffic check through it failed ($stage)" +
+            (if (retried) " and a restart of the same engine did not help" else "") +
+            " within ${seconds}s. You picked this connection yourself, so no other connection was started."
 }

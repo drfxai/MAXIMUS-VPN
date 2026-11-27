@@ -87,6 +87,16 @@ internal object HomeFailure {
         }
     }
 
+    /**
+     * Build 179 device test (N1): the tunnel is up and carries nothing (the VPN holds every app's traffic). Home shows a
+     * busy "No traffic yet" with the Stop hint, never "Not connected".
+     */
+    fun holdsTraffic(state: ConnectionState): Boolean = state.status == ConnectionStatus.TUNNEL_STARTED_CONNECTIVITY_UNVERIFIED
+
+    /** Build 179 device test (N10): Unlock mode's failure, shown in the header instead of only below the fold. */
+    fun unlockReason(state: ConnectionState): String? =
+        if (state.status != ConnectionStatus.FAILED) null else short(state.errorMessage)
+
     /** The message up to its first sentence end (or [MAX_REASON] characters). */
     fun short(message: String?): String? {
         val text = message?.trim()?.takeIf { it.isNotEmpty() } ?: return null

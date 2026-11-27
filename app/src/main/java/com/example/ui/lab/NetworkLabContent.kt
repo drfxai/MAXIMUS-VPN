@@ -362,9 +362,21 @@ private fun LabHome(c: LabColors, state: NetworkLabUiState, actions: NetworkLabA
                         LabText(pct(best.confidence), c.text, 12.5.sp, FontWeight.SemiBold, Modifier.padding(start = 10.dp), maxLines = 1)
                     }
                 } else {
+                    // Build 179 device test (N4): "Nothing verified on this network yet" after seven connections carried
+                    // traffic here. What the app's own connections verified on this network (24 h ledger) is shown.
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val ledgerLine = remember(s.plan, s.networkState) {
+                        com.example.vpn.engine.registry.NetworkResults.labLine(
+                            com.example.vpn.engine.registry.NetworkResultsReader.current(context), System.currentTimeMillis())
+                    }
                     Column(Modifier.padding(14.dp)) {
-                        LabText(stringResource(R.string.ui_nothing_verified_on_this_network), c.text, 14.5.sp, FontWeight.Medium, maxLines = 1)
-                        LabText(s.plan?.reason ?: "Run an experiment when a config stops working.", c.text3, 12.sp, maxLines = 2)
+                        if (ledgerLine != null) {
+                            LabText(stringResource(R.string.ui_verified_by_your_connections), c.text, 14.5.sp, FontWeight.Medium, maxLines = 1)
+                            LabText(ledgerLine, c.text3, 12.sp, maxLines = 4)
+                        } else {
+                            LabText(stringResource(R.string.ui_nothing_verified_on_this_network), c.text, 14.5.sp, FontWeight.Medium, maxLines = 1)
+                            LabText(s.plan?.reason ?: "Run an experiment when a config stops working.", c.text3, 12.sp, maxLines = 2)
+                        }
                     }
                 }
             }

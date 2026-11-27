@@ -92,26 +92,27 @@ class LanternRelayFallbackTest {
                 lanternAvailable = lantern, relayExitNode = relayExitNode)
         }
 
-    @Test fun insideTheHoldWithCloudflareFilteredAndNoLanternTheUsersRunFailsAtOnce() {
+    @Test fun insideTheHoldWithCloudflareFilteredAndNoLanternTheUsersRunStillRuns() {
+        // Build 179 device test (N3): the hold no longer refuses the user's own pick.
         WarpDataPlaneHold.record(network)
         val failure = run(manual = true, cloudflareBlocked = true, lantern = false)
-        assertTrue(attempted.toString(), attempted.isEmpty())
-        val message = failure.message.orEmpty()
-        assertTrue(message, message.startsWith("Aether skipped: Cloudflare TLS is filtered"))
-        assertTrue(message, message.contains("Lantern or Serverless"))
+        assertTrue(attempted.toString(), attempted.isNotEmpty())
+        assertFalse(failure.message.orEmpty(), failure.message.orEmpty().startsWith("Aether skipped"))
     }
 
-    @Test fun insideTheHoldWithCloudflareFilteredTheUsersRunGoesStraightThroughLantern() {
+    @Test fun insideTheHoldWithCloudflareFilteredTheUsersRunTriesTheDirectCarriersThenLantern() {
         WarpDataPlaneHold.record(network)
         val failure = run(manual = true, cloudflareBlocked = true, lantern = true)
-        assertEquals(listOf("lantern"), attempted)
-        val extras = attemptedExtras.single()
+        assertEquals("lantern", attempted.last())
+        assertEquals(1, attempted.count { it == "lantern" })
+        assertTrue(attempted.toString(), attempted.size > 1)
+        val extras = attemptedExtras.last()
         assertEquals("h2", extras.getString("carrier"))
         assertFalse(extras.optBoolean(AetherSidecar.SNI_SPLIT))
         assertTrue(extras.optString("exitNode").isBlank())
         assertTrue(failure.message.orEmpty(), failure.message.orEmpty()
             .contains("${ConnectionEngineRunner.H2_LANTERN}: ${LanternRelayHop.NOT_READY}"))
-        // A failure through Lantern says nothing new about this network's own path: the hold is unchanged.
+        // Failures that are not gateway-scan failures say nothing new about this network's own path: the hold is unchanged.
         assertTrue(WarpDataPlaneHold.blocked(network))
     }
 

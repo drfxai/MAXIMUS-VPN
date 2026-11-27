@@ -61,13 +61,17 @@ object IrancellWarp {
             ?: preferred?.takeIf { it in ALLOWED && it in methods }
             ?: ALLOWED.firstOrNull { it in methods }
 
-    /** An explicit connect can use a second H2 variant within the same overall budget. */
-    fun plan(methods: List<String>, preferred: String?, manual: Boolean): List<String> {
+    /**
+     * An explicit connect can use a second H2 variant within the same overall budget. [v6First] (a manual pick with
+     * cf=0 on a link not measured IPv4-only, build 179): MASQUE H2 over IPv6 goes before them.
+     */
+    fun plan(methods: List<String>, preferred: String?, manual: Boolean, v6First: Boolean = false): List<String> {
         val first = pick(methods, preferred) ?: return emptyList()
         if (!manual) return listOf(first)
         val alternate = listOf(ConnectionEngineRunner.H2_SPLIT, "h2", ConnectionEngineRunner.CLEAN_H2)
             .firstOrNull { it != first && it in methods }
-        return listOfNotNull(first, alternate)
+        val v6 = ConnectionEngineRunner.H2_V6.takeIf { v6First && it in methods && first != ConnectionEngineRunner.CLEAN_H2 }
+        return listOfNotNull(v6, first, alternate)
     }
 
     /** The methods left out of the plan, in their original order, for the log. */
@@ -102,6 +106,7 @@ object IrancellWarp {
 
     internal fun manualAttemptMs(candidate: VlessProfile): Long {
         val extras = ProfileExtras.read(candidate)
+        if (extras.optBoolean(ConnectionEngineRunner.V6_FIRST)) return ConnectionEngineRunner.IRANCELL_V6_MS
         val options = AetherSettings.read(extras)
         if (AetherSidecar.cleanH2Peer(extras, "h2", options) != null)
             return ConnectionEngineRunner.CLEAN_H2_BUDGET_MS

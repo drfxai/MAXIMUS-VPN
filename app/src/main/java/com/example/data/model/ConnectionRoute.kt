@@ -21,7 +21,17 @@ object ConnectionRoute {
     }
 
     fun withExitCountry(route: String, countryCode: String?): String =
-        "$route · ${exitName(countryCode) ?: "Unknown country"}"
+        "$route · ${exitName(countryCode) ?: if (exitsThroughTor(route)) TOR_EXIT_NAME else "Unknown country"}"
+
+    /**
+     * Build 179 device test (N6): a working Tor session showed "Tor · Unknown country" because the exit trace through
+     * Tor had not answered yet (the country is read from it). A route whose exit hop is Tor is the Tor network whatever
+     * the trace says. Pure.
+     */
+    fun exitsThroughTor(route: String): Boolean {
+        val r = route.trim()
+        return r == "Tor" || r.startsWith("Tor ·") || r.startsWith("Tor over ") || r.contains("Tor (chain)") || r.contains("Tor (only)")
+    }
 
     /**
      * A chain of engines by its hops, entry hop first, the way the app names it ("Psiphon over Lantern / Radiance").
@@ -58,7 +68,10 @@ object ConnectionRoute {
             "" -> "${profile.protocolType} · ${profile.transport}"
             else -> e.optString("engine")
         }
-        val exit = if (e.optString("exitNode").isNotBlank()) " · custom exit" else ""
+        // Build 179 device test (N7): "Aether over Lantern" showed as plain "Aether WARP · MASQUE HTTP/2": the Lantern hop
+        // it dials WARP through is part of the route.
+        val lantern = if (e.optString("engine") == "aether" && e.optBoolean("lanternHop")) " over Lantern" else ""
+        val exit = lantern + if (e.optString("exitNode").isNotBlank()) " · custom exit" else ""
         val relays = listOf("tor" to "Tor", "psiphon" to "Psiphon").mapNotNull { (key, title) ->
             e.optString(key, "off").takeIf { it != "off" }?.let { "$title ($it)" }
         }
