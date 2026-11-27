@@ -1524,11 +1524,12 @@ private fun ConfigFreeMethodPicker(
                                 listOf(ConfigFreeMethod.AETHER_PSIPHON, ConfigFreeMethod.AETHER_TOR, ConfigFreeMethod.AETHER_LANTERN))
                         ) else listOf(
                             Triple(R.string.ui_picker_direct_engines, R.string.ui_picker_direct_engines_hint,
-                                listOf(ConfigFreeMethod.AETHER_WARP, ConfigFreeMethod.SERVERLESS, ConfigFreeMethod.SERVERLESS_LANTERN)),
+                                listOf(ConfigFreeMethod.AETHER_WARP, ConfigFreeMethod.SERVERLESS, ConfigFreeMethod.SERVERLESS_LANTERN,
+                                    ConfigFreeMethod.PERSONAL_ECH)),
                             Triple(R.string.ui_picker_relay_networks, R.string.ui_picker_relay_networks_hint,
                                 ConfigFreeMethod.entries.filter { it.aetherTransport == null &&
                                     it != ConfigFreeMethod.AETHER_WARP && it != ConfigFreeMethod.SERVERLESS &&
-                                    it != ConfigFreeMethod.SERVERLESS_LANTERN })
+                                    it != ConfigFreeMethod.SERVERLESS_LANTERN && it != ConfigFreeMethod.PERSONAL_ECH })
                         )
                         // Anything in the catalogue that no group names still gets a row, at the end of its tab.
                         val grouped = groups.flatMap { it.third }.toSet()
@@ -1587,6 +1588,7 @@ private fun ConfigFreeMethod.pickerIcon(): androidx.compose.ui.graphics.vector.I
     ConfigFreeMethod.PSIPHON_RADIANCE, ConfigFreeMethod.SHIROKHORSHID_RADIANCE, ConfigFreeMethod.AETHER_LANTERN,
     ConfigFreeMethod.SERVERLESS_LANTERN -> Icons.Rounded.Layers
     ConfigFreeMethod.RADIANCE -> Icons.Filled.Lightbulb
+    ConfigFreeMethod.PERSONAL_ECH -> Icons.Filled.Shield
     ConfigFreeMethod.AETHER_GOOL -> Icons.Rounded.CropFree
     ConfigFreeMethod.AETHER_GOOL_CLASSIC, ConfigFreeMethod.AETHER_MIM -> Icons.Rounded.Layers
     ConfigFreeMethod.AETHER_PSIPHON -> Icons.Filled.Shield

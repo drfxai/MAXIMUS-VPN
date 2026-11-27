@@ -20,7 +20,8 @@ class SmartTiersTest {
         val s = SmartTiers.Signals(cloudflareFiltered = true, udpFiltered = true, irancell = true)
         assertEquals(SmartTiers.Tier.HEAVY, SmartTiers.tier(s))
         val c = SmartTiers.candidates(s, normal)
-        assertEquals(ConfigFreeMethod.RADIANCE.id, c.first())
+        // Build 181 Phase 6: the user's own ECH server (only runnable when one has ECH) leads, then Lantern.
+        assertEquals(listOf(ConfigFreeMethod.PERSONAL_ECH.id, ConfigFreeMethod.RADIANCE.id), c.take(2))
         assertTrue(c.indexOf(ConfigFreeMethod.PSIPHON_RADIANCE.id) < c.indexOf(ConfigFreeMethod.AETHER_H2.id))
         assertTrue(c.indexOf(ConfigFreeMethod.AETHER_LANTERN.id) < c.indexOf(ConfigFreeMethod.AETHER_H2.id))
         assertTrue(c.indexOf(ConfigFreeMethod.AETHER_H2.id) < c.indexOf(ConfigFreeMethod.TOR_SNOWFLAKE.id))
@@ -33,7 +34,9 @@ class SmartTiersTest {
         val s = SmartTiers.Signals(internationalReachable = false, domesticReachable = true)
         assertEquals(SmartTiers.Tier.WHITELIST, SmartTiers.tier(s))
         val c = SmartTiers.candidates(s, normal)
-        assertEquals(listOf(ConfigFreeMethod.TOR_SNOWFLAKE.id, ConfigFreeMethod.SHIROKHORSHID.id, ConfigFreeMethod.RADIANCE.id), c.take(3))
+        assertEquals(listOf(ConfigFreeMethod.TOR_SNOWFLAKE.id, ConfigFreeMethod.SHIROKHORSHID.id, ConfigFreeMethod.RADIANCE.id,
+            ConfigFreeMethod.PERSONAL_ECH.id), c.take(4))
+        assertFalse(ConfigFreeMethod.PERSONAL_ECH.id in SmartTiers.candidates(SmartTiers.Signals(), normal))
         assertTrue(SmartTiers.allowIranianConduits(SmartTiers.Tier.WHITELIST))
         assertFalse(SmartTiers.allowIranianConduits(SmartTiers.Tier.HEAVY))
     }

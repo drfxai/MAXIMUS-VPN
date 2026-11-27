@@ -365,6 +365,8 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     private fun save(server: ManagedServer) {
         store.save(server)
         _state.update { s -> s.copy(servers = s.servers.filterNot { it.id == server.id } + server) }
+        // Build 181 Phase 6: configs of a server with ECH connect with its current key (PersonalEch).
+        viewModelScope.launch(Dispatchers.IO) { runCatching { com.example.vpn.smartsni.PersonalEch.reload() } }
     }
 
     private fun emit(e: ServersEvent) { _events.tryEmit(e) }
@@ -831,6 +833,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     fun remove(id: String) {
         store.delete(id)
         _state.update { it.copy(servers = it.servers.filterNot { s -> s.id == id }, route = ServersRoute.None) }
+        viewModelScope.launch(Dispatchers.IO) { runCatching { com.example.vpn.smartsni.PersonalEch.reload() } }
     }
 
     fun test(id: String, toolId: String) = serverAction(id, "Testing ${toolTitle(toolId)} from this phone…") { s ->

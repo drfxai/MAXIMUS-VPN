@@ -47,7 +47,11 @@ object BuiltinConnections {
         // Build 181 (3.4): Serverless Direct, and sites that do not answer directly go through Lantern (Xray sockopt
         // fallback). An explicit, labelled pick; its exit is still the ISP's for everything that works directly.
         SERVERLESS_LANTERN("config-free-direct-lantern", "Serverless + Lantern",
-            "Direct access; sites that do not answer go through Lantern");
+            "Direct access; sites that do not answer go through Lantern"),
+        // Build 181 (Phase 6): the user's own server with its own ECH key (Panels → My Servers → ECH). A separately
+        // labelled pick; plain TLS to the same server after ECH failed on this network. Never inside another pick.
+        PERSONAL_ECH("config-free-personal-ech", "Personal server (ECH)",
+            "Your own server, with ECH and an outer name that passes this network");
 
         fun profile(): VlessProfile = when (this) {
             AETHER_WARP -> AetherSidecar.profile()
@@ -57,6 +61,9 @@ object BuiltinConnections {
                 p.copy(extraSettings = org.json.JSONObject(p.extraSettings).put(ServerlessSidecar.KEY_LANTERN_FALLBACK, true).toString())
             }
             PSIPHON -> PsiphonSidecar.profile()
+            // Placeholder until a server has ECH (missingDependency() then explains); resolve() reads the real config.
+            PERSONAL_ECH -> VlessProfile(name = title, address = "127.0.0.1", port = 443, uuid = "00000000-0000-0000-0000-000000000000",
+                security = "tls", sni = "personal-ech.invalid")
             SHIROKHORSHID -> ShirokhorshidSidecar.profile()
             PSIPHON_RADIANCE -> ChainRunner.profile(EngineChain.Chain(listOf(
                 EngineChain.Hop(PsiphonSidecar.ID), EngineChain.Hop(RadianceSidecar.id)
@@ -83,6 +90,8 @@ object BuiltinConnections {
             AETHER_PSIPHON -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(PSIPHON.profile())
             AETHER_TOR -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(TOR_SNOWFLAKE.profile())
             AETHER_LANTERN, SHIROKHORSHID_RADIANCE, SERVERLESS_LANTERN -> com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(RADIANCE.profile())
+            PERSONAL_ECH -> if (com.example.vpn.smartsni.PersonalEch.available()) null
+                else "Turn on ECH for your server in Panels → My Servers first."
             else -> null
         }
     }
@@ -101,6 +110,9 @@ object BuiltinConnections {
                         .put(ServerlessSidecar.KEY_LANTERN_FALLBACK, true).toString())
                 } ?: method.profile()
                 ConfigFreeMethod.SHIROKHORSHID -> ShirokhorshidSidecar.profile(ShirokhorshidSettings.load(context)).copy(id = id)
+                // The ECH-enabled server that is not failing here; ECH itself is added at connect (PersonalEch).
+                ConfigFreeMethod.PERSONAL_ECH -> com.example.vpn.smartsni.PersonalEch.profile(BuiltinMethodMemory.network())
+                    ?.copy(id = id, name = method.title)
                 else -> method.profile()
             }
         }

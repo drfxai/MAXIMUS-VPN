@@ -14,6 +14,7 @@ import com.example.vpn.connectivity.NetworkFirewalls
  *  - WHITELIST (only domestic sites answer): Snowflake through the Google-fronted AMP cache, then Psiphon's in-proxy
  *    conduits (Shir o Khorshid, Iranian conduits allowed in this tier), then Lantern.
  *  - NEAR_SHUTDOWN (nothing answers, not even domestic): the same short list, tried slowly, with a clear status.
+ *  - Personal server (ECH) (Build 181 Phase 6): first in HEAVY, after Lantern in WHITELIST; only when a server has ECH.
  *
  * Demoted (moved to the end, never removed): WARP WireGuard / Gool / MASQUE-in-MASQUE / Aether → Tor when Cloudflare is
  * filtered; MASQUE HTTP/3 when UDP is filtered; direct Psiphon on Irancell (every direct and fronted dial failed in b180).
@@ -60,6 +61,9 @@ object SmartTiers {
     }
 
     private val HEAVY = listOf(
+        // Build 181 Phase 6: the user's own server with its own ECH key, outer name chosen by Smart SNI for this network
+        // (built for exactly this filter). Runnable only once a server has ECH; plain TLS after ECH failed here.
+        ConfigFreeMethod.PERSONAL_ECH,
         ConfigFreeMethod.RADIANCE,                // Lantern
         ConfigFreeMethod.PSIPHON_RADIANCE,        // over-Lantern chains
         ConfigFreeMethod.AETHER_LANTERN,
@@ -75,6 +79,8 @@ object SmartTiers {
         ConfigFreeMethod.TOR_SNOWFLAKE,           // AMP cache (Google-fronted) first
         ConfigFreeMethod.SHIROKHORSHID,           // Psiphon in-proxy conduits, Iranian conduits allowed in this tier
         ConfigFreeMethod.RADIANCE,
+        // A server abroad is rarely on a whitelist: after the relays that are built for one, before the Psiphon tail.
+        ConfigFreeMethod.PERSONAL_ECH,
         ConfigFreeMethod.PSIPHON_RADIANCE,
         ConfigFreeMethod.PSIPHON
     )

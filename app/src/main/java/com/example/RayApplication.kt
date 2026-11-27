@@ -476,6 +476,21 @@ class RayApplication : Application() {
                 } else null
             } finally { c.disconnect() }
         }
+        // Build 181 Phase 6: the user's own servers with ECH (Panels → My Servers), read from the encrypted server
+        // store; their configs connect with the server's ECH (PersonalEch). Loaded off the main thread.
+        com.example.vpn.smartsni.PersonalEch.load = {
+            com.example.panels.servers.ServerStore(this).load().flatMap { s ->
+                com.example.vpn.smartsni.PersonalEch.fromRecord(s.id, s.displayName, s.host,
+                    com.example.panels.servers.ech.ServerEch.record(s.tool(com.example.panels.servers.ServerToolCatalog.XUI)?.settings.orEmpty()))
+            }
+        }
+        com.example.vpn.smartsni.PersonalEch.parseLink = { link ->
+            com.example.vpn.engine.UniversalImportEngine.importText(link).validProfiles.firstOrNull()
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching { com.example.vpn.smartsni.PersonalEch.reload() }
+            runCatching { com.example.panels.servers.ech.ServerEchRotation.runDue(this@RayApplication) }
+        }
         // Per-network clean MASQUE HTTP/2 gateways (UAC SNI Spoofer's clean-H2 list) and their screen-on prewarm.
         val cleanH2 = getSharedPreferences("aether_clean_h2", MODE_PRIVATE)
         com.example.vpn.connections.CleanH2PeerMemory.read = { key -> cleanH2.getString(key, null) }

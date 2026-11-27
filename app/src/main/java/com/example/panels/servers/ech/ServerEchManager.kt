@@ -33,9 +33,9 @@ class ServerEchManager(
     private val app = context.applicationContext
     private val secure by lazy { SecureStorage(app) }
 
-    /** Outer-name suggestions for the current network (Smart SNI winners that pass here, else a random-style name). */
+    /** Outer-name suggestions for the current network (names Smart SNI saw get through here, else a random-style name). */
     fun suggestions(network: String?): List<String> = ServerEch.suggestions(
-        runCatching { SmartSni.ranked(network, passedOnly = true) }.getOrDefault(emptyList()),
+        runCatching { SmartSni.ranked(network) }.getOrDefault(emptyList()),
         runCatching { SmartSni.cooling(network) }.getOrDefault(emptySet()),
         { SmartSni.randomName() })
 

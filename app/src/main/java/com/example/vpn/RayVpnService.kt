@@ -1220,6 +1220,19 @@ class RayVpnService : VpnService() {
      * traffic on this network before (a Smart pick tries it). A stale key is fetched by DoH first, and an outer name not
      * yet seen here gets one short Smart SNI probe (≤3 s), so a blocked outer name is skipped instead of costing an attempt.
      */
+    /**
+     * Build 181 Phase 6: the decision for a config of the user's own ECH-enabled server when Xray carries it, or null
+     * (not such a config). A decision that does not apply means plain TLS to that server on this network (cooldown).
+     */
+    private fun personalEchFor(profile: VlessProfile): com.example.vpn.smartsni.PersonalEch.Decision? {
+        if (EngineSelectionPolicy.select(profile) != EngineSelectionPolicy.Runtime.XRAY) return null
+        val net = com.example.vpn.connections.BuiltinMethodMemory.network()
+        val d = com.example.vpn.smartsni.PersonalEch.decide(profile, net)
+        if (d.entry == null) return null
+        XrayLogManager.i("SMART", "Personal server ECH: " + if (d.applies) "on, outer name ${d.entry.outer}" else "off (${d.reason})")
+        return d
+    }
+
     private fun smartEchFor(profile: VlessProfile, smartPick: Boolean): com.example.vpn.smartsni.SmartEch.Decision? {
         if (EngineSelectionPolicy.select(profile) != EngineSelectionPolicy.Runtime.XRAY) return null
         val ech = com.example.vpn.smartsni.SmartEch
@@ -2298,9 +2311,17 @@ class RayVpnService : VpnService() {
             // The app is left out of its own VPN here, so the device (TUN) path cannot be dialed from the app
             // (TunCheckPlan). A byte meter on the TUN → engine hop measures what the TUN forwards for other apps.
             // Build 181 Phase 5 (B): Smart ECH for a Cloudflare-fronted config carried by Xray itself (no engine program).
-            val echDecision = if (amnezia == null && sidecarEngine == null && engineChain == null)
+            // Build 181 Phase 6: the user's own server with ECH (Panels → My Servers) wins over Smart ECH for its configs;
+            // after an ECH failure on this network it connects with plain TLS (PersonalEch cooldown).
+            val personalEch = if (amnezia == null && sidecarEngine == null && engineChain == null)
+                runCatching { personalEchFor(profile) }.getOrNull() else null
+            val echDecision = if (personalEch == null && amnezia == null && sidecarEngine == null && engineChain == null)
                 runCatching { smartEchFor(profile, smart) }.getOrNull() else null
-            val xrayProfile = withTunForwardMeter(if (echDecision != null) com.example.vpn.smartsni.SmartEch.applyTo(profile, echDecision) else profile)
+            val xrayProfile = withTunForwardMeter(when {
+                personalEch != null -> com.example.vpn.smartsni.PersonalEch.applyTo(profile, personalEch)
+                echDecision != null -> com.example.vpn.smartsni.SmartEch.applyTo(profile, echDecision)
+                else -> profile
+            })
             val runtime = EngineSelectionPolicy.select(profile)
             val engineId = if (amnezia != null) com.example.vpn.engine.AmneziaNativeEngine.ID
                 else com.example.vpn.engine.registry.EngineRegistry.descriptorFor(runtime).id
@@ -2430,6 +2451,10 @@ class RayVpnService : VpnService() {
             val currentNetwork = _vpnState.value.networkGeneration == verificationGeneration &&
                 result.second != com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED
             val check = if (currentNetwork) result else null to com.example.vpn.diagnostics.FailureStage.NETWORK_CHANGED
+            if (currentNetwork && personalEch != null) runCatching {
+                com.example.vpn.smartsni.PersonalEch.onResult(com.example.vpn.connections.BuiltinMethodMemory.network(), personalEch,
+                    verified = check.first != null) { XrayLogManager.i("SMART", it) }
+            }
             if (currentNetwork && echDecision != null) runCatching {
                 // A failure with ECH may be a rejected (rotated) key: refreshed and retried once by the next attempt, else plain TLS here.
                 com.example.vpn.smartsni.SmartEch.onResult(com.example.vpn.connections.BuiltinMethodMemory.network(), echDecision,
