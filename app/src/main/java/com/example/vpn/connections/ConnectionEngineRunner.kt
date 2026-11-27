@@ -169,12 +169,26 @@ object ConnectionEngineRunner {
             relayExitNode.isNullOrBlank() && !relayOnly && options.exitNode.isBlank() &&
             options.tor == "off" && options.psiphon == "off"
 
+    /**
+     * Build 181 (3.2): run the MASQUE SNI pre-check for this start: Aether, Cloudflare measured as filtered here (or
+     * Irancell), a carrier that can be MASQUE (auto, h2, h3), not the background relay retry. Pure.
+     */
+    fun masqueSniPrecheck(engineId: String, relayOnly: Boolean, cloudflareBlocked: Boolean, irancell: Boolean, carrier: String): Boolean =
+        engineId == AetherSidecar.ID && !relayOnly && (cloudflareBlocked || irancell) && carrier in listOf("auto", "h2", "h3")
+
+    /** [candidate] with the MASQUE TLS name [sni] when it is a MASQUE carrier (h2, h3); others unchanged. Pure. */
+    fun withMasqueSni(candidate: VlessProfile, sni: String): VlessProfile {
+        val e = org.json.JSONObject(candidate.extraSettings)
+        if (e.optString("carrier") !in listOf("h2", "h3") || !AetherSniProbe.validName(sni)) return candidate
+        return candidate.copy(extraSettings = e.put(AetherSidecar.MASQUE_SNI, sni).toString())
+    }
+
     /** [candidate] (an HTTP/2 carrier) as MASQUE HTTP/2 through the Lantern hop: no split hello, no remembered gateway. */
     fun lanternRelayed(candidate: VlessProfile): VlessProfile = candidate.copy(extraSettings =
         org.json.JSONObject(candidate.extraSettings).put("carrier", "h2").put(LanternRelayHop.EXTRA, true)
             .put(RELAY_FOLLOW_UP, true).apply {
                 remove(NOIZE_FOLLOW_UP); remove(MTU_FOLLOW_UP); remove("rescan")
-                remove(AetherSidecar.SNI_SPLIT); remove(AetherSidecar.CLEAN_H2_PEER)
+                remove(AetherSidecar.SNI_SPLIT); remove(AetherSidecar.CLEAN_H2_PEER); remove(AetherSidecar.MASQUE_SNI)
                 remove(BuiltinExitNode.EXIT_ENDPOINT); remove(BuiltinExitNode.EXIT_VARIANT)
             }.toString())
 
@@ -767,12 +781,19 @@ object ConnectionEngineRunner {
             record("ladder", "ipv6-first", if (cfV6) "START" else "SKIP",
                 if (cfV6) "MASQUE H2 over IPv6 first (up to ${v6AttemptMs(manual) / 1000}s), then the IPv4 carriers"
                 else "this link has no IPv6 (measured, or no global IPv6 address on the phone's network)")
+        // Build 181 (3.2): Cloudflare filtered here: a ≤10 s pre-check picks the TLS name the MASQUE handshakes send
+        // (a name the filter lets through); Aether still enforces its MASQUE certificate pins on its own handshake.
+        // Only while the VPN service runs (it installs the protector): never from unit tests or without a phone network.
+        val masqueSni = if (AetherSniProbe.socketProtector != null && masqueSniPrecheck(engine.id, relayOnly, cloudflareBlocked, onIrancell,
+                ProfileExtras.read(profile).optString("carrier", "auto")))
+            AetherSniProbe.precheck(networkKey) { line -> record("ladder", "sni-precheck", "INFO", line) } else null
         // The IPv6 variants are made before the Irancell IPv4 pin (which only touches a family left on Auto).
         val carrierChoices = candidates(profile, ipv4Only = ipv4Only,
             firewall = com.example.vpn.connectivity.NetworkFirewalls.detect(networkKey).takeIf { automatic && ServerlessSidecar.handles(profile) }
                 ?: com.example.vpn.connectivity.NetworkFirewalls.Firewall.OTHER)
             .let { operatorVariants(it, irancell = onIrancell, mci = onMci, cfV6 = cfV6) }
             .let { list -> if (onIrancell) list.map(::irancellIpv4) else list }
+            .let { list -> if (masqueSni != null) list.map { withMasqueSni(it, masqueSni) } else list }
         val cleanPeers = if (engine.id == AetherSidecar.ID && automatic) CleanH2PeerMemory.peers(networkKey) else emptyList()
         val cleanChoices = if (engine.id == AetherSidecar.ID && automatic)
             cleanH2Candidates(carrierChoices, cleanPeers, ipv4Only) + cleanUdpCandidates(carrierChoices, cleanPeers, ipv4Only) else emptyList()
@@ -911,6 +932,11 @@ object ConnectionEngineRunner {
         fun failed(name: String, candidate: VlessProfile) {
             // A fingerprint picked for Auto failed here: the next attempt on this network moves on to the next one.
             AetherFingerprintBook.record(networkKey, candidate, verified = false)
+            // Build 181: a picked MASQUE name that failed (another site's certificate breaks the pin) is skipped next time.
+            ProfileExtras.read(candidate).optString(AetherSidecar.MASQUE_SNI).takeIf { it.isNotBlank() }?.let {
+                AetherSniProbe.recordFailure(networkKey, it)
+                record(name, "sni", "FORGET", "MASQUE name $it failed here; the next pre-check skips it")
+            }
             if (name in CLEAN_METHODS) {
                 val e = ProfileExtras.read(candidate)
                 val peer = e.optString(AetherSidecar.CLEAN_H2_PEER).ifBlank { e.optString(AetherSidecar.CLEAN_PEER) }
@@ -1153,6 +1179,8 @@ object ConnectionEngineRunner {
                     ?.let { "stopped " + it.joinToString(", ") }.orEmpty())
                 record(w.name, "https", "PASS")
                 AetherFingerprintBook.record(networkKey, w.candidate, verified = true)
+                ProfileExtras.read(w.candidate).optString(AetherSidecar.MASQUE_SNI).takeIf { it.isNotBlank() }
+                    ?.let { AetherSniProbe.recordSuccess(networkKey, it) }
                 if (engine.id == AetherSidecar.ID && automatic) rememberCleanH2(w.name, w.candidate, networkKey, raceStartedAt, ::record)
                 if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                 if (scope() == cacheScope) {
@@ -1340,6 +1368,7 @@ object ConnectionEngineRunner {
                 if (result.traffic && process.isAlive) {
                     record(name, "https", "PASS")
                     AetherFingerprintBook.record(networkKey, candidate, verified = true)
+                    extras.optString(AetherSidecar.MASQUE_SNI).takeIf { it.isNotBlank() }?.let { AetherSniProbe.recordSuccess(networkKey, it) }
                     if (engine.id == AetherSidecar.ID && automatic) rememberCleanH2(name, candidate, networkKey, attemptStartedAt, ::record)
                     if (engine.id == AetherSidecar.ID) WarpRegistrationMemory.clear(networkKey)
                     if (engine.id == AetherSidecar.ID && !extras.optBoolean(RELAY_FOLLOW_UP)) WarpDataPlaneHold.clear(networkKey)
